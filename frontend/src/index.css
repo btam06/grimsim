@@ -8,7 +8,51 @@ body {
 }
 
 .app {
-  max-width: 480px;
+  max-width: 640px;
   margin: 2rem auto;
   padding: 0 1rem;
+}
+
+.tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.tabs button {
+  padding: 0.4rem 0.8rem;
+  border: 1px solid #8884;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.tabs button.active {
+  background: #8882;
+  font-weight: bold;
+}
+
+section form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+section form input {
+  flex: 1 1 140px;
+  padding: 0.4rem;
+}
+
+section form button {
+  padding: 0.4rem 0.8rem;
+}
+
+.error {
+  color: #d33;
+}
+
+section ul {
+  padding-left: 1.25rem;
 }

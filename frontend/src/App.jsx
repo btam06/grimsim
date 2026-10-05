@@ -1,53 +1,61 @@
 import { useEffect, useState } from 'react'
+import AbilityPanel from './components/AbilityPanel'
+import ModelsPanel from './components/ModelsPanel'
+import UnitsPanel from './components/UnitsPanel'
+import {
+  createDatasheetAbility,
+  createWeaponAbility,
+  listDatasheetAbilities,
+  listWeaponAbilities,
+} from './api'
+
+const TABS = ['Models', 'Units', 'Weapon Abilities', 'Datasheet Abilities']
 
 function App() {
   const [health, setHealth] = useState(null)
-  const [items, setItems] = useState([])
-  const [name, setName] = useState('')
+  const [tab, setTab] = useState(TABS[0])
 
   useEffect(() => {
     fetch('/api/health')
       .then((r) => r.json())
       .then(setHealth)
       .catch(() => setHealth({ status: 'unreachable' }))
-    refreshItems()
   }, [])
-
-  const refreshItems = () => {
-    fetch('/api/items')
-      .then((r) => r.json())
-      .then(setItems)
-  }
-
-  const addItem = async (e) => {
-    e.preventDefault()
-    if (!name.trim()) return
-    await fetch('/api/items', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }),
-    })
-    setName('')
-    refreshItems()
-  }
 
   return (
     <div className="app">
       <h1>Grimsim</h1>
       <p>API status: {health ? health.status : 'checking...'}</p>
-      <form onSubmit={addItem}>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="New item name"
-        />
-        <button type="submit">Add</button>
-      </form>
-      <ul>
-        {items.map((item) => (
-          <li key={item.id}>{item.name}</li>
+
+      <nav className="tabs">
+        {TABS.map((t) => (
+          <button
+            key={t}
+            type="button"
+            className={t === tab ? 'active' : ''}
+            onClick={() => setTab(t)}
+          >
+            {t}
+          </button>
         ))}
-      </ul>
+      </nav>
+
+      {tab === 'Models' && <ModelsPanel />}
+      {tab === 'Units' && <UnitsPanel />}
+      {tab === 'Weapon Abilities' && (
+        <AbilityPanel
+          title="Weapon Abilities"
+          listFn={listWeaponAbilities}
+          createFn={createWeaponAbility}
+        />
+      )}
+      {tab === 'Datasheet Abilities' && (
+        <AbilityPanel
+          title="Datasheet Abilities"
+          listFn={listDatasheetAbilities}
+          createFn={createDatasheetAbility}
+        />
+      )}
     </div>
   )
 }
