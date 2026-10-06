@@ -7,6 +7,7 @@ const EMPTY_FORM = {
   damage: '',
   range: '',
   strength: '',
+  ap: '',
   attacks: '',
   ability_ids: [],
 }
@@ -24,9 +25,10 @@ function AddWeaponForm({ modelId, weaponAbilities, onAdded }) {
       await createWeapon({
         name: form.name,
         model_id: modelId,
-        damage: Number(form.damage),
+        damage: form.damage,
         range: Number(form.range),
         strength: Number(form.strength),
+        ap: Number(form.ap),
         attacks: Number(form.attacks),
         ability_ids: form.ability_ids,
       })
@@ -38,12 +40,13 @@ function AddWeaponForm({ modelId, weaponAbilities, onAdded }) {
   }
 
   return (
-    <form className="add-weapon-form" onSubmit={handleSubmit}>
+    <form className="inline-form" onSubmit={handleSubmit}>
       {error && <p className="error">{error}</p>}
       <input placeholder="Weapon Name" value={form.name} onChange={handleChange('name')} required />
       <input
-        placeholder="Damage"
-        type="number"
+        placeholder="Damage (e.g. 1, 2, 1D3, 2D6)"
+        type="text"
+        pattern="[0-9](D[36])?"
         value={form.damage}
         onChange={handleChange('damage')}
         required
@@ -62,6 +65,7 @@ function AddWeaponForm({ modelId, weaponAbilities, onAdded }) {
         onChange={handleChange('strength')}
         required
       />
+      <input placeholder="AP" type="number" value={form.ap} onChange={handleChange('ap')} required />
       <input
         placeholder="Attacks"
         type="number"

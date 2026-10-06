@@ -1,17 +1,31 @@
 import { useEffect, useState } from 'react'
 import AbilityPanel from './components/AbilityPanel'
+import DetachmentsPanel from './components/DetachmentsPanel'
 import FactionsPanel from './components/FactionsPanel'
+import ListsPanel from './components/ListsPanel'
 import ModelsPanel from './components/ModelsPanel'
 import UnitsPanel from './components/UnitsPanel'
 import WeaponsPanel from './components/WeaponsPanel'
 import {
   createDatasheetAbility,
+  createDisposition,
   createWeaponAbility,
   listDatasheetAbilities,
+  listDispositions,
   listWeaponAbilities,
 } from './api'
 
-const TABS = ['Factions', 'Models', 'Weapons', 'Units', 'Weapon Abilities', 'Datasheet Abilities']
+const TABS = [
+  'Factions',
+  'Detachments',
+  'Models',
+  'Weapons',
+  'Units',
+  'Lists',
+  'Weapon Abilities',
+  'Datasheet Abilities',
+  'Dispositions',
+]
 
 function App() {
   const [health, setHealth] = useState(null)
@@ -43,9 +57,11 @@ function App() {
       </nav>
 
       {tab === 'Factions' && <FactionsPanel />}
+      {tab === 'Detachments' && <DetachmentsPanel />}
       {tab === 'Models' && <ModelsPanel />}
       {tab === 'Weapons' && <WeaponsPanel />}
       {tab === 'Units' && <UnitsPanel />}
+      {tab === 'Lists' && <ListsPanel />}
       {tab === 'Weapon Abilities' && (
         <AbilityPanel
           title="Weapon Abilities"
@@ -59,6 +75,9 @@ function App() {
           listFn={listDatasheetAbilities}
           createFn={createDatasheetAbility}
         />
+      )}
+      {tab === 'Dispositions' && (
+        <AbilityPanel title="Dispositions" listFn={listDispositions} createFn={createDisposition} />
       )}
     </div>
   )

@@ -79,7 +79,7 @@ section > button {
   margin-bottom: 1rem;
 }
 
-.add-weapon-form {
+.inline-form {
   margin: 0.4rem 0 0;
   padding: 0.5rem;
   border: 1px solid #8884;

@@ -19,6 +19,7 @@ def _to_out(weapon: Weapon) -> WeaponOut:
         damage=weapon.damage,
         range=weapon.range,
         strength=weapon.strength,
+        ap=weapon.ap,
         attacks=weapon.attacks,
         ability_ids=[ability.id for ability in weapon.abilities],
     )

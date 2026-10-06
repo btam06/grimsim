@@ -1,4 +1,8 @@
-from pydantic import BaseModel, ConfigDict
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+DAMAGE_PATTERN = r"^[0-9](D[36])?$"
 
 
 class FactionIn(BaseModel):
@@ -14,7 +18,6 @@ class FactionOut(FactionIn):
 class ModelIn(BaseModel):
     name: str
     faction_id: int
-    points: int
     save: int
     toughness: int
     oc: int
@@ -24,13 +27,13 @@ class ModelIn(BaseModel):
     feel_no_pain: int | None = None
     ability_ids: list[int] = []
     weapon_ids: list[int] = []
+    wargear_ids: list[int] = []
 
 
 class ModelOut(BaseModel):
     id: int
     name: str
     faction_id: int
-    points: int
     save: int
     toughness: int
     oc: int
@@ -40,14 +43,16 @@ class ModelOut(BaseModel):
     feel_no_pain: int | None
     ability_ids: list[int]
     weapon_ids: list[int]
+    wargear_ids: list[int]
 
 
 class WeaponIn(BaseModel):
     name: str
     model_id: int
-    damage: int
+    damage: str = Field(pattern=DAMAGE_PATTERN)
     range: int
     strength: int
+    ap: int
     attacks: int
     ability_ids: list[int] = []
 
@@ -56,22 +61,53 @@ class WeaponOut(BaseModel):
     id: int
     name: str
     model_id: int
-    damage: int
+    damage: str
     range: int
     strength: int
+    ap: int
     attacks: int
     ability_ids: list[int]
 
 
+class WargearIn(BaseModel):
+    name: str
+    model_id: int
+    description: str | None = None
+
+
+class WargearOut(BaseModel):
+    id: int
+    name: str
+    model_id: int
+    description: str | None
+
+
+class UnitModelIn(BaseModel):
+    model_id: int
+    weapon_ids: list[int] = []
+    wargear_ids: list[int] = []
+
+
+class UnitModelOut(BaseModel):
+    id: int
+    model_id: int
+    weapon_ids: list[int]
+    wargear_ids: list[int]
+
+
 class UnitIn(BaseModel):
     name: str
-    model_ids: list[int] = []
+    points: int
+    list_id: int | None = None
+    unit_models: list[UnitModelIn] = []
 
 
 class UnitOut(BaseModel):
     id: int
     name: str
-    model_ids: list[int]
+    points: int
+    list_id: int | None
+    unit_models: list[UnitModelOut]
 
 
 class WeaponAbilityIn(BaseModel):
@@ -94,3 +130,44 @@ class DatasheetAbilityOut(DatasheetAbilityIn):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+
+
+class DispositionIn(BaseModel):
+    name: str
+    description: str | None = None
+
+
+class DispositionOut(DispositionIn):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+
+
+class DetachmentIn(BaseModel):
+    name: str
+    faction_id: int
+    disposition_ids: list[int] = []
+
+
+class DetachmentOut(BaseModel):
+    id: int
+    name: str
+    faction_id: int
+    disposition_ids: list[int]
+
+
+class ArmyListIn(BaseModel):
+    name: str
+    points_limit: Literal[1000, 2000]
+    faction_id: int
+    detachment_id: int
+    unit_ids: list[int] = []
+
+
+class ArmyListOut(BaseModel):
+    id: int
+    name: str
+    points_limit: int
+    faction_id: int
+    detachment_id: int
+    unit_ids: list[int]

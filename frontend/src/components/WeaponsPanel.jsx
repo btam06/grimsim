@@ -8,6 +8,7 @@ const EMPTY_FORM = {
   damage: '',
   range: '',
   strength: '',
+  ap: '',
   attacks: '',
   ability_ids: [],
 }
@@ -16,9 +17,10 @@ function toPayload(form) {
   return {
     name: form.name,
     model_id: Number(form.model_id),
-    damage: Number(form.damage),
+    damage: form.damage,
     range: Number(form.range),
     strength: Number(form.strength),
+    ap: Number(form.ap),
     attacks: Number(form.attacks),
     ability_ids: form.ability_ids,
   }
@@ -75,8 +77,9 @@ function WeaponsPanel() {
           ))}
         </select>
         <input
-          placeholder="Damage"
-          type="number"
+          placeholder="Damage (e.g. 1, 2, 1D3, 2D6)"
+          type="text"
+          pattern="[0-9](D[36])?"
           value={form.damage}
           onChange={handleChange('damage')}
           required
@@ -93,6 +96,13 @@ function WeaponsPanel() {
           type="number"
           value={form.strength}
           onChange={handleChange('strength')}
+          required
+        />
+        <input
+          placeholder="AP"
+          type="number"
+          value={form.ap}
+          onChange={handleChange('ap')}
           required
         />
         <input
@@ -115,8 +125,8 @@ function WeaponsPanel() {
       <ul>
         {weapons.map((w) => (
           <li key={w.id}>
-            #{w.id} {w.name} ({modelName(w.model_id)}) — R{w.range}" A{w.attacks} S{w.strength} D
-            {w.damage}
+            #{w.id} {w.name} ({modelName(w.model_id)}) — R{w.range}" A{w.attacks} S{w.strength} AP
+            {w.ap} D{w.damage}
             {w.ability_ids.length > 0 && ` — ${w.ability_ids.map(abilityName).join(', ')}`}
           </li>
         ))}

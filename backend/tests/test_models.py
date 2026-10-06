@@ -5,7 +5,6 @@ def _model_payload(faction_id: int, **overrides) -> dict:
     payload = {
         "name": "Intercessor",
         "faction_id": faction_id,
-        "points": 20,
         "save": 3,
         "toughness": 4,
         "oc": 2,
@@ -62,9 +61,10 @@ async def test_create_model_with_weapons_reassigns_them(client: AsyncClient, fac
         json={
             "name": "Bolt Rifle",
             "model_id": owner_id,
-            "damage": 1,
+            "damage": "1",
             "range": 24,
             "strength": 4,
+            "ap": -1,
             "attacks": 2,
         },
     )
@@ -87,17 +87,61 @@ async def test_create_model_with_invalid_weapon_id_returns_400(client: AsyncClie
     assert response.status_code == 400
 
 
+async def test_create_model_with_wargear_reassigns_it(client: AsyncClient, faction_id: int):
+    owner_id = (await client.post("/models", json=_model_payload(faction_id))).json()["id"]
+    wargear_id = (
+        await client.post("/wargear", json={"name": "Frag Grenades", "model_id": owner_id})
+    ).json()["id"]
+
+    response = await client.post(
+        "/models", json=_model_payload(faction_id, wargear_ids=[wargear_id])
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["wargear_ids"] == [wargear_id]
+
+    wargear = (await client.get("/wargear")).json()
+    reassigned = next(g for g in wargear if g["id"] == wargear_id)
+    assert reassigned["model_id"] == body["id"]
+
+
+async def test_create_model_with_invalid_wargear_id_returns_400(client: AsyncClient, faction_id: int):
+    response = await client.post("/models", json=_model_payload(faction_id, wargear_ids=[9999]))
+    assert response.status_code == 400
+
+
+async def test_update_model_additively_reassigns_wargear(client: AsyncClient, faction_id: int):
+    model_id = (await client.post("/models", json=_model_payload(faction_id))).json()["id"]
+    other_model_id = (
+        await client.post("/models", json=_model_payload(faction_id, name="Other"))
+    ).json()["id"]
+    wargear_id = (
+        await client.post("/wargear", json={"name": "Frag Grenades", "model_id": other_model_id})
+    ).json()["id"]
+
+    response = await client.put(
+        f"/models/{model_id}", json=_model_payload(faction_id, wargear_ids=[wargear_id])
+    )
+    assert response.status_code == 200
+    assert response.json()["wargear_ids"] == [wargear_id]
+
+    wargear = (await client.get("/wargear")).json()
+    reassigned = next(g for g in wargear if g["id"] == wargear_id)
+    assert reassigned["model_id"] == model_id
+
+
 async def test_update_model_changes_fields(client: AsyncClient, faction_id: int):
     model_id = (await client.post("/models", json=_model_payload(faction_id))).json()["id"]
 
     response = await client.put(
-        f"/models/{model_id}", json=_model_payload(faction_id, name="Veteran Intercessor", points=25)
+        f"/models/{model_id}",
+        json=_model_payload(faction_id, name="Veteran Intercessor", toughness=5),
     )
     assert response.status_code == 200
     body = response.json()
     assert body["id"] == model_id
     assert body["name"] == "Veteran Intercessor"
-    assert body["points"] == 25
+    assert body["toughness"] == 5
 
     response = await client.get("/models")
     assert response.json()[0]["name"] == "Veteran Intercessor"
@@ -133,9 +177,10 @@ async def test_update_model_additively_reassigns_weapons(client: AsyncClient, fa
             json={
                 "name": "Bolt Rifle",
                 "model_id": other_model_id,
-                "damage": 1,
+                "damage": "1",
                 "range": 24,
                 "strength": 4,
+                "ap": -1,
                 "attacks": 2,
             },
         )

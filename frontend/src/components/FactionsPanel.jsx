@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { createFaction, listFactions } from '../api'
+import { createFaction, deleteFaction, listFactions } from '../api'
 
 function FactionsPanel() {
   const [factions, setFactions] = useState([])
@@ -24,6 +24,16 @@ function FactionsPanel() {
     }
   }
 
+  const handleRemove = async (id) => {
+    setError(null)
+    try {
+      await deleteFaction(id)
+      refresh()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
   return (
     <section>
       <h2>Factions</h2>
@@ -35,7 +45,10 @@ function FactionsPanel() {
       <ul>
         {factions.map((f) => (
           <li key={f.id}>
-            #{f.id} {f.name}
+            {f.name}
+            <button type="button" onClick={() => handleRemove(f.id)}>
+              Remove
+            </button>
           </li>
         ))}
       </ul>

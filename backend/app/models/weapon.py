@@ -18,9 +18,10 @@ class Weapon(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255))
-    damage: Mapped[int] = mapped_column(Integer)
+    damage: Mapped[str] = mapped_column(String(10))
     range: Mapped[int] = mapped_column(Integer)
     strength: Mapped[int] = mapped_column(Integer)
+    ap: Mapped[int] = mapped_column(Integer)
     attacks: Mapped[int] = mapped_column(Integer)
     model_id: Mapped[int] = mapped_column(ForeignKey("models.id"))
 

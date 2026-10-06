@@ -5,18 +5,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db import get_session
-from app.models import DatasheetAbility, Model, Weapon
+from app.models import DatasheetAbility, Model, Wargear, Weapon
 from app.schemas import ModelIn, ModelOut
 
 router = APIRouter(prefix="/models", tags=["models"])
 
 
-def _to_out(model: Model, ability_ids: list[int], weapon_ids: list[int]) -> ModelOut:
+def _to_out(
+    model: Model, ability_ids: list[int], weapon_ids: list[int], wargear_ids: list[int]
+) -> ModelOut:
     return ModelOut(
         id=model.id,
         name=model.name,
         faction_id=model.faction_id,
-        points=model.points,
         save=model.save,
         toughness=model.toughness,
         oc=model.oc,
@@ -26,6 +27,7 @@ def _to_out(model: Model, ability_ids: list[int], weapon_ids: list[int]) -> Mode
         feel_no_pain=model.feel_no_pain,
         ability_ids=ability_ids,
         weapon_ids=weapon_ids,
+        wargear_ids=wargear_ids,
     )
 
 
@@ -33,11 +35,18 @@ def _to_out(model: Model, ability_ids: list[int], weapon_ids: list[int]) -> Mode
 async def list_models(session: AsyncSession = Depends(get_session)):
     result = await session.execute(
         select(Model)
-        .options(selectinload(Model.abilities), selectinload(Model.weapons))
+        .options(
+            selectinload(Model.abilities), selectinload(Model.weapons), selectinload(Model.wargear)
+        )
         .order_by(Model.id)
     )
     return [
-        _to_out(model, [a.id for a in model.abilities], [w.id for w in model.weapons])
+        _to_out(
+            model,
+            [a.id for a in model.abilities],
+            [w.id for w in model.weapons],
+            [g.id for g in model.wargear],
+        )
         for model in result.scalars().all()
     ]
 
@@ -54,7 +63,8 @@ async def create_model(payload: ModelIn, session: AsyncSession = Depends(get_ses
             raise HTTPException(status_code=400, detail="one or more ability_ids not found")
 
     model = Model(
-        **payload.model_dump(exclude={"ability_ids", "weapon_ids"}), abilities=abilities
+        **payload.model_dump(exclude={"ability_ids", "weapon_ids", "wargear_ids"}),
+        abilities=abilities,
     )
     session.add(model)
     try:
@@ -73,8 +83,23 @@ async def create_model(payload: ModelIn, session: AsyncSession = Depends(get_ses
         for weapon in weapons:
             weapon.model_id = model.id
 
+    wargear: list[Wargear] = []
+    if payload.wargear_ids:
+        result = await session.execute(select(Wargear).where(Wargear.id.in_(payload.wargear_ids)))
+        wargear = list(result.scalars().all())
+        if len(wargear) != len(set(payload.wargear_ids)):
+            await session.rollback()
+            raise HTTPException(status_code=400, detail="one or more wargear_ids not found")
+        for item in wargear:
+            item.model_id = model.id
+
     await session.commit()
-    return _to_out(model, [a.id for a in abilities], [w.id for w in weapons])
+    return _to_out(
+        model,
+        [a.id for a in abilities],
+        [w.id for w in weapons],
+        [g.id for g in wargear],
+    )
 
 
 @router.put("/{model_id}", response_model=ModelOut)
@@ -99,7 +124,6 @@ async def update_model(
 
     model.name = payload.name
     model.faction_id = payload.faction_id
-    model.points = payload.points
     model.save = payload.save
     model.toughness = payload.toughness
     model.oc = payload.oc
@@ -124,12 +148,28 @@ async def update_model(
         for weapon in new_weapons:
             weapon.model_id = model.id
 
+    if payload.wargear_ids:
+        result = await session.execute(select(Wargear).where(Wargear.id.in_(payload.wargear_ids)))
+        new_wargear = list(result.scalars().all())
+        if len(new_wargear) != len(set(payload.wargear_ids)):
+            await session.rollback()
+            raise HTTPException(status_code=400, detail="one or more wargear_ids not found")
+        for item in new_wargear:
+            item.model_id = model.id
+
     await session.commit()
 
     result = await session.execute(
         select(Model)
-        .options(selectinload(Model.abilities), selectinload(Model.weapons))
+        .options(
+            selectinload(Model.abilities), selectinload(Model.weapons), selectinload(Model.wargear)
+        )
         .where(Model.id == model_id)
     )
     model = result.scalar_one()
-    return _to_out(model, [a.id for a in model.abilities], [w.id for w in model.weapons])
+    return _to_out(
+        model,
+        [a.id for a in model.abilities],
+        [w.id for w in model.weapons],
+        [g.id for g in model.wargear],
+    )
