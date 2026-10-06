@@ -40,7 +40,8 @@ section form {
   margin-bottom: 1rem;
 }
 
-section form input {
+section form input,
+section form select {
   flex: 1 1 140px;
   padding: 0.4rem;
 }
@@ -49,10 +50,39 @@ section form button {
   padding: 0.4rem 0.8rem;
 }
 
+section form label.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1 1 100%;
+  font-size: 0.85rem;
+}
+
 .error {
   color: #d33;
 }
 
 section ul {
   padding-left: 1.25rem;
+}
+
+section ul li {
+  margin-bottom: 0.75rem;
+}
+
+section ul li button {
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.5rem;
+}
+
+section > button {
+  margin-bottom: 1rem;
+}
+
+.add-weapon-form {
+  margin: 0.4rem 0 0;
+  padding: 0.5rem;
+  border: 1px solid #8884;
+  border-radius: 4px;
+  background: #8881;
 }

@@ -2,27 +2,134 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.db import get_session
-from app.models import Model
+from app.models import DatasheetAbility, Model, Weapon
 from app.schemas import ModelIn, ModelOut
 
 router = APIRouter(prefix="/models", tags=["models"])
 
 
+def _to_out(model: Model, ability_ids: list[int], weapon_ids: list[int]) -> ModelOut:
+    return ModelOut(
+        id=model.id,
+        name=model.name,
+        faction_id=model.faction_id,
+        points=model.points,
+        save=model.save,
+        toughness=model.toughness,
+        oc=model.oc,
+        movement=model.movement,
+        wounds=model.wounds,
+        invulnerable=model.invulnerable,
+        feel_no_pain=model.feel_no_pain,
+        ability_ids=ability_ids,
+        weapon_ids=weapon_ids,
+    )
+
+
 @router.get("", response_model=list[ModelOut])
 async def list_models(session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(Model).order_by(Model.id))
-    return result.scalars().all()
+    result = await session.execute(
+        select(Model)
+        .options(selectinload(Model.abilities), selectinload(Model.weapons))
+        .order_by(Model.id)
+    )
+    return [
+        _to_out(model, [a.id for a in model.abilities], [w.id for w in model.weapons])
+        for model in result.scalars().all()
+    ]
 
 
 @router.post("", response_model=ModelOut, status_code=201)
 async def create_model(payload: ModelIn, session: AsyncSession = Depends(get_session)):
-    model = Model(**payload.model_dump())
+    abilities: list[DatasheetAbility] = []
+    if payload.ability_ids:
+        result = await session.execute(
+            select(DatasheetAbility).where(DatasheetAbility.id.in_(payload.ability_ids))
+        )
+        abilities = list(result.scalars().all())
+        if len(abilities) != len(set(payload.ability_ids)):
+            raise HTTPException(status_code=400, detail="one or more ability_ids not found")
+
+    model = Model(
+        **payload.model_dump(exclude={"ability_ids", "weapon_ids"}), abilities=abilities
+    )
     session.add(model)
     try:
-        await session.commit()
+        await session.flush()
     except IntegrityError as exc:
         await session.rollback()
         raise HTTPException(status_code=400, detail="invalid faction_id") from exc
-    return model
+
+    weapons: list[Weapon] = []
+    if payload.weapon_ids:
+        result = await session.execute(select(Weapon).where(Weapon.id.in_(payload.weapon_ids)))
+        weapons = list(result.scalars().all())
+        if len(weapons) != len(set(payload.weapon_ids)):
+            await session.rollback()
+            raise HTTPException(status_code=400, detail="one or more weapon_ids not found")
+        for weapon in weapons:
+            weapon.model_id = model.id
+
+    await session.commit()
+    return _to_out(model, [a.id for a in abilities], [w.id for w in weapons])
+
+
+@router.put("/{model_id}", response_model=ModelOut)
+async def update_model(
+    model_id: int, payload: ModelIn, session: AsyncSession = Depends(get_session)
+):
+    result = await session.execute(
+        select(Model).options(selectinload(Model.abilities)).where(Model.id == model_id)
+    )
+    model = result.scalar_one_or_none()
+    if model is None:
+        raise HTTPException(status_code=404, detail="model not found")
+
+    abilities: list[DatasheetAbility] = []
+    if payload.ability_ids:
+        result = await session.execute(
+            select(DatasheetAbility).where(DatasheetAbility.id.in_(payload.ability_ids))
+        )
+        abilities = list(result.scalars().all())
+        if len(abilities) != len(set(payload.ability_ids)):
+            raise HTTPException(status_code=400, detail="one or more ability_ids not found")
+
+    model.name = payload.name
+    model.faction_id = payload.faction_id
+    model.points = payload.points
+    model.save = payload.save
+    model.toughness = payload.toughness
+    model.oc = payload.oc
+    model.movement = payload.movement
+    model.wounds = payload.wounds
+    model.invulnerable = payload.invulnerable
+    model.feel_no_pain = payload.feel_no_pain
+    model.abilities = abilities
+
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=400, detail="invalid faction_id") from exc
+
+    if payload.weapon_ids:
+        result = await session.execute(select(Weapon).where(Weapon.id.in_(payload.weapon_ids)))
+        new_weapons = list(result.scalars().all())
+        if len(new_weapons) != len(set(payload.weapon_ids)):
+            await session.rollback()
+            raise HTTPException(status_code=400, detail="one or more weapon_ids not found")
+        for weapon in new_weapons:
+            weapon.model_id = model.id
+
+    await session.commit()
+
+    result = await session.execute(
+        select(Model)
+        .options(selectinload(Model.abilities), selectinload(Model.weapons))
+        .where(Model.id == model_id)
+    )
+    model = result.scalar_one()
+    return _to_out(model, [a.id for a in model.abilities], [w.id for w in model.weapons])

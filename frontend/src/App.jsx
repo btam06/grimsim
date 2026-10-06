@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import AbilityPanel from './components/AbilityPanel'
+import FactionsPanel from './components/FactionsPanel'
 import ModelsPanel from './components/ModelsPanel'
 import UnitsPanel from './components/UnitsPanel'
+import WeaponsPanel from './components/WeaponsPanel'
 import {
   createDatasheetAbility,
   createWeaponAbility,
@@ -9,7 +11,7 @@ import {
   listWeaponAbilities,
 } from './api'
 
-const TABS = ['Models', 'Units', 'Weapon Abilities', 'Datasheet Abilities']
+const TABS = ['Factions', 'Models', 'Weapons', 'Units', 'Weapon Abilities', 'Datasheet Abilities']
 
 function App() {
   const [health, setHealth] = useState(null)
@@ -40,7 +42,9 @@ function App() {
         ))}
       </nav>
 
+      {tab === 'Factions' && <FactionsPanel />}
       {tab === 'Models' && <ModelsPanel />}
+      {tab === 'Weapons' && <WeaponsPanel />}
       {tab === 'Units' && <UnitsPanel />}
       {tab === 'Weapon Abilities' && (
         <AbilityPanel

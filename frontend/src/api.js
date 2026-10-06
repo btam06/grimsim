@@ -12,9 +12,19 @@ async function request(path, options) {
   return response.json()
 }
 
+export const listFactions = () => request('/factions')
+export const createFaction = (payload) =>
+  request('/factions', { method: 'POST', body: JSON.stringify(payload) })
+
 export const listModels = () => request('/models')
 export const createModel = (payload) =>
   request('/models', { method: 'POST', body: JSON.stringify(payload) })
+export const updateModel = (id, payload) =>
+  request(`/models/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
+
+export const listWeapons = () => request('/weapons')
+export const createWeapon = (payload) =>
+  request('/weapons', { method: 'POST', body: JSON.stringify(payload) })
 
 export const listUnits = () => request('/units')
 export const createUnit = (payload) =>

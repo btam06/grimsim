@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s http://localhost:8080/api/weapons)",
+      "Bash(python3 -m json.tool)"
+    ]
+  }
+}
