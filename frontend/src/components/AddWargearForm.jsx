@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { createWargear } from '../api'
+import Field from './Field'
 
 const EMPTY_FORM = {
   name: '',
@@ -31,12 +32,12 @@ function AddWargearForm({ modelId, onAdded }) {
   return (
     <form className="inline-form" onSubmit={handleSubmit}>
       {error && <p className="error">{error}</p>}
-      <input placeholder="Wargear Name" value={form.name} onChange={handleChange('name')} required />
-      <input
-        placeholder="Description (optional)"
-        value={form.description}
-        onChange={handleChange('description')}
-      />
+      <Field label="Wargear Name">
+        <input value={form.name} onChange={handleChange('name')} required />
+      </Field>
+      <Field label="Description (optional)">
+        <input value={form.description} onChange={handleChange('description')} />
+      </Field>
       <button type="submit">Add Wargear</button>
     </form>
   )

@@ -15,21 +15,25 @@ import {
   listWeaponAbilities,
 } from './api'
 
-const TABS = [
-  'Factions',
-  'Detachments',
-  'Models',
-  'Weapons',
-  'Units',
-  'Lists',
-  'Weapon Abilities',
-  'Datasheet Abilities',
-  'Dispositions',
-]
+const TAB_GROUPS = {
+  Build: ['Lists'],
+  Data: [
+    'Models',
+    'Datasheet Abilities',
+    'Weapon Abilities',
+    'Dispositions',
+    'Factions',
+    'Detachments',
+  ],
+  Debug: ['Weapons', 'Units'],
+}
+
+const GROUPS = Object.keys(TAB_GROUPS)
 
 function App() {
   const [health, setHealth] = useState(null)
-  const [tab, setTab] = useState(TABS[0])
+  const [group, setGroup] = useState(GROUPS[0])
+  const [tab, setTab] = useState(TAB_GROUPS[GROUPS[0]][0])
 
   useEffect(() => {
     fetch('/api/health')
@@ -38,13 +42,31 @@ function App() {
       .catch(() => setHealth({ status: 'unreachable' }))
   }, [])
 
+  const handleGroupChange = (g) => {
+    setGroup(g)
+    setTab(TAB_GROUPS[g][0])
+  }
+
   return (
     <div className="app">
       <h1>Grimsim</h1>
       <p>API status: {health ? health.status : 'checking...'}</p>
 
       <nav className="tabs">
-        {TABS.map((t) => (
+        {GROUPS.map((g) => (
+          <button
+            key={g}
+            type="button"
+            className={g === group ? 'active' : ''}
+            onClick={() => handleGroupChange(g)}
+          >
+            {g}
+          </button>
+        ))}
+      </nav>
+
+      <nav className="tabs subtabs">
+        {TAB_GROUPS[group].map((t) => (
           <button
             key={t}
             type="button"

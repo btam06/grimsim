@@ -2,7 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-DAMAGE_PATTERN = r"^[0-9](D[36])?$"
+DAMAGE_PATTERN = r"^([0-9]+|[0-9]*D[36])$"
 
 
 class FactionIn(BaseModel):
@@ -26,7 +26,6 @@ class ModelIn(BaseModel):
     invulnerable: int | None = None
     feel_no_pain: int | None = None
     ability_ids: list[int] = []
-    weapon_ids: list[int] = []
     wargear_ids: list[int] = []
 
 
@@ -42,7 +41,6 @@ class ModelOut(BaseModel):
     invulnerable: int | None
     feel_no_pain: int | None
     ability_ids: list[int]
-    weapon_ids: list[int]
     wargear_ids: list[int]
 
 
@@ -161,7 +159,6 @@ class ArmyListIn(BaseModel):
     points_limit: Literal[1000, 2000]
     faction_id: int
     detachment_id: int
-    unit_ids: list[int] = []
 
 
 class ArmyListOut(BaseModel):
@@ -170,4 +167,3 @@ class ArmyListOut(BaseModel):
     points_limit: int
     faction_id: int
     detachment_id: int
-    unit_ids: list[int]

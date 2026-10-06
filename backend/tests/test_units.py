@@ -171,6 +171,78 @@ async def test_create_unit_with_invalid_list_id_returns_400(client: AsyncClient)
     assert response.status_code == 400
 
 
+async def test_update_unit_changes_fields(client: AsyncClient):
+    unit_id = (await client.post("/units", json=_unit_payload())).json()["id"]
+
+    response = await client.put(
+        f"/units/{unit_id}", json=_unit_payload(name="Veteran Squad", points=150)
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == unit_id
+    assert body["name"] == "Veteran Squad"
+    assert body["points"] == 150
+
+    response = await client.get("/units")
+    assert response.json()[0]["name"] == "Veteran Squad"
+
+
+async def test_update_unit_replaces_unit_models(client: AsyncClient, faction_id: int):
+    model_a = await _create_model(client, faction_id, "Intercessor")
+    model_b = await _create_model(client, faction_id, "Terminator")
+    unit_id = (
+        await client.post(
+            "/units", json=_unit_payload(unit_models=[{"model_id": model_a}])
+        )
+    ).json()["id"]
+
+    response = await client.put(
+        f"/units/{unit_id}", json=_unit_payload(unit_models=[{"model_id": model_b}])
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["unit_models"]) == 1
+    assert body["unit_models"][0]["model_id"] == model_b
+
+    response = await client.get("/units")
+    listed = response.json()[0]
+    assert len(listed["unit_models"]) == 1
+    assert listed["unit_models"][0]["model_id"] == model_b
+
+
+async def test_update_unit_can_change_list(client: AsyncClient, faction_id: int):
+    detachment_id = (
+        await client.post("/detachments", json={"name": "Gladius", "faction_id": faction_id})
+    ).json()["id"]
+    list_id = (
+        await client.post(
+            "/lists",
+            json={
+                "name": "My List",
+                "points_limit": 1000,
+                "faction_id": faction_id,
+                "detachment_id": detachment_id,
+            },
+        )
+    ).json()["id"]
+    unit_id = (await client.post("/units", json=_unit_payload())).json()["id"]
+
+    response = await client.put(f"/units/{unit_id}", json=_unit_payload(list_id=list_id))
+    assert response.status_code == 200
+    assert response.json()["list_id"] == list_id
+
+
+async def test_update_unit_with_invalid_list_id_returns_400(client: AsyncClient):
+    unit_id = (await client.post("/units", json=_unit_payload())).json()["id"]
+    response = await client.put(f"/units/{unit_id}", json=_unit_payload(list_id=9999))
+    assert response.status_code == 400
+
+
+async def test_update_nonexistent_unit_returns_404(client: AsyncClient):
+    response = await client.put("/units/9999", json=_unit_payload())
+    assert response.status_code == 404
+
+
 async def test_delete_unit(client: AsyncClient):
     unit_id = (await client.post("/units", json=_unit_payload())).json()["id"]
 

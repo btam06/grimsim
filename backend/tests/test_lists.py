@@ -7,12 +7,6 @@ async def _create_detachment(client: AsyncClient, faction_id: int, name: str = "
     return response.json()["id"]
 
 
-async def _create_unit(client: AsyncClient, name: str = "Squad") -> int:
-    response = await client.post("/units", json={"name": name, "points": 100})
-    assert response.status_code == 201
-    return response.json()["id"]
-
-
 def _list_payload(faction_id: int, detachment_id: int, **overrides) -> dict:
     payload = {
         "name": "My List",
@@ -32,7 +26,6 @@ async def test_create_and_list_army_list(client: AsyncClient, faction_id: int):
     body = response.json()
     assert body["name"] == "My List"
     assert body["points_limit"] == 1000
-    assert body["unit_ids"] == []
 
     response = await client.get("/lists")
     assert response.status_code == 200
@@ -88,30 +81,6 @@ async def test_create_list_with_detachment_from_other_faction_returns_400(
     assert response.status_code == 400
 
 
-async def test_create_list_with_units_reassigns_them(client: AsyncClient, faction_id: int):
-    detachment_id = await _create_detachment(client, faction_id)
-    unit_id = await _create_unit(client)
-
-    response = await client.post(
-        "/lists", json=_list_payload(faction_id, detachment_id, unit_ids=[unit_id])
-    )
-    assert response.status_code == 201
-    body = response.json()
-    assert body["unit_ids"] == [unit_id]
-
-    units = (await client.get("/units")).json()
-    reassigned = next(u for u in units if u["id"] == unit_id)
-    assert reassigned["list_id"] == body["id"]
-
-
-async def test_create_list_with_invalid_unit_id_returns_400(client: AsyncClient, faction_id: int):
-    detachment_id = await _create_detachment(client, faction_id)
-    response = await client.post(
-        "/lists", json=_list_payload(faction_id, detachment_id, unit_ids=[9999])
-    )
-    assert response.status_code == 400
-
-
 async def test_update_list_changes_fields(client: AsyncClient, faction_id: int):
     detachment_id = await _create_detachment(client, faction_id)
     list_id = (
@@ -130,24 +99,6 @@ async def test_update_list_changes_fields(client: AsyncClient, faction_id: int):
 
     response = await client.get("/lists")
     assert response.json()[0]["name"] == "Updated List"
-
-
-async def test_update_list_additively_reassigns_units(client: AsyncClient, faction_id: int):
-    detachment_id = await _create_detachment(client, faction_id)
-    list_id = (
-        await client.post("/lists", json=_list_payload(faction_id, detachment_id))
-    ).json()["id"]
-    unit_id = await _create_unit(client)
-
-    response = await client.put(
-        f"/lists/{list_id}", json=_list_payload(faction_id, detachment_id, unit_ids=[unit_id])
-    )
-    assert response.status_code == 200
-    assert response.json()["unit_ids"] == [unit_id]
-
-    units = (await client.get("/units")).json()
-    reassigned = next(u for u in units if u["id"] == unit_id)
-    assert reassigned["list_id"] == list_id
 
 
 async def test_update_list_with_detachment_from_other_faction_returns_400(
@@ -174,4 +125,39 @@ async def test_update_list_with_detachment_from_other_faction_returns_400(
 async def test_update_nonexistent_list_returns_404(client: AsyncClient, faction_id: int):
     detachment_id = await _create_detachment(client, faction_id)
     response = await client.put("/lists/9999", json=_list_payload(faction_id, detachment_id))
+    assert response.status_code == 404
+
+
+async def test_delete_list(client: AsyncClient, faction_id: int):
+    detachment_id = await _create_detachment(client, faction_id)
+    list_id = (
+        await client.post("/lists", json=_list_payload(faction_id, detachment_id))
+    ).json()["id"]
+
+    response = await client.delete(f"/lists/{list_id}")
+    assert response.status_code == 204
+
+    response = await client.get("/lists")
+    assert response.json() == []
+
+
+async def test_delete_list_unassigns_units(client: AsyncClient, faction_id: int):
+    detachment_id = await _create_detachment(client, faction_id)
+    list_id = (
+        await client.post("/lists", json=_list_payload(faction_id, detachment_id))
+    ).json()["id"]
+    unit_id = (
+        await client.post("/units", json={"name": "Squad", "points": 100, "list_id": list_id})
+    ).json()["id"]
+
+    response = await client.delete(f"/lists/{list_id}")
+    assert response.status_code == 204
+
+    units = (await client.get("/units")).json()
+    unassigned = next(u for u in units if u["id"] == unit_id)
+    assert unassigned["list_id"] is None
+
+
+async def test_delete_nonexistent_list_returns_404(client: AsyncClient):
+    response = await client.delete("/lists/9999")
     assert response.status_code == 404

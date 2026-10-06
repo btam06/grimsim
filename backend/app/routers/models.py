@@ -5,15 +5,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db import get_session
-from app.models import DatasheetAbility, Model, Wargear, Weapon
+from app.models import DatasheetAbility, Model, Wargear
 from app.schemas import ModelIn, ModelOut
 
 router = APIRouter(prefix="/models", tags=["models"])
 
 
-def _to_out(
-    model: Model, ability_ids: list[int], weapon_ids: list[int], wargear_ids: list[int]
-) -> ModelOut:
+def _to_out(model: Model, ability_ids: list[int], wargear_ids: list[int]) -> ModelOut:
     return ModelOut(
         id=model.id,
         name=model.name,
@@ -26,7 +24,6 @@ def _to_out(
         invulnerable=model.invulnerable,
         feel_no_pain=model.feel_no_pain,
         ability_ids=ability_ids,
-        weapon_ids=weapon_ids,
         wargear_ids=wargear_ids,
     )
 
@@ -35,18 +32,11 @@ def _to_out(
 async def list_models(session: AsyncSession = Depends(get_session)):
     result = await session.execute(
         select(Model)
-        .options(
-            selectinload(Model.abilities), selectinload(Model.weapons), selectinload(Model.wargear)
-        )
+        .options(selectinload(Model.abilities), selectinload(Model.wargear))
         .order_by(Model.id)
     )
     return [
-        _to_out(
-            model,
-            [a.id for a in model.abilities],
-            [w.id for w in model.weapons],
-            [g.id for g in model.wargear],
-        )
+        _to_out(model, [a.id for a in model.abilities], [g.id for g in model.wargear])
         for model in result.scalars().all()
     ]
 
@@ -63,7 +53,7 @@ async def create_model(payload: ModelIn, session: AsyncSession = Depends(get_ses
             raise HTTPException(status_code=400, detail="one or more ability_ids not found")
 
     model = Model(
-        **payload.model_dump(exclude={"ability_ids", "weapon_ids", "wargear_ids"}),
+        **payload.model_dump(exclude={"ability_ids", "wargear_ids"}),
         abilities=abilities,
     )
     session.add(model)
@@ -72,16 +62,6 @@ async def create_model(payload: ModelIn, session: AsyncSession = Depends(get_ses
     except IntegrityError as exc:
         await session.rollback()
         raise HTTPException(status_code=400, detail="invalid faction_id") from exc
-
-    weapons: list[Weapon] = []
-    if payload.weapon_ids:
-        result = await session.execute(select(Weapon).where(Weapon.id.in_(payload.weapon_ids)))
-        weapons = list(result.scalars().all())
-        if len(weapons) != len(set(payload.weapon_ids)):
-            await session.rollback()
-            raise HTTPException(status_code=400, detail="one or more weapon_ids not found")
-        for weapon in weapons:
-            weapon.model_id = model.id
 
     wargear: list[Wargear] = []
     if payload.wargear_ids:
@@ -94,12 +74,7 @@ async def create_model(payload: ModelIn, session: AsyncSession = Depends(get_ses
             item.model_id = model.id
 
     await session.commit()
-    return _to_out(
-        model,
-        [a.id for a in abilities],
-        [w.id for w in weapons],
-        [g.id for g in wargear],
-    )
+    return _to_out(model, [a.id for a in abilities], [g.id for g in wargear])
 
 
 @router.put("/{model_id}", response_model=ModelOut)
@@ -139,15 +114,6 @@ async def update_model(
         await session.rollback()
         raise HTTPException(status_code=400, detail="invalid faction_id") from exc
 
-    if payload.weapon_ids:
-        result = await session.execute(select(Weapon).where(Weapon.id.in_(payload.weapon_ids)))
-        new_weapons = list(result.scalars().all())
-        if len(new_weapons) != len(set(payload.weapon_ids)):
-            await session.rollback()
-            raise HTTPException(status_code=400, detail="one or more weapon_ids not found")
-        for weapon in new_weapons:
-            weapon.model_id = model.id
-
     if payload.wargear_ids:
         result = await session.execute(select(Wargear).where(Wargear.id.in_(payload.wargear_ids)))
         new_wargear = list(result.scalars().all())
@@ -161,15 +127,8 @@ async def update_model(
 
     result = await session.execute(
         select(Model)
-        .options(
-            selectinload(Model.abilities), selectinload(Model.weapons), selectinload(Model.wargear)
-        )
+        .options(selectinload(Model.abilities), selectinload(Model.wargear))
         .where(Model.id == model_id)
     )
     model = result.scalar_one()
-    return _to_out(
-        model,
-        [a.id for a in model.abilities],
-        [w.id for w in model.weapons],
-        [g.id for g in model.wargear],
-    )
+    return _to_out(model, [a.id for a in model.abilities], [g.id for g in model.wargear])

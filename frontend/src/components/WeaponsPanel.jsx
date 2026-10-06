@@ -1,137 +1,71 @@
 import { useEffect, useState } from 'react'
-import { createWeapon, listModels, listWeaponAbilities, listWeapons } from '../api'
-import MultiSelect from './MultiSelect'
-
-const EMPTY_FORM = {
-  name: '',
-  model_id: '',
-  damage: '',
-  range: '',
-  strength: '',
-  ap: '',
-  attacks: '',
-  ability_ids: [],
-}
-
-function toPayload(form) {
-  return {
-    name: form.name,
-    model_id: Number(form.model_id),
-    damage: form.damage,
-    range: Number(form.range),
-    strength: Number(form.strength),
-    ap: Number(form.ap),
-    attacks: Number(form.attacks),
-    ability_ids: form.ability_ids,
-  }
-}
+import { deleteWeapon, listModels, listWeaponAbilities, listWeapons } from '../api'
+import WeaponFormPage from './WeaponFormPage'
+import WeaponsListPage from './WeaponsListPage'
 
 function WeaponsPanel() {
   const [weapons, setWeapons] = useState([])
   const [models, setModels] = useState([])
-  const [abilities, setAbilities] = useState([])
-  const [form, setForm] = useState(EMPTY_FORM)
+  const [weaponAbilities, setWeaponAbilities] = useState([])
   const [error, setError] = useState(null)
+  const [view, setView] = useState('list')
+  const [editingWeapon, setEditingWeapon] = useState(null)
 
-  const refresh = () => listWeapons().then(setWeapons).catch((err) => setError(err.message))
+  const refreshWeapons = () => listWeapons().then(setWeapons).catch((err) => setError(err.message))
 
   useEffect(() => {
-    refresh()
+    refreshWeapons()
     listModels().then(setModels).catch((err) => setError(err.message))
     listWeaponAbilities()
-      .then(setAbilities)
+      .then(setWeaponAbilities)
       .catch((err) => setError(err.message))
   }, [])
 
-  const handleChange = (field) => (e) => setForm({ ...form, [field]: e.target.value })
+  const goToList = () => {
+    setView('list')
+    setEditingWeapon(null)
+    refreshWeapons()
+  }
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
+  const handleDelete = async (id) => {
     setError(null)
     try {
-      await createWeapon(toPayload(form))
-      setForm(EMPTY_FORM)
-      refresh()
+      await deleteWeapon(id)
+      refreshWeapons()
     } catch (err) {
       setError(err.message)
     }
   }
 
-  const modelName = (id) => models.find((m) => m.id === id)?.name ?? `#${id}`
-  const abilityName = (id) => abilities.find((a) => a.id === id)?.name ?? `#${id}`
+  if (view === 'form') {
+    return (
+      <WeaponFormPage
+        editingWeapon={editingWeapon}
+        defaultModelId={null}
+        models={models}
+        weaponAbilities={weaponAbilities}
+        onSaved={goToList}
+        onCancel={goToList}
+      />
+    )
+  }
 
   return (
-    <section>
-      <h2>Weapons</h2>
-      {error && <p className="error">{error}</p>}
-      <form onSubmit={handleSubmit}>
-        <input placeholder="Name" value={form.name} onChange={handleChange('name')} required />
-        <select value={form.model_id} onChange={handleChange('model_id')} required>
-          <option value="" disabled>
-            Select model
-          </option>
-          {models.map((m) => (
-            <option key={m.id} value={m.id}>
-              #{m.id} {m.name}
-            </option>
-          ))}
-        </select>
-        <input
-          placeholder="Damage (e.g. 1, 2, 1D3, 2D6)"
-          type="text"
-          pattern="[0-9](D[36])?"
-          value={form.damage}
-          onChange={handleChange('damage')}
-          required
-        />
-        <input
-          placeholder="Range"
-          type="number"
-          value={form.range}
-          onChange={handleChange('range')}
-          required
-        />
-        <input
-          placeholder="Strength"
-          type="number"
-          value={form.strength}
-          onChange={handleChange('strength')}
-          required
-        />
-        <input
-          placeholder="AP"
-          type="number"
-          value={form.ap}
-          onChange={handleChange('ap')}
-          required
-        />
-        <input
-          placeholder="Attacks"
-          type="number"
-          value={form.attacks}
-          onChange={handleChange('attacks')}
-          required
-        />
-        <label className="field">
-          Weapon Abilities
-          <MultiSelect
-            options={abilities}
-            value={form.ability_ids}
-            onChange={(ability_ids) => setForm({ ...form, ability_ids })}
-          />
-        </label>
-        <button type="submit">Add Weapon</button>
-      </form>
-      <ul>
-        {weapons.map((w) => (
-          <li key={w.id}>
-            #{w.id} {w.name} ({modelName(w.model_id)}) — R{w.range}" A{w.attacks} S{w.strength} AP
-            {w.ap} D{w.damage}
-            {w.ability_ids.length > 0 && ` — ${w.ability_ids.map(abilityName).join(', ')}`}
-          </li>
-        ))}
-      </ul>
-    </section>
+    <WeaponsListPage
+      weapons={weapons}
+      models={models}
+      abilities={weaponAbilities}
+      error={error}
+      onEdit={(weapon) => {
+        setEditingWeapon(weapon)
+        setView('form')
+      }}
+      onAddNew={() => {
+        setEditingWeapon(null)
+        setView('form')
+      }}
+      onDelete={handleDelete}
+    />
   )
 }
 

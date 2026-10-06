@@ -9,6 +9,7 @@ import {
 } from '../api'
 import ModelFormPage from './ModelFormPage'
 import ModelsListPage from './ModelsListPage'
+import WeaponFormPage from './WeaponFormPage'
 
 function ModelsPanel() {
   const [models, setModels] = useState([])
@@ -20,6 +21,7 @@ function ModelsPanel() {
   const [error, setError] = useState(null)
   const [view, setView] = useState('list')
   const [editingModel, setEditingModel] = useState(null)
+  const [editingWeapon, setEditingWeapon] = useState(null)
 
   const refreshModels = () => listModels().then(setModels).catch((err) => setError(err.message))
   const refreshWeapons = () => listWeapons().then(setWeapons).catch((err) => setError(err.message))
@@ -46,20 +48,54 @@ function ModelsPanel() {
     refreshWargear()
   }
 
-  if (view === 'form') {
+  const stayOnForm = (model) => {
+    setEditingModel(model)
+    refreshModels()
+    refreshWeapons()
+    refreshWargear()
+  }
+
+  const goBackToModelForm = () => {
+    setView('model-form')
+    setEditingWeapon(null)
+    refreshWeapons()
+  }
+
+  if (view === 'weapon-form') {
+    return (
+      <WeaponFormPage
+        editingWeapon={editingWeapon}
+        defaultModelId={editingModel?.id ?? null}
+        models={models}
+        weaponAbilities={weaponAbilities}
+        onSaved={goBackToModelForm}
+        onCancel={goBackToModelForm}
+      />
+    )
+  }
+
+  if (view === 'model-form') {
     return (
       <ModelFormPage
         editingModel={editingModel}
         factions={factions}
         abilities={abilities}
         weapons={weapons}
-        weaponAbilities={weaponAbilities}
         wargear={wargear}
         onSaved={goToList}
+        onSavedStay={stayOnForm}
         onCancel={goToList}
         onInventoryChanged={() => {
           refreshWeapons()
           refreshWargear()
+        }}
+        onAddWeapon={() => {
+          setEditingWeapon(null)
+          setView('weapon-form')
+        }}
+        onEditWeapon={(weapon) => {
+          setEditingWeapon(weapon)
+          setView('weapon-form')
         }}
       />
     )
@@ -74,11 +110,11 @@ function ModelsPanel() {
       error={error}
       onEdit={(model) => {
         setEditingModel(model)
-        setView('form')
+        setView('model-form')
       }}
       onAddNew={() => {
         setEditingModel(null)
-        setView('form')
+        setView('model-form')
       }}
     />
   )

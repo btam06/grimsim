@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { createModel, updateModel } from '../api'
+import { createModel, deleteWeapon, updateModel } from '../api'
 import AddWargearForm from './AddWargearForm'
-import AddWeaponForm from './AddWeaponForm'
+import Field from './Field'
 import MultiSelect from './MultiSelect'
 
 function buildEmptyForm() {
@@ -16,7 +16,6 @@ function buildEmptyForm() {
     invulnerable: '',
     feel_no_pain: '',
     ability_ids: [],
-    weapon_ids: [],
     wargear_ids: [],
   }
 }
@@ -33,7 +32,6 @@ function formFromModel(model) {
     invulnerable: model.invulnerable === null ? '' : String(model.invulnerable),
     feel_no_pain: model.feel_no_pain === null ? '' : String(model.feel_no_pain),
     ability_ids: model.ability_ids,
-    weapon_ids: [],
     wargear_ids: [],
   }
 }
@@ -50,7 +48,6 @@ function toPayload(form) {
     invulnerable: form.invulnerable === '' ? null : Number(form.invulnerable),
     feel_no_pain: form.feel_no_pain === '' ? null : Number(form.feel_no_pain),
     ability_ids: form.ability_ids,
-    weapon_ids: form.weapon_ids,
     wargear_ids: form.wargear_ids,
   }
 }
@@ -60,112 +57,113 @@ function ModelFormPage({
   factions,
   abilities,
   weapons,
-  weaponAbilities,
   wargear,
   onSaved,
+  onSavedStay,
   onCancel,
   onInventoryChanged,
+  onAddWeapon,
+  onEditWeapon,
 }) {
   const [form, setForm] = useState(editingModel ? formFromModel(editingModel) : buildEmptyForm())
   const [error, setError] = useState(null)
 
   const handleChange = (field) => (e) => setForm({ ...form, [field]: e.target.value })
 
+  const save = () =>
+    editingModel ? updateModel(editingModel.id, toPayload(form)) : createModel(toPayload(form))
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError(null)
     try {
-      if (editingModel) {
-        await updateModel(editingModel.id, toPayload(form))
-      } else {
-        await createModel(toPayload(form))
-      }
+      await save()
       onSaved()
     } catch (err) {
       setError(err.message)
     }
   }
 
-  const weaponOptions = weapons.map((w) => ({
-    id: w.id,
-    name: `${w.name} (currently on model #${w.model_id})`,
-  }))
+  const handleSaveAndStay = async () => {
+    setError(null)
+    try {
+      const result = await save()
+      onSavedStay(result)
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  const handleDeleteWeapon = async (id) => {
+    setError(null)
+    try {
+      await deleteWeapon(id)
+      onInventoryChanged()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
   const wargearOptions = wargear.map((g) => ({
     id: g.id,
     name: `${g.name} (currently on model #${g.model_id})`,
   }))
+  const weaponsOnThisModel = editingModel
+    ? weapons.filter((w) => w.model_id === editingModel.id)
+    : []
 
   return (
     <section>
       <h2>{editingModel ? `Edit Model #${editingModel.id}` : 'Add Model'}</h2>
       {error && <p className="error">{error}</p>}
       <form onSubmit={handleSubmit}>
-        <input placeholder="Name" value={form.name} onChange={handleChange('name')} required />
-        <select value={form.faction_id} onChange={handleChange('faction_id')} required>
-          <option value="" disabled>
-            Select faction
-          </option>
-          {factions.map((f) => (
-            <option key={f.id} value={f.id}>
-              {f.name}
+        <Field label="Name">
+          <input value={form.name} onChange={handleChange('name')} required />
+        </Field>
+        <Field label="Faction">
+          <select value={form.faction_id} onChange={handleChange('faction_id')} required>
+            <option value="" disabled>
+              Select faction
             </option>
-          ))}
-        </select>
-        <input
-          placeholder="Movement"
-          type="number"
-          value={form.movement}
-          onChange={handleChange('movement')}
-          required
-        />
-        <input
-          placeholder="Toughness"
-          type="number"
-          value={form.toughness}
-          onChange={handleChange('toughness')}
-          required
-        />
-        <input placeholder="OC" type="number" value={form.oc} onChange={handleChange('oc')} required />
-        <input
-          placeholder="Wounds"
-          type="number"
-          value={form.wounds}
-          onChange={handleChange('wounds')}
-          required
-        />
-        <input
-          placeholder="Save"
-          type="number"
-          value={form.save}
-          onChange={handleChange('save')}
-          required
-        />
-        <input
-          placeholder="Invulnerable (optional)"
-          type="number"
-          value={form.invulnerable}
-          onChange={handleChange('invulnerable')}
-        />
-        <input
-          placeholder="Feel No Pain (optional)"
-          type="number"
-          value={form.feel_no_pain}
-          onChange={handleChange('feel_no_pain')}
-        />
+            {factions.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Movement">
+          <input type="number" value={form.movement} onChange={handleChange('movement')} required />
+        </Field>
+        <Field label="Toughness">
+          <input
+            type="number"
+            value={form.toughness}
+            onChange={handleChange('toughness')}
+            required
+          />
+        </Field>
+        <Field label="OC">
+          <input type="number" value={form.oc} onChange={handleChange('oc')} required />
+        </Field>
+        <Field label="Wounds">
+          <input type="number" value={form.wounds} onChange={handleChange('wounds')} required />
+        </Field>
+        <Field label="Save">
+          <input type="number" value={form.save} onChange={handleChange('save')} required />
+        </Field>
+        <Field label="Invulnerable (optional)">
+          <input type="number" value={form.invulnerable} onChange={handleChange('invulnerable')} />
+        </Field>
+        <Field label="Feel No Pain (optional)">
+          <input type="number" value={form.feel_no_pain} onChange={handleChange('feel_no_pain')} />
+        </Field>
         <label className="field">
           Datasheet Abilities
           <MultiSelect
             options={abilities}
             value={form.ability_ids}
             onChange={(ability_ids) => setForm({ ...form, ability_ids })}
-          />
-        </label>
-        <label className="field">
-          Existing Weapons (reassigns additional weapons to this model)
-          <MultiSelect
-            options={weaponOptions}
-            value={form.weapon_ids}
-            onChange={(weapon_ids) => setForm({ ...form, weapon_ids })}
           />
         </label>
         <label className="field">
@@ -177,17 +175,34 @@ function ModelFormPage({
           />
         </label>
         <button type="submit">{editingModel ? 'Save Changes' : 'Add Model'}</button>
+        <button type="button" onClick={handleSaveAndStay}>
+          {editingModel ? 'Save & Continue Editing' : 'Add & Continue Editing'}
+        </button>
         <button type="button" onClick={onCancel}>
           Cancel
         </button>
       </form>
       {editingModel && (
         <>
-          <AddWeaponForm
-            modelId={editingModel.id}
-            weaponAbilities={weaponAbilities}
-            onAdded={onInventoryChanged}
-          />
+          <h3>Weapons</h3>
+          <button type="button" onClick={() => onAddWeapon(editingModel.id)}>
+            + Add Weapon
+          </button>
+          {weaponsOnThisModel.length > 0 && (
+            <ul>
+              {weaponsOnThisModel.map((w) => (
+                <li key={w.id}>
+                  {w.name} — R{w.range}" A{w.attacks} S{w.strength} AP{w.ap} D{w.damage}
+                  <button type="button" onClick={() => onEditWeapon(w)}>
+                    Edit
+                  </button>
+                  <button type="button" onClick={() => handleDeleteWeapon(w.id)}>
+                    Delete
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
           <AddWargearForm modelId={editingModel.id} onAdded={onInventoryChanged} />
         </>
       )}

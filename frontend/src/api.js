@@ -32,6 +32,7 @@ export const createList = (payload) =>
   request('/lists', { method: 'POST', body: JSON.stringify(payload) })
 export const updateList = (id, payload) =>
   request(`/lists/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
+export const deleteList = (id) => request(`/lists/${id}`, { method: 'DELETE' })
 
 export const listModels = () => request('/models')
 export const createModel = (payload) =>
@@ -42,6 +43,9 @@ export const updateModel = (id, payload) =>
 export const listWeapons = () => request('/weapons')
 export const createWeapon = (payload) =>
   request('/weapons', { method: 'POST', body: JSON.stringify(payload) })
+export const updateWeapon = (id, payload) =>
+  request(`/weapons/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
+export const deleteWeapon = (id) => request(`/weapons/${id}`, { method: 'DELETE' })
 
 export const listWargear = () => request('/wargear')
 export const createWargear = (payload) =>
@@ -50,6 +54,8 @@ export const createWargear = (payload) =>
 export const listUnits = () => request('/units')
 export const createUnit = (payload) =>
   request('/units', { method: 'POST', body: JSON.stringify(payload) })
+export const updateUnit = (id, payload) =>
+  request(`/units/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
 export const deleteUnit = (id) => request(`/units/${id}`, { method: 'DELETE' })
 
 export const listWeaponAbilities = () => request('/weapon-abilities')

@@ -1,7 +1,7 @@
 function ModelsListPage({ models, abilities, weapons, wargear, error, onEdit, onAddNew }) {
   const abilityName = (id) => abilities.find((a) => a.id === id)?.name ?? `#${id}`
-  const weaponName = (id) => weapons.find((w) => w.id === id)?.name ?? `#${id}`
   const wargearName = (id) => wargear.find((g) => g.id === id)?.name ?? `#${id}`
+  const weaponsFor = (modelId) => weapons.filter((w) => w.model_id === modelId)
 
   return (
     <section>
@@ -19,7 +19,10 @@ function ModelsListPage({ models, abilities, weapons, wargear, error, onEdit, on
               {m.feel_no_pain ? ` FNP${m.feel_no_pain}+` : ''}
               {m.ability_ids.length > 0 &&
                 ` — Abilities: ${m.ability_ids.map(abilityName).join(', ')}`}
-              {m.weapon_ids.length > 0 && ` — Weapons: ${m.weapon_ids.map(weaponName).join(', ')}`}
+              {weaponsFor(m.id).length > 0 &&
+                ` — Weapons: ${weaponsFor(m.id)
+                  .map((w) => w.name)
+                  .join(', ')}`}
               {m.wargear_ids.length > 0 &&
                 ` — Wargear: ${m.wargear_ids.map(wargearName).join(', ')}`}
               <button type="button" onClick={() => onEdit(m)}>

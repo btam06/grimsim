@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createFaction, deleteFaction, listFactions } from '../api'
+import Field from './Field'
 
 function FactionsPanel() {
   const [factions, setFactions] = useState([])
@@ -39,7 +40,9 @@ function FactionsPanel() {
       <h2>Factions</h2>
       {error && <p className="error">{error}</p>}
       <form onSubmit={handleSubmit}>
-        <input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} required />
+        <Field label="Name">
+          <input value={name} onChange={(e) => setName(e.target.value)} required />
+        </Field>
         <button type="submit">Add Faction</button>
       </form>
       <ul>

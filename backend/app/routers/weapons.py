@@ -52,3 +52,60 @@ async def create_weapon(payload: WeaponIn, session: AsyncSession = Depends(get_s
         await session.rollback()
         raise HTTPException(status_code=400, detail="invalid model_id") from exc
     return _to_out(weapon)
+
+
+@router.put("/{weapon_id}", response_model=WeaponOut)
+async def update_weapon(
+    weapon_id: int, payload: WeaponIn, session: AsyncSession = Depends(get_session)
+):
+    weapon = (
+        await session.execute(
+            select(Weapon).options(selectinload(Weapon.abilities)).where(Weapon.id == weapon_id)
+        )
+    ).scalar_one_or_none()
+    if weapon is None:
+        raise HTTPException(status_code=404, detail="weapon not found")
+
+    abilities: list[WeaponAbility] = []
+    if payload.ability_ids:
+        result = await session.execute(
+            select(WeaponAbility).where(WeaponAbility.id.in_(payload.ability_ids))
+        )
+        abilities = list(result.scalars().all())
+        if len(abilities) != len(set(payload.ability_ids)):
+            raise HTTPException(status_code=400, detail="one or more ability_ids not found")
+
+    weapon.name = payload.name
+    weapon.model_id = payload.model_id
+    weapon.damage = payload.damage
+    weapon.range = payload.range
+    weapon.strength = payload.strength
+    weapon.ap = payload.ap
+    weapon.attacks = payload.attacks
+    weapon.abilities = abilities
+
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=400, detail="invalid model_id") from exc
+    return _to_out(weapon)
+
+
+@router.delete("/{weapon_id}", status_code=204)
+async def delete_weapon(weapon_id: int, session: AsyncSession = Depends(get_session)):
+    weapon = (
+        await session.execute(select(Weapon).where(Weapon.id == weapon_id))
+    ).scalar_one_or_none()
+    if weapon is None:
+        raise HTTPException(status_code=404, detail="weapon not found")
+
+    await session.delete(weapon)
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="cannot delete weapon: it is currently equipped by one or more units",
+        ) from exc

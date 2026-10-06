@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
+  deleteList,
   listDetachments,
   listFactions,
   listLists,
@@ -10,6 +11,7 @@ import {
 } from '../api'
 import ListFormPage from './ListFormPage'
 import ListsListPage from './ListsListPage'
+import UnitFormPage from './UnitFormPage'
 
 function ListsPanel() {
   const [lists, setLists] = useState([])
@@ -22,6 +24,7 @@ function ListsPanel() {
   const [error, setError] = useState(null)
   const [view, setView] = useState('list')
   const [editingList, setEditingList] = useState(null)
+  const [editingUnit, setEditingUnit] = useState(null)
 
   const refreshLists = () => listLists().then(setLists).catch((err) => setError(err.message))
   const refreshUnits = () => listUnits().then(setUnits).catch((err) => setError(err.message))
@@ -45,7 +48,39 @@ function ListsPanel() {
     refreshUnits()
   }
 
-  if (view === 'form') {
+  const goBackToListForm = () => {
+    setView('list-form')
+    setEditingUnit(null)
+    refreshUnits()
+  }
+
+  const handleDeleteList = async (id) => {
+    setError(null)
+    try {
+      await deleteList(id)
+      refreshLists()
+      refreshUnits()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  if (view === 'unit-form') {
+    return (
+      <UnitFormPage
+        editingUnit={editingUnit}
+        defaultListId={editingList?.id ?? null}
+        models={models}
+        weapons={weapons}
+        wargear={wargear}
+        lists={lists}
+        onSaved={goBackToListForm}
+        onCancel={goBackToListForm}
+      />
+    )
+  }
+
+  if (view === 'list-form') {
     return (
       <ListFormPage
         editingList={editingList}
@@ -58,6 +93,14 @@ function ListsPanel() {
         onSaved={goToList}
         onCancel={goToList}
         onUnitsChanged={refreshUnits}
+        onAddUnit={() => {
+          setEditingUnit(null)
+          setView('unit-form')
+        }}
+        onEditUnit={(unit) => {
+          setEditingUnit(unit)
+          setView('unit-form')
+        }}
       />
     )
   }
@@ -68,15 +111,19 @@ function ListsPanel() {
       factions={factions}
       detachments={detachments}
       units={units}
+      models={models}
+      weapons={weapons}
+      wargear={wargear}
       error={error}
       onEdit={(list) => {
         setEditingList(list)
-        setView('form')
+        setView('list-form')
       }}
       onAddNew={() => {
         setEditingList(null)
-        setView('form')
+        setView('list-form')
       }}
+      onDelete={handleDeleteList}
     />
   )
 }

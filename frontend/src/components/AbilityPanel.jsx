@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import Field from './Field'
 
 function AbilityPanel({ title, listFn, createFn }) {
   const [items, setItems] = useState([])
@@ -30,12 +31,12 @@ function AbilityPanel({ title, listFn, createFn }) {
       <h2>{title}</h2>
       {error && <p className="error">{error}</p>}
       <form onSubmit={handleSubmit}>
-        <input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} required />
-        <input
-          placeholder="Description (optional)"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-        />
+        <Field label="Name">
+          <input value={name} onChange={(e) => setName(e.target.value)} required />
+        </Field>
+        <Field label="Description (optional)">
+          <input value={description} onChange={(e) => setDescription(e.target.value)} />
+        </Field>
         <button type="submit">Add</button>
       </form>
       <ul>

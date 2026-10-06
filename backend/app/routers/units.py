@@ -107,6 +107,46 @@ async def create_unit(payload: UnitIn, session: AsyncSession = Depends(get_sessi
     return _to_out(unit)
 
 
+@router.put("/{unit_id}", response_model=UnitOut)
+async def update_unit(
+    unit_id: int, payload: UnitIn, session: AsyncSession = Depends(get_session)
+):
+    unit = (
+        await session.execute(
+            select(Unit).options(selectinload(Unit.unit_models)).where(Unit.id == unit_id)
+        )
+    ).scalar_one_or_none()
+    if unit is None:
+        raise HTTPException(status_code=404, detail="unit not found")
+
+    if payload.list_id is not None:
+        army_list = (
+            await session.execute(select(ArmyList).where(ArmyList.id == payload.list_id))
+        ).scalar_one_or_none()
+        if army_list is None:
+            raise HTTPException(status_code=400, detail="invalid list_id")
+
+    new_unit_models = await _build_unit_models(session, payload.unit_models)
+
+    unit.name = payload.name
+    unit.points = payload.points
+    unit.list_id = payload.list_id
+    unit.unit_models = new_unit_models
+
+    await session.commit()
+
+    result = await session.execute(
+        select(Unit)
+        .options(
+            selectinload(Unit.unit_models).selectinload(UnitModel.weapons),
+            selectinload(Unit.unit_models).selectinload(UnitModel.wargear),
+        )
+        .where(Unit.id == unit_id)
+    )
+    unit = result.scalar_one()
+    return _to_out(unit)
+
+
 @router.delete("/{unit_id}", status_code=204)
 async def delete_unit(unit_id: int, session: AsyncSession = Depends(get_session)):
     unit = (
