@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db import get_session
-from app.models import Unit, UnitModel
+from app.models import Unit, UnitModel, Wargear, WargearAbility, Weapon, WeaponAbility
 from app.schemas import CombatIn, CombatOut
 from app.services import combat as combat_service
 
@@ -12,10 +12,23 @@ router = APIRouter(prefix="/combat", tags=["combat"])
 
 
 async def _load_unit(session: AsyncSession, unit_id: int) -> Unit | None:
+    weapons_loader = selectinload(Unit.unit_models).selectinload(UnitModel.weapons)
+    wargear_loader = selectinload(Unit.unit_models).selectinload(UnitModel.wargear)
     result = await session.execute(
         select(Unit)
         .options(
-            selectinload(Unit.unit_models).selectinload(UnitModel.weapons),
+            weapons_loader,
+            weapons_loader.selectinload(Weapon.abilities).selectinload(
+                WeaponAbility.conditions
+            ),
+            weapons_loader.selectinload(Weapon.abilities).selectinload(WeaponAbility.effects),
+            wargear_loader,
+            wargear_loader.selectinload(Wargear.abilities).selectinload(
+                WargearAbility.conditions
+            ),
+            wargear_loader.selectinload(Wargear.abilities).selectinload(
+                WargearAbility.effects
+            ),
             selectinload(Unit.unit_models).selectinload(UnitModel.model),
         )
         .where(Unit.id == unit_id)
@@ -52,16 +65,17 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
         in_engagement_range=payload.in_engagement_range,
         visible=visible,
         in_range=in_range,
+        in_cover=payload.in_cover,
     )
 
     return CombatOut(
         visible=visible,
         in_range=in_range,
         in_engagement_range=payload.in_engagement_range,
-        total_attacks=result.total_attacks,
-        total_hits=result.total_hits,
-        total_wounds=result.total_wounds,
-        failed_saves=result.failed_saves,
+        in_cover=payload.in_cover,
+        attack_rolls=result.attack_rolls,
+        wound_rolls=result.wound_rolls,
+        save_rolls=result.save_rolls,
         total_damage=result.total_damage,
         models_destroyed=result.models_destroyed,
         defending_models_remaining=result.defending_models_remaining,

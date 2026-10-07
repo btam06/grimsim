@@ -43,3 +43,38 @@ list_detachments = Table(
     Column("list_id", ForeignKey("lists.id"), primary_key=True),
     Column("detachment_id", ForeignKey("detachments.id"), primary_key=True),
 )
+
+weapon_ability_conditions = Table(
+    "weapon_ability_conditions",
+    Base.metadata,
+    Column("weapon_ability_id", ForeignKey("weapon_abilities.id"), primary_key=True),
+    Column("condition_id", ForeignKey("conditions.id"), primary_key=True),
+)
+
+weapon_ability_effects = Table(
+    "weapon_ability_effects",
+    Base.metadata,
+    Column("weapon_ability_id", ForeignKey("weapon_abilities.id"), primary_key=True),
+    Column("effect_id", ForeignKey("effects.id"), primary_key=True),
+)
+
+wargear_ability_links = Table(
+    "wargear_ability_links",
+    Base.metadata,
+    Column("wargear_id", ForeignKey("wargear.id"), primary_key=True),
+    Column("wargear_ability_id", ForeignKey("wargear_abilities.id"), primary_key=True),
+)
+
+wargear_ability_conditions = Table(
+    "wargear_ability_conditions",
+    Base.metadata,
+    Column("wargear_ability_id", ForeignKey("wargear_abilities.id"), primary_key=True),
+    Column("condition_id", ForeignKey("conditions.id"), primary_key=True),
+)
+
+wargear_ability_effects = Table(
+    "wargear_ability_effects",
+    Base.metadata,
+    Column("wargear_ability_id", ForeignKey("wargear_abilities.id"), primary_key=True),
+    Column("effect_id", ForeignKey("effects.id"), primary_key=True),
+)

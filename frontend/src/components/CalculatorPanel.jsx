@@ -2,11 +2,25 @@ import { useEffect, useState } from 'react'
 import { listFactionUnits, listUnits, runCombat } from '../api'
 import Field from './Field'
 
+const DIE_FACES = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅']
+const diceFace = (roll) => DIE_FACES[roll - 1] ?? roll
+
+function DiceRolls({ rolls }) {
+  if (rolls.length === 0) return 'none'
+  return rolls.map((roll, i) => (
+    <span key={i} className="die-face">
+      {diceFace(roll)}
+    </span>
+  ))
+}
+
 function CalculatorPanel() {
   const [units, setUnits] = useState([])
   const [factionUnits, setFactionUnits] = useState([])
   const [attackingUnitId, setAttackingUnitId] = useState('')
   const [defendingUnitId, setDefendingUnitId] = useState('')
+  const [inEngagementRange, setInEngagementRange] = useState(false)
+  const [inCover, setInCover] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
 
@@ -31,6 +45,8 @@ function CalculatorPanel() {
         attacking_unit_id: Number(attackingUnitId),
         defending_unit_id: Number(defendingUnitId),
         selected_weapon_ids: selectedWeaponIds,
+        in_engagement_range: inEngagementRange,
+        in_cover: inCover,
       })
       setResult(response)
     } catch (err) {
@@ -75,15 +91,47 @@ function CalculatorPanel() {
             ))}
           </select>
         </Field>
+        <div className="radio-group">
+          Engagement
+          <label className="radio-option">
+            <input
+              type="radio"
+              name="in_engagement_range"
+              checked={!inEngagementRange}
+              onChange={() => setInEngagementRange(false)}
+            />
+            Ranged
+          </label>
+          <label className="radio-option">
+            <input
+              type="radio"
+              name="in_engagement_range"
+              checked={inEngagementRange}
+              onChange={() => setInEngagementRange(true)}
+            />
+            Melee (in engagement range)
+          </label>
+        </div>
+        {!inEngagementRange && (
+          <label className="checkbox-field">
+            <input type="checkbox" checked={inCover} onChange={(e) => setInCover(e.target.checked)} />
+            Defender in cover (+1 to hit for ranged attacks)
+          </label>
+        )}
         <button type="submit">Calculate</button>
       </form>
 
       {result && (
         <ul>
-          <li>Total attacks: {result.total_attacks}</li>
-          <li>Total hits: {result.total_hits}</li>
-          <li>Total wounds: {result.total_wounds}</li>
-          <li>Failed saves: {result.failed_saves}</li>
+          <li>
+            Attack rolls: <DiceRolls rolls={result.attack_rolls} />
+          </li>
+          <li>
+            Wound rolls: <DiceRolls rolls={result.wound_rolls} />
+          </li>
+          <li>
+            Save rolls: <DiceRolls rolls={result.save_rolls} />
+          </li>
           <li>Total damage dealt: {result.total_damage}</li>
           <li>Defending models destroyed: {result.models_destroyed}</li>
           <li>Defending models remaining: {result.defending_models_remaining}</li>

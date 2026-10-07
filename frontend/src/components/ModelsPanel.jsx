@@ -4,6 +4,7 @@ import {
   listFactions,
   listModels,
   listWargear,
+  listWargearAbilities,
   listWeaponAbilities,
   listWeapons,
 } from '../api'
@@ -16,6 +17,7 @@ function ModelsPanel() {
   const [factions, setFactions] = useState([])
   const [abilities, setAbilities] = useState([])
   const [weaponAbilities, setWeaponAbilities] = useState([])
+  const [wargearAbilities, setWargearAbilities] = useState([])
   const [weapons, setWeapons] = useState([])
   const [wargear, setWargear] = useState([])
   const [error, setError] = useState(null)
@@ -37,6 +39,9 @@ function ModelsPanel() {
       .catch((err) => setError(err.message))
     listWeaponAbilities()
       .then(setWeaponAbilities)
+      .catch((err) => setError(err.message))
+    listWargearAbilities()
+      .then(setWargearAbilities)
       .catch((err) => setError(err.message))
   }, [])
 
@@ -81,6 +86,7 @@ function ModelsPanel() {
         abilities={abilities}
         weapons={weapons}
         wargear={wargear}
+        wargearAbilities={wargearAbilities}
         onSaved={goToList}
         onSavedStay={stayOnForm}
         onCancel={goToList}

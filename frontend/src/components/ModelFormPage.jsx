@@ -68,6 +68,7 @@ function ModelFormPage({
   abilities,
   weapons,
   wargear,
+  wargearAbilities,
   onSaved,
   onSavedStay,
   onCancel,
@@ -239,7 +240,11 @@ function ModelFormPage({
               ))}
             </ul>
           )}
-          <AddWargearForm modelId={editingModel.id} onAdded={onInventoryChanged} />
+          <AddWargearForm
+            modelId={editingModel.id}
+            wargearAbilities={wargearAbilities}
+            onAdded={onInventoryChanged}
+          />
         </>
       )}
     </section>

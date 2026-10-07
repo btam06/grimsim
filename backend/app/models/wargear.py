@@ -5,10 +5,12 @@ from typing import TYPE_CHECKING
 from sqlalchemy import ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.models.associations import wargear_ability_links
 from app.models.base import Base
 
 if TYPE_CHECKING:
     from app.models.model import Model
+    from app.models.wargear_ability import WargearAbility
 
 
 class Wargear(Base):
@@ -20,3 +22,6 @@ class Wargear(Base):
     model_id: Mapped[int] = mapped_column(ForeignKey("models.id"))
 
     model: Mapped["Model"] = relationship(back_populates="wargear")
+    abilities: Mapped[list["WargearAbility"]] = relationship(
+        secondary=wargear_ability_links, back_populates="wargear"
+    )

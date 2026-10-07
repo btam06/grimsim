@@ -6,15 +6,18 @@ from app.db import async_session, engine
 from app.models import Base
 from app.routers import (
     combat,
+    conditions,
     datasheet_abilities,
     detachments,
     dispositions,
+    effects,
     faction_units,
     factions,
     lists,
     models,
     units,
     wargear,
+    wargear_abilities,
     weapon_abilities,
     weapons,
 )
@@ -38,10 +41,13 @@ app.include_router(detachments.router)
 app.include_router(models.router)
 app.include_router(weapons.router)
 app.include_router(wargear.router)
+app.include_router(wargear_abilities.router)
 app.include_router(units.router)
 app.include_router(lists.router)
 app.include_router(weapon_abilities.router)
 app.include_router(datasheet_abilities.router)
+app.include_router(conditions.router)
+app.include_router(effects.router)
 app.include_router(combat.router)
 
 

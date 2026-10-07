@@ -25,7 +25,7 @@ def _weapon_payload(model_id: int, **overrides) -> dict:
         "range": 24,
         "strength": 4,
         "ap": -1,
-        "attacks": 2,
+        "attacks": "2",
         "skill": 3,
     }
     payload.update(overrides)
@@ -97,6 +97,20 @@ async def test_create_weapon_with_invalid_damage_returns_422(
             "/weapons", json=_weapon_payload(model_id, damage=invalid_damage)
         )
         assert response.status_code == 422, invalid_damage
+
+
+async def test_create_weapon_with_zero_or_negative_ap(client: AsyncClient, faction_id: int):
+    model_id = await _create_model(client, faction_id)
+    for valid_ap in [0, -1, -5]:
+        response = await client.post("/weapons", json=_weapon_payload(model_id, ap=valid_ap))
+        assert response.status_code == 201, valid_ap
+        assert response.json()["ap"] == valid_ap
+
+
+async def test_create_weapon_with_positive_ap_returns_422(client: AsyncClient, faction_id: int):
+    model_id = await _create_model(client, faction_id)
+    response = await client.post("/weapons", json=_weapon_payload(model_id, ap=1))
+    assert response.status_code == 422
 
 
 async def test_create_ranged_weapon_requires_range(client: AsyncClient, faction_id: int):

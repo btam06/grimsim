@@ -2,7 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-DAMAGE_PATTERN = r"^([0-9]+|[0-9]*D[36])$"
+DICE_PATTERN = r"^([0-9]+|[0-9]*D[36])$"
 
 
 class FactionIn(BaseModel):
@@ -64,11 +64,11 @@ class ModelOut(BaseModel):
 class WeaponIn(BaseModel):
     name: str
     model_id: int
-    damage: str = Field(pattern=DAMAGE_PATTERN)
+    damage: str = Field(pattern=DICE_PATTERN)
     range: int | None = None
     strength: int
-    ap: int
-    attacks: int
+    ap: int = Field(le=0)
+    attacks: str = Field(pattern=DICE_PATTERN)
     skill: int
     weapon_type: Literal["melee", "ranged"] | None = None
     ability_ids: list[int] = []
@@ -88,7 +88,7 @@ class WeaponOut(BaseModel):
     range: int | None
     strength: int
     ap: int
-    attacks: int
+    attacks: str
     skill: int
     weapon_type: Literal["melee", "ranged"] | None
     ability_ids: list[int]
@@ -98,6 +98,7 @@ class WargearIn(BaseModel):
     name: str
     model_id: int
     description: str | None = None
+    ability_ids: list[int] = []
 
 
 class WargearOut(BaseModel):
@@ -105,6 +106,7 @@ class WargearOut(BaseModel):
     name: str
     model_id: int
     description: str | None
+    ability_ids: list[int]
 
 
 class UnitModelIn(BaseModel):
@@ -135,15 +137,52 @@ class UnitOut(BaseModel):
     unit_models: list[UnitModelOut]
 
 
-class WeaponAbilityIn(BaseModel):
-    name: str
-    description: str | None = None
-
-
-class WeaponAbilityOut(WeaponAbilityIn):
+class ConditionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    keyword: str
+    name: str
+    description: str | None
+
+
+class EffectOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    keyword: str
+    name: str
+    description: str | None
+
+
+class WeaponAbilityIn(BaseModel):
+    name: str
+    description: str | None = None
+    condition_ids: list[int] = []
+    effect_ids: list[int] = []
+
+
+class WeaponAbilityOut(BaseModel):
+    id: int
+    name: str
+    description: str | None
+    condition_ids: list[int]
+    effect_ids: list[int]
+
+
+class WargearAbilityIn(BaseModel):
+    name: str
+    description: str | None = None
+    condition_ids: list[int] = []
+    effect_ids: list[int] = []
+
+
+class WargearAbilityOut(BaseModel):
+    id: int
+    name: str
+    description: str | None
+    condition_ids: list[int]
+    effect_ids: list[int]
 
 
 class DatasheetAbilityIn(BaseModel):
@@ -189,6 +228,7 @@ class CombatIn(BaseModel):
     defending_unit_id: int
     selected_weapon_ids: list[int] = []
     in_engagement_range: bool = False
+    in_cover: bool = False
     defender_visible: bool = True
     defender_in_range: bool = True
 
@@ -197,10 +237,10 @@ class CombatOut(BaseModel):
     visible: bool
     in_range: bool
     in_engagement_range: bool
-    total_attacks: int
-    total_hits: int
-    total_wounds: int
-    failed_saves: int
+    in_cover: bool
+    attack_rolls: list[int]
+    wound_rolls: list[int]
+    save_rolls: list[int]
     total_damage: int
     models_destroyed: int
     defending_models_remaining: int

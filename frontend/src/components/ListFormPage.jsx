@@ -133,16 +133,18 @@ function ListFormPage({
           {detachmentOptionsForFaction.length === 0 && (
             <p className="hint">Select a faction to see its detachments</p>
           )}
-          {detachmentOptionsForFaction.map((d) => (
-            <label key={d.id} className="checkbox-field">
-              <input
-                type="checkbox"
-                checked={form.detachment_ids.includes(d.id)}
-                onChange={() => toggleDetachment(d.id)}
-              />
-              {d.name}
-            </label>
-          ))}
+          <div className="checkbox-grid">
+            {detachmentOptionsForFaction.map((d) => (
+              <label key={d.id} className="checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={form.detachment_ids.includes(d.id)}
+                  onChange={() => toggleDetachment(d.id)}
+                />
+                {d.name}
+              </label>
+            ))}
+          </div>
         </div>
         <button type="submit">{editingList ? 'Save Changes' : 'Add List'}</button>
         <button type="button" onClick={onCancel}>

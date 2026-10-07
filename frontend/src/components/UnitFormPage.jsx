@@ -53,6 +53,15 @@ function UnitFormPage({
 
   const removeSlot = (index) => setSlots(slots.filter((_, i) => i !== index))
 
+  const toggleSlotWeapon = (weaponId) => {
+    setSlot({
+      ...slot,
+      weapon_ids: slot.weapon_ids.includes(weaponId)
+        ? slot.weapon_ids.filter((id) => id !== weaponId)
+        : [...slot.weapon_ids, weaponId],
+    })
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError(null)
@@ -133,14 +142,24 @@ function UnitFormPage({
             ))}
           </select>
         </Field>
-        <label className="field">
+        <div className="checkbox-group">
           Weapons
-          <MultiSelect
-            options={weaponOptionsForSlot}
-            value={slot.weapon_ids}
-            onChange={(weapon_ids) => setSlot({ ...slot, weapon_ids })}
-          />
-        </label>
+          {weaponOptionsForSlot.length === 0 && (
+            <p className="hint">Select a model to see its weapons</p>
+          )}
+          <div className="checkbox-grid">
+            {weaponOptionsForSlot.map((w) => (
+              <label key={w.id} className="checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={slot.weapon_ids.includes(w.id)}
+                  onChange={() => toggleSlotWeapon(w.id)}
+                />
+                {w.name}
+              </label>
+            ))}
+          </div>
+        </div>
         <label className="field">
           Wargear
           <MultiSelect

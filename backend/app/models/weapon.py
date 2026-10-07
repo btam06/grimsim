@@ -22,7 +22,7 @@ class Weapon(Base):
     range: Mapped[int | None] = mapped_column(Integer, nullable=True)
     strength: Mapped[int] = mapped_column(Integer)
     ap: Mapped[int] = mapped_column(Integer)
-    attacks: Mapped[int] = mapped_column(Integer)
+    attacks: Mapped[str] = mapped_column(String(10))
     skill: Mapped[int] = mapped_column(Integer)
     weapon_type: Mapped[str | None] = mapped_column(String(10), nullable=True)
     model_id: Mapped[int] = mapped_column(ForeignKey("models.id"))

@@ -26,7 +26,7 @@ function formFromWeapon(weapon) {
     range: weapon.range === null ? '' : String(weapon.range),
     strength: String(weapon.strength),
     ap: String(weapon.ap),
-    attacks: String(weapon.attacks),
+    attacks: weapon.attacks,
     skill: String(weapon.skill),
     weapon_type: weapon.weapon_type ?? '',
     ability_ids: weapon.ability_ids,
@@ -41,7 +41,7 @@ function toPayload(form) {
     range: form.range === '' ? null : Number(form.range),
     strength: Number(form.strength),
     ap: Number(form.ap),
-    attacks: Number(form.attacks),
+    attacks: form.attacks,
     skill: Number(form.skill),
     weapon_type: form.weapon_type === '' ? null : form.weapon_type,
     ability_ids: form.ability_ids,
@@ -107,10 +107,16 @@ function WeaponFormPage({
           <input type="number" value={form.strength} onChange={handleChange('strength')} required />
         </Field>
         <Field label="AP">
-          <input type="number" value={form.ap} onChange={handleChange('ap')} required />
+          <input type="number" max="0" value={form.ap} onChange={handleChange('ap')} required />
         </Field>
-        <Field label="Attacks">
-          <input type="number" value={form.attacks} onChange={handleChange('attacks')} required />
+        <Field label="Attacks (e.g. 1, 2, D3, D6, 2D6)">
+          <input
+            type="text"
+            pattern="([0-9]+|[0-9]*D[36])"
+            value={form.attacks}
+            onChange={handleChange('attacks')}
+            required
+          />
         </Field>
         <Field label="Skill (WS/BS)">
           <input type="number" value={form.skill} onChange={handleChange('skill')} required />

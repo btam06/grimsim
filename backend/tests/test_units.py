@@ -27,7 +27,7 @@ async def _create_weapon(client: AsyncClient, model_id: int, name: str = "Bolt R
             "range": 24,
             "strength": 4,
             "ap": -1,
-            "attacks": 2,
+            "attacks": "2",
             "skill": 3,
         },
     )

@@ -4,14 +4,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db import get_session
-from app.models import Condition, Effect, WeaponAbility
-from app.schemas import WeaponAbilityIn, WeaponAbilityOut
+from app.models import Condition, Effect, WargearAbility
+from app.schemas import WargearAbilityIn, WargearAbilityOut
 
-router = APIRouter(prefix="/weapon-abilities", tags=["weapon-abilities"])
+router = APIRouter(prefix="/wargear-abilities", tags=["wargear-abilities"])
 
 
-def _to_out(ability: WeaponAbility) -> WeaponAbilityOut:
-    return WeaponAbilityOut(
+def _to_out(ability: WargearAbility) -> WargearAbilityOut:
+    return WargearAbilityOut(
         id=ability.id,
         name=ability.name,
         description=ability.description,
@@ -20,19 +20,19 @@ def _to_out(ability: WeaponAbility) -> WeaponAbilityOut:
     )
 
 
-@router.get("", response_model=list[WeaponAbilityOut])
-async def list_weapon_abilities(session: AsyncSession = Depends(get_session)):
+@router.get("", response_model=list[WargearAbilityOut])
+async def list_wargear_abilities(session: AsyncSession = Depends(get_session)):
     result = await session.execute(
-        select(WeaponAbility)
-        .options(selectinload(WeaponAbility.conditions), selectinload(WeaponAbility.effects))
-        .order_by(WeaponAbility.id)
+        select(WargearAbility)
+        .options(selectinload(WargearAbility.conditions), selectinload(WargearAbility.effects))
+        .order_by(WargearAbility.id)
     )
     return [_to_out(ability) for ability in result.scalars().all()]
 
 
-@router.post("", response_model=WeaponAbilityOut, status_code=201)
-async def create_weapon_ability(
-    payload: WeaponAbilityIn, session: AsyncSession = Depends(get_session)
+@router.post("", response_model=WargearAbilityOut, status_code=201)
+async def create_wargear_ability(
+    payload: WargearAbilityIn, session: AsyncSession = Depends(get_session)
 ):
     conditions: list[Condition] = []
     if payload.condition_ids:
@@ -50,7 +50,7 @@ async def create_weapon_ability(
         if len(effects) != len(set(payload.effect_ids)):
             raise HTTPException(status_code=400, detail="one or more effect_ids not found")
 
-    ability = WeaponAbility(
+    ability = WargearAbility(
         name=payload.name,
         description=payload.description,
         conditions=conditions,

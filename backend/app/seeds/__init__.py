@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.seeds import dispositions, factions
+from app.seeds import conditions, dispositions, effects, factions, wargear_abilities, weapon_abilities
 from app.seeds.detachments import adeptus_mechanicus as adeptus_mechanicus_detachments
 from app.seeds.faction_units import adeptus_mechanicus as adeptus_mechanicus_units
 
@@ -15,9 +15,19 @@ from app.seeds.faction_units import adeptus_mechanicus as adeptus_mechanicus_uni
 # faction: add a module to the relevant directory following the same shape,
 # then register it below — after dispositions.seed/factions.seed, since both
 # look up rows by name.
+#
+# conditions.seed/effects.seed populate the hardcoded condition/effect catalog
+# (see app/combat_rules/) that WeaponAbility/WargearAbility rows reference;
+# weapon_abilities.seed/wargear_abilities.seed build abilities from them (each
+# with an ENTRIES list of (name, description, condition keywords, effect
+# keywords)), so both must run after conditions.seed/effects.seed.
 SEED_FUNCS = [
     dispositions.seed,
     factions.seed,
+    conditions.seed,
+    effects.seed,
+    weapon_abilities.seed,
+    wargear_abilities.seed,
     adeptus_mechanicus_units.seed,
     adeptus_mechanicus_detachments.seed,
 ]

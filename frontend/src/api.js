@@ -70,6 +70,13 @@ export const listWeaponAbilities = () => request('/weapon-abilities')
 export const createWeaponAbility = (payload) =>
   request('/weapon-abilities', { method: 'POST', body: JSON.stringify(payload) })
 
+export const listWargearAbilities = () => request('/wargear-abilities')
+export const createWargearAbility = (payload) =>
+  request('/wargear-abilities', { method: 'POST', body: JSON.stringify(payload) })
+
+export const listConditions = () => request('/conditions')
+export const listEffects = () => request('/effects')
+
 export const listDatasheetAbilities = () => request('/datasheet-abilities')
 export const createDatasheetAbility = (payload) =>
   request('/datasheet-abilities', { method: 'POST', body: JSON.stringify(payload) })

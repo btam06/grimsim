@@ -7,14 +7,14 @@ import FactionsPanel from './components/FactionsPanel'
 import ListsPanel from './components/ListsPanel'
 import ModelsPanel from './components/ModelsPanel'
 import UnitsPanel from './components/UnitsPanel'
+import WargearAbilitiesPanel from './components/WargearAbilitiesPanel'
+import WeaponAbilitiesPanel from './components/WeaponAbilitiesPanel'
 import WeaponsPanel from './components/WeaponsPanel'
 import {
   createDatasheetAbility,
   createDisposition,
-  createWeaponAbility,
   listDatasheetAbilities,
   listDispositions,
-  listWeaponAbilities,
 } from './api'
 
 const TAB_GROUPS = {
@@ -23,6 +23,7 @@ const TAB_GROUPS = {
     'Models',
     'Datasheet Abilities',
     'Weapon Abilities',
+    'Wargear Abilities',
     'Dispositions',
     'Factions',
     'Detachments',
@@ -91,13 +92,8 @@ function App() {
       {tab === 'Units' && <UnitsPanel />}
       {tab === 'Faction Units' && <FactionUnitsPanel />}
       {tab === 'Lists' && <ListsPanel />}
-      {tab === 'Weapon Abilities' && (
-        <AbilityPanel
-          title="Weapon Abilities"
-          listFn={listWeaponAbilities}
-          createFn={createWeaponAbility}
-        />
-      )}
+      {tab === 'Weapon Abilities' && <WeaponAbilitiesPanel />}
+      {tab === 'Wargear Abilities' && <WargearAbilitiesPanel />}
       {tab === 'Datasheet Abilities' && (
         <AbilityPanel
           title="Datasheet Abilities"
