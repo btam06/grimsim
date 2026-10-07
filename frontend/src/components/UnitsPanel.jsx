@@ -1,5 +1,12 @@
 import { useEffect, useState } from 'react'
-import { deleteUnit, listLists, listModels, listUnits, listWargear, listWeapons } from '../api'
+import {
+  deleteUnit,
+  listFactionUnits,
+  listModels,
+  listUnits,
+  listWargear,
+  listWeapons,
+} from '../api'
 import UnitFormPage from './UnitFormPage'
 import UnitsListPage from './UnitsListPage'
 
@@ -8,7 +15,7 @@ function UnitsPanel() {
   const [models, setModels] = useState([])
   const [weapons, setWeapons] = useState([])
   const [wargear, setWargear] = useState([])
-  const [lists, setLists] = useState([])
+  const [factionUnits, setFactionUnits] = useState([])
   const [error, setError] = useState(null)
   const [view, setView] = useState('list')
   const [editingUnit, setEditingUnit] = useState(null)
@@ -20,7 +27,7 @@ function UnitsPanel() {
     listModels().then(setModels).catch((err) => setError(err.message))
     listWeapons().then(setWeapons).catch((err) => setError(err.message))
     listWargear().then(setWargear).catch((err) => setError(err.message))
-    listLists().then(setLists).catch((err) => setError(err.message))
+    listFactionUnits().then(setFactionUnits).catch((err) => setError(err.message))
   }, [])
 
   const goToList = () => {
@@ -47,7 +54,7 @@ function UnitsPanel() {
         models={models}
         weapons={weapons}
         wargear={wargear}
-        lists={lists}
+        factionUnits={factionUnits}
         onSaved={goToList}
         onCancel={goToList}
       />
@@ -60,6 +67,7 @@ function UnitsPanel() {
       models={models}
       weapons={weapons}
       wargear={wargear}
+      factionUnits={factionUnits}
       error={error}
       onEdit={(unit) => {
         setEditingUnit(unit)

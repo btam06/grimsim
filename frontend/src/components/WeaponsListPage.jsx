@@ -1,6 +1,6 @@
 import { skillLabel } from '../weaponDisplay'
 
-function WeaponsListPage({ weapons, models, abilities, error, onEdit, onAddNew, onDelete }) {
+function WeaponsListPage({ weapons, models, abilities, error, onEdit, onDelete }) {
   const modelName = (id) => models.find((m) => m.id === id)?.name ?? `#${id}`
   const abilityName = (id) => abilities.find((a) => a.id === id)?.name ?? `#${id}`
 
@@ -8,9 +8,6 @@ function WeaponsListPage({ weapons, models, abilities, error, onEdit, onAddNew, 
     <section>
       <h2>Weapons</h2>
       {error && <p className="error">{error}</p>}
-      <button type="button" onClick={onAddNew}>
-        + Add Weapon
-      </button>
       <ul>
         {weapons.map((w) => (
           <li key={w.id}>

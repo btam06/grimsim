@@ -15,6 +15,7 @@ function DetachmentsPanel() {
   const [dispositions, setDispositions] = useState([])
   const [name, setName] = useState('')
   const [factionId, setFactionId] = useState('')
+  const [dp, setDp] = useState('')
   const [dispositionIds, setDispositionIds] = useState([])
   const [error, setError] = useState(null)
 
@@ -38,10 +39,12 @@ function DetachmentsPanel() {
       await createDetachment({
         name,
         faction_id: Number(factionId),
+        dp: Number(dp),
         disposition_ids: dispositionIds,
       })
       setName('')
       setFactionId('')
+      setDp('')
       setDispositionIds([])
       refresh()
     } catch (err) {
@@ -79,6 +82,9 @@ function DetachmentsPanel() {
             ))}
           </select>
         </Field>
+        <Field label="DP">
+          <input type="number" value={dp} onChange={(e) => setDp(e.target.value)} required />
+        </Field>
         <label className="field">
           Dispositions
           <MultiSelect
@@ -92,7 +98,7 @@ function DetachmentsPanel() {
       <ul>
         {detachments.map((d) => (
           <li key={d.id}>
-            {d.name} ({factionName(d.faction_id)})
+            {d.name} ({factionName(d.faction_id)}) — DP {d.dp}
             {d.disposition_ids.length > 0 &&
               ` — ${d.disposition_ids.map(dispositionName).join(', ')}`}
             <button type="button" onClick={() => handleRemove(d.id)}>

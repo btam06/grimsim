@@ -1,7 +1,18 @@
-function UnitsListPage({ units, models, weapons, wargear, error, onEdit, onAddNew, onDelete }) {
+function UnitsListPage({
+  units,
+  models,
+  weapons,
+  wargear,
+  factionUnits,
+  error,
+  onEdit,
+  onAddNew,
+  onDelete,
+}) {
   const modelName = (id) => models.find((m) => m.id === id)?.name ?? `#${id}`
   const weaponName = (id) => weapons.find((w) => w.id === id)?.name ?? `#${id}`
   const wargearName = (id) => wargear.find((g) => g.id === id)?.name ?? `#${id}`
+  const factionUnitName = (id) => factionUnits.find((fu) => fu.id === id)?.name ?? `#${id}`
 
   return (
     <section>
@@ -13,7 +24,7 @@ function UnitsListPage({ units, models, weapons, wargear, error, onEdit, onAddNe
       <ul>
         {units.map((u) => (
           <li key={u.id}>
-            {u.name} — {u.points}pts —{' '}
+            {factionUnitName(u.faction_unit_id)} — {u.points}pts —{' '}
             {u.unit_models.length === 0
               ? 'no models'
               : u.unit_models

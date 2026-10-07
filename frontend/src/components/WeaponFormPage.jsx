@@ -51,7 +51,6 @@ function toPayload(form) {
 function WeaponFormPage({
   editingWeapon,
   defaultModelId,
-  models,
   weaponAbilities,
   onSaved,
   onCancel,
@@ -86,18 +85,6 @@ function WeaponFormPage({
       <form onSubmit={handleSubmit}>
         <Field label="Name">
           <input value={form.name} onChange={handleChange('name')} required />
-        </Field>
-        <Field label="Model">
-          <select value={form.model_id} onChange={handleChange('model_id')} required>
-            <option value="" disabled>
-              Select model
-            </option>
-            {models.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </select>
         </Field>
         <Field label="Damage (e.g. 1, 2, D3, D6, 2D6)">
           <input

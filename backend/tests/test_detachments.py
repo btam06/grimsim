@@ -3,12 +3,13 @@ from httpx import AsyncClient
 
 async def test_create_and_list_detachment(client: AsyncClient, faction_id: int):
     response = await client.post(
-        "/detachments", json={"name": "Gladius Task Force", "faction_id": faction_id}
+        "/detachments", json={"name": "Gladius Task Force", "faction_id": faction_id, "dp": 2}
     )
     assert response.status_code == 201
     body = response.json()
     assert body["name"] == "Gladius Task Force"
     assert body["faction_id"] == faction_id
+    assert body["dp"] == 2
     assert body["disposition_ids"] == []
 
     response = await client.get("/detachments")
@@ -16,9 +17,16 @@ async def test_create_and_list_detachment(client: AsyncClient, faction_id: int):
     assert len(response.json()) == 1
 
 
+async def test_create_detachment_without_dp_returns_422(client: AsyncClient, faction_id: int):
+    response = await client.post(
+        "/detachments", json={"name": "Gladius Task Force", "faction_id": faction_id}
+    )
+    assert response.status_code == 422
+
+
 async def test_create_detachment_with_invalid_faction_returns_400(client: AsyncClient):
     response = await client.post(
-        "/detachments", json={"name": "Gladius Task Force", "faction_id": 9999}
+        "/detachments", json={"name": "Gladius Task Force", "faction_id": 9999, "dp": 2}
     )
     assert response.status_code == 400
 
@@ -33,6 +41,7 @@ async def test_create_detachment_with_dispositions(client: AsyncClient, faction_
         json={
             "name": "Gladius Task Force",
             "faction_id": faction_id,
+            "dp": 2,
             "disposition_ids": [disposition_id],
         },
     )
@@ -48,14 +57,21 @@ async def test_create_detachment_with_invalid_disposition_id_returns_400(
 ):
     response = await client.post(
         "/detachments",
-        json={"name": "Gladius Task Force", "faction_id": faction_id, "disposition_ids": [9999]},
+        json={
+            "name": "Gladius Task Force",
+            "faction_id": faction_id,
+            "dp": 2,
+            "disposition_ids": [9999],
+        },
     )
     assert response.status_code == 400
 
 
 async def test_delete_detachment(client: AsyncClient, faction_id: int):
     detachment_id = (
-        await client.post("/detachments", json={"name": "Gladius Task Force", "faction_id": faction_id})
+        await client.post(
+            "/detachments", json={"name": "Gladius Task Force", "faction_id": faction_id, "dp": 2}
+        )
     ).json()["id"]
 
     response = await client.delete(f"/detachments/{detachment_id}")
@@ -73,6 +89,7 @@ async def test_delete_detachment_with_dispositions(client: AsyncClient, faction_
             json={
                 "name": "Gladius Task Force",
                 "faction_id": faction_id,
+                "dp": 2,
                 "disposition_ids": [disposition_id],
             },
         )
@@ -89,7 +106,9 @@ async def test_delete_nonexistent_detachment_returns_404(client: AsyncClient):
 
 async def test_delete_detachment_in_use_returns_400(client: AsyncClient, faction_id: int):
     detachment_id = (
-        await client.post("/detachments", json={"name": "Gladius Task Force", "faction_id": faction_id})
+        await client.post(
+            "/detachments", json={"name": "Gladius Task Force", "faction_id": faction_id, "dp": 2}
+        )
     ).json()["id"]
     response = await client.post(
         "/lists",

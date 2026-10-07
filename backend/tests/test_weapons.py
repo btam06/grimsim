@@ -227,11 +227,16 @@ async def test_delete_nonexistent_weapon_returns_404(client: AsyncClient):
 async def test_delete_weapon_equipped_by_unit_returns_400(client: AsyncClient, faction_id: int):
     model_id = await _create_model(client, faction_id)
     weapon_id = (await client.post("/weapons", json=_weapon_payload(model_id))).json()["id"]
+    faction_unit_id = (
+        await client.post(
+            "/faction-units", json={"name": "Squad", "faction_id": faction_id}
+        )
+    ).json()["id"]
 
     response = await client.post(
         "/units",
         json={
-            "name": "Squad",
+            "faction_unit_id": faction_unit_id,
             "points": 100,
             "unit_models": [{"model_id": model_id, "weapon_ids": [weapon_id]}],
         },

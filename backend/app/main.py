@@ -8,6 +8,7 @@ from app.routers import (
     datasheet_abilities,
     detachments,
     dispositions,
+    faction_units,
     factions,
     lists,
     models,
@@ -30,6 +31,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="grimsim API", lifespan=lifespan)
 app.include_router(factions.router)
+app.include_router(faction_units.router)
 app.include_router(dispositions.router)
 app.include_router(detachments.router)
 app.include_router(models.router)

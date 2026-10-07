@@ -16,6 +16,7 @@ def _to_out(detachment: Detachment, disposition_ids: list[int]) -> DetachmentOut
         id=detachment.id,
         name=detachment.name,
         faction_id=detachment.faction_id,
+        dp=detachment.dp,
         disposition_ids=disposition_ids,
     )
 
@@ -43,7 +44,10 @@ async def create_detachment(payload: DetachmentIn, session: AsyncSession = Depen
             raise HTTPException(status_code=400, detail="one or more disposition_ids not found")
 
     detachment = Detachment(
-        name=payload.name, faction_id=payload.faction_id, dispositions=dispositions
+        name=payload.name,
+        faction_id=payload.faction_id,
+        dp=payload.dp,
+        dispositions=dispositions,
     )
     session.add(detachment)
     try:

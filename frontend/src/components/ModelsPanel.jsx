@@ -66,7 +66,6 @@ function ModelsPanel() {
       <WeaponFormPage
         editingWeapon={editingWeapon}
         defaultModelId={editingModel?.id ?? null}
-        models={models}
         weaponAbilities={weaponAbilities}
         onSaved={goBackToModelForm}
         onCancel={goBackToModelForm}

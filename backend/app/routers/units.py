@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db import get_session
-from app.models import ArmyList, Model, Unit, UnitModel, Wargear, Weapon
+from app.models import ArmyList, FactionUnit, Model, Unit, UnitModel, Wargear, Weapon
 from app.schemas import UnitIn, UnitModelIn, UnitModelOut, UnitOut
 
 router = APIRouter(prefix="/units", tags=["units"])
@@ -22,7 +22,7 @@ def _unit_model_to_out(unit_model: UnitModel) -> UnitModelOut:
 def _to_out(unit: Unit) -> UnitOut:
     return UnitOut(
         id=unit.id,
-        name=unit.name,
+        faction_unit_id=unit.faction_unit_id,
         points=unit.points,
         list_id=unit.list_id,
         unit_models=[_unit_model_to_out(um) for um in unit.unit_models],
@@ -88,6 +88,14 @@ async def list_units(session: AsyncSession = Depends(get_session)):
 
 @router.post("", response_model=UnitOut, status_code=201)
 async def create_unit(payload: UnitIn, session: AsyncSession = Depends(get_session)):
+    faction_unit = (
+        await session.execute(
+            select(FactionUnit).where(FactionUnit.id == payload.faction_unit_id)
+        )
+    ).scalar_one_or_none()
+    if faction_unit is None:
+        raise HTTPException(status_code=400, detail="invalid faction_unit_id")
+
     if payload.list_id is not None:
         army_list = (
             await session.execute(select(ArmyList).where(ArmyList.id == payload.list_id))
@@ -97,7 +105,7 @@ async def create_unit(payload: UnitIn, session: AsyncSession = Depends(get_sessi
 
     unit_models = await _build_unit_models(session, payload.unit_models)
     unit = Unit(
-        name=payload.name,
+        faction_unit_id=payload.faction_unit_id,
         points=payload.points,
         list_id=payload.list_id,
         unit_models=unit_models,
@@ -119,6 +127,14 @@ async def update_unit(
     if unit is None:
         raise HTTPException(status_code=404, detail="unit not found")
 
+    faction_unit = (
+        await session.execute(
+            select(FactionUnit).where(FactionUnit.id == payload.faction_unit_id)
+        )
+    ).scalar_one_or_none()
+    if faction_unit is None:
+        raise HTTPException(status_code=400, detail="invalid faction_unit_id")
+
     if payload.list_id is not None:
         army_list = (
             await session.execute(select(ArmyList).where(ArmyList.id == payload.list_id))
@@ -128,7 +144,7 @@ async def update_unit(
 
     new_unit_models = await _build_unit_models(session, payload.unit_models)
 
-    unit.name = payload.name
+    unit.faction_unit_id = payload.faction_unit_id
     unit.points = payload.points
     unit.list_id = payload.list_id
     unit.unit_models = new_unit_models

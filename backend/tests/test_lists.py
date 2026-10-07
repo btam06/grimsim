@@ -2,7 +2,9 @@ from httpx import AsyncClient
 
 
 async def _create_detachment(client: AsyncClient, faction_id: int, name: str = "Gladius") -> int:
-    response = await client.post("/detachments", json={"name": name, "faction_id": faction_id})
+    response = await client.post(
+        "/detachments", json={"name": name, "faction_id": faction_id, "dp": 2}
+    )
     assert response.status_code == 201
     return response.json()["id"]
 
@@ -146,8 +148,16 @@ async def test_delete_list_unassigns_units(client: AsyncClient, faction_id: int)
     list_id = (
         await client.post("/lists", json=_list_payload(faction_id, detachment_id))
     ).json()["id"]
+    faction_unit_id = (
+        await client.post(
+            "/faction-units", json={"name": "Squad", "faction_id": faction_id}
+        )
+    ).json()["id"]
     unit_id = (
-        await client.post("/units", json={"name": "Squad", "points": 100, "list_id": list_id})
+        await client.post(
+            "/units",
+            json={"faction_unit_id": faction_unit_id, "points": 100, "list_id": list_id},
+        )
     ).json()["id"]
 
     response = await client.delete(f"/lists/{list_id}")

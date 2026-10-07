@@ -19,13 +19,15 @@ function UnitFormPage({
   models,
   weapons,
   wargear,
-  lists,
+  factionUnits,
   onSaved,
   onCancel,
 }) {
-  const [name, setName] = useState(editingUnit ? editingUnit.name : '')
+  const [factionUnitId, setFactionUnitId] = useState(
+    editingUnit ? String(editingUnit.faction_unit_id) : ''
+  )
   const [points, setPoints] = useState(editingUnit ? String(editingUnit.points) : '')
-  const [listId, setListId] = useState(() => {
+  const [listId] = useState(() => {
     if (editingUnit) return editingUnit.list_id === null ? '' : String(editingUnit.list_id)
     return defaultListId ? String(defaultListId) : ''
   })
@@ -56,7 +58,7 @@ function UnitFormPage({
     setError(null)
     try {
       const payload = {
-        name,
+        faction_unit_id: Number(factionUnitId),
         points: Number(points),
         list_id: listId === '' ? null : Number(listId),
         unit_models: slots.map((s) => ({
@@ -81,21 +83,24 @@ function UnitFormPage({
       <h2>{editingUnit ? `Edit Unit #${editingUnit.id}` : 'Add Unit'}</h2>
       {error && <p className="error">{error}</p>}
       <form onSubmit={handleSubmit}>
-        <Field label="Unit Name">
-          <input value={name} onChange={(e) => setName(e.target.value)} required />
-        </Field>
-        <Field label="Points">
-          <input type="number" value={points} onChange={(e) => setPoints(e.target.value)} required />
-        </Field>
-        <Field label="List">
-          <select value={listId} onChange={(e) => setListId(e.target.value)}>
-            <option value="">No list</option>
-            {lists.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
+        <Field label="Faction Unit">
+          <select
+            value={factionUnitId}
+            onChange={(e) => setFactionUnitId(e.target.value)}
+            required
+          >
+            <option value="" disabled>
+              Select faction unit
+            </option>
+            {factionUnits.map((fu) => (
+              <option key={fu.id} value={fu.id}>
+                {fu.name}
               </option>
             ))}
           </select>
+        </Field>
+        <Field label="Points">
+          <input type="number" value={points} onChange={(e) => setPoints(e.target.value)} required />
         </Field>
 
         {slots.length > 0 && (

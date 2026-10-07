@@ -37,6 +37,7 @@ function ListFormPage({
   models,
   weapons,
   wargear,
+  factionUnits,
   onSaved,
   onCancel,
   onUnitsChanged,
@@ -53,6 +54,7 @@ function ListFormPage({
   const modelName = (id) => models.find((m) => m.id === id)?.name ?? `#${id}`
   const weaponName = (id) => weapons.find((w) => w.id === id)?.name ?? `#${id}`
   const wargearName = (id) => wargear.find((g) => g.id === id)?.name ?? `#${id}`
+  const factionUnitName = (id) => factionUnits.find((fu) => fu.id === id)?.name ?? `#${id}`
 
   const handleFactionChange = (e) => {
     setForm({ ...form, faction_id: e.target.value, detachment_id: '' })
@@ -150,7 +152,7 @@ function ListFormPage({
             <ul>
               {unitsInThisList.map((u) => (
                 <li key={u.id}>
-                  {u.name} — {u.points}pts
+                  {factionUnitName(u.faction_unit_id)} — {u.points}pts
                   {u.unit_models.length > 0 && (
                     <ul>
                       {u.unit_models.map((m) => (

@@ -41,25 +41,36 @@ async def _create_wargear(client: AsyncClient, model_id: int, name: str = "Frag 
     return response.json()["id"]
 
 
-def _unit_payload(**overrides) -> dict:
-    payload = {"name": "Squad", "points": 100, "unit_models": []}
+async def _create_faction_unit(
+    client: AsyncClient, faction_id: int, name: str = "Intercessor Squad"
+) -> int:
+    response = await client.post(
+        "/faction-units", json={"name": name, "faction_id": faction_id}
+    )
+    assert response.status_code == 201
+    return response.json()["id"]
+
+
+def _unit_payload(faction_unit_id: int, **overrides) -> dict:
+    payload = {"faction_unit_id": faction_unit_id, "points": 100, "unit_models": []}
     payload.update(overrides)
     return payload
 
 
 async def test_create_unit_with_duplicate_models(client: AsyncClient, faction_id: int):
     model_id = await _create_model(client, faction_id, "Intercessor")
+    faction_unit_id = await _create_faction_unit(client, faction_id)
 
     response = await client.post(
         "/units",
         json=_unit_payload(
-            name="Intercessor Squad",
+            faction_unit_id,
             unit_models=[{"model_id": model_id}, {"model_id": model_id}],
         ),
     )
     assert response.status_code == 201
     body = response.json()
-    assert body["name"] == "Intercessor Squad"
+    assert body["faction_unit_id"] == faction_unit_id
     assert body["points"] == 100
     assert len(body["unit_models"]) == 2
     assert [um["model_id"] for um in body["unit_models"]] == [model_id, model_id]
@@ -75,10 +86,12 @@ async def test_create_unit_with_per_model_weapon_and_wargear(client: AsyncClient
     model_id = await _create_model(client, faction_id, "Intercessor")
     weapon_id = await _create_weapon(client, model_id)
     wargear_id = await _create_wargear(client, model_id)
+    faction_unit_id = await _create_faction_unit(client, faction_id)
 
     response = await client.post(
         "/units",
         json=_unit_payload(
+            faction_unit_id,
             unit_models=[
                 {"model_id": model_id, "weapon_ids": [weapon_id], "wargear_ids": [wargear_id]}
             ],
@@ -90,26 +103,34 @@ async def test_create_unit_with_per_model_weapon_and_wargear(client: AsyncClient
     assert unit_model["wargear_ids"] == [wargear_id]
 
 
-async def test_create_unit_without_models(client: AsyncClient):
-    response = await client.post("/units", json=_unit_payload(name="Empty Squad"))
+async def test_create_unit_without_models(client: AsyncClient, faction_id: int):
+    faction_unit_id = await _create_faction_unit(client, faction_id, "Empty Squad")
+    response = await client.post("/units", json=_unit_payload(faction_unit_id))
     assert response.status_code == 201
     assert response.json()["unit_models"] == []
 
 
-async def test_create_unit_with_invalid_model_id_returns_400(client: AsyncClient):
+async def test_create_unit_with_invalid_model_id_returns_400(client: AsyncClient, faction_id: int):
+    faction_unit_id = await _create_faction_unit(client, faction_id, "Bad Squad")
     response = await client.post(
         "/units",
-        json=_unit_payload(name="Bad Squad", unit_models=[{"model_id": 9999}]),
+        json=_unit_payload(faction_unit_id, unit_models=[{"model_id": 9999}]),
     )
+    assert response.status_code == 400
+
+
+async def test_create_unit_with_invalid_faction_unit_id_returns_400(client: AsyncClient):
+    response = await client.post("/units", json=_unit_payload(9999))
     assert response.status_code == 400
 
 
 async def test_create_unit_with_invalid_weapon_id_returns_400(client: AsyncClient, faction_id: int):
     model_id = await _create_model(client, faction_id, "Intercessor")
+    faction_unit_id = await _create_faction_unit(client, faction_id, "Bad Squad")
     response = await client.post(
         "/units",
         json=_unit_payload(
-            name="Bad Squad", unit_models=[{"model_id": model_id, "weapon_ids": [9999]}]
+            faction_unit_id, unit_models=[{"model_id": model_id, "weapon_ids": [9999]}]
         ),
     )
     assert response.status_code == 400
@@ -121,11 +142,12 @@ async def test_create_unit_with_weapon_from_other_model_returns_400(
     model_id = await _create_model(client, faction_id, "Intercessor")
     other_model_id = await _create_model(client, faction_id, "Terminator")
     weapon_id = await _create_weapon(client, other_model_id)
+    faction_unit_id = await _create_faction_unit(client, faction_id, "Bad Squad")
 
     response = await client.post(
         "/units",
         json=_unit_payload(
-            name="Bad Squad", unit_models=[{"model_id": model_id, "weapon_ids": [weapon_id]}]
+            faction_unit_id, unit_models=[{"model_id": model_id, "weapon_ids": [weapon_id]}]
         ),
     )
     assert response.status_code == 400
@@ -137,11 +159,12 @@ async def test_create_unit_with_wargear_from_other_model_returns_400(
     model_id = await _create_model(client, faction_id, "Intercessor")
     other_model_id = await _create_model(client, faction_id, "Terminator")
     wargear_id = await _create_wargear(client, other_model_id)
+    faction_unit_id = await _create_faction_unit(client, faction_id, "Bad Squad")
 
     response = await client.post(
         "/units",
         json=_unit_payload(
-            name="Bad Squad", unit_models=[{"model_id": model_id, "wargear_ids": [wargear_id]}]
+            faction_unit_id, unit_models=[{"model_id": model_id, "wargear_ids": [wargear_id]}]
         ),
     )
     assert response.status_code == 400
@@ -149,7 +172,9 @@ async def test_create_unit_with_wargear_from_other_model_returns_400(
 
 async def test_create_unit_with_list_id(client: AsyncClient, faction_id: int):
     detachment_id = (
-        await client.post("/detachments", json={"name": "Gladius", "faction_id": faction_id})
+        await client.post(
+            "/detachments", json={"name": "Gladius", "faction_id": faction_id, "dp": 2}
+        )
     ).json()["id"]
     list_id = (
         await client.post(
@@ -162,44 +187,53 @@ async def test_create_unit_with_list_id(client: AsyncClient, faction_id: int):
             },
         )
     ).json()["id"]
+    faction_unit_id = await _create_faction_unit(client, faction_id)
 
-    response = await client.post("/units", json=_unit_payload(list_id=list_id))
+    response = await client.post("/units", json=_unit_payload(faction_unit_id, list_id=list_id))
     assert response.status_code == 201
     assert response.json()["list_id"] == list_id
 
 
-async def test_create_unit_with_invalid_list_id_returns_400(client: AsyncClient):
-    response = await client.post("/units", json=_unit_payload(list_id=9999))
+async def test_create_unit_with_invalid_list_id_returns_400(client: AsyncClient, faction_id: int):
+    faction_unit_id = await _create_faction_unit(client, faction_id)
+    response = await client.post("/units", json=_unit_payload(faction_unit_id, list_id=9999))
     assert response.status_code == 400
 
 
-async def test_update_unit_changes_fields(client: AsyncClient):
-    unit_id = (await client.post("/units", json=_unit_payload())).json()["id"]
+async def test_update_unit_changes_fields(client: AsyncClient, faction_id: int):
+    faction_unit_id = await _create_faction_unit(client, faction_id)
+    other_faction_unit_id = await _create_faction_unit(client, faction_id, "Veteran Squad")
+    unit_id = (
+        await client.post("/units", json=_unit_payload(faction_unit_id))
+    ).json()["id"]
 
     response = await client.put(
-        f"/units/{unit_id}", json=_unit_payload(name="Veteran Squad", points=150)
+        f"/units/{unit_id}",
+        json=_unit_payload(other_faction_unit_id, points=150),
     )
     assert response.status_code == 200
     body = response.json()
     assert body["id"] == unit_id
-    assert body["name"] == "Veteran Squad"
+    assert body["faction_unit_id"] == other_faction_unit_id
     assert body["points"] == 150
 
     response = await client.get("/units")
-    assert response.json()[0]["name"] == "Veteran Squad"
+    assert response.json()[0]["faction_unit_id"] == other_faction_unit_id
 
 
 async def test_update_unit_replaces_unit_models(client: AsyncClient, faction_id: int):
     model_a = await _create_model(client, faction_id, "Intercessor")
     model_b = await _create_model(client, faction_id, "Terminator")
+    faction_unit_id = await _create_faction_unit(client, faction_id)
     unit_id = (
         await client.post(
-            "/units", json=_unit_payload(unit_models=[{"model_id": model_a}])
+            "/units", json=_unit_payload(faction_unit_id, unit_models=[{"model_id": model_a}])
         )
     ).json()["id"]
 
     response = await client.put(
-        f"/units/{unit_id}", json=_unit_payload(unit_models=[{"model_id": model_b}])
+        f"/units/{unit_id}",
+        json=_unit_payload(faction_unit_id, unit_models=[{"model_id": model_b}]),
     )
     assert response.status_code == 200
     body = response.json()
@@ -214,7 +248,9 @@ async def test_update_unit_replaces_unit_models(client: AsyncClient, faction_id:
 
 async def test_update_unit_can_change_list(client: AsyncClient, faction_id: int):
     detachment_id = (
-        await client.post("/detachments", json={"name": "Gladius", "faction_id": faction_id})
+        await client.post(
+            "/detachments", json={"name": "Gladius", "faction_id": faction_id, "dp": 2}
+        )
     ).json()["id"]
     list_id = (
         await client.post(
@@ -227,26 +263,43 @@ async def test_update_unit_can_change_list(client: AsyncClient, faction_id: int)
             },
         )
     ).json()["id"]
-    unit_id = (await client.post("/units", json=_unit_payload())).json()["id"]
+    faction_unit_id = await _create_faction_unit(client, faction_id)
+    unit_id = (await client.post("/units", json=_unit_payload(faction_unit_id))).json()["id"]
 
-    response = await client.put(f"/units/{unit_id}", json=_unit_payload(list_id=list_id))
+    response = await client.put(
+        f"/units/{unit_id}", json=_unit_payload(faction_unit_id, list_id=list_id)
+    )
     assert response.status_code == 200
     assert response.json()["list_id"] == list_id
 
 
-async def test_update_unit_with_invalid_list_id_returns_400(client: AsyncClient):
-    unit_id = (await client.post("/units", json=_unit_payload())).json()["id"]
-    response = await client.put(f"/units/{unit_id}", json=_unit_payload(list_id=9999))
+async def test_update_unit_with_invalid_list_id_returns_400(client: AsyncClient, faction_id: int):
+    faction_unit_id = await _create_faction_unit(client, faction_id)
+    unit_id = (await client.post("/units", json=_unit_payload(faction_unit_id))).json()["id"]
+    response = await client.put(
+        f"/units/{unit_id}", json=_unit_payload(faction_unit_id, list_id=9999)
+    )
     assert response.status_code == 400
 
 
-async def test_update_nonexistent_unit_returns_404(client: AsyncClient):
-    response = await client.put("/units/9999", json=_unit_payload())
+async def test_update_unit_with_invalid_faction_unit_id_returns_400(
+    client: AsyncClient, faction_id: int
+):
+    faction_unit_id = await _create_faction_unit(client, faction_id)
+    unit_id = (await client.post("/units", json=_unit_payload(faction_unit_id))).json()["id"]
+    response = await client.put(f"/units/{unit_id}", json=_unit_payload(9999))
+    assert response.status_code == 400
+
+
+async def test_update_nonexistent_unit_returns_404(client: AsyncClient, faction_id: int):
+    faction_unit_id = await _create_faction_unit(client, faction_id)
+    response = await client.put("/units/9999", json=_unit_payload(faction_unit_id))
     assert response.status_code == 404
 
 
-async def test_delete_unit(client: AsyncClient):
-    unit_id = (await client.post("/units", json=_unit_payload())).json()["id"]
+async def test_delete_unit(client: AsyncClient, faction_id: int):
+    faction_unit_id = await _create_faction_unit(client, faction_id)
+    unit_id = (await client.post("/units", json=_unit_payload(faction_unit_id))).json()["id"]
 
     response = await client.delete(f"/units/{unit_id}")
     assert response.status_code == 204
@@ -257,9 +310,10 @@ async def test_delete_unit(client: AsyncClient):
 
 async def test_delete_unit_cascades_unit_models(client: AsyncClient, faction_id: int):
     model_id = await _create_model(client, faction_id, "Intercessor")
+    faction_unit_id = await _create_faction_unit(client, faction_id)
     unit_id = (
         await client.post(
-            "/units", json=_unit_payload(unit_models=[{"model_id": model_id}])
+            "/units", json=_unit_payload(faction_unit_id, unit_models=[{"model_id": model_id}])
         )
     ).json()["id"]
 

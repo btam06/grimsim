@@ -15,6 +15,17 @@ class FactionOut(FactionIn):
     id: int
 
 
+class FactionUnitIn(BaseModel):
+    name: str
+    faction_id: int
+
+
+class FactionUnitOut(FactionUnitIn):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+
+
 class ModelIn(BaseModel):
     name: str
     faction_id: int
@@ -110,7 +121,7 @@ class UnitModelOut(BaseModel):
 
 
 class UnitIn(BaseModel):
-    name: str
+    faction_unit_id: int
     points: int
     list_id: int | None = None
     unit_models: list[UnitModelIn] = []
@@ -118,7 +129,7 @@ class UnitIn(BaseModel):
 
 class UnitOut(BaseModel):
     id: int
-    name: str
+    faction_unit_id: int
     points: int
     list_id: int | None
     unit_models: list[UnitModelOut]
@@ -160,6 +171,7 @@ class DispositionOut(DispositionIn):
 class DetachmentIn(BaseModel):
     name: str
     faction_id: int
+    dp: int
     disposition_ids: list[int] = []
 
 
@@ -167,6 +179,7 @@ class DetachmentOut(BaseModel):
     id: int
     name: str
     faction_id: int
+    dp: int
     disposition_ids: list[int]
 
 

@@ -11,6 +11,7 @@ from app.models.datasheet_ability import DatasheetAbility
 from app.models.detachment import Detachment
 from app.models.disposition import Disposition
 from app.models.faction import Faction
+from app.models.faction_unit import FactionUnit
 from app.models.model import Model
 from app.models.unit import Unit
 from app.models.unit_model import UnitModel
@@ -21,6 +22,7 @@ from app.models.weapon_ability import WeaponAbility
 __all__ = [
     "Base",
     "Faction",
+    "FactionUnit",
     "Weapon",
     "Wargear",
     "Model",

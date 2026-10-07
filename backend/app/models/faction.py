@@ -10,6 +10,7 @@ from app.models.base import Base
 if TYPE_CHECKING:
     from app.models.army_list import ArmyList
     from app.models.detachment import Detachment
+    from app.models.faction_unit import FactionUnit
     from app.models.model import Model
 
 
@@ -22,3 +23,4 @@ class Faction(Base):
     models: Mapped[list["Model"]] = relationship(back_populates="faction")
     detachments: Mapped[list["Detachment"]] = relationship(back_populates="faction")
     lists: Mapped[list["ArmyList"]] = relationship(back_populates="faction")
+    faction_units: Mapped[list["FactionUnit"]] = relationship(back_populates="faction")

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import AbilityPanel from './components/AbilityPanel'
 import DetachmentsPanel from './components/DetachmentsPanel'
+import FactionUnitsPanel from './components/FactionUnitsPanel'
 import FactionsPanel from './components/FactionsPanel'
 import ListsPanel from './components/ListsPanel'
 import ModelsPanel from './components/ModelsPanel'
@@ -25,7 +26,7 @@ const TAB_GROUPS = {
     'Factions',
     'Detachments',
   ],
-  Debug: ['Weapons', 'Units'],
+  Debug: ['Weapons', 'Units', 'Faction Units'],
 }
 
 const GROUPS = Object.keys(TAB_GROUPS)
@@ -83,6 +84,7 @@ function App() {
       {tab === 'Models' && <ModelsPanel />}
       {tab === 'Weapons' && <WeaponsPanel />}
       {tab === 'Units' && <UnitsPanel />}
+      {tab === 'Faction Units' && <FactionUnitsPanel />}
       {tab === 'Lists' && <ListsPanel />}
       {tab === 'Weapon Abilities' && (
         <AbilityPanel

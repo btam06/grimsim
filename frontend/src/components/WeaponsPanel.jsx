@@ -41,8 +41,7 @@ function WeaponsPanel() {
     return (
       <WeaponFormPage
         editingWeapon={editingWeapon}
-        defaultModelId={null}
-        models={models}
+        defaultModelId={editingWeapon?.model_id ?? null}
         weaponAbilities={weaponAbilities}
         onSaved={goToList}
         onCancel={goToList}
@@ -58,10 +57,6 @@ function WeaponsPanel() {
       error={error}
       onEdit={(weapon) => {
         setEditingWeapon(weapon)
-        setView('form')
-      }}
-      onAddNew={() => {
-        setEditingWeapon(null)
         setView('form')
       }}
       onDelete={handleDelete}

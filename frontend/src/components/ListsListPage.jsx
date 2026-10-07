@@ -6,6 +6,7 @@ function ListsListPage({
   models,
   weapons,
   wargear,
+  factionUnits,
   error,
   onEdit,
   onAddNew,
@@ -16,6 +17,7 @@ function ListsListPage({
   const modelName = (id) => models.find((m) => m.id === id)?.name ?? `#${id}`
   const weaponName = (id) => weapons.find((w) => w.id === id)?.name ?? `#${id}`
   const wargearName = (id) => wargear.find((g) => g.id === id)?.name ?? `#${id}`
+  const factionUnitName = (id) => factionUnits.find((fu) => fu.id === id)?.name ?? `#${id}`
   const unitsForList = (listId) => units.filter((u) => u.list_id === listId)
 
   return (
@@ -40,7 +42,7 @@ function ListsListPage({
               <ul>
                 {unitsForList(l.id).map((u) => (
                   <li key={u.id}>
-                    {u.name} — {u.points}pts
+                    {factionUnitName(u.faction_unit_id)} — {u.points}pts
                     {u.unit_models.length > 0 && (
                       <ul>
                         {u.unit_models.map((um) => (
