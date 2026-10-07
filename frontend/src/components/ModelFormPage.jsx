@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { createModel, deleteWeapon, updateModel } from '../api'
+import { skillLabel } from '../weaponDisplay'
 import AddWargearForm from './AddWargearForm'
 import Field from './Field'
 import MultiSelect from './MultiSelect'
@@ -13,8 +14,11 @@ function buildEmptyForm() {
     oc: '',
     movement: '',
     wounds: '',
+    leadership: '',
     invulnerable: '',
     feel_no_pain: '',
+    is_support: false,
+    is_leader: false,
     ability_ids: [],
     wargear_ids: [],
   }
@@ -29,8 +33,11 @@ function formFromModel(model) {
     oc: String(model.oc),
     movement: String(model.movement),
     wounds: String(model.wounds),
+    leadership: String(model.leadership),
     invulnerable: model.invulnerable === null ? '' : String(model.invulnerable),
     feel_no_pain: model.feel_no_pain === null ? '' : String(model.feel_no_pain),
+    is_support: model.is_support,
+    is_leader: model.is_leader,
     ability_ids: model.ability_ids,
     wargear_ids: [],
   }
@@ -45,8 +52,11 @@ function toPayload(form) {
     oc: Number(form.oc),
     movement: Number(form.movement),
     wounds: Number(form.wounds),
+    leadership: Number(form.leadership),
     invulnerable: form.invulnerable === '' ? null : Number(form.invulnerable),
     feel_no_pain: form.feel_no_pain === '' ? null : Number(form.feel_no_pain),
+    is_support: form.is_support,
+    is_leader: form.is_leader,
     ability_ids: form.ability_ids,
     wargear_ids: form.wargear_ids,
   }
@@ -152,12 +162,36 @@ function ModelFormPage({
         <Field label="Save">
           <input type="number" value={form.save} onChange={handleChange('save')} required />
         </Field>
+        <Field label="Leadership">
+          <input
+            type="number"
+            value={form.leadership}
+            onChange={handleChange('leadership')}
+            required
+          />
+        </Field>
         <Field label="Invulnerable (optional)">
           <input type="number" value={form.invulnerable} onChange={handleChange('invulnerable')} />
         </Field>
         <Field label="Feel No Pain (optional)">
           <input type="number" value={form.feel_no_pain} onChange={handleChange('feel_no_pain')} />
         </Field>
+        <label className="checkbox-field">
+          <input
+            type="checkbox"
+            checked={form.is_support}
+            onChange={(e) => setForm({ ...form, is_support: e.target.checked })}
+          />
+          Support
+        </label>
+        <label className="checkbox-field">
+          <input
+            type="checkbox"
+            checked={form.is_leader}
+            onChange={(e) => setForm({ ...form, is_leader: e.target.checked })}
+          />
+          Leader
+        </label>
         <label className="field">
           Datasheet Abilities
           <MultiSelect
@@ -192,7 +226,9 @@ function ModelFormPage({
             <ul>
               {weaponsOnThisModel.map((w) => (
                 <li key={w.id}>
-                  {w.name} — R{w.range}" A{w.attacks} S{w.strength} AP{w.ap} D{w.damage}
+                  {w.name} —{w.range !== null ? ` R${w.range}"` : ''} A{w.attacks} S{w.strength} AP
+                  {w.ap} D{w.damage} {skillLabel(w.weapon_type)}
+                  {w.skill}+
                   <button type="button" onClick={() => onEditWeapon(w)}>
                     Edit
                   </button>

@@ -10,6 +10,7 @@ async def _create_model(client: AsyncClient, faction_id: int) -> int:
         "oc": 2,
         "movement": 6,
         "wounds": 2,
+        "leadership": 7,
     }
     response = await client.post("/models", json=payload)
     assert response.status_code == 201
@@ -25,6 +26,7 @@ def _weapon_payload(model_id: int, **overrides) -> dict:
         "strength": 4,
         "ap": -1,
         "attacks": 2,
+        "skill": 3,
     }
     payload.update(overrides)
     return payload
@@ -95,6 +97,46 @@ async def test_create_weapon_with_invalid_damage_returns_422(
             "/weapons", json=_weapon_payload(model_id, damage=invalid_damage)
         )
         assert response.status_code == 422, invalid_damage
+
+
+async def test_create_ranged_weapon_requires_range(client: AsyncClient, faction_id: int):
+    model_id = await _create_model(client, faction_id)
+    payload = _weapon_payload(model_id, weapon_type="ranged")
+    del payload["range"]
+    response = await client.post("/weapons", json=payload)
+    assert response.status_code == 422
+
+
+async def test_create_weapon_with_unknown_type_requires_range(
+    client: AsyncClient, faction_id: int
+):
+    model_id = await _create_model(client, faction_id)
+    payload = _weapon_payload(model_id)
+    del payload["range"]
+    response = await client.post("/weapons", json=payload)
+    assert response.status_code == 422
+
+
+async def test_create_melee_weapon_without_range(client: AsyncClient, faction_id: int):
+    model_id = await _create_model(client, faction_id)
+    payload = _weapon_payload(model_id, weapon_type="melee")
+    del payload["range"]
+    response = await client.post("/weapons", json=payload)
+    assert response.status_code == 201
+    body = response.json()
+    assert body["range"] is None
+    assert body["weapon_type"] == "melee"
+
+
+async def test_create_weapon_with_skill_and_type(client: AsyncClient, faction_id: int):
+    model_id = await _create_model(client, faction_id)
+    response = await client.post(
+        "/weapons", json=_weapon_payload(model_id, skill=4, weapon_type="ranged")
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["skill"] == 4
+    assert body["weapon_type"] == "ranged"
 
 
 async def test_update_weapon_changes_fields(client: AsyncClient, faction_id: int):

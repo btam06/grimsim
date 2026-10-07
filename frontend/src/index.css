@@ -82,6 +82,36 @@ label.input-field select {
   flex: 0 0 auto;
 }
 
+section form input[type='checkbox'],
+section form input[type='radio'] {
+  flex: 0 0 auto;
+  width: auto;
+  padding: 0;
+}
+
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 1 1 140px;
+  font-size: 0.85rem;
+}
+
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  flex: 1 1 140px;
+  font-size: 0.8rem;
+}
+
+.radio-group .radio-option {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+}
+
 .error {
   color: #d33;
 }

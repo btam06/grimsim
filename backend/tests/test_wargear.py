@@ -10,6 +10,7 @@ async def _create_model(client: AsyncClient, faction_id: int) -> int:
         "oc": 2,
         "movement": 6,
         "wounds": 2,
+        "leadership": 7,
     }
     response = await client.post("/models", json=payload)
     assert response.status_code == 201

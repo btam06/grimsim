@@ -21,6 +21,8 @@ def _to_out(weapon: Weapon) -> WeaponOut:
         strength=weapon.strength,
         ap=weapon.ap,
         attacks=weapon.attacks,
+        skill=weapon.skill,
+        weapon_type=weapon.weapon_type,
         ability_ids=[ability.id for ability in weapon.abilities],
     )
 
@@ -82,6 +84,8 @@ async def update_weapon(
     weapon.strength = payload.strength
     weapon.ap = payload.ap
     weapon.attacks = payload.attacks
+    weapon.skill = payload.skill
+    weapon.weapon_type = payload.weapon_type
     weapon.abilities = abilities
 
     try:

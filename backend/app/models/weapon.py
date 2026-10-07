@@ -19,10 +19,12 @@ class Weapon(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255))
     damage: Mapped[str] = mapped_column(String(10))
-    range: Mapped[int] = mapped_column(Integer)
+    range: Mapped[int | None] = mapped_column(Integer, nullable=True)
     strength: Mapped[int] = mapped_column(Integer)
     ap: Mapped[int] = mapped_column(Integer)
     attacks: Mapped[int] = mapped_column(Integer)
+    skill: Mapped[int] = mapped_column(Integer)
+    weapon_type: Mapped[str | None] = mapped_column(String(10), nullable=True)
     model_id: Mapped[int] = mapped_column(ForeignKey("models.id"))
 
     model: Mapped["Model"] = relationship(back_populates="weapons")

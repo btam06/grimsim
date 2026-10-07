@@ -12,6 +12,8 @@ function buildEmptyForm(defaultModelId) {
     strength: '',
     ap: '',
     attacks: '',
+    skill: '',
+    weapon_type: '',
     ability_ids: [],
   }
 }
@@ -21,10 +23,12 @@ function formFromWeapon(weapon) {
     name: weapon.name,
     model_id: String(weapon.model_id),
     damage: weapon.damage,
-    range: String(weapon.range),
+    range: weapon.range === null ? '' : String(weapon.range),
     strength: String(weapon.strength),
     ap: String(weapon.ap),
     attacks: String(weapon.attacks),
+    skill: String(weapon.skill),
+    weapon_type: weapon.weapon_type ?? '',
     ability_ids: weapon.ability_ids,
   }
 }
@@ -34,10 +38,12 @@ function toPayload(form) {
     name: form.name,
     model_id: Number(form.model_id),
     damage: form.damage,
-    range: Number(form.range),
+    range: form.range === '' ? null : Number(form.range),
     strength: Number(form.strength),
     ap: Number(form.ap),
     attacks: Number(form.attacks),
+    skill: Number(form.skill),
+    weapon_type: form.weapon_type === '' ? null : form.weapon_type,
     ability_ids: form.ability_ids,
   }
 }
@@ -56,6 +62,7 @@ function WeaponFormPage({
   const [error, setError] = useState(null)
 
   const handleChange = (field) => (e) => setForm({ ...form, [field]: e.target.value })
+  const isMelee = form.weapon_type === 'melee'
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -101,8 +108,13 @@ function WeaponFormPage({
             required
           />
         </Field>
-        <Field label="Range">
-          <input type="number" value={form.range} onChange={handleChange('range')} required />
+        <Field label={`Range${isMelee ? ' (not required for melee)' : ''}`}>
+          <input
+            type="number"
+            value={form.range}
+            onChange={handleChange('range')}
+            required={!isMelee}
+          />
         </Field>
         <Field label="Strength">
           <input type="number" value={form.strength} onChange={handleChange('strength')} required />
@@ -113,6 +125,32 @@ function WeaponFormPage({
         <Field label="Attacks">
           <input type="number" value={form.attacks} onChange={handleChange('attacks')} required />
         </Field>
+        <Field label="Skill (WS/BS)">
+          <input type="number" value={form.skill} onChange={handleChange('skill')} required />
+        </Field>
+        <div className="radio-group">
+          Weapon Type
+          <label className="radio-option">
+            <input
+              type="radio"
+              name="weapon_type"
+              value="melee"
+              checked={form.weapon_type === 'melee'}
+              onChange={handleChange('weapon_type')}
+            />
+            Melee
+          </label>
+          <label className="radio-option">
+            <input
+              type="radio"
+              name="weapon_type"
+              value="ranged"
+              checked={form.weapon_type === 'ranged'}
+              onChange={handleChange('weapon_type')}
+            />
+            Ranged
+          </label>
+        </div>
         <label className="field">
           Weapon Abilities
           <MultiSelect

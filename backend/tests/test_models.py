@@ -10,6 +10,7 @@ def _model_payload(faction_id: int, **overrides) -> dict:
         "oc": 2,
         "movement": 6,
         "wounds": 2,
+        "leadership": 7,
         "invulnerable": None,
         "feel_no_pain": None,
     }
@@ -33,6 +34,27 @@ async def test_create_and_list_model(client: AsyncClient, faction_id: int):
 async def test_create_model_with_invalid_faction_returns_400(client: AsyncClient):
     response = await client.post("/models", json=_model_payload(faction_id=9999))
     assert response.status_code == 400
+
+
+async def test_create_model_defaults_support_and_leader_false(
+    client: AsyncClient, faction_id: int
+):
+    response = await client.post("/models", json=_model_payload(faction_id))
+    assert response.status_code == 201
+    body = response.json()
+    assert body["is_support"] is False
+    assert body["is_leader"] is False
+    assert body["leadership"] == 7
+
+
+async def test_create_model_as_support_and_leader(client: AsyncClient, faction_id: int):
+    response = await client.post(
+        "/models", json=_model_payload(faction_id, is_support=True, is_leader=True)
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["is_support"] is True
+    assert body["is_leader"] is True
 
 
 async def test_create_model_with_abilities(client: AsyncClient, faction_id: int):
@@ -131,6 +153,19 @@ async def test_update_model_replaces_abilities(client: AsyncClient, faction_id: 
 
     response = await client.put(f"/models/{model_id}", json=_model_payload(faction_id))
     assert response.json()["ability_ids"] == []
+
+
+async def test_update_model_changes_support_and_leader(client: AsyncClient, faction_id: int):
+    model_id = (await client.post("/models", json=_model_payload(faction_id))).json()["id"]
+
+    response = await client.put(
+        f"/models/{model_id}", json=_model_payload(faction_id, is_support=True, leadership=9)
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["is_support"] is True
+    assert body["is_leader"] is False
+    assert body["leadership"] == 9
 
 
 async def test_update_model_with_invalid_faction_returns_400(client: AsyncClient, faction_id: int):

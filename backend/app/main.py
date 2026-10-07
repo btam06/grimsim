@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.db import engine
+from app.db import async_session, engine
 from app.models import Base
 from app.routers import (
     datasheet_abilities,
@@ -16,12 +16,15 @@ from app.routers import (
     weapon_abilities,
     weapons,
 )
+from app.seeds import run_all as run_seeds
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    async with async_session() as session:
+        await run_seeds(session)
     yield
 
 

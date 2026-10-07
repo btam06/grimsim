@@ -21,8 +21,11 @@ def _to_out(model: Model, ability_ids: list[int], wargear_ids: list[int]) -> Mod
         oc=model.oc,
         movement=model.movement,
         wounds=model.wounds,
+        leadership=model.leadership,
         invulnerable=model.invulnerable,
         feel_no_pain=model.feel_no_pain,
+        is_support=model.is_support,
+        is_leader=model.is_leader,
         ability_ids=ability_ids,
         wargear_ids=wargear_ids,
     )
@@ -104,8 +107,11 @@ async def update_model(
     model.oc = payload.oc
     model.movement = payload.movement
     model.wounds = payload.wounds
+    model.leadership = payload.leadership
     model.invulnerable = payload.invulnerable
     model.feel_no_pain = payload.feel_no_pain
+    model.is_support = payload.is_support
+    model.is_leader = payload.is_leader
     model.abilities = abilities
 
     try:

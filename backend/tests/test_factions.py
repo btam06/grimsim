@@ -44,6 +44,7 @@ async def test_delete_faction_in_use_returns_400(client: AsyncClient, faction_id
             "oc": 2,
             "movement": 6,
             "wounds": 2,
+            "leadership": 7,
         },
     )
     assert response.status_code == 201

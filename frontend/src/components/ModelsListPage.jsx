@@ -14,9 +14,12 @@ function ModelsListPage({ models, abilities, weapons, wargear, error, onEdit, on
         {models.map((m) => (
           <li key={m.id}>
             <div>
-              {m.name} — M{m.movement}" T{m.toughness} Sv{m.save}+ W{m.wounds} OC{m.oc}
+              {m.name} — M{m.movement}" T{m.toughness} Sv{m.save}+ W{m.wounds} OC{m.oc} Ld
+              {m.leadership}+
               {m.invulnerable ? ` Inv${m.invulnerable}+` : ''}
               {m.feel_no_pain ? ` FNP${m.feel_no_pain}+` : ''}
+              {m.is_support ? ' [Support]' : ''}
+              {m.is_leader ? ' [Leader]' : ''}
               {m.ability_ids.length > 0 &&
                 ` — Abilities: ${m.ability_ids.map(abilityName).join(', ')}`}
               {weaponsFor(m.id).length > 0 &&

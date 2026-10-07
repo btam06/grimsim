@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Integer, String
+from sqlalchemy import Boolean, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.associations import datasheet_ability_links
@@ -30,6 +30,9 @@ class Model(Base):
     movement: Mapped[int] = mapped_column(Integer)
     wounds: Mapped[int] = mapped_column(Integer)
     feel_no_pain: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    leadership: Mapped[int] = mapped_column(Integer)
+    is_support: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_leader: Mapped[bool] = mapped_column(Boolean, default=False)
 
     faction: Mapped["Faction"] = relationship(back_populates="models")
     weapons: Mapped[list["Weapon"]] = relationship(back_populates="model")
