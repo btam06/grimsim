@@ -36,3 +36,10 @@ detachment_dispositions = Table(
     Column("detachment_id", ForeignKey("detachments.id"), primary_key=True),
     Column("disposition_id", ForeignKey("dispositions.id"), primary_key=True),
 )
+
+list_detachments = Table(
+    "list_detachments",
+    Base.metadata,
+    Column("list_id", ForeignKey("lists.id"), primary_key=True),
+    Column("detachment_id", ForeignKey("detachments.id"), primary_key=True),
+)

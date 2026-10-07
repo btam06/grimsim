@@ -183,7 +183,7 @@ async def test_create_unit_with_list_id(client: AsyncClient, faction_id: int):
                 "name": "My List",
                 "points_limit": 1000,
                 "faction_id": faction_id,
-                "detachment_id": detachment_id,
+                "detachment_ids": [detachment_id],
             },
         )
     ).json()["id"]
@@ -259,7 +259,7 @@ async def test_update_unit_can_change_list(client: AsyncClient, faction_id: int)
                 "name": "My List",
                 "points_limit": 1000,
                 "faction_id": faction_id,
-                "detachment_id": detachment_id,
+                "detachment_ids": [detachment_id],
             },
         )
     ).json()["id"]

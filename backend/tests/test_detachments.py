@@ -116,7 +116,7 @@ async def test_delete_detachment_in_use_returns_400(client: AsyncClient, faction
             "name": "My List",
             "points_limit": 1000,
             "faction_id": faction_id,
-            "detachment_id": detachment_id,
+            "detachment_ids": [detachment_id],
         },
     )
     assert response.status_code == 201

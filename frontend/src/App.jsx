@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import AbilityPanel from './components/AbilityPanel'
+import CalculatorPanel from './components/CalculatorPanel'
 import DetachmentsPanel from './components/DetachmentsPanel'
 import FactionUnitsPanel from './components/FactionUnitsPanel'
 import FactionsPanel from './components/FactionsPanel'
@@ -27,6 +28,7 @@ const TAB_GROUPS = {
     'Detachments',
   ],
   Debug: ['Weapons', 'Units', 'Faction Units'],
+  Calculator: ['Calculator'],
 }
 
 const GROUPS = Object.keys(TAB_GROUPS)
@@ -66,19 +68,22 @@ function App() {
         ))}
       </nav>
 
-      <nav className="tabs subtabs">
-        {TAB_GROUPS[group].map((t) => (
-          <button
-            key={t}
-            type="button"
-            className={t === tab ? 'active' : ''}
-            onClick={() => setTab(t)}
-          >
-            {t}
-          </button>
-        ))}
-      </nav>
+      {TAB_GROUPS[group].length > 1 && (
+        <nav className="tabs subtabs">
+          {TAB_GROUPS[group].map((t) => (
+            <button
+              key={t}
+              type="button"
+              className={t === tab ? 'active' : ''}
+              onClick={() => setTab(t)}
+            >
+              {t}
+            </button>
+          ))}
+        </nav>
+      )}
 
+      {tab === 'Calculator' && <CalculatorPanel />}
       {tab === 'Factions' && <FactionsPanel />}
       {tab === 'Detachments' && <DetachmentsPanel />}
       {tab === 'Models' && <ModelsPanel />}

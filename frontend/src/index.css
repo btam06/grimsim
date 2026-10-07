@@ -112,6 +112,20 @@ section form input[type='radio'] {
   font-size: 0.85rem;
 }
 
+.checkbox-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  flex: 1 1 100%;
+  font-size: 0.8rem;
+}
+
+.hint {
+  margin: 0.2rem 0;
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
 .error {
   color: #d33;
 }

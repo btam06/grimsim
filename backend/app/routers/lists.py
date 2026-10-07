@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.db import get_session
 from app.models import ArmyList, Detachment, Unit
@@ -16,33 +17,43 @@ def _to_out(army_list: ArmyList) -> ArmyListOut:
         name=army_list.name,
         points_limit=army_list.points_limit,
         faction_id=army_list.faction_id,
-        detachment_id=army_list.detachment_id,
+        detachment_ids=[d.id for d in army_list.detachments],
     )
+
+
+async def _build_detachments(
+    session: AsyncSession, detachment_ids: list[int], faction_id: int
+) -> list[Detachment]:
+    if not detachment_ids:
+        return []
+    result = await session.execute(select(Detachment).where(Detachment.id.in_(detachment_ids)))
+    detachments = list(result.scalars().all())
+    if len(detachments) != len(set(detachment_ids)):
+        raise HTTPException(status_code=400, detail="one or more detachment_ids not found")
+    if any(d.faction_id != faction_id for d in detachments):
+        raise HTTPException(
+            status_code=400, detail="detachment does not belong to the selected faction"
+        )
+    return detachments
 
 
 @router.get("", response_model=list[ArmyListOut])
 async def list_lists(session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(ArmyList).order_by(ArmyList.id))
+    result = await session.execute(
+        select(ArmyList).options(selectinload(ArmyList.detachments)).order_by(ArmyList.id)
+    )
     return [_to_out(army_list) for army_list in result.scalars().all()]
 
 
 @router.post("", response_model=ArmyListOut, status_code=201)
 async def create_list(payload: ArmyListIn, session: AsyncSession = Depends(get_session)):
-    detachment = (
-        await session.execute(select(Detachment).where(Detachment.id == payload.detachment_id))
-    ).scalar_one_or_none()
-    if detachment is None:
-        raise HTTPException(status_code=400, detail="invalid detachment_id")
-    if detachment.faction_id != payload.faction_id:
-        raise HTTPException(
-            status_code=400, detail="detachment does not belong to the selected faction"
-        )
+    detachments = await _build_detachments(session, payload.detachment_ids, payload.faction_id)
 
     army_list = ArmyList(
         name=payload.name,
         points_limit=payload.points_limit,
         faction_id=payload.faction_id,
-        detachment_id=payload.detachment_id,
+        detachments=detachments,
     )
     session.add(army_list)
     try:
@@ -58,25 +69,21 @@ async def update_list(
     list_id: int, payload: ArmyListIn, session: AsyncSession = Depends(get_session)
 ):
     army_list = (
-        await session.execute(select(ArmyList).where(ArmyList.id == list_id))
+        await session.execute(
+            select(ArmyList)
+            .options(selectinload(ArmyList.detachments))
+            .where(ArmyList.id == list_id)
+        )
     ).scalar_one_or_none()
     if army_list is None:
         raise HTTPException(status_code=404, detail="list not found")
 
-    detachment = (
-        await session.execute(select(Detachment).where(Detachment.id == payload.detachment_id))
-    ).scalar_one_or_none()
-    if detachment is None:
-        raise HTTPException(status_code=400, detail="invalid detachment_id")
-    if detachment.faction_id != payload.faction_id:
-        raise HTTPException(
-            status_code=400, detail="detachment does not belong to the selected faction"
-        )
+    detachments = await _build_detachments(session, payload.detachment_ids, payload.faction_id)
 
     army_list.name = payload.name
     army_list.points_limit = payload.points_limit
     army_list.faction_id = payload.faction_id
-    army_list.detachment_id = payload.detachment_id
+    army_list.detachments = detachments
 
     try:
         await session.commit()

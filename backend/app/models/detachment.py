@@ -9,7 +9,6 @@ from app.models.associations import detachment_dispositions
 from app.models.base import Base
 
 if TYPE_CHECKING:
-    from app.models.army_list import ArmyList
     from app.models.disposition import Disposition
     from app.models.faction import Faction
 
@@ -26,4 +25,3 @@ class Detachment(Base):
     dispositions: Mapped[list["Disposition"]] = relationship(
         secondary=detachment_dispositions, back_populates="detachments"
     )
-    lists: Mapped[list["ArmyList"]] = relationship(back_populates="detachment")

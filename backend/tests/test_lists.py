@@ -14,7 +14,7 @@ def _list_payload(faction_id: int, detachment_id: int, **overrides) -> dict:
         "name": "My List",
         "points_limit": 1000,
         "faction_id": faction_id,
-        "detachment_id": detachment_id,
+        "detachment_ids": [detachment_id],
     }
     payload.update(overrides)
     return payload
@@ -122,6 +122,49 @@ async def test_update_list_with_detachment_from_other_faction_returns_400(
         f"/lists/{list_id}", json=_list_payload(faction_id, other_detachment_id)
     )
     assert response.status_code == 400
+
+
+async def test_create_list_with_multiple_detachments(client: AsyncClient, faction_id: int):
+    detachment_a = await _create_detachment(client, faction_id, "Gladius")
+    detachment_b = await _create_detachment(client, faction_id, "Firestorm")
+
+    response = await client.post(
+        "/lists", json=_list_payload(faction_id, detachment_a, detachment_ids=[detachment_a, detachment_b])
+    )
+    assert response.status_code == 201
+    assert set(response.json()["detachment_ids"]) == {detachment_a, detachment_b}
+
+    response = await client.get("/lists")
+    assert set(response.json()[0]["detachment_ids"]) == {detachment_a, detachment_b}
+
+
+async def test_create_list_with_no_detachments(client: AsyncClient, faction_id: int):
+    response = await client.post(
+        "/lists",
+        json={
+            "name": "My List",
+            "points_limit": 1000,
+            "faction_id": faction_id,
+            "detachment_ids": [],
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["detachment_ids"] == []
+
+
+async def test_update_list_replaces_detachments(client: AsyncClient, faction_id: int):
+    detachment_a = await _create_detachment(client, faction_id, "Gladius")
+    detachment_b = await _create_detachment(client, faction_id, "Firestorm")
+    list_id = (
+        await client.post("/lists", json=_list_payload(faction_id, detachment_a))
+    ).json()["id"]
+
+    response = await client.put(
+        f"/lists/{list_id}",
+        json=_list_payload(faction_id, detachment_a, detachment_ids=[detachment_b]),
+    )
+    assert response.status_code == 200
+    assert response.json()["detachment_ids"] == [detachment_b]
 
 
 async def test_update_nonexistent_list_returns_404(client: AsyncClient, faction_id: int):

@@ -63,6 +63,9 @@ export const updateUnit = (id, payload) =>
   request(`/units/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
 export const deleteUnit = (id) => request(`/units/${id}`, { method: 'DELETE' })
 
+export const runCombat = (payload) =>
+  request('/combat', { method: 'POST', body: JSON.stringify(payload) })
+
 export const listWeaponAbilities = () => request('/weapon-abilities')
 export const createWeaponAbility = (payload) =>
   request('/weapon-abilities', { method: 'POST', body: JSON.stringify(payload) })

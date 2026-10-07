@@ -183,11 +183,34 @@ class DetachmentOut(BaseModel):
     disposition_ids: list[int]
 
 
+class CombatIn(BaseModel):
+    game_id: int | None = None
+    attacking_unit_id: int
+    defending_unit_id: int
+    selected_weapon_ids: list[int] = []
+    in_engagement_range: bool = False
+    defender_visible: bool = True
+    defender_in_range: bool = True
+
+
+class CombatOut(BaseModel):
+    visible: bool
+    in_range: bool
+    in_engagement_range: bool
+    total_attacks: int
+    total_hits: int
+    total_wounds: int
+    failed_saves: int
+    total_damage: int
+    models_destroyed: int
+    defending_models_remaining: int
+
+
 class ArmyListIn(BaseModel):
     name: str
     points_limit: Literal[1000, 2000]
     faction_id: int
-    detachment_id: int
+    detachment_ids: list[int] = []
 
 
 class ArmyListOut(BaseModel):
@@ -195,4 +218,4 @@ class ArmyListOut(BaseModel):
     name: str
     points_limit: int
     faction_id: int
-    detachment_id: int
+    detachment_ids: list[int]

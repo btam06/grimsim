@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from app.db import async_session, engine
 from app.models import Base
 from app.routers import (
+    combat,
     datasheet_abilities,
     detachments,
     dispositions,
@@ -41,6 +42,7 @@ app.include_router(units.router)
 app.include_router(lists.router)
 app.include_router(weapon_abilities.router)
 app.include_router(datasheet_abilities.router)
+app.include_router(combat.router)
 
 
 @app.get("/health")

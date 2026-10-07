@@ -30,8 +30,9 @@ function ListsListPage({
       <ul>
         {lists.map((l) => (
           <li key={l.id}>
-            {l.name} — {l.points_limit}pts, {factionName(l.faction_id)},{' '}
-            {detachmentName(l.detachment_id)}
+            {l.name} — {l.points_limit}pts, {factionName(l.faction_id)}
+            {l.detachment_ids.length > 0 &&
+              `, ${l.detachment_ids.map(detachmentName).join(', ')}`}
             <button type="button" onClick={() => onEdit(l)}>
               Edit
             </button>

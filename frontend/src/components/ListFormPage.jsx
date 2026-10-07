@@ -7,7 +7,7 @@ function buildEmptyForm() {
     name: '',
     points_limit: '2000',
     faction_id: '',
-    detachment_id: '',
+    detachment_ids: [],
   }
 }
 
@@ -16,7 +16,7 @@ function formFromList(list) {
     name: list.name,
     points_limit: String(list.points_limit),
     faction_id: String(list.faction_id),
-    detachment_id: String(list.detachment_id),
+    detachment_ids: list.detachment_ids,
   }
 }
 
@@ -25,7 +25,7 @@ function toPayload(form) {
     name: form.name,
     points_limit: Number(form.points_limit),
     faction_id: Number(form.faction_id),
-    detachment_id: Number(form.detachment_id),
+    detachment_ids: form.detachment_ids,
   }
 }
 
@@ -57,7 +57,16 @@ function ListFormPage({
   const factionUnitName = (id) => factionUnits.find((fu) => fu.id === id)?.name ?? `#${id}`
 
   const handleFactionChange = (e) => {
-    setForm({ ...form, faction_id: e.target.value, detachment_id: '' })
+    setForm({ ...form, faction_id: e.target.value, detachment_ids: [] })
+  }
+
+  const toggleDetachment = (id) => {
+    setForm({
+      ...form,
+      detachment_ids: form.detachment_ids.includes(id)
+        ? form.detachment_ids.filter((d) => d !== id)
+        : [...form.detachment_ids, id],
+    })
   }
 
   const handleSubmit = async (e) => {
@@ -119,23 +128,22 @@ function ListFormPage({
             ))}
           </select>
         </Field>
-        <Field label="Detachment">
-          <select
-            value={form.detachment_id}
-            onChange={(e) => setForm({ ...form, detachment_id: e.target.value })}
-            disabled={!form.faction_id}
-            required
-          >
-            <option value="" disabled>
-              Select detachment
-            </option>
-            {detachmentOptionsForFaction.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </select>
-        </Field>
+        <div className="checkbox-group">
+          Detachments
+          {detachmentOptionsForFaction.length === 0 && (
+            <p className="hint">Select a faction to see its detachments</p>
+          )}
+          {detachmentOptionsForFaction.map((d) => (
+            <label key={d.id} className="checkbox-field">
+              <input
+                type="checkbox"
+                checked={form.detachment_ids.includes(d.id)}
+                onChange={() => toggleDetachment(d.id)}
+              />
+              {d.name}
+            </label>
+          ))}
+        </div>
         <button type="submit">{editingList ? 'Save Changes' : 'Add List'}</button>
         <button type="button" onClick={onCancel}>
           Cancel
