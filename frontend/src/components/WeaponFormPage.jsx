@@ -1,7 +1,7 @@
 import { useState } from 'react'
+import { MultiSelect as WeaponAbilityMultiSelect } from 'react-multi-select-component'
 import { createWeapon, updateWeapon } from '../api'
 import Field from './Field'
-import MultiSelect from './MultiSelect'
 
 function buildEmptyForm(defaultModelId) {
   return {
@@ -62,6 +62,11 @@ function WeaponFormPage({
 
   const handleChange = (field) => (e) => setForm({ ...form, [field]: e.target.value })
   const isMelee = form.weapon_type === 'melee'
+
+  const weaponAbilityOptions = weaponAbilities.map((a) => ({ value: a.id, label: a.name }))
+  const selectedWeaponAbilityOptions = weaponAbilityOptions.filter((option) =>
+    form.ability_ids.includes(option.value)
+  )
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -144,14 +149,17 @@ function WeaponFormPage({
             Ranged
           </label>
         </div>
-        <label className="field">
+        <div className="field">
           Weapon Abilities
-          <MultiSelect
-            options={weaponAbilities}
-            value={form.ability_ids}
-            onChange={(ability_ids) => setForm({ ...form, ability_ids })}
+          <WeaponAbilityMultiSelect
+            options={weaponAbilityOptions}
+            value={selectedWeaponAbilityOptions}
+            onChange={(selected) =>
+              setForm({ ...form, ability_ids: selected.map((option) => option.value) })
+            }
+            labelledBy="Weapon Abilities"
           />
-        </label>
+        </div>
         <button type="submit">{editingWeapon ? 'Save Changes' : 'Add Weapon'}</button>
         <button type="button" onClick={onCancel}>
           Cancel

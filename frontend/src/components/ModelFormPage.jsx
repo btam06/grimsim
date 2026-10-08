@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { MultiSelect as KeywordMultiSelect } from 'react-multi-select-component'
 import { createModel, deleteWeapon, updateModel } from '../api'
 import { skillLabel } from '../weaponDisplay'
 import AddWargearForm from './AddWargearForm'
@@ -85,14 +86,10 @@ function ModelFormPage({
 
   const handleChange = (field) => (e) => setForm({ ...form, [field]: e.target.value })
 
-  const toggleKeyword = (id) => {
-    setForm({
-      ...form,
-      keyword_ids: form.keyword_ids.includes(id)
-        ? form.keyword_ids.filter((x) => x !== id)
-        : [...form.keyword_ids, id],
-    })
-  }
+  const keywordOptions = keywords.map((k) => ({ value: k.id, label: k.name }))
+  const selectedKeywordOptions = keywordOptions.filter((option) =>
+    form.keyword_ids.includes(option.value)
+  )
 
   const save = () =>
     editingModel ? updateModel(editingModel.id, toPayload(form)) : createModel(toPayload(form))
@@ -206,20 +203,16 @@ function ModelFormPage({
           />
           Leader
         </label>
-        <div className="checkbox-group">
+        <div className="field">
           Keywords
-          <div className="checkbox-grid">
-            {keywords.map((k) => (
-              <label key={k.id} className="checkbox-field">
-                <input
-                  type="checkbox"
-                  checked={form.keyword_ids.includes(k.id)}
-                  onChange={() => toggleKeyword(k.id)}
-                />
-                {k.name}
-              </label>
-            ))}
-          </div>
+          <KeywordMultiSelect
+            options={keywordOptions}
+            value={selectedKeywordOptions}
+            onChange={(selected) =>
+              setForm({ ...form, keyword_ids: selected.map((option) => option.value) })
+            }
+            labelledBy="Keywords"
+          />
         </div>
         <label className="field">
           Datasheet Abilities

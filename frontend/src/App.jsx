@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import AbilityPanel from './components/AbilityPanel'
 import CalculatorPanel from './components/CalculatorPanel'
+import DatasheetAbilitiesPanel from './components/DatasheetAbilitiesPanel'
 import DetachmentsPanel from './components/DetachmentsPanel'
 import FactionUnitsPanel from './components/FactionUnitsPanel'
 import FactionsPanel from './components/FactionsPanel'
@@ -11,12 +12,7 @@ import UnitsPanel from './components/UnitsPanel'
 import WargearAbilitiesPanel from './components/WargearAbilitiesPanel'
 import WeaponAbilitiesPanel from './components/WeaponAbilitiesPanel'
 import WeaponsPanel from './components/WeaponsPanel'
-import {
-  createDatasheetAbility,
-  createDisposition,
-  listDatasheetAbilities,
-  listDispositions,
-} from './api'
+import { createDisposition, listDispositions } from './api'
 
 const TAB_GROUPS = {
   Build: ['Lists'],
@@ -97,13 +93,7 @@ function App() {
       {tab === 'Lists' && <ListsPanel />}
       {tab === 'Weapon Abilities' && <WeaponAbilitiesPanel />}
       {tab === 'Wargear Abilities' && <WargearAbilitiesPanel />}
-      {tab === 'Datasheet Abilities' && (
-        <AbilityPanel
-          title="Datasheet Abilities"
-          listFn={listDatasheetAbilities}
-          createFn={createDatasheetAbility}
-        />
-      )}
+      {tab === 'Datasheet Abilities' && <DatasheetAbilitiesPanel />}
       {tab === 'Dispositions' && (
         <AbilityPanel title="Dispositions" listFn={listDispositions} createFn={createDisposition} />
       )}

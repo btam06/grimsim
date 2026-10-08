@@ -4,7 +4,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db import get_session
-from app.models import Unit, UnitModel, Wargear, WargearAbility, Weapon, WeaponAbility
+from app.models import (
+    DatasheetAbility,
+    Model,
+    Unit,
+    UnitModel,
+    Wargear,
+    WargearAbility,
+    Weapon,
+    WeaponAbility,
+)
 from app.schemas import CombatIn, CombatOut
 from app.services import combat as combat_service
 
@@ -14,6 +23,7 @@ router = APIRouter(prefix="/combat", tags=["combat"])
 async def _load_unit(session: AsyncSession, unit_id: int) -> Unit | None:
     weapons_loader = selectinload(Unit.unit_models).selectinload(UnitModel.weapons)
     wargear_loader = selectinload(Unit.unit_models).selectinload(UnitModel.wargear)
+    model_loader = selectinload(Unit.unit_models).selectinload(UnitModel.model)
     result = await session.execute(
         select(Unit)
         .options(
@@ -29,7 +39,12 @@ async def _load_unit(session: AsyncSession, unit_id: int) -> Unit | None:
             wargear_loader.selectinload(Wargear.abilities).selectinload(
                 WargearAbility.effects
             ),
-            selectinload(Unit.unit_models).selectinload(UnitModel.model),
+            model_loader,
+            model_loader.selectinload(Model.keywords),
+            model_loader.selectinload(Model.abilities).selectinload(
+                DatasheetAbility.conditions
+            ),
+            model_loader.selectinload(Model.abilities).selectinload(DatasheetAbility.effects),
         )
         .where(Unit.id == unit_id)
     )
@@ -66,6 +81,8 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
         visible=visible,
         in_range=in_range,
         in_cover=payload.in_cover,
+        half_range=payload.half_range,
+        moved_less_than_3=payload.moved_less_than_3,
     )
 
     return CombatOut(
@@ -73,10 +90,15 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
         in_range=in_range,
         in_engagement_range=payload.in_engagement_range,
         in_cover=payload.in_cover,
+        half_range=payload.half_range,
+        moved_less_than_3=payload.moved_less_than_3,
         attack_rolls=result.attack_rolls,
         wound_rolls=result.wound_rolls,
         save_rolls=result.save_rolls,
         total_damage=result.total_damage,
         models_destroyed=result.models_destroyed,
         defending_models_remaining=result.defending_models_remaining,
+        hazardous_rolls=result.hazardous_rolls,
+        hazardous_wounds=result.hazardous_wounds,
+        hazardous_models_destroyed=result.hazardous_models_destroyed,
     )

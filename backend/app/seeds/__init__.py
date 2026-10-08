@@ -2,6 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.seeds import (
     conditions,
+    datasheet_abilities,
     dispositions,
     effects,
     factions,
@@ -25,10 +26,11 @@ from app.seeds.faction_units import adeptus_mechanicus as adeptus_mechanicus_uni
 # look up rows by name.
 #
 # conditions.seed/effects.seed populate the hardcoded condition/effect catalog
-# (see app/combat_rules/) that WeaponAbility/WargearAbility rows reference;
-# weapon_abilities.seed/wargear_abilities.seed build abilities from them (each
-# with an ENTRIES list of (name, description, condition keywords, effect
-# keywords)), so both must run after conditions.seed/effects.seed.
+# (see app/combat_rules/) that WeaponAbility/WargearAbility/DatasheetAbility
+# rows reference; weapon_abilities.seed/wargear_abilities.seed/
+# datasheet_abilities.seed build abilities from them (each with an ENTRIES
+# list of (name, description, condition keywords, effect keywords)), so all
+# three must run after conditions.seed/effects.seed.
 SEED_FUNCS = [
     dispositions.seed,
     factions.seed,
@@ -37,6 +39,7 @@ SEED_FUNCS = [
     effects.seed,
     weapon_abilities.seed,
     wargear_abilities.seed,
+    datasheet_abilities.seed,
     adeptus_mechanicus_units.seed,
     adeptus_mechanicus_detachments.seed,
 ]

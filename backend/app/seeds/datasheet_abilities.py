@@ -2,22 +2,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.combat_rules.conditions import ALWAYS
-from app.combat_rules.effects import IGNORE_COVER, IGNORE_COVER_UNIT
-from app.models import Condition, Effect, WargearAbility
+from app.combat_rules.effects import REROLL_FAILED_HITS
+from app.models import Condition, DatasheetAbility, Effect
 
 # (name, description, [condition keywords], [effect keywords])
 ENTRIES = [
     (
-        "Ignores Cover",
-        "Wargear equipped with this is not worsened by the defender being in cover.",
+        "Reroll Failed Hits",
+        "This unit may always re-roll failed hit rolls.",
         [ALWAYS],
-        [IGNORE_COVER],
-    ),
-    (
-        "Ignore Cover (Unit)",
-        "The whole unit this wargear is equipped in, not just the carrying model, ignores cover.",
-        [ALWAYS],
-        [IGNORE_COVER_UNIT],
+        [REROLL_FAILED_HITS],
     ),
 ]
 
@@ -25,7 +19,9 @@ ENTRIES = [
 async def seed(session: AsyncSession) -> None:
     for name, description, condition_keywords, effect_keywords in ENTRIES:
         existing = (
-            await session.execute(select(WargearAbility.id).where(WargearAbility.name == name))
+            await session.execute(
+                select(DatasheetAbility.id).where(DatasheetAbility.name == name)
+            )
         ).scalar_one_or_none()
         if existing is not None:
             continue
@@ -40,7 +36,7 @@ async def seed(session: AsyncSession) -> None:
             continue  # conditions/effects haven't been seeded yet
 
         session.add(
-            WargearAbility(
+            DatasheetAbility(
                 name=name,
                 description=description,
                 conditions=list(conditions),

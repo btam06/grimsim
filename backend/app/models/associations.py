@@ -85,3 +85,17 @@ model_keyword_links = Table(
     Column("model_id", ForeignKey("models.id"), primary_key=True),
     Column("keyword_id", ForeignKey("keywords.id"), primary_key=True),
 )
+
+datasheet_ability_conditions = Table(
+    "datasheet_ability_conditions",
+    Base.metadata,
+    Column("datasheet_ability_id", ForeignKey("datasheet_abilities.id"), primary_key=True),
+    Column("condition_id", ForeignKey("conditions.id"), primary_key=True),
+)
+
+datasheet_ability_effects = Table(
+    "datasheet_ability_effects",
+    Base.metadata,
+    Column("datasheet_ability_id", ForeignKey("datasheet_abilities.id"), primary_key=True),
+    Column("effect_id", ForeignKey("effects.id"), primary_key=True),
+)

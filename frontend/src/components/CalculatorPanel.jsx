@@ -21,6 +21,8 @@ function CalculatorPanel() {
   const [defendingUnitId, setDefendingUnitId] = useState('')
   const [inEngagementRange, setInEngagementRange] = useState(false)
   const [inCover, setInCover] = useState(false)
+  const [halfRange, setHalfRange] = useState(false)
+  const [movedLessThan3, setMovedLessThan3] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
 
@@ -47,6 +49,8 @@ function CalculatorPanel() {
         selected_weapon_ids: selectedWeaponIds,
         in_engagement_range: inEngagementRange,
         in_cover: inCover,
+        half_range: halfRange,
+        moved_less_than_3: movedLessThan3,
       })
       setResult(response)
     } catch (err) {
@@ -113,11 +117,33 @@ function CalculatorPanel() {
           </label>
         </div>
         {!inEngagementRange && (
-          <label className="checkbox-field">
-            <input type="checkbox" checked={inCover} onChange={(e) => setInCover(e.target.checked)} />
-            Defender in cover (+1 to hit for ranged attacks)
-          </label>
+          <>
+            <label className="checkbox-field">
+              <input
+                type="checkbox"
+                checked={inCover}
+                onChange={(e) => setInCover(e.target.checked)}
+              />
+              Defender in cover (+1 to hit for ranged attacks)
+            </label>
+            <label className="checkbox-field">
+              <input
+                type="checkbox"
+                checked={halfRange}
+                onChange={(e) => setHalfRange(e.target.checked)}
+              />
+              Shooting model is within half range
+            </label>
+          </>
         )}
+        <label className="checkbox-field">
+          <input
+            type="checkbox"
+            checked={movedLessThan3}
+            onChange={(e) => setMovedLessThan3(e.target.checked)}
+          />
+          Attacking unit moved less than 3" this turn
+        </label>
         <button type="submit">Calculate</button>
       </form>
 
@@ -135,6 +161,11 @@ function CalculatorPanel() {
           <li>Total damage dealt: {result.total_damage}</li>
           <li>Defending models destroyed: {result.models_destroyed}</li>
           <li>Defending models remaining: {result.defending_models_remaining}</li>
+          <li>
+            Hazardous rolls: <DiceRolls rolls={result.hazardous_rolls} />
+          </li>
+          <li>Hazardous wounds taken: {result.hazardous_wounds}</li>
+          <li>Hazardous attackers destroyed: {result.hazardous_models_destroyed}</li>
         </ul>
       )}
     </section>

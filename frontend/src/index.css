@@ -61,7 +61,7 @@ section form button {
   padding: 0.4rem 0.8rem;
 }
 
-section form label.field {
+section form .field {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;

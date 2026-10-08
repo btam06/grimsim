@@ -200,12 +200,16 @@ class WargearAbilityOut(BaseModel):
 class DatasheetAbilityIn(BaseModel):
     name: str
     description: str | None = None
+    condition_ids: list[int] = []
+    effect_ids: list[int] = []
 
 
-class DatasheetAbilityOut(DatasheetAbilityIn):
-    model_config = ConfigDict(from_attributes=True)
-
+class DatasheetAbilityOut(BaseModel):
     id: int
+    name: str
+    description: str | None
+    condition_ids: list[int]
+    effect_ids: list[int]
 
 
 class DispositionIn(BaseModel):
@@ -241,6 +245,8 @@ class CombatIn(BaseModel):
     selected_weapon_ids: list[int] = []
     in_engagement_range: bool = False
     in_cover: bool = False
+    half_range: bool = False
+    moved_less_than_3: bool = False
     defender_visible: bool = True
     defender_in_range: bool = True
 
@@ -250,12 +256,17 @@ class CombatOut(BaseModel):
     in_range: bool
     in_engagement_range: bool
     in_cover: bool
+    half_range: bool
+    moved_less_than_3: bool
     attack_rolls: list[int]
     wound_rolls: list[int]
     save_rolls: list[int]
     total_damage: int
     models_destroyed: int
     defending_models_remaining: int
+    hazardous_rolls: list[int]
+    hazardous_wounds: int
+    hazardous_models_destroyed: int
 
 
 class ArmyListIn(BaseModel):

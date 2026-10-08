@@ -4,6 +4,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models import (
     Condition,
+    DatasheetAbility,
     Detachment,
     Disposition,
     Effect,
@@ -15,6 +16,7 @@ from app.models import (
 )
 from app.seeds import (
     conditions,
+    datasheet_abilities,
     dispositions,
     effects,
     factions,
@@ -229,13 +231,21 @@ async def test_seed_weapon_abilities_is_idempotent(session: AsyncSession):
     assert len(names) == len(weapon_abilities.ENTRIES)
 
 
-async def test_seed_weapon_abilities_skips_if_conditions_or_effects_missing(
+async def test_seed_weapon_abilities_skips_entries_with_missing_conditions_or_effects(
     session: AsyncSession,
 ):
     await weapon_abilities.seed(session)
 
-    result = await session.execute(select(WeaponAbility))
-    assert result.scalars().all() == []
+    result = await session.execute(select(WeaponAbility.name))
+    names = set(result.scalars().all())
+    # Only entries with no condition/effect dependencies at all (e.g. "Precision",
+    # which has none) can be created before conditions.seed/effects.seed have run.
+    no_dependency_names = {
+        name
+        for name, _, condition_keywords, effect_keywords in weapon_abilities.ENTRIES
+        if not condition_keywords and not effect_keywords
+    }
+    assert names == no_dependency_names
 
 
 async def test_seed_wargear_abilities_creates_all_entries(session: AsyncSession):
@@ -277,6 +287,45 @@ async def test_seed_wargear_abilities_skips_if_conditions_or_effects_missing(
     assert result.scalars().all() == []
 
 
+async def test_seed_datasheet_abilities_creates_all_entries(session: AsyncSession):
+    await conditions.seed(session)
+    await effects.seed(session)
+    await datasheet_abilities.seed(session)
+
+    result = await session.execute(
+        select(DatasheetAbility).options(
+            selectinload(DatasheetAbility.conditions), selectinload(DatasheetAbility.effects)
+        )
+    )
+    abilities_by_name = {a.name: a for a in result.scalars().all()}
+    assert set(abilities_by_name) == {name for name, _, _, _ in datasheet_abilities.ENTRIES}
+
+    for name, _, condition_keywords, effect_keywords in datasheet_abilities.ENTRIES:
+        ability = abilities_by_name[name]
+        assert {c.keyword for c in ability.conditions} == set(condition_keywords)
+        assert {e.keyword for e in ability.effects} == set(effect_keywords)
+
+
+async def test_seed_datasheet_abilities_is_idempotent(session: AsyncSession):
+    await conditions.seed(session)
+    await effects.seed(session)
+    await datasheet_abilities.seed(session)
+    await datasheet_abilities.seed(session)
+
+    result = await session.execute(select(DatasheetAbility.name))
+    names = result.scalars().all()
+    assert len(names) == len(datasheet_abilities.ENTRIES)
+
+
+async def test_seed_datasheet_abilities_skips_if_conditions_or_effects_missing(
+    session: AsyncSession,
+):
+    await datasheet_abilities.seed(session)
+
+    result = await session.execute(select(DatasheetAbility))
+    assert result.scalars().all() == []
+
+
 async def test_run_all_seeds_everything(session: AsyncSession):
     await run_all(session)
 
@@ -289,6 +338,9 @@ async def test_run_all_seeds_everything(session: AsyncSession):
     effect_keywords = set((await session.execute(select(Effect.keyword))).scalars().all())
     weapon_ability_names = set((await session.execute(select(WeaponAbility.name))).scalars().all())
     wargear_ability_names = set((await session.execute(select(WargearAbility.name))).scalars().all())
+    datasheet_ability_names = set(
+        (await session.execute(select(DatasheetAbility.name))).scalars().all()
+    )
     assert disposition_names == set(dispositions.NAMES)
     assert faction_names == set(factions.NAMES)
     assert faction_unit_names == set(adeptus_mechanicus.NAMES)
@@ -298,3 +350,4 @@ async def test_run_all_seeds_everything(session: AsyncSession):
     assert effect_keywords == {keyword for keyword, _, _ in effects.ENTRIES}
     assert weapon_ability_names == {name for name, _, _, _ in weapon_abilities.ENTRIES}
     assert wargear_ability_names == {name for name, _, _, _ in wargear_abilities.ENTRIES}
+    assert datasheet_ability_names == {name for name, _, _, _ in datasheet_abilities.ENTRIES}

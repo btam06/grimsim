@@ -95,6 +95,13 @@ class CombatResult:
     total_damage: int = field(default=0)
     models_destroyed: int = field(default=0)
     defending_models_remaining: int = field(default=0)
+    # Self-inflicted hazard checks made by the attacking unit (one per
+    # hazardous weapon fired), and the total wounds they dealt after FNP.
+    hazardous_rolls: list[int] = field(default_factory=list)
+    hazardous_wounds: int = field(default=0)
+    # How many attacking models were destroyed outright by their own
+    # hazardous wounds (checked once a model is done firing all its weapons).
+    hazardous_models_destroyed: int = field(default=0)
 
 
 def resolve_combat(
@@ -105,6 +112,8 @@ def resolve_combat(
     visible: bool,
     in_range: bool,
     in_cover: bool,
+    half_range: bool,
+    moved_less_than_3: bool,
 ) -> CombatResult:
     # The defending unit is a queue of individual models, each with its own wound pool.
     # Each attack targets whichever model is at the front of the queue; once that
@@ -115,6 +124,37 @@ def resolve_combat(
     ordered_unit_models = sorted(
         defender.unit_models, key=lambda unit_model: _target_priority(unit_model.model)
     )
+    # The full set of keywords across every model in the defending unit's
+    # original composition - used by conditions like "target has INFANTRY"
+    # (e.g. for Anti-Infantry/Anti-Vehicle), independent of casualties so far.
+    defender_keywords = {
+        keyword.name
+        for unit_model in defender.unit_models
+        for keyword in unit_model.model.keywords
+    }
+
+    # Some wargear/datasheet abilities apply to the whole attacking unit rather
+    # than just the model carrying them (e.g. "Ignore Cover (Unit)", or a
+    # datasheet ability granting the unit a reroll) - checked once, across
+    # every model's wargear and datasheet abilities, regardless of which
+    # weapon is firing.
+    unit_wide_state: dict = {}
+    all_unit_wide_abilities = [
+        ability
+        for unit_model in attacker.unit_models
+        for gear in unit_model.wargear
+        for ability in gear.abilities
+    ] + [
+        ability
+        for unit_model in attacker.unit_models
+        for ability in unit_model.model.abilities
+    ]
+    _apply_triggered_effects(
+        all_unit_wide_abilities, {"step": "unit_wide"}, unit_wide_state, deque()
+    )
+    unit_ignores_cover = unit_wide_state.get("ignore_cover_unit", False)
+    unit_rerolls_failed_hits = unit_wide_state.get("reroll_failed_hits", False)
+
     targets: deque[_Target] = deque(
         _Target(
             toughness=unit_model.model.toughness,
@@ -145,6 +185,11 @@ def resolve_combat(
                 ability for gear in unit_model.wargear for ability in gear.abilities
             ]
 
+            # Hazardous wounds taken by this model accumulate across every one
+            # of its weapons, in case more than one is hazardous - checked
+            # against its own wounds once it's done firing (see below).
+            model_hazardous_damage = 0
+
             for weapon in unit_model.weapons:
                 # Only weapons the caller chose to fire/swing with this attack count.
                 if weapon.id not in selected_weapon_ids:
@@ -165,6 +210,37 @@ def resolve_combat(
                     {"auto_hit": False} for _ in range(roll_dice(weapon.attacks))
                 )
 
+                # Pre-weapon: checked once per weapon (not per individual attack),
+                # for traits that apply to the whole shooting sequence rather than
+                # any one attack - e.g. Rapid Fire adding attacks to the queue when
+                # within half range, or Hazardous risking a self-inflicted wound.
+                pre_weapon_state: dict = {}
+                _apply_triggered_effects(
+                    abilities,
+                    {"step": "pre_weapon", "half_range": half_range},
+                    pre_weapon_state,
+                    pending_attacks,
+                )
+                if pre_weapon_state.get("hazardous"):
+                    # Hazard roll: a 1-2 means the firing model takes damage based
+                    # on its own keywords, reduced by its own feel no pain.
+                    hazard_roll = random.randint(1, 6)
+                    result.hazardous_rolls.append(hazard_roll)
+                    if hazard_roll <= 2:
+                        shooter_keywords = {k.name for k in unit_model.model.keywords}
+                        if "VEHICLE" in shooter_keywords:
+                            self_wounds = 3
+                        elif "INFANTRY" in shooter_keywords:
+                            self_wounds = 1
+                        else:
+                            self_wounds = 0
+                        shooter_fnp = unit_model.model.feel_no_pain
+                        for _ in range(self_wounds):
+                            if shooter_fnp is not None and random.randint(1, 6) >= shooter_fnp:
+                                continue  # feel no pain negated this point of damage
+                            result.hazardous_wounds += 1
+                            model_hazardous_damage += 1
+
                 while pending_attacks:
                     if not targets:
                         break  # defending unit has no models left to attack
@@ -175,16 +251,32 @@ def resolve_combat(
                         # already a hit, so no hit roll and no hit-step triggers.
                         pass
                     else:
-                        # Pre-hit: lets a static trait (e.g. "always ignore cover")
-                        # mark this attack before the hit roll's threshold is set.
+                        # Pre-hit: lets a static trait (e.g. "always ignore cover",
+                        # or Heavy when the unit moved less than 3") mark this
+                        # attack before the hit roll's threshold is set.
                         _apply_triggered_effects(
-                            abilities, {"step": "pre_hit"}, attack, pending_attacks
+                            abilities,
+                            {"step": "pre_hit", "moved_less_than_3": moved_less_than_3},
+                            attack,
+                            pending_attacks,
                         )
                         # A ranged attack against a target in cover needs a roll 1
-                        # higher to hit, unless this attack ignores cover.
+                        # higher to hit, unless this attack (or the whole unit)
+                        # ignores cover.
                         effective_skill = weapon.skill
-                        if in_cover and is_ranged and not attack.get("ignore_cover"):
+                        if (
+                            in_cover
+                            and is_ranged
+                            and not unit_ignores_cover
+                            and not attack.get("ignore_cover")
+                        ):
                             effective_skill += 1
+                        if attack.get("plus_one_to_hit"):
+                            effective_skill -= 1
+                        if is_ranged and attack.get("plus_one_skill_ranged"):
+                            effective_skill -= 1
+                        if not is_ranged and attack.get("plus_one_skill_melee"):
+                            effective_skill -= 1
 
                         # Hit roll: succeeds (hits) on a roll equal to or greater than skill.
                         hit_roll = random.randint(1, 6)
@@ -192,23 +284,53 @@ def resolve_combat(
                         _apply_triggered_effects(
                             abilities, {"step": "hit", "roll": hit_roll}, attack, pending_attacks
                         )
+                        if hit_roll < effective_skill and (
+                            attack.get("reroll_failed_hits") or unit_rerolls_failed_hits
+                        ):
+                            # Re-roll a failed hit once, replacing the original
+                            # result - hit-step triggers (e.g. Sustained Hits) are
+                            # re-checked against the new roll too.
+                            hit_roll = random.randint(1, 6)
+                            result.attack_rolls.append(hit_roll)
+                            _apply_triggered_effects(
+                                abilities, {"step": "hit", "roll": hit_roll}, attack, pending_attacks
+                            )
                         if hit_roll < effective_skill:
                             continue
 
                     # Wound roll: threshold depends on this weapon's strength versus the
-                    # toughness of whichever model is currently being targeted. An effect
-                    # (e.g. auto-pass wound) can mark this attack to skip the roll entirely.
+                    # toughness of whichever model is currently being targeted.
                     target = targets[0]
                     threshold = wound_threshold(weapon.strength, target.toughness)
+
                     if attack.get("auto_pass_wound"):
                         wound_passed = True
                     else:
                         wound_roll = random.randint(1, 6)
                         result.wound_rolls.append(wound_roll)
                         _apply_triggered_effects(
-                            abilities, {"step": "wound", "roll": wound_roll}, attack, pending_attacks
+                            abilities,
+                            {"step": "wound", "roll": wound_roll, "defender_keywords": defender_keywords},
+                            attack,
+                            pending_attacks,
                         )
-                        wound_passed = wound_roll >= threshold
+                        if attack.get("critical_wound"):
+                            # An Anti-X-style ability (e.g. Anti-Infantry 4+) matched
+                            # this roll against the defending unit's keywords - it
+                            # counts as a critical wound regardless of the actual roll,
+                            # so re-run the wound-step trigger check with a synthetic
+                            # natural-6 context to also fire any other critical-wound-
+                            # dependent effects (e.g. Devastating Wounds), same as an
+                            # actual natural 6 would.
+                            _apply_triggered_effects(
+                                abilities,
+                                {"step": "wound", "roll": 6, "defender_keywords": defender_keywords},
+                                attack,
+                                pending_attacks,
+                            )
+                            wound_passed = True
+                        else:
+                            wound_passed = wound_roll >= threshold
                     if not wound_passed:
                         continue
 
@@ -253,6 +375,11 @@ def resolve_combat(
                             targets.popleft()
                             result.models_destroyed += 1
                             break  # this model is destroyed - no spillover to the next
+
+            # End of combat for this attacking model: if the hazardous wounds it
+            # took while firing added up to (or past) its own wounds, it died.
+            if model_hazardous_damage >= unit_model.model.wounds:
+                result.hazardous_models_destroyed += 1
 
     result.defending_models_remaining = len(targets)
     return result
