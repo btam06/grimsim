@@ -21,6 +21,7 @@ function buildEmptyForm() {
     is_leader: false,
     ability_ids: [],
     wargear_ids: [],
+    keyword_ids: [],
   }
 }
 
@@ -40,6 +41,7 @@ function formFromModel(model) {
     is_leader: model.is_leader,
     ability_ids: model.ability_ids,
     wargear_ids: [],
+    keyword_ids: model.keyword_ids,
   }
 }
 
@@ -59,6 +61,7 @@ function toPayload(form) {
     is_leader: form.is_leader,
     ability_ids: form.ability_ids,
     wargear_ids: form.wargear_ids,
+    keyword_ids: form.keyword_ids,
   }
 }
 
@@ -66,6 +69,7 @@ function ModelFormPage({
   editingModel,
   factions,
   abilities,
+  keywords,
   weapons,
   wargear,
   wargearAbilities,
@@ -80,6 +84,15 @@ function ModelFormPage({
   const [error, setError] = useState(null)
 
   const handleChange = (field) => (e) => setForm({ ...form, [field]: e.target.value })
+
+  const toggleKeyword = (id) => {
+    setForm({
+      ...form,
+      keyword_ids: form.keyword_ids.includes(id)
+        ? form.keyword_ids.filter((x) => x !== id)
+        : [...form.keyword_ids, id],
+    })
+  }
 
   const save = () =>
     editingModel ? updateModel(editingModel.id, toPayload(form)) : createModel(toPayload(form))
@@ -193,6 +206,21 @@ function ModelFormPage({
           />
           Leader
         </label>
+        <div className="checkbox-group">
+          Keywords
+          <div className="checkbox-grid">
+            {keywords.map((k) => (
+              <label key={k.id} className="checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={form.keyword_ids.includes(k.id)}
+                  onChange={() => toggleKeyword(k.id)}
+                />
+                {k.name}
+              </label>
+            ))}
+          </div>
+        </div>
         <label className="field">
           Datasheet Abilities
           <MultiSelect

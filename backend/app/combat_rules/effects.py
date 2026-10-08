@@ -17,6 +17,7 @@ from typing import Any
 AUTO_PASS_WOUND = "auto_pass_wound"
 ADD_EXTRA_HIT = "add_extra_hit"
 IGNORE_COVER = "ignore_cover"
+NO_SAVE = "no_save"
 
 
 def auto_pass_wound(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
@@ -35,8 +36,15 @@ def ignore_cover(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
     state["ignore_cover"] = True
 
 
+def no_save(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # The save roll for *this* attack is skipped entirely and treated as failed -
+    # no armor save, and no invulnerable save either.
+    state["no_save"] = True
+
+
 EFFECTS = {
     AUTO_PASS_WOUND: auto_pass_wound,
     ADD_EXTRA_HIT: add_extra_hit,
     IGNORE_COVER: ignore_cover,
+    NO_SAVE: no_save,
 }

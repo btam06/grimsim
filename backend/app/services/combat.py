@@ -214,15 +214,21 @@ def resolve_combat(
 
                     # Save roll: armor save is worsened by the weapon's AP, but the
                     # defender may use their invulnerable save instead if it's better.
-                    save_needed = target.save - weapon.ap
-                    if target.invulnerable is not None:
-                        save_needed = min(save_needed, target.invulnerable)
-                    save_roll = random.randint(1, 6)
-                    result.save_rolls.append(save_roll)
-                    _apply_triggered_effects(
-                        abilities, {"step": "save", "roll": save_roll}, attack, pending_attacks
-                    )
-                    if save_roll >= save_needed:
+                    # An effect (e.g. devastating wounds) can mark this attack to skip
+                    # the roll entirely - no save of any kind, armor or invulnerable.
+                    if attack.get("no_save"):
+                        save_passed = False
+                    else:
+                        save_needed = target.save - weapon.ap
+                        if target.invulnerable is not None:
+                            save_needed = min(save_needed, target.invulnerable)
+                        save_roll = random.randint(1, 6)
+                        result.save_rolls.append(save_roll)
+                        _apply_triggered_effects(
+                            abilities, {"step": "save", "roll": save_roll}, attack, pending_attacks
+                        )
+                        save_passed = save_roll >= save_needed
+                    if save_passed:
                         continue  # save succeeded - no damage from this attack
 
                     # Damage roll: how many wounds this one failed save inflicts.

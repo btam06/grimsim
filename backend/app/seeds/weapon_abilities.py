@@ -1,8 +1,8 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.combat_rules.conditions import ALWAYS, CRITICAL_HIT
-from app.combat_rules.effects import ADD_EXTRA_HIT, IGNORE_COVER
+from app.combat_rules.conditions import ALWAYS, CRITICAL_HIT, CRITICAL_WOUND
+from app.combat_rules.effects import ADD_EXTRA_HIT, AUTO_PASS_WOUND, IGNORE_COVER, NO_SAVE
 from app.models import Condition, Effect, WeaponAbility
 
 # (name, description, [condition keywords], [effect keywords])
@@ -18,6 +18,18 @@ ENTRIES = [
         "This weapon's attacks are not worsened by the defender being in cover.",
         [ALWAYS],
         [IGNORE_COVER],
+    ),
+    (
+        "Lethal Hits",
+        "Each critical hit (an unmodified roll of 6 to hit) automatically wounds.",
+        [CRITICAL_HIT],
+        [AUTO_PASS_WOUND],
+    ),
+    (
+        "Devastating Wounds",
+        "Each critical wound (an unmodified roll of 6 to wound) allows no save.",
+        [CRITICAL_WOUND],
+        [NO_SAVE],
     ),
 ]
 

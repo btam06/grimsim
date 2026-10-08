@@ -5,12 +5,13 @@ from typing import TYPE_CHECKING
 from sqlalchemy import Boolean, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.associations import datasheet_ability_links
+from app.models.associations import datasheet_ability_links, model_keyword_links
 from app.models.base import Base
 
 if TYPE_CHECKING:
     from app.models.datasheet_ability import DatasheetAbility
     from app.models.faction import Faction
+    from app.models.keyword import Keyword
     from app.models.unit_model import UnitModel
     from app.models.wargear import Wargear
     from app.models.weapon import Weapon
@@ -39,5 +40,8 @@ class Model(Base):
     wargear: Mapped[list["Wargear"]] = relationship(back_populates="model")
     abilities: Mapped[list["DatasheetAbility"]] = relationship(
         secondary=datasheet_ability_links, back_populates="models"
+    )
+    keywords: Mapped[list["Keyword"]] = relationship(
+        secondary=model_keyword_links, back_populates="models"
     )
     unit_models: Mapped[list["UnitModel"]] = relationship(back_populates="model")

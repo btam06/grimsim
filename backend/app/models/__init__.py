@@ -2,6 +2,7 @@ from app.models.army_list import ArmyList
 from app.models.associations import (
     datasheet_ability_links,
     detachment_dispositions,
+    model_keyword_links,
     unit_model_wargear,
     unit_model_weapons,
     wargear_ability_conditions,
@@ -19,6 +20,7 @@ from app.models.disposition import Disposition
 from app.models.effect import Effect
 from app.models.faction import Faction
 from app.models.faction_unit import FactionUnit
+from app.models.keyword import Keyword
 from app.models.model import Model
 from app.models.unit import Unit
 from app.models.unit_model import UnitModel
@@ -34,6 +36,7 @@ __all__ = [
     "Weapon",
     "Wargear",
     "Model",
+    "Keyword",
     "DatasheetAbility",
     "WeaponAbility",
     "WargearAbility",
@@ -53,5 +56,6 @@ __all__ = [
     "wargear_ability_links",
     "wargear_ability_conditions",
     "wargear_ability_effects",
+    "model_keyword_links",
     "detachment_dispositions",
 ]

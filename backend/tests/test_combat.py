@@ -465,6 +465,78 @@ def test_resolve_combat_auto_pass_wound_skips_the_wound_roll(monkeypatch):
     assert result.total_damage == 1
 
 
+def test_resolve_combat_lethal_hits_auto_wounds_on_a_critical_hit(monkeypatch):
+    # "Lethal Hits": critical_hit -> auto_pass_wound. Strength 1 vs toughness 100
+    # would normally never wound, but a critical hit (roll of 6) should still
+    # force the wound to pass without a roll being made at all.
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+
+    lethal_hits = _ability([_condition("critical_hit")], [_effect("auto_pass_wound")])
+    weapon = _weapon(attacks="1", skill=2, strength=1, ap=-10, damage="1")
+    weapon.id = 1
+    weapon.abilities = [lethal_hits]
+    attacker = _unit([_unit_model(_model(toughness=100), [weapon])])
+    defender = _unit([_unit_model(_model(wounds=5, save=2, feel_no_pain=None), [])])
+
+    result = combat.resolve_combat(
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False
+    )
+    assert result.attack_rolls == [6]
+    assert result.wound_rolls == []
+    assert result.total_damage == 1
+
+
+def test_resolve_combat_devastating_wounds_skips_the_save_roll_on_a_critical_wound(monkeypatch):
+    # "Devastating Wounds": critical_wound -> no_save. A save of 2+ with an
+    # invulnerable of 2+ would normally always succeed, but a critical wound
+    # (roll of 6) should skip the save roll entirely and apply damage.
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+
+    devastating_wounds = _ability([_condition("critical_wound")], [_effect("no_save")])
+    weapon = _weapon(attacks="1", skill=2, strength=10, damage="1")
+    weapon.id = 1
+    weapon.abilities = [devastating_wounds]
+    attacker = _unit([_unit_model(_model(toughness=1), [weapon])])
+    defender = _unit(
+        [_unit_model(_model(wounds=5, save=2, invulnerable=2, feel_no_pain=None), [])]
+    )
+
+    result = combat.resolve_combat(
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False
+    )
+    assert result.attack_rolls == [6]
+    assert result.wound_rolls == [6]
+    assert result.save_rolls == []  # no save roll at all - always-passing save was bypassed
+    assert result.total_damage == 1
+
+
+def test_resolve_combat_devastating_wounds_does_nothing_on_a_non_critical_wound(monkeypatch):
+    # A wound roll of 3 (vs threshold 2, since strength 10 is double toughness 1)
+    # still wounds but isn't a critical, so the save should still be rolled normally.
+    rolls = iter([6, 3, 1])  # hit (crit, irrelevant here), wound (non-crit), save
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls))
+
+    devastating_wounds = _ability([_condition("critical_wound")], [_effect("no_save")])
+    weapon = _weapon(attacks="1", skill=2, strength=10, ap=0, damage="1")
+    weapon.id = 1
+    weapon.abilities = [devastating_wounds]
+    attacker = _unit([_unit_model(_model(toughness=1), [weapon])])
+    defender = _unit([_unit_model(_model(wounds=5, save=2, feel_no_pain=None), [])])
+
+    result = combat.resolve_combat(
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False
+    )
+    assert result.wound_rolls == [3]
+    assert result.save_rolls == [1]  # the save was rolled normally (and failed here)
+    assert result.total_damage == 1
+
+
+def test_critical_wound_condition_matches_only_wound_step_sixes():
+    assert combat.CONDITIONS["critical_wound"]({"step": "wound", "roll": 6}) is True
+    assert combat.CONDITIONS["critical_wound"]({"step": "wound", "roll": 5}) is False
+    assert combat.CONDITIONS["critical_wound"]({"step": "hit", "roll": 6}) is False
+
+
 def test_resolve_combat_unmatched_condition_keyword_is_ignored(monkeypatch):
     # A condition keyword with no hardcoded implementation should simply never
     # match, rather than raising - the ability is inert.
@@ -696,6 +768,55 @@ async def test_combat_endpoint_applies_sustained_1_weapon_ability(
     assert len(body["attack_rolls"]) == 1
     assert len(body["wound_rolls"]) == 2
     assert len(body["save_rolls"]) == 2
+
+
+async def test_combat_endpoint_applies_seeded_devastating_wounds_weapon_ability(
+    client: AsyncClient, faction_id: int, session, monkeypatch
+):
+    from app.seeds import conditions as conditions_seed
+    from app.seeds import effects as effects_seed
+    from app.seeds import weapon_abilities as weapon_abilities_seed
+
+    await conditions_seed.seed(session)
+    await effects_seed.seed(session)
+    await weapon_abilities_seed.seed(session)
+
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+
+    abilities = (await client.get("/weapon-abilities")).json()
+    ability_id = next(a["id"] for a in abilities if a["name"] == "Devastating Wounds")
+
+    attacker_model_id = await _create_model(client, faction_id)
+    weapon_id = await _create_weapon(
+        client,
+        attacker_model_id,
+        strength=10,
+        skill=2,
+        ability_ids=[ability_id],
+    )
+    attacker_fu = await _create_faction_unit(client, faction_id, "Attackers")
+    attacker_unit_id = await _create_unit(client, attacker_fu, attacker_model_id, weapon_id)
+
+    # A save of 2+ with a 2+ invulnerable would normally always succeed.
+    defender_model_id = await _create_model(
+        client, faction_id, toughness=1, save=2, invulnerable=2, wounds=5
+    )
+    defender_fu = await _create_faction_unit(client, faction_id, "Defenders")
+    defender_unit_id = await _create_unit(client, defender_fu, defender_model_id)
+
+    response = await client.post(
+        "/combat",
+        json={
+            "attacking_unit_id": attacker_unit_id,
+            "defending_unit_id": defender_unit_id,
+            "selected_weapon_ids": [weapon_id],
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["wound_rolls"]) == 1
+    assert body["save_rolls"] == []  # the critical wound skipped the save entirely
+    assert body["total_damage"] == 1
 
 
 async def test_combat_endpoint_in_cover_worsens_ranged_hit_rolls(

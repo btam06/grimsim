@@ -78,3 +78,10 @@ wargear_ability_effects = Table(
     Column("wargear_ability_id", ForeignKey("wargear_abilities.id"), primary_key=True),
     Column("effect_id", ForeignKey("effects.id"), primary_key=True),
 )
+
+model_keyword_links = Table(
+    "model_keyword_links",
+    Base.metadata,
+    Column("model_id", ForeignKey("models.id"), primary_key=True),
+    Column("keyword_id", ForeignKey("keywords.id"), primary_key=True),
+)

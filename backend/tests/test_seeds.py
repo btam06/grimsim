@@ -9,10 +9,20 @@ from app.models import (
     Effect,
     Faction,
     FactionUnit,
+    Keyword,
     WargearAbility,
     WeaponAbility,
 )
-from app.seeds import conditions, dispositions, effects, factions, run_all, wargear_abilities, weapon_abilities
+from app.seeds import (
+    conditions,
+    dispositions,
+    effects,
+    factions,
+    keywords,
+    run_all,
+    wargear_abilities,
+    weapon_abilities,
+)
 from app.seeds.detachments import adeptus_mechanicus as adeptus_mechanicus_detachments
 from app.seeds.faction_units import adeptus_mechanicus
 
@@ -49,6 +59,27 @@ async def test_seed_factions_is_idempotent(session: AsyncSession):
     result = await session.execute(select(Faction.name))
     names = result.scalars().all()
     assert len(names) == len(factions.NAMES)
+
+
+async def test_seed_keywords_has_no_duplicate_names():
+    assert len(keywords.NAMES) == len(set(keywords.NAMES))
+
+
+async def test_seed_keywords_inserts_all_names(session: AsyncSession):
+    await keywords.seed(session)
+
+    result = await session.execute(select(Keyword.name))
+    names = set(result.scalars().all())
+    assert names == set(keywords.NAMES)
+
+
+async def test_seed_keywords_is_idempotent(session: AsyncSession):
+    await keywords.seed(session)
+    await keywords.seed(session)
+
+    result = await session.execute(select(Keyword.name))
+    names = result.scalars().all()
+    assert len(names) == len(keywords.NAMES)
 
 
 async def test_seed_factions_does_not_duplicate_existing(session: AsyncSession, faction_id: int):
@@ -253,6 +284,7 @@ async def test_run_all_seeds_everything(session: AsyncSession):
     faction_names = set((await session.execute(select(Faction.name))).scalars().all())
     faction_unit_names = set((await session.execute(select(FactionUnit.name))).scalars().all())
     detachment_names = set((await session.execute(select(Detachment.name))).scalars().all())
+    keyword_names = set((await session.execute(select(Keyword.name))).scalars().all())
     condition_keywords = set((await session.execute(select(Condition.keyword))).scalars().all())
     effect_keywords = set((await session.execute(select(Effect.keyword))).scalars().all())
     weapon_ability_names = set((await session.execute(select(WeaponAbility.name))).scalars().all())
@@ -261,6 +293,7 @@ async def test_run_all_seeds_everything(session: AsyncSession):
     assert faction_names == set(factions.NAMES)
     assert faction_unit_names == set(adeptus_mechanicus.NAMES)
     assert detachment_names == {name for name, _, _ in adeptus_mechanicus_detachments.ENTRIES}
+    assert keyword_names == set(keywords.NAMES)
     assert condition_keywords == {keyword for keyword, _, _ in conditions.ENTRIES}
     assert effect_keywords == {keyword for keyword, _, _ in effects.ENTRIES}
     assert weapon_ability_names == {name for name, _, _, _ in weapon_abilities.ENTRIES}

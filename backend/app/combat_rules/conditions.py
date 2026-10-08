@@ -10,12 +10,18 @@ from __future__ import annotations
 # its keyword in CONDITIONS, then add a matching row in app/seeds/conditions.py.
 
 CRITICAL_HIT = "critical_hit"
+CRITICAL_WOUND = "critical_wound"
 ALWAYS = "always"
 
 
 def critical_hit(context: dict) -> bool:
     # True when the roll just made was a hit roll, and it came up a natural 6.
     return context.get("step") == "hit" and context.get("roll") == 6
+
+
+def critical_wound(context: dict) -> bool:
+    # True when the roll just made was a wound roll, and it came up a natural 6.
+    return context.get("step") == "wound" and context.get("roll") == 6
 
 
 def always(context: dict) -> bool:
@@ -26,5 +32,6 @@ def always(context: dict) -> bool:
 
 CONDITIONS = {
     CRITICAL_HIT: critical_hit,
+    CRITICAL_WOUND: critical_wound,
     ALWAYS: always,
 }

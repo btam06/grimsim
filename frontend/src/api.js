@@ -39,6 +39,11 @@ export const updateList = (id, payload) =>
   request(`/lists/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
 export const deleteList = (id) => request(`/lists/${id}`, { method: 'DELETE' })
 
+export const listKeywords = () => request('/keywords')
+export const createKeyword = (payload) =>
+  request('/keywords', { method: 'POST', body: JSON.stringify(payload) })
+export const deleteKeyword = (id) => request(`/keywords/${id}`, { method: 'DELETE' })
+
 export const listModels = () => request('/models')
 export const createModel = (payload) =>
   request('/models', { method: 'POST', body: JSON.stringify(payload) })

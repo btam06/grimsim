@@ -13,6 +13,7 @@ from app.routers import (
     effects,
     faction_units,
     factions,
+    keywords,
     lists,
     models,
     units,
@@ -38,6 +39,7 @@ app.include_router(factions.router)
 app.include_router(faction_units.router)
 app.include_router(dispositions.router)
 app.include_router(detachments.router)
+app.include_router(keywords.router)
 app.include_router(models.router)
 app.include_router(weapons.router)
 app.include_router(wargear.router)

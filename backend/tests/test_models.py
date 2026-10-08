@@ -76,6 +76,53 @@ async def test_create_model_with_invalid_ability_id_returns_400(client: AsyncCli
     assert response.status_code == 400
 
 
+async def test_create_model_with_keywords(client: AsyncClient, faction_id: int):
+    keyword_id = (await client.post("/keywords", json={"name": "INFANTRY"})).json()["id"]
+
+    response = await client.post(
+        "/models", json=_model_payload(faction_id, keyword_ids=[keyword_id])
+    )
+    assert response.status_code == 201
+    assert response.json()["keyword_ids"] == [keyword_id]
+
+    response = await client.get("/models")
+    assert response.json()[0]["keyword_ids"] == [keyword_id]
+
+
+async def test_create_model_with_multiple_keywords(client: AsyncClient, faction_id: int):
+    keyword_a = (await client.post("/keywords", json={"name": "INFANTRY"})).json()["id"]
+    keyword_b = (await client.post("/keywords", json={"name": "CHARACTER"})).json()["id"]
+
+    response = await client.post(
+        "/models", json=_model_payload(faction_id, keyword_ids=[keyword_a, keyword_b])
+    )
+    assert response.status_code == 201
+    assert set(response.json()["keyword_ids"]) == {keyword_a, keyword_b}
+
+
+async def test_create_model_with_invalid_keyword_id_returns_400(client: AsyncClient, faction_id: int):
+    response = await client.post("/models", json=_model_payload(faction_id, keyword_ids=[9999]))
+    assert response.status_code == 400
+
+
+async def test_keyword_can_be_attached_to_multiple_models(client: AsyncClient, faction_id: int):
+    keyword_id = (await client.post("/keywords", json={"name": "INFANTRY"})).json()["id"]
+
+    model_a_id = (
+        await client.post("/models", json=_model_payload(faction_id, keyword_ids=[keyword_id]))
+    ).json()["id"]
+    model_b_id = (
+        await client.post(
+            "/models", json=_model_payload(faction_id, name="Other", keyword_ids=[keyword_id])
+        )
+    ).json()["id"]
+
+    response = await client.get("/models")
+    models_by_id = {m["id"]: m for m in response.json()}
+    assert models_by_id[model_a_id]["keyword_ids"] == [keyword_id]
+    assert models_by_id[model_b_id]["keyword_ids"] == [keyword_id]
+
+
 async def test_create_model_with_wargear_reassigns_it(client: AsyncClient, faction_id: int):
     owner_id = (await client.post("/models", json=_model_payload(faction_id))).json()["id"]
     wargear_id = (
@@ -153,6 +200,25 @@ async def test_update_model_replaces_abilities(client: AsyncClient, faction_id: 
 
     response = await client.put(f"/models/{model_id}", json=_model_payload(faction_id))
     assert response.json()["ability_ids"] == []
+
+
+async def test_update_model_replaces_keywords(client: AsyncClient, faction_id: int):
+    model_id = (await client.post("/models", json=_model_payload(faction_id))).json()["id"]
+    keyword_a = (await client.post("/keywords", json={"name": "INFANTRY"})).json()["id"]
+    keyword_b = (await client.post("/keywords", json={"name": "CHARACTER"})).json()["id"]
+
+    response = await client.put(
+        f"/models/{model_id}", json=_model_payload(faction_id, keyword_ids=[keyword_a])
+    )
+    assert response.json()["keyword_ids"] == [keyword_a]
+
+    response = await client.put(
+        f"/models/{model_id}", json=_model_payload(faction_id, keyword_ids=[keyword_b])
+    )
+    assert response.json()["keyword_ids"] == [keyword_b]
+
+    response = await client.put(f"/models/{model_id}", json=_model_payload(faction_id))
+    assert response.json()["keyword_ids"] == []
 
 
 async def test_update_model_changes_support_and_leader(client: AsyncClient, faction_id: int):

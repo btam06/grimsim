@@ -1,6 +1,14 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.seeds import conditions, dispositions, effects, factions, wargear_abilities, weapon_abilities
+from app.seeds import (
+    conditions,
+    dispositions,
+    effects,
+    factions,
+    keywords,
+    wargear_abilities,
+    weapon_abilities,
+)
 from app.seeds.detachments import adeptus_mechanicus as adeptus_mechanicus_detachments
 from app.seeds.faction_units import adeptus_mechanicus as adeptus_mechanicus_units
 
@@ -24,6 +32,7 @@ from app.seeds.faction_units import adeptus_mechanicus as adeptus_mechanicus_uni
 SEED_FUNCS = [
     dispositions.seed,
     factions.seed,
+    keywords.seed,
     conditions.seed,
     effects.seed,
     weapon_abilities.seed,

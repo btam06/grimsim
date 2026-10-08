@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   listDatasheetAbilities,
   listFactions,
+  listKeywords,
   listModels,
   listWargear,
   listWargearAbilities,
@@ -16,6 +17,7 @@ function ModelsPanel() {
   const [models, setModels] = useState([])
   const [factions, setFactions] = useState([])
   const [abilities, setAbilities] = useState([])
+  const [keywords, setKeywords] = useState([])
   const [weaponAbilities, setWeaponAbilities] = useState([])
   const [wargearAbilities, setWargearAbilities] = useState([])
   const [weapons, setWeapons] = useState([])
@@ -36,6 +38,9 @@ function ModelsPanel() {
     listFactions().then(setFactions).catch((err) => setError(err.message))
     listDatasheetAbilities()
       .then(setAbilities)
+      .catch((err) => setError(err.message))
+    listKeywords()
+      .then(setKeywords)
       .catch((err) => setError(err.message))
     listWeaponAbilities()
       .then(setWeaponAbilities)
@@ -84,6 +89,7 @@ function ModelsPanel() {
         editingModel={editingModel}
         factions={factions}
         abilities={abilities}
+        keywords={keywords}
         weapons={weapons}
         wargear={wargear}
         wargearAbilities={wargearAbilities}
@@ -110,6 +116,7 @@ function ModelsPanel() {
     <ModelsListPage
       models={models}
       abilities={abilities}
+      keywords={keywords}
       weapons={weapons}
       wargear={wargear}
       error={error}

@@ -1,5 +1,15 @@
-function ModelsListPage({ models, abilities, weapons, wargear, error, onEdit, onAddNew }) {
+function ModelsListPage({
+  models,
+  abilities,
+  keywords,
+  weapons,
+  wargear,
+  error,
+  onEdit,
+  onAddNew,
+}) {
   const abilityName = (id) => abilities.find((a) => a.id === id)?.name ?? `#${id}`
+  const keywordName = (id) => keywords.find((k) => k.id === id)?.name ?? `#${id}`
   const wargearName = (id) => wargear.find((g) => g.id === id)?.name ?? `#${id}`
   const weaponsFor = (modelId) => weapons.filter((w) => w.model_id === modelId)
 
@@ -20,6 +30,8 @@ function ModelsListPage({ models, abilities, weapons, wargear, error, onEdit, on
               {m.feel_no_pain ? ` FNP${m.feel_no_pain}+` : ''}
               {m.is_support ? ' [Support]' : ''}
               {m.is_leader ? ' [Leader]' : ''}
+              {m.keyword_ids.length > 0 &&
+                ` — Keywords: ${m.keyword_ids.map(keywordName).join(', ')}`}
               {m.ability_ids.length > 0 &&
                 ` — Abilities: ${m.ability_ids.map(abilityName).join(', ')}`}
               {weaponsFor(m.id).length > 0 &&

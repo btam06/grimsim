@@ -26,6 +26,16 @@ class FactionUnitOut(FactionUnitIn):
     id: int
 
 
+class KeywordIn(BaseModel):
+    name: str
+
+
+class KeywordOut(KeywordIn):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+
+
 class ModelIn(BaseModel):
     name: str
     faction_id: int
@@ -41,6 +51,7 @@ class ModelIn(BaseModel):
     is_leader: bool = False
     ability_ids: list[int] = []
     wargear_ids: list[int] = []
+    keyword_ids: list[int] = []
 
 
 class ModelOut(BaseModel):
@@ -59,6 +70,7 @@ class ModelOut(BaseModel):
     is_leader: bool
     ability_ids: list[int]
     wargear_ids: list[int]
+    keyword_ids: list[int]
 
 
 class WeaponIn(BaseModel):
