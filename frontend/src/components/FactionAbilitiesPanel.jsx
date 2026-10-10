@@ -1,17 +1,18 @@
 import { useEffect, useState } from 'react'
-import { createFactionUnit, deleteFactionUnit, listFactionUnits, listFactions } from '../api'
+import { createFactionAbility, deleteFactionAbility, listFactionAbilities, listFactions } from '../api'
 import Field from './Field'
 import Select from './Select'
 
-function FactionUnitsPanel() {
-  const [factionUnits, setFactionUnits] = useState([])
+function FactionAbilitiesPanel() {
+  const [factionAbilities, setFactionAbilities] = useState([])
   const [factions, setFactions] = useState([])
   const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
   const [factionId, setFactionId] = useState('')
   const [error, setError] = useState(null)
 
   const refresh = () =>
-    listFactionUnits().then(setFactionUnits).catch((err) => setError(err.message))
+    listFactionAbilities().then(setFactionAbilities).catch((err) => setError(err.message))
 
   useEffect(() => {
     refresh()
@@ -28,8 +29,13 @@ function FactionUnitsPanel() {
       return
     }
     try {
-      await createFactionUnit({ name, faction_id: Number(factionId) })
+      await createFactionAbility({
+        name,
+        description: description || null,
+        faction_id: Number(factionId),
+      })
       setName('')
+      setDescription('')
       setFactionId('')
       refresh()
     } catch (err) {
@@ -40,7 +46,7 @@ function FactionUnitsPanel() {
   const handleRemove = async (id) => {
     setError(null)
     try {
-      await deleteFactionUnit(id)
+      await deleteFactionAbility(id)
       refresh()
     } catch (err) {
       setError(err.message)
@@ -49,22 +55,26 @@ function FactionUnitsPanel() {
 
   return (
     <section>
-      <h2>Faction Units</h2>
+      <h2>Faction Abilities</h2>
       {error && <p className="error">{error}</p>}
       <form onSubmit={handleSubmit}>
         <Field label="Name">
           <input value={name} onChange={(e) => setName(e.target.value)} required />
         </Field>
+        <Field label="Description (optional)">
+          <input value={description} onChange={(e) => setDescription(e.target.value)} />
+        </Field>
         <Field label="Faction">
           <Select options={factions} value={factionId} onChange={setFactionId} placeholder="Select faction" />
         </Field>
-        <button type="submit">Add Faction Unit</button>
+        <button type="submit">Add Faction Ability</button>
       </form>
       <ul>
-        {factionUnits.map((fu) => (
-          <li key={fu.id}>
-            {fu.name} ({factionName(fu.faction_id)})
-            <button type="button" onClick={() => handleRemove(fu.id)}>
+        {factionAbilities.map((fa) => (
+          <li key={fa.id}>
+            {fa.name} ({factionName(fa.faction_id)})
+            {fa.description ? ` — ${fa.description}` : ''}
+            <button type="button" onClick={() => handleRemove(fa.id)}>
               Remove
             </button>
           </li>
@@ -74,4 +84,4 @@ function FactionUnitsPanel() {
   )
 }
 
-export default FactionUnitsPanel
+export default FactionAbilitiesPanel

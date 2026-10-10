@@ -134,6 +134,7 @@ def resolve_combat(
     in_cover: bool,
     half_range: bool,
     moved_less_than_3: bool,
+    advanced: bool,
 ) -> CombatResult:
     # The defending unit is a queue of individual models, each with its own wound pool.
     # Each attack targets whichever model is at the front of the queue; once that
@@ -219,17 +220,43 @@ def resolve_combat(
                 # Only weapons the caller chose to fire/swing with this attack count.
                 if weapon.id not in selected_weapon_ids:
                     continue
-                # Being in engagement range swaps which weapons are usable: melee
-                # weapons fight instead of ranged weapons shooting.
+
                 is_ranged = weapon.weapon_type != "melee"
+                abilities = list(weapon.abilities) + wargear_abilities
+
+                # Weapon eligibility: a static, no-dice-rolled check of this
+                # weapon's own abilities (Assault/Pistol) run before deciding
+                # whether it can fire at all this call, since both can
+                # override the engagement-range/advance restrictions below.
+                eligibility_state: dict = {}
+                _apply_triggered_effects(
+                    abilities, {"step": "weapon_eligibility"}, eligibility_state, deque()
+                )
+
+                # Being in engagement range normally swaps which weapons are
+                # usable: melee weapons fight instead of ranged weapons
+                # shooting - Pistol is the one exception, letting a ranged
+                # weapon fire while its bearer is in engagement range without
+                # becoming a melee weapon.
                 if is_ranged == in_engagement_range:
+                    if not (
+                        is_ranged and in_engagement_range and eligibility_state.get("pistol")
+                    ):
+                        continue
+
+                # A unit that advanced can't shoot with ranged weapons this
+                # turn, unless the weapon has Assault.
+                if (
+                    advanced
+                    and is_ranged
+                    and not in_engagement_range
+                    and not eligibility_state.get("assault")
+                ):
                     continue
 
                 weapon_result = weapon_results_by_name.setdefault(
                     weapon.name, WeaponCombatResult(name=weapon.name)
                 )
-
-                abilities = list(weapon.abilities) + wargear_abilities
 
                 # Attacks characteristic: how many attack sequences this weapon makes,
                 # rolled once per weapon (flat or dice notation, e.g. "2", "D3", "2D6").

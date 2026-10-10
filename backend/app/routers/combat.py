@@ -83,6 +83,7 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
         in_cover=payload.in_cover,
         half_range=payload.half_range,
         moved_less_than_3=payload.moved_less_than_3,
+        advanced=payload.advanced,
     )
 
     return CombatOut(
@@ -92,6 +93,7 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
         in_cover=payload.in_cover,
         half_range=payload.half_range,
         moved_less_than_3=payload.moved_less_than_3,
+        advanced=payload.advanced,
         attack_rolls=result.attack_rolls,
         attack_rerolls=result.attack_rerolls,
         wound_rolls=result.wound_rolls,

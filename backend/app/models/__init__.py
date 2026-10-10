@@ -19,6 +19,7 @@ from app.models.detachment import Detachment
 from app.models.disposition import Disposition
 from app.models.effect import Effect
 from app.models.faction import Faction
+from app.models.faction_ability import FactionAbility
 from app.models.faction_unit import FactionUnit
 from app.models.keyword import Keyword
 from app.models.model import Model
@@ -32,6 +33,7 @@ from app.models.weapon_ability import WeaponAbility
 __all__ = [
     "Base",
     "Faction",
+    "FactionAbility",
     "FactionUnit",
     "Weapon",
     "Wargear",

@@ -23,6 +23,12 @@ export const createFactionUnit = (payload) =>
   request('/faction-units', { method: 'POST', body: JSON.stringify(payload) })
 export const deleteFactionUnit = (id) => request(`/faction-units/${id}`, { method: 'DELETE' })
 
+export const listFactionAbilities = () => request('/faction-abilities')
+export const createFactionAbility = (payload) =>
+  request('/faction-abilities', { method: 'POST', body: JSON.stringify(payload) })
+export const deleteFactionAbility = (id) =>
+  request(`/faction-abilities/${id}`, { method: 'DELETE' })
+
 export const listDispositions = () => request('/dispositions')
 export const createDisposition = (payload) =>
   request('/dispositions', { method: 'POST', body: JSON.stringify(payload) })

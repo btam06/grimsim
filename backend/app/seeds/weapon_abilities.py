@@ -17,11 +17,13 @@ from app.combat_rules.conditions import (
 from app.combat_rules.effects import (
     ADD_EXTRA_ATTACK,
     ADD_EXTRA_HIT,
+    ASSAULT,
     AUTO_PASS_WOUND,
     FORCE_CRITICAL_WOUND,
     HAZARDOUS,
     IGNORE_COVER,
     NO_SAVE,
+    PISTOL,
     PLUS_ONE_TO_HIT,
 )
 from app.models import Condition, Effect, WeaponAbility
@@ -111,6 +113,18 @@ ENTRIES = [
         "If the attacking unit moved less than 3\" this turn, this weapon's attacks get +1 to hit.",
         [MOVED_LESS_THAN_3],
         [PLUS_ONE_TO_HIT],
+    ),
+    (
+        "Assault",
+        "This weapon may still be fired even if the attacking unit advanced this turn.",
+        [ALWAYS],
+        [ASSAULT],
+    ),
+    (
+        "Pistol",
+        "This weapon may be fired while the attacking unit is in engagement range, without becoming a melee weapon.",
+        [ALWAYS],
+        [PISTOL],
     ),
 ]
 

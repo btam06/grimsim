@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { createUnit, updateUnit } from '../api'
 import Field from './Field'
 import MultiSelect from './MultiSelect'
+import Select from './Select'
 
 const EMPTY_SLOT = { model_id: '', weapon_ids: [], wargear_ids: [] }
 
@@ -66,6 +67,10 @@ function UnitFormPage({
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError(null)
+    if (!factionUnitId) {
+      setError('Faction Unit is required')
+      return
+    }
     try {
       const payload = {
         faction_unit_id: Number(factionUnitId),
@@ -94,20 +99,12 @@ function UnitFormPage({
       {error && <p className="error">{error}</p>}
       <form onSubmit={handleSubmit}>
         <Field label="Faction Unit">
-          <select
+          <Select
+            options={factionUnits}
             value={factionUnitId}
-            onChange={(e) => setFactionUnitId(e.target.value)}
-            required
-          >
-            <option value="" disabled>
-              Select faction unit
-            </option>
-            {factionUnits.map((fu) => (
-              <option key={fu.id} value={fu.id}>
-                {fu.name}
-              </option>
-            ))}
-          </select>
+            onChange={setFactionUnitId}
+            placeholder="Select faction unit"
+          />
         </Field>
         <Field label="Points">
           <input type="number" value={points} onChange={(e) => setPoints(e.target.value)} required />
@@ -129,19 +126,12 @@ function UnitFormPage({
         )}
 
         <Field label="Add model to unit">
-          <select
+          <Select
+            options={modelOptions}
             value={slot.model_id}
-            onChange={(e) => setSlot({ model_id: e.target.value, weapon_ids: [], wargear_ids: [] })}
-          >
-            <option value="" disabled>
-              Select model
-            </option>
-            {modelOptions.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </select>
+            onChange={(model_id) => setSlot({ model_id, weapon_ids: [], wargear_ids: [] })}
+            placeholder="Select model"
+          />
         </Field>
         <div className="checkbox-group">
           Weapons

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { listFactionUnits, listUnits, listWeapons, runCombat } from '../api'
 import Field from './Field'
+import Select from './Select'
 
 const DIE_FACES = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅']
 const diceFace = (roll) => DIE_FACES[roll - 1] ?? roll
@@ -24,6 +25,7 @@ function CalculatorPanel() {
   const [inCover, setInCover] = useState(false)
   const [halfRange, setHalfRange] = useState(false)
   const [movedLessThan3, setMovedLessThan3] = useState(false)
+  const [advanced, setAdvanced] = useState(false)
   const [selectedWeaponNames, setSelectedWeaponNames] = useState([])
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
@@ -38,6 +40,8 @@ function CalculatorPanel() {
     const name = factionUnits.find((fu) => fu.id === unit.faction_unit_id)?.name ?? `#${unit.faction_unit_id}`
     return `${name} (unit #${unit.id})`
   }
+
+  const unitOptions = units.map((u) => ({ id: u.id, name: unitLabel(u) }))
 
   const attackingUnit = units.find((u) => u.id === Number(attackingUnitId))
 
@@ -74,6 +78,10 @@ function CalculatorPanel() {
     e.preventDefault()
     setError(null)
     setResult(null)
+    if (!attackingUnitId || !defendingUnitId) {
+      setError('Attacking and defending units are required')
+      return
+    }
     try {
       const selectedWeaponIds = weaponGroups
         .filter((g) => selectedWeaponNames.includes(g.name))
@@ -86,6 +94,7 @@ function CalculatorPanel() {
         in_cover: inCover,
         half_range: halfRange,
         moved_less_than_3: movedLessThan3,
+        advanced,
       })
       setResult(response)
     } catch (err) {
@@ -99,36 +108,20 @@ function CalculatorPanel() {
       {error && <p className="error">{error}</p>}
       <form onSubmit={handleCalculate}>
         <Field label="Attacking Unit">
-          <select
+          <Select
+            options={unitOptions}
             value={attackingUnitId}
-            onChange={(e) => setAttackingUnitId(e.target.value)}
-            required
-          >
-            <option value="" disabled>
-              Select attacking unit
-            </option>
-            {units.map((u) => (
-              <option key={u.id} value={u.id}>
-                {unitLabel(u)}
-              </option>
-            ))}
-          </select>
+            onChange={setAttackingUnitId}
+            placeholder="Select attacking unit"
+          />
         </Field>
         <Field label="Defending Unit">
-          <select
+          <Select
+            options={unitOptions}
             value={defendingUnitId}
-            onChange={(e) => setDefendingUnitId(e.target.value)}
-            required
-          >
-            <option value="" disabled>
-              Select defending unit
-            </option>
-            {units.map((u) => (
-              <option key={u.id} value={u.id}>
-                {unitLabel(u)}
-              </option>
-            ))}
-          </select>
+            onChange={setDefendingUnitId}
+            placeholder="Select defending unit"
+          />
         </Field>
         {weaponGroups.length > 0 && (
           <div className="checkbox-group">
@@ -185,6 +178,14 @@ function CalculatorPanel() {
                 onChange={(e) => setHalfRange(e.target.checked)}
               />
               Shooting model is within half range
+            </label>
+            <label className="checkbox-field">
+              <input
+                type="checkbox"
+                checked={advanced}
+                onChange={(e) => setAdvanced(e.target.checked)}
+              />
+              Attacking unit advanced this turn
             </label>
           </>
         )}

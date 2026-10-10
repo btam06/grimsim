@@ -26,6 +26,18 @@ class FactionUnitOut(FactionUnitIn):
     id: int
 
 
+class FactionAbilityIn(BaseModel):
+    name: str
+    description: str | None = None
+    faction_id: int
+
+
+class FactionAbilityOut(FactionAbilityIn):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+
+
 class KeywordIn(BaseModel):
     name: str
 
@@ -247,6 +259,7 @@ class CombatIn(BaseModel):
     in_cover: bool = False
     half_range: bool = False
     moved_less_than_3: bool = False
+    advanced: bool = False
     defender_visible: bool = True
     defender_in_range: bool = True
 
@@ -270,6 +283,7 @@ class CombatOut(BaseModel):
     in_cover: bool
     half_range: bool
     moved_less_than_3: bool
+    advanced: bool
     attack_rolls: list[int]
     attack_rerolls: list[int]
     wound_rolls: list[int]

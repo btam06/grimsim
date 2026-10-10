@@ -1,6 +1,12 @@
 import { useState } from 'react'
 import { createList, deleteUnit, updateList } from '../api'
 import Field from './Field'
+import Select from './Select'
+
+const POINTS_LIMIT_OPTIONS = [
+  { id: '2000', name: '2000 points' },
+  { id: '1000', name: '1000 points' },
+]
 
 function buildEmptyForm() {
   return {
@@ -56,8 +62,8 @@ function ListFormPage({
   const wargearName = (id) => wargear.find((g) => g.id === id)?.name ?? `#${id}`
   const factionUnitName = (id) => factionUnits.find((fu) => fu.id === id)?.name ?? `#${id}`
 
-  const handleFactionChange = (e) => {
-    setForm({ ...form, faction_id: e.target.value, detachment_ids: [] })
+  const handleFactionChange = (faction_id) => {
+    setForm({ ...form, faction_id, detachment_ids: [] })
   }
 
   const toggleDetachment = (id) => {
@@ -72,6 +78,10 @@ function ListFormPage({
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError(null)
+    if (!form.faction_id) {
+      setError('Faction is required')
+      return
+    }
     try {
       if (editingList) {
         await updateList(editingList.id, toPayload(form))
@@ -107,26 +117,19 @@ function ListFormPage({
           />
         </Field>
         <Field label="Points Limit">
-          <select
+          <Select
+            options={POINTS_LIMIT_OPTIONS}
             value={form.points_limit}
-            onChange={(e) => setForm({ ...form, points_limit: e.target.value })}
-            required
-          >
-            <option value="2000">2000 points</option>
-            <option value="1000">1000 points</option>
-          </select>
+            onChange={(points_limit) => setForm({ ...form, points_limit })}
+          />
         </Field>
         <Field label="Faction">
-          <select value={form.faction_id} onChange={handleFactionChange} required>
-            <option value="" disabled>
-              Select faction
-            </option>
-            {factions.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.name}
-              </option>
-            ))}
-          </select>
+          <Select
+            options={factions}
+            value={form.faction_id}
+            onChange={handleFactionChange}
+            placeholder="Select faction"
+          />
         </Field>
         <div className="checkbox-group">
           Detachments

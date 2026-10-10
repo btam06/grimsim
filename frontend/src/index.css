@@ -52,9 +52,14 @@ section form {
 }
 
 section form input,
-section form select {
+section form select,
+section form .select-wrapper {
   flex: 1 1 140px;
   padding: 0.4rem;
+}
+
+section form .select-wrapper {
+  padding: 0;
 }
 
 section form button {
@@ -78,7 +83,8 @@ label.input-field {
 }
 
 label.input-field input,
-label.input-field select {
+label.input-field select,
+label.input-field .select-wrapper {
   flex: 0 0 auto;
 }
 

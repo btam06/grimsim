@@ -4,12 +4,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.combat_rules.effects import (
     ADD_EXTRA_ATTACK,
     ADD_EXTRA_HIT,
+    ASSAULT,
     AUTO_PASS_WOUND,
     FORCE_CRITICAL_WOUND,
     HAZARDOUS,
     IGNORE_COVER,
     IGNORE_COVER_UNIT,
     NO_SAVE,
+    PISTOL,
     PLUS_ONE_SKILL_MELEE,
     PLUS_ONE_SKILL_RANGED,
     PLUS_ONE_TO_HIT,
@@ -79,6 +81,16 @@ ENTRIES = [
         PLUS_ONE_SKILL_MELEE,
         "+1 Skill (Melee)",
         "This attack's hit roll needs 1 less to succeed, but only for a melee weapon.",
+    ),
+    (
+        ASSAULT,
+        "Assault",
+        "This weapon may still be fired even if its bearer's unit advanced this turn.",
+    ),
+    (
+        PISTOL,
+        "Pistol",
+        "This weapon may be fired while its bearer is in engagement range.",
     ),
 ]
 

@@ -8,6 +8,7 @@ import {
 } from '../api'
 import Field from './Field'
 import MultiSelect from './MultiSelect'
+import Select from './Select'
 
 function DetachmentsPanel() {
   const [detachments, setDetachments] = useState([])
@@ -35,6 +36,10 @@ function DetachmentsPanel() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError(null)
+    if (!factionId) {
+      setError('Faction is required')
+      return
+    }
     try {
       await createDetachment({
         name,
@@ -71,16 +76,7 @@ function DetachmentsPanel() {
           <input value={name} onChange={(e) => setName(e.target.value)} required />
         </Field>
         <Field label="Faction">
-          <select value={factionId} onChange={(e) => setFactionId(e.target.value)} required>
-            <option value="" disabled>
-              Select faction
-            </option>
-            {factions.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.name}
-              </option>
-            ))}
-          </select>
+          <Select options={factions} value={factionId} onChange={setFactionId} placeholder="Select faction" />
         </Field>
         <Field label="DP">
           <input type="number" value={dp} onChange={(e) => setDp(e.target.value)} required />

@@ -1,22 +1,18 @@
+import ReactSelect from 'react-select'
+
 function MultiSelect({ options, value, onChange }) {
-  const handleChange = (e) => {
-    const selected = Array.from(e.target.selectedOptions).map((option) => Number(option.value))
-    onChange(selected)
-  }
+  const selectOptions = options.map((option) => ({ value: option.id, label: option.name }))
+  const selected = selectOptions.filter((option) => value.includes(option.value))
 
   return (
-    <select
-      multiple
-      value={value.map(String)}
-      onChange={handleChange}
-      size={Math.min(6, Math.max(2, options.length))}
-    >
-      {options.map((option) => (
-        <option key={option.id} value={option.id}>
-          {option.name}
-        </option>
-      ))}
-    </select>
+    <ReactSelect
+      className="select-wrapper"
+      classNamePrefix="rs"
+      options={selectOptions}
+      value={selected}
+      onChange={(selectedOptions) => onChange((selectedOptions ?? []).map((option) => option.value))}
+      isMulti
+    />
   )
 }
 

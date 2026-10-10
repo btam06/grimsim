@@ -182,7 +182,7 @@ def test_resolve_combat_not_visible_deals_no_damage(monkeypatch):
     defender = _unit([_unit_model(_model(), [])])
 
     result = combat.resolve_combat(
-        attacker, defender, {weapon.id}, in_engagement_range=False, visible=False, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=False, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     assert result.attack_rolls == []
     assert result.total_damage == 0
@@ -196,7 +196,7 @@ def test_resolve_combat_not_in_range_deals_no_damage(monkeypatch):
     defender = _unit([_unit_model(_model(), [])])
 
     result = combat.resolve_combat(
-        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=False, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=False, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     assert result.attack_rolls == []
 
@@ -223,7 +223,7 @@ def test_resolve_combat_in_range_is_checked_per_attacking_model(monkeypatch):
         {weapon_a.id, weapon_b.id},
         in_engagement_range=False,
         visible=True,
-        in_range=True, in_cover=False, half_range=False, moved_less_than_3=False,
+        in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False,
     )
     assert len(result.attack_rolls) == 5  # both attacking models' weapons fired
 
@@ -241,7 +241,7 @@ def test_resolve_combat_rolls_dice_notation_attacks(monkeypatch):
     defender = _unit([_unit_model(_model(wounds=100, save=7), [])])
 
     result = combat.resolve_combat(
-        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     assert len(result.attack_rolls) == 6  # "2D3" rolled as two dice of 3 each
     assert result.wound_rolls == []  # every attack missed, so no wound rolls occurred
@@ -255,7 +255,7 @@ def test_resolve_combat_unselected_weapon_does_not_attack(monkeypatch):
     defender = _unit([_unit_model(_model(wounds=10), [])])
 
     result = combat.resolve_combat(
-        attacker, defender, set(), in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, set(), in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     assert result.attack_rolls == []
 
@@ -275,7 +275,7 @@ def test_resolve_combat_engagement_range_selects_melee_only(monkeypatch):
         {melee.id, ranged.id},
         in_engagement_range=True,
         visible=True,
-        in_range=True, in_cover=False, half_range=False, moved_less_than_3=False,
+        in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False,
     )
     assert len(result.attack_rolls) == 2  # only the melee weapon's attacks counted
 
@@ -295,7 +295,7 @@ def test_resolve_combat_not_in_engagement_range_selects_ranged_only(monkeypatch)
         {melee.id, ranged.id},
         in_engagement_range=False,
         visible=True,
-        in_range=True, in_cover=False, half_range=False, moved_less_than_3=False,
+        in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False,
     )
     assert len(result.attack_rolls) == 5  # only the ranged weapon's attacks counted
 
@@ -314,7 +314,7 @@ def test_resolve_combat_targets_normal_models_before_supports(monkeypatch):
     defender = _unit([_unit_model(support_model, []), _unit_model(normal_model, [])])
 
     result = combat.resolve_combat(
-        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     assert result.models_destroyed == 1  # the 1-wound normal model, not the support
     assert result.defending_models_remaining == 1
@@ -333,7 +333,7 @@ def test_resolve_combat_targets_worst_save_before_best_save(monkeypatch):
     defender = _unit([_unit_model(best_save, []), _unit_model(worst_save, [])])
 
     result = combat.resolve_combat(
-        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     assert result.models_destroyed == 1  # the worst-save model, not the best-save one
     assert result.defending_models_remaining == 1
@@ -355,7 +355,7 @@ def test_resolve_combat_does_not_spill_remaining_damage_onto_next_model(monkeypa
     defender = _unit(defender_models)
 
     result = combat.resolve_combat(
-        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     assert result.attack_rolls == [6]
     assert result.wound_rolls == [6]
@@ -375,7 +375,7 @@ def test_resolve_combat_feel_no_pain_negates_some_damage(monkeypatch):
     defender = _unit([_unit_model(_model(wounds=5, save=2, feel_no_pain=4), [])])
 
     result = combat.resolve_combat(
-        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     assert result.save_rolls == [1]
     assert result.total_damage == 1  # only the middle fnp roll (2) failed to negate
@@ -402,7 +402,7 @@ def test_resolve_combat_next_attack_targets_next_model_with_its_own_fnp(monkeypa
     )
 
     result = combat.resolve_combat(
-        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     assert result.save_rolls == [1, 1]
     # attack 1's point kills model 1 outright (no fnp to roll); attack 2's point
@@ -424,7 +424,7 @@ def test_resolve_combat_weapon_results_breaks_down_a_single_weapon(monkeypatch):
     defender = _unit([_unit_model(_model(wounds=5, save=2, feel_no_pain=None), [])])
 
     result = combat.resolve_combat(
-        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     assert len(result.weapon_results) == 1
     wr = result.weapon_results[0]
@@ -463,7 +463,7 @@ def test_resolve_combat_weapon_results_groups_same_named_weapons_across_models(m
         in_range=True,
         in_cover=False,
         half_range=False,
-        moved_less_than_3=False,
+        moved_less_than_3=False, advanced=False,
     )
     assert len(result.weapon_results) == 1
     wr = result.weapon_results[0]
@@ -491,7 +491,7 @@ def test_resolve_combat_weapon_results_keeps_differently_named_weapons_separate(
         in_range=True,
         in_cover=False,
         half_range=False,
-        moved_less_than_3=False,
+        moved_less_than_3=False, advanced=False,
     )
     names = {wr.name for wr in result.weapon_results}
     assert names == {"Boltgun", "Plasma Gun"}
@@ -516,7 +516,7 @@ def test_resolve_combat_sustained_hits_adds_extra_hit_on_critical(monkeypatch):
     defender = _unit([_unit_model(_model(wounds=5, save=2, feel_no_pain=None), [])])
 
     result = combat.resolve_combat(
-        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     # Only the original attack rolls a hit die; the sustained hit is granted outright.
     assert result.attack_rolls == [6]
@@ -539,7 +539,7 @@ def test_resolve_combat_sustained_hits_does_nothing_on_a_non_critical_hit(monkey
     defender = _unit([_unit_model(_model(wounds=5, save=2, feel_no_pain=None), [])])
 
     result = combat.resolve_combat(
-        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     assert result.attack_rolls == [3]
     assert result.wound_rolls == [3]
@@ -560,7 +560,7 @@ def test_resolve_combat_auto_pass_wound_skips_the_wound_roll(monkeypatch):
     defender = _unit([_unit_model(_model(wounds=5, save=2, feel_no_pain=None), [])])
 
     result = combat.resolve_combat(
-        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     # Strength 1 vs toughness 100 would normally never wound, but the effect
     # forces the wound to pass without a roll being made at all.
@@ -584,7 +584,7 @@ def test_resolve_combat_lethal_hits_auto_wounds_on_a_critical_hit(monkeypatch):
     defender = _unit([_unit_model(_model(wounds=5, save=2, feel_no_pain=None), [])])
 
     result = combat.resolve_combat(
-        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     assert result.attack_rolls == [6]
     assert result.wound_rolls == []
@@ -607,7 +607,7 @@ def test_resolve_combat_devastating_wounds_skips_the_save_roll_on_a_critical_wou
     )
 
     result = combat.resolve_combat(
-        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     assert result.attack_rolls == [6]
     assert result.wound_rolls == [6]
@@ -629,7 +629,7 @@ def test_resolve_combat_devastating_wounds_does_nothing_on_a_non_critical_wound(
     defender = _unit([_unit_model(_model(wounds=5, save=2, feel_no_pain=None), [])])
 
     result = combat.resolve_combat(
-        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     assert result.wound_rolls == [3]
     assert result.save_rolls == [1]  # the save was rolled normally (and failed here)
@@ -655,7 +655,7 @@ def test_resolve_combat_unmatched_condition_keyword_is_ignored(monkeypatch):
     defender = _unit([_unit_model(_model(wounds=5, save=2, feel_no_pain=None), [])])
 
     result = combat.resolve_combat(
-        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     assert result.attack_rolls == [6]
     assert result.total_damage == 1  # just the one attack, no sustained hit granted
@@ -687,7 +687,7 @@ def test_resolve_combat_in_cover_worsens_ranged_hit_rolls(monkeypatch):
         visible=True,
         in_range=True,
         in_cover=True,
-        half_range=False, moved_less_than_3=False,
+        half_range=False, moved_less_than_3=False, advanced=False,
     )
     assert result.attack_rolls == [3]
     assert result.wound_rolls == []  # the worsened hit roll missed
@@ -712,7 +712,7 @@ def test_resolve_combat_in_cover_does_not_affect_melee(monkeypatch):
         visible=True,
         in_range=True,
         in_cover=True,
-        half_range=False, moved_less_than_3=False,
+        half_range=False, moved_less_than_3=False, advanced=False,
     )
     assert result.attack_rolls == [3]
     assert result.wound_rolls == [3]  # the hit succeeded despite in_cover
@@ -739,7 +739,7 @@ def test_resolve_combat_ignore_cover_weapon_ability_negates_the_penalty(monkeypa
         visible=True,
         in_range=True,
         in_cover=True,
-        half_range=False, moved_less_than_3=False,
+        half_range=False, moved_less_than_3=False, advanced=False,
     )
     assert result.attack_rolls == [3]
     assert result.wound_rolls == [3]  # ignored the cover penalty and hit
@@ -766,7 +766,7 @@ def test_resolve_combat_ignore_cover_wargear_ability_negates_the_penalty(monkeyp
         visible=True,
         in_range=True,
         in_cover=True,
-        half_range=False, moved_less_than_3=False,
+        half_range=False, moved_less_than_3=False, advanced=False,
     )
     assert result.attack_rolls == [3]
     assert result.wound_rolls == [3]  # ignored the cover penalty and hit
@@ -804,7 +804,7 @@ def test_resolve_combat_anti_infantry_4_plus_scores_a_critical_wound_at_the_thre
     defender = _unit([_unit_model(defender_model, [])])
 
     result = combat.resolve_combat(
-        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     assert result.attack_rolls == [6]
     assert result.wound_rolls == [4]  # the roll is actually made, not skipped
@@ -825,7 +825,7 @@ def test_resolve_combat_anti_infantry_4_plus_does_nothing_below_the_threshold(mo
     defender = _unit([_unit_model(defender_model, [])])
 
     result = combat.resolve_combat(
-        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     assert result.wound_rolls == [3]
     assert result.total_damage == 0  # below both the anti-infantry and normal wound thresholds
@@ -846,7 +846,7 @@ def test_resolve_combat_anti_infantry_does_nothing_without_the_keyword(monkeypat
     defender = _unit([_unit_model(defender_model, [])])
 
     result = combat.resolve_combat(
-        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     assert result.wound_rolls == [4]
     assert result.total_damage == 0  # strength 1 vs toughness 100 needs a 6 to wound normally
@@ -867,7 +867,7 @@ def test_resolve_combat_anti_vehicle_2_plus_scores_a_critical_wound_at_the_thres
     defender = _unit([_unit_model(defender_model, [])])
 
     result = combat.resolve_combat(
-        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     assert result.wound_rolls == [2]
     assert result.total_damage == 1
@@ -895,7 +895,7 @@ def test_resolve_combat_anti_infantry_triggers_devastating_wounds(monkeypatch):
     defender = _unit([_unit_model(defender_model, [])])
 
     result = combat.resolve_combat(
-        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     assert result.wound_rolls == [4]  # the roll is actually made, not skipped
     assert result.save_rolls == []  # devastating wounds skipped the save too
@@ -941,7 +941,7 @@ def test_resolve_combat_heavy_grants_plus_one_to_hit_when_moved_less_than_3(monk
         in_range=True,
         in_cover=False,
         half_range=False,
-        moved_less_than_3=True,
+        moved_less_than_3=True, advanced=False,
     )
     assert result.attack_rolls == [3]
     assert result.total_damage == 1
@@ -966,7 +966,7 @@ def test_resolve_combat_heavy_does_nothing_when_unit_moved_3_or_more(monkeypatch
         in_range=True,
         in_cover=False,
         half_range=False,
-        moved_less_than_3=False,
+        moved_less_than_3=False, advanced=False,
     )
     assert result.attack_rolls == [3]
     assert result.total_damage == 0  # roll of 3 fails skill 4 without the Heavy bonus
@@ -992,7 +992,7 @@ def test_resolve_combat_reroll_failed_hits_rerolls_once_on_a_failure(monkeypatch
         in_range=True,
         in_cover=False,
         half_range=False,
-        moved_less_than_3=False,
+        moved_less_than_3=False, advanced=False,
     )
     assert result.attack_rolls == [2]  # the original failed roll
     assert result.attack_rerolls == [6]  # the reroll, kept separate
@@ -1018,7 +1018,7 @@ def test_resolve_combat_reroll_failed_hits_does_not_reroll_a_success(monkeypatch
         in_range=True,
         in_cover=False,
         half_range=False,
-        moved_less_than_3=False,
+        moved_less_than_3=False, advanced=False,
     )
     assert result.attack_rolls == [6]  # no reroll needed
     assert result.attack_rerolls == []
@@ -1045,7 +1045,7 @@ def test_resolve_combat_plus_one_skill_ranged_applies_only_to_ranged_weapons(mon
         in_range=True,
         in_cover=False,
         half_range=False,
-        moved_less_than_3=False,
+        moved_less_than_3=False, advanced=False,
     )
     assert result.attack_rolls == [3]
     assert result.total_damage == 1
@@ -1070,7 +1070,7 @@ def test_resolve_combat_plus_one_skill_ranged_does_nothing_for_melee_weapons(mon
         in_range=True,
         in_cover=False,
         half_range=False,
-        moved_less_than_3=False,
+        moved_less_than_3=False, advanced=False,
     )
     assert result.attack_rolls == [3]
     assert result.total_damage == 0  # no bonus for a melee weapon
@@ -1096,7 +1096,7 @@ def test_resolve_combat_plus_one_skill_melee_applies_only_to_melee_weapons(monke
         in_range=True,
         in_cover=False,
         half_range=False,
-        moved_less_than_3=False,
+        moved_less_than_3=False, advanced=False,
     )
     assert result.attack_rolls == [3]
     assert result.total_damage == 1
@@ -1121,10 +1121,164 @@ def test_resolve_combat_plus_one_skill_melee_does_nothing_for_ranged_weapons(mon
         in_range=True,
         in_cover=False,
         half_range=False,
-        moved_less_than_3=False,
+        moved_less_than_3=False, advanced=False,
     )
     assert result.attack_rolls == [3]
     assert result.total_damage == 0  # no bonus for a ranged weapon
+
+
+# --- assault / pistol ---
+
+
+def test_resolve_combat_advanced_prevents_a_ranged_weapon_from_firing(monkeypatch):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+
+    weapon = _weapon(attacks="2", skill=2, weapon_type="ranged")
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    defender = _unit([_unit_model(_model(wounds=5), [])])
+
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {weapon.id},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=True,
+    )
+    assert result.attack_rolls == []
+    assert result.total_damage == 0
+
+
+def test_resolve_combat_assault_weapon_still_fires_when_advanced(monkeypatch):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+
+    assault = _ability([_condition("always")], [_effect("assault")])
+    weapon = _weapon(attacks="2", skill=2, weapon_type="ranged")
+    weapon.id = 1
+    weapon.abilities = [assault]
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    defender = _unit([_unit_model(_model(wounds=5), [])])
+
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {weapon.id},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=True,
+    )
+    assert len(result.attack_rolls) == 2
+
+
+def test_resolve_combat_advanced_does_not_affect_melee_weapons(monkeypatch):
+    # Advancing only restricts ranged weapons firing during the shooting
+    # phase - it has no bearing on a melee weapon swinging in engagement range.
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+
+    weapon = _weapon(attacks="2", skill=2, weapon_type="melee")
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    defender = _unit([_unit_model(_model(wounds=5), [])])
+
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {weapon.id},
+        in_engagement_range=True,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=True,
+    )
+    assert len(result.attack_rolls) == 2
+
+
+def test_resolve_combat_ranged_weapon_does_not_fire_in_engagement_range_without_pistol(
+    monkeypatch,
+):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+
+    weapon = _weapon(attacks="2", skill=2, weapon_type="ranged")
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    defender = _unit([_unit_model(_model(wounds=5), [])])
+
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {weapon.id},
+        in_engagement_range=True,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+    )
+    assert result.attack_rolls == []
+
+
+def test_resolve_combat_pistol_weapon_fires_in_engagement_range(monkeypatch):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+
+    pistol = _ability([_condition("always")], [_effect("pistol")])
+    weapon = _weapon(attacks="2", skill=2, weapon_type="ranged")
+    weapon.id = 1
+    weapon.abilities = [pistol]
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    defender = _unit([_unit_model(_model(wounds=5), [])])
+
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {weapon.id},
+        in_engagement_range=True,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+    )
+    assert len(result.attack_rolls) == 2
+
+
+def test_resolve_combat_pistol_does_not_help_a_melee_weapon_fire_at_range(monkeypatch):
+    # Pistol only ever bypasses the engagement-range restriction for a
+    # ranged weapon - it never turns a melee weapon into a ranged one.
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+
+    pistol = _ability([_condition("always")], [_effect("pistol")])
+    weapon = _weapon(attacks="2", skill=2, weapon_type="melee")
+    weapon.id = 1
+    weapon.abilities = [pistol]
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    defender = _unit([_unit_model(_model(wounds=5), [])])
+
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {weapon.id},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+    )
+    assert result.attack_rolls == []
 
 
 # --- datasheet ability: unit-wide reroll failed hits ---
@@ -1152,7 +1306,7 @@ def test_resolve_combat_datasheet_ability_grants_unit_wide_reroll_failed_hits(mo
         in_range=True,
         in_cover=False,
         half_range=False,
-        moved_less_than_3=False,
+        moved_less_than_3=False, advanced=False,
     )
     assert result.attack_rolls == [2]  # the original failed roll
     assert result.attack_rerolls == [6]  # the reroll, kept separate
@@ -1176,7 +1330,7 @@ def test_resolve_combat_without_the_datasheet_ability_no_reroll_happens(monkeypa
         in_range=True,
         in_cover=False,
         half_range=False,
-        moved_less_than_3=False,
+        moved_less_than_3=False, advanced=False,
     )
     assert result.attack_rolls == [2]  # no reroll
     assert result.attack_rerolls == []
@@ -1214,7 +1368,7 @@ def test_resolve_combat_datasheet_ability_reroll_applies_to_every_model_in_the_u
         in_range=True,
         in_cover=False,
         half_range=False,
-        moved_less_than_3=False,
+        moved_less_than_3=False, advanced=False,
     )
     assert result.attack_rolls == [2]  # model B's original failed roll
     assert result.attack_rerolls == [6]  # the reroll, kept separate
@@ -1262,7 +1416,7 @@ def test_resolve_combat_rapid_fire_1_adds_an_extra_attack_within_half_range(monk
         visible=True,
         in_range=True,
         in_cover=False,
-        half_range=True, moved_less_than_3=False,
+        half_range=True, moved_less_than_3=False, advanced=False,
     )
     # Two separate hit rolls (base attack + the one Rapid Fire added).
     assert result.attack_rolls == [6, 6]
@@ -1288,7 +1442,7 @@ def test_resolve_combat_rapid_fire_1_does_nothing_outside_half_range(monkeypatch
         visible=True,
         in_range=True,
         in_cover=False,
-        half_range=False, moved_less_than_3=False,
+        half_range=False, moved_less_than_3=False, advanced=False,
     )
     assert result.attack_rolls == [6]  # just the base attack, no extra one added
     assert result.total_damage == 1
@@ -1316,7 +1470,7 @@ def test_resolve_combat_rapid_fire_1_grants_exactly_one_extra_attack_regardless_
         visible=True,
         in_range=True,
         in_cover=False,
-        half_range=True, moved_less_than_3=False,
+        half_range=True, moved_less_than_3=False, advanced=False,
     )
     assert len(result.attack_rolls) == 3
 
@@ -1337,7 +1491,7 @@ def test_resolve_combat_hazardous_rolls_once_per_weapon_and_deals_no_damage_abov
     defender = _unit([_unit_model(_model(wounds=5), [])])
 
     result = combat.resolve_combat(
-        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     assert result.hazardous_rolls == [3]
     assert result.hazardous_wounds == 0  # a roll of 3 is safe
@@ -1356,7 +1510,7 @@ def test_resolve_combat_hazardous_deals_1_wound_to_an_infantry_shooter(monkeypat
     defender = _unit([_unit_model(_model(wounds=5), [])])
 
     result = combat.resolve_combat(
-        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     assert result.hazardous_rolls == [1]
     assert result.hazardous_wounds == 1
@@ -1374,7 +1528,7 @@ def test_resolve_combat_hazardous_deals_3_wounds_to_a_vehicle_shooter(monkeypatc
     defender = _unit([_unit_model(_model(wounds=5), [])])
 
     result = combat.resolve_combat(
-        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     assert result.hazardous_rolls == [2]
     assert result.hazardous_wounds == 3
@@ -1395,7 +1549,7 @@ def test_resolve_combat_hazardous_wounds_reduced_by_feel_no_pain(monkeypatch):
     defender = _unit([_unit_model(_model(wounds=5), [])])
 
     result = combat.resolve_combat(
-        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     assert result.hazardous_rolls == [1]
     assert result.hazardous_wounds == 1
@@ -1417,7 +1571,7 @@ def test_resolve_combat_hazardous_destroys_the_shooting_model_when_wounds_exceed
     defender = _unit([_unit_model(_model(wounds=5), [])])
 
     result = combat.resolve_combat(
-        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     assert result.hazardous_wounds == 1
     assert result.hazardous_models_destroyed == 1
@@ -1436,7 +1590,7 @@ def test_resolve_combat_hazardous_does_not_destroy_a_model_that_survives(monkeyp
     defender = _unit([_unit_model(_model(wounds=5), [])])
 
     result = combat.resolve_combat(
-        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
     assert result.hazardous_wounds == 1
     assert result.hazardous_models_destroyed == 0
@@ -1466,7 +1620,7 @@ def test_resolve_combat_hazardous_damage_accumulates_across_a_models_weapons(mon
         visible=True,
         in_range=True,
         in_cover=False,
-        half_range=False, moved_less_than_3=False,
+        half_range=False, moved_less_than_3=False, advanced=False,
     )
     assert result.hazardous_rolls == [1, 1]
     assert result.hazardous_wounds == 2
@@ -1502,7 +1656,7 @@ def test_resolve_combat_hazardous_models_destroyed_only_counts_models_that_fired
         visible=True,
         in_range=True,
         in_cover=False,
-        half_range=False, moved_less_than_3=False,
+        half_range=False, moved_less_than_3=False, advanced=False,
     )
     assert result.hazardous_models_destroyed == 1
 
@@ -1536,7 +1690,7 @@ def test_resolve_combat_ignore_cover_unit_wargear_applies_to_every_model_in_the_
         visible=True,
         in_range=True,
         in_cover=True,
-        half_range=False, moved_less_than_3=False,
+        half_range=False, moved_less_than_3=False, advanced=False,
     )
     # Both weapons hit on a roll of 3 (unworsened skill 3), proving the unit-wide
     # effect applied to model B's weapon even though the wargear is on model A.
@@ -1571,7 +1725,7 @@ def test_resolve_combat_ignore_cover_per_model_does_not_leak_to_other_models(mon
         visible=True,
         in_range=True,
         in_cover=True,
-        half_range=False, moved_less_than_3=False,
+        half_range=False, moved_less_than_3=False, advanced=False,
     )
     # Model A's roll of 3 still hits (skill 3, cover ignored); model B's roll of
     # 3 misses (skill worsened to 4 by cover, since it doesn't carry the gear).
@@ -1835,6 +1989,104 @@ async def test_combat_endpoint_applies_seeded_heavy_weapon_ability(
     # Skill 4 would normally need a roll of 4+ to hit, but Heavy grants +1 to
     # hit since the attacking unit moved less than 3" this turn.
     assert body["attack_rolls"] == [3]
+    assert body["total_damage"] == 1
+
+
+async def test_combat_endpoint_applies_seeded_assault_weapon_ability(
+    client: AsyncClient, faction_id: int, session, monkeypatch
+):
+    from app.seeds import conditions as conditions_seed
+    from app.seeds import effects as effects_seed
+    from app.seeds import weapon_abilities as weapon_abilities_seed
+
+    await conditions_seed.seed(session)
+    await effects_seed.seed(session)
+    await weapon_abilities_seed.seed(session)
+
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+
+    abilities = (await client.get("/weapon-abilities")).json()
+    ability_id = next(a["id"] for a in abilities if a["name"] == "Assault")
+
+    attacker_model_id = await _create_model(client, faction_id)
+    weapon_id = await _create_weapon(
+        client,
+        attacker_model_id,
+        strength=10,
+        ap=-10,
+        skill=2,
+        ability_ids=[ability_id],
+    )
+    attacker_fu = await _create_faction_unit(client, faction_id, "Attackers")
+    attacker_unit_id = await _create_unit(client, attacker_fu, attacker_model_id, weapon_id)
+
+    defender_model_id = await _create_model(client, faction_id, toughness=1, save=2, wounds=5)
+    defender_fu = await _create_faction_unit(client, faction_id, "Defenders")
+    defender_unit_id = await _create_unit(client, defender_fu, defender_model_id)
+
+    response = await client.post(
+        "/combat",
+        json={
+            "attacking_unit_id": attacker_unit_id,
+            "defending_unit_id": defender_unit_id,
+            "selected_weapon_ids": [weapon_id],
+            "advanced": True,
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    # The attacking unit advanced, which would normally stop this ranged
+    # weapon from firing at all - Assault lets it fire anyway.
+    assert len(body["attack_rolls"]) == 1
+    assert body["total_damage"] == 1
+
+
+async def test_combat_endpoint_applies_seeded_pistol_weapon_ability(
+    client: AsyncClient, faction_id: int, session, monkeypatch
+):
+    from app.seeds import conditions as conditions_seed
+    from app.seeds import effects as effects_seed
+    from app.seeds import weapon_abilities as weapon_abilities_seed
+
+    await conditions_seed.seed(session)
+    await effects_seed.seed(session)
+    await weapon_abilities_seed.seed(session)
+
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+
+    abilities = (await client.get("/weapon-abilities")).json()
+    ability_id = next(a["id"] for a in abilities if a["name"] == "Pistol")
+
+    attacker_model_id = await _create_model(client, faction_id)
+    weapon_id = await _create_weapon(
+        client,
+        attacker_model_id,
+        strength=10,
+        ap=-10,
+        skill=2,
+        ability_ids=[ability_id],
+    )
+    attacker_fu = await _create_faction_unit(client, faction_id, "Attackers")
+    attacker_unit_id = await _create_unit(client, attacker_fu, attacker_model_id, weapon_id)
+
+    defender_model_id = await _create_model(client, faction_id, toughness=1, save=2, wounds=5)
+    defender_fu = await _create_faction_unit(client, faction_id, "Defenders")
+    defender_unit_id = await _create_unit(client, defender_fu, defender_model_id)
+
+    response = await client.post(
+        "/combat",
+        json={
+            "attacking_unit_id": attacker_unit_id,
+            "defending_unit_id": defender_unit_id,
+            "selected_weapon_ids": [weapon_id],
+            "in_engagement_range": True,
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    # The attacking unit is in engagement range, which would normally stop
+    # this ranged weapon from firing at all - Pistol lets it fire anyway.
+    assert len(body["attack_rolls"]) == 1
     assert body["total_damage"] == 1
 
 

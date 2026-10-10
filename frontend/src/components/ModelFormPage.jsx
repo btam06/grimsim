@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import { MultiSelect as KeywordMultiSelect } from 'react-multi-select-component'
 import { createModel, deleteWeapon, updateModel } from '../api'
 import { skillLabel } from '../weaponDisplay'
 import AddWargearForm from './AddWargearForm'
 import Field from './Field'
 import MultiSelect from './MultiSelect'
+import Select from './Select'
 
 function buildEmptyForm() {
   return {
@@ -86,17 +86,16 @@ function ModelFormPage({
 
   const handleChange = (field) => (e) => setForm({ ...form, [field]: e.target.value })
 
-  const keywordOptions = keywords.map((k) => ({ value: k.id, label: k.name }))
-  const selectedKeywordOptions = keywordOptions.filter((option) =>
-    form.keyword_ids.includes(option.value)
-  )
-
   const save = () =>
     editingModel ? updateModel(editingModel.id, toPayload(form)) : createModel(toPayload(form))
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError(null)
+    if (!form.faction_id) {
+      setError('Faction is required')
+      return
+    }
     try {
       await save()
       onSaved()
@@ -107,6 +106,10 @@ function ModelFormPage({
 
   const handleSaveAndStay = async () => {
     setError(null)
+    if (!form.faction_id) {
+      setError('Faction is required')
+      return
+    }
     try {
       const result = await save()
       onSavedStay(result)
@@ -142,16 +145,12 @@ function ModelFormPage({
           <input value={form.name} onChange={handleChange('name')} required />
         </Field>
         <Field label="Faction">
-          <select value={form.faction_id} onChange={handleChange('faction_id')} required>
-            <option value="" disabled>
-              Select faction
-            </option>
-            {factions.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.name}
-              </option>
-            ))}
-          </select>
+          <Select
+            options={factions}
+            value={form.faction_id}
+            onChange={(faction_id) => setForm({ ...form, faction_id })}
+            placeholder="Select faction"
+          />
         </Field>
         <Field label="Movement">
           <input type="number" value={form.movement} onChange={handleChange('movement')} required />
@@ -205,13 +204,10 @@ function ModelFormPage({
         </label>
         <div className="field">
           Keywords
-          <KeywordMultiSelect
-            options={keywordOptions}
-            value={selectedKeywordOptions}
-            onChange={(selected) =>
-              setForm({ ...form, keyword_ids: selected.map((option) => option.value) })
-            }
-            labelledBy="Keywords"
+          <MultiSelect
+            options={keywords}
+            value={form.keyword_ids}
+            onChange={(keyword_ids) => setForm({ ...form, keyword_ids })}
           />
         </div>
         <label className="field">

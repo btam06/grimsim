@@ -26,6 +26,8 @@ PLUS_ONE_TO_HIT = "plus_one_to_hit"
 REROLL_FAILED_HITS = "reroll_failed_hits"
 PLUS_ONE_SKILL_RANGED = "plus_one_skill_ranged"
 PLUS_ONE_SKILL_MELEE = "plus_one_skill_melee"
+ASSAULT = "assault"
+PISTOL = "pistol"
 
 
 def auto_pass_wound(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
@@ -99,6 +101,19 @@ def plus_one_skill_melee(state: dict[str, Any], pending: deque[dict[str, Any]]) 
     state["plus_one_skill_melee"] = True
 
 
+def assault(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # This weapon may still be fired even if the bearer's unit advanced this
+    # turn, when a ranged weapon would otherwise be unable to shoot at all.
+    state["assault"] = True
+
+
+def pistol(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # This weapon may be fired while its bearer is in engagement range,
+    # without becoming a melee weapon - it's still subject to every other
+    # normal restriction on ranged weapons.
+    state["pistol"] = True
+
+
 EFFECTS = {
     AUTO_PASS_WOUND: auto_pass_wound,
     ADD_EXTRA_HIT: add_extra_hit,
@@ -112,4 +127,6 @@ EFFECTS = {
     REROLL_FAILED_HITS: reroll_failed_hits,
     PLUS_ONE_SKILL_RANGED: plus_one_skill_ranged,
     PLUS_ONE_SKILL_MELEE: plus_one_skill_melee,
+    ASSAULT: assault,
+    PISTOL: pistol,
 }

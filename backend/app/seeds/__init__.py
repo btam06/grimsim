@@ -5,6 +5,7 @@ from app.seeds import (
     datasheet_abilities,
     dispositions,
     effects,
+    faction_abilities,
     factions,
     keywords,
     wargear_abilities,
@@ -36,6 +37,7 @@ from app.seeds.faction_units import imperial_knights as imperial_knights_units
 SEED_FUNCS = [
     dispositions.seed,
     factions.seed,
+    faction_abilities.seed,
     keywords.seed,
     conditions.seed,
     effects.seed,
