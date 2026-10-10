@@ -52,6 +52,7 @@ function UnitsPanel() {
         editingUnit={editingUnit}
         defaultListId={null}
         models={models}
+        modelOptions={models}
         weapons={weapons}
         wargear={wargear}
         factionUnits={factionUnits}

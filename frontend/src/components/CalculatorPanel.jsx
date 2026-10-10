@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { listFactionUnits, listUnits, runCombat } from '../api'
+import { useEffect, useMemo, useState } from 'react'
+import { listFactionUnits, listUnits, listWeapons, runCombat } from '../api'
 import Field from './Field'
 
 const DIE_FACES = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅']
@@ -17,18 +17,21 @@ function DiceRolls({ rolls }) {
 function CalculatorPanel() {
   const [units, setUnits] = useState([])
   const [factionUnits, setFactionUnits] = useState([])
+  const [weapons, setWeapons] = useState([])
   const [attackingUnitId, setAttackingUnitId] = useState('')
   const [defendingUnitId, setDefendingUnitId] = useState('')
   const [inEngagementRange, setInEngagementRange] = useState(false)
   const [inCover, setInCover] = useState(false)
   const [halfRange, setHalfRange] = useState(false)
   const [movedLessThan3, setMovedLessThan3] = useState(false)
+  const [selectedWeaponNames, setSelectedWeaponNames] = useState([])
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
 
   useEffect(() => {
     listUnits().then(setUnits).catch((err) => setError(err.message))
     listFactionUnits().then(setFactionUnits).catch((err) => setError(err.message))
+    listWeapons().then(setWeapons).catch((err) => setError(err.message))
   }, [])
 
   const unitLabel = (unit) => {
@@ -36,13 +39,45 @@ function CalculatorPanel() {
     return `${name} (unit #${unit.id})`
   }
 
+  const attackingUnit = units.find((u) => u.id === Number(attackingUnitId))
+
+  // Weapons sharing a name (e.g. one per model in a 5-model squad) are
+  // grouped into a single checklist entry - checking it selects every
+  // underlying weapon id in the group.
+  const weaponGroups = useMemo(() => {
+    if (!attackingUnit) return []
+    const weaponIds = attackingUnit.unit_models.flatMap((um) => um.weapon_ids)
+    const groups = new Map()
+    weaponIds.forEach((id) => {
+      const weapon = weapons.find((w) => w.id === id)
+      if (!weapon) return
+      if (!groups.has(weapon.name)) groups.set(weapon.name, [])
+      groups.get(weapon.name).push(id)
+    })
+    return Array.from(groups.entries()).map(([name, ids]) => ({ name, weaponIds: ids }))
+  }, [attackingUnit, weapons])
+
+  // Default every weapon group to selected whenever the attacking unit
+  // changes (or its weapons finish loading).
+  useEffect(() => {
+    setSelectedWeaponNames(weaponGroups.map((g) => g.name))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attackingUnitId, weapons])
+
+  const toggleWeaponName = (name) => {
+    setSelectedWeaponNames((names) =>
+      names.includes(name) ? names.filter((n) => n !== name) : [...names, name]
+    )
+  }
+
   const handleCalculate = async (e) => {
     e.preventDefault()
     setError(null)
     setResult(null)
     try {
-      const attackingUnit = units.find((u) => u.id === Number(attackingUnitId))
-      const selectedWeaponIds = attackingUnit.unit_models.flatMap((um) => um.weapon_ids)
+      const selectedWeaponIds = weaponGroups
+        .filter((g) => selectedWeaponNames.includes(g.name))
+        .flatMap((g) => g.weaponIds)
       const response = await runCombat({
         attacking_unit_id: Number(attackingUnitId),
         defending_unit_id: Number(defendingUnitId),
@@ -95,6 +130,23 @@ function CalculatorPanel() {
             ))}
           </select>
         </Field>
+        {weaponGroups.length > 0 && (
+          <div className="checkbox-group">
+            Weapons to Shoot
+            <div className="checkbox-grid">
+              {weaponGroups.map((g) => (
+                <label key={g.name} className="checkbox-field">
+                  <input
+                    type="checkbox"
+                    checked={selectedWeaponNames.includes(g.name)}
+                    onChange={() => toggleWeaponName(g.name)}
+                  />
+                  {g.name}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="radio-group">
           Engagement
           <label className="radio-option">
@@ -148,25 +200,46 @@ function CalculatorPanel() {
       </form>
 
       {result && (
-        <ul>
-          <li>
-            Attack rolls: <DiceRolls rolls={result.attack_rolls} />
-          </li>
-          <li>
-            Wound rolls: <DiceRolls rolls={result.wound_rolls} />
-          </li>
-          <li>
-            Save rolls: <DiceRolls rolls={result.save_rolls} />
-          </li>
-          <li>Total damage dealt: {result.total_damage}</li>
-          <li>Defending models destroyed: {result.models_destroyed}</li>
-          <li>Defending models remaining: {result.defending_models_remaining}</li>
-          <li>
-            Hazardous rolls: <DiceRolls rolls={result.hazardous_rolls} />
-          </li>
-          <li>Hazardous wounds taken: {result.hazardous_wounds}</li>
-          <li>Hazardous attackers destroyed: {result.hazardous_models_destroyed}</li>
-        </ul>
+        <>
+          <h3>Results by Weapon</h3>
+          {result.weapon_results.length === 0 && <p>No weapons fired.</p>}
+          <ul>
+            {result.weapon_results.map((wr) => (
+              <li key={wr.name}>
+                {wr.name}
+                <ul>
+                  <li>
+                    Attack rolls: <DiceRolls rolls={wr.attack_rolls} />
+                  </li>
+                  <li>
+                    Attack rerolls: <DiceRolls rolls={wr.attack_rerolls} />
+                  </li>
+                  <li>
+                    Wound rolls: <DiceRolls rolls={wr.wound_rolls} />
+                  </li>
+                  <li>
+                    Save rolls: <DiceRolls rolls={wr.save_rolls} />
+                  </li>
+                  <li>Total damage dealt: {wr.total_damage}</li>
+                  <li>Defending models destroyed: {wr.models_destroyed}</li>
+                  <li>
+                    Hazardous rolls: <DiceRolls rolls={wr.hazardous_rolls} />
+                  </li>
+                  <li>Hazardous wounds taken: {wr.hazardous_wounds}</li>
+                </ul>
+              </li>
+            ))}
+          </ul>
+
+          <h3>Overall</h3>
+          <ul>
+            <li>Total damage dealt: {result.total_damage}</li>
+            <li>Defending models destroyed: {result.models_destroyed}</li>
+            <li>Defending models remaining: {result.defending_models_remaining}</li>
+            <li>Hazardous wounds taken: {result.hazardous_wounds}</li>
+            <li>Hazardous attackers destroyed: {result.hazardous_models_destroyed}</li>
+          </ul>
+        </>
       )}
     </section>
   )

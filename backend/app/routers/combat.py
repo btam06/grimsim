@@ -14,7 +14,7 @@ from app.models import (
     Weapon,
     WeaponAbility,
 )
-from app.schemas import CombatIn, CombatOut
+from app.schemas import CombatIn, CombatOut, WeaponCombatResultOut
 from app.services import combat as combat_service
 
 router = APIRouter(prefix="/combat", tags=["combat"])
@@ -93,6 +93,7 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
         half_range=payload.half_range,
         moved_less_than_3=payload.moved_less_than_3,
         attack_rolls=result.attack_rolls,
+        attack_rerolls=result.attack_rerolls,
         wound_rolls=result.wound_rolls,
         save_rolls=result.save_rolls,
         total_damage=result.total_damage,
@@ -101,4 +102,18 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
         hazardous_rolls=result.hazardous_rolls,
         hazardous_wounds=result.hazardous_wounds,
         hazardous_models_destroyed=result.hazardous_models_destroyed,
+        weapon_results=[
+            WeaponCombatResultOut(
+                name=wr.name,
+                attack_rolls=wr.attack_rolls,
+                attack_rerolls=wr.attack_rerolls,
+                wound_rolls=wr.wound_rolls,
+                save_rolls=wr.save_rolls,
+                total_damage=wr.total_damage,
+                models_destroyed=wr.models_destroyed,
+                hazardous_rolls=wr.hazardous_rolls,
+                hazardous_wounds=wr.hazardous_wounds,
+            )
+            for wr in result.weapon_results
+        ],
     )

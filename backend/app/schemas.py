@@ -251,6 +251,18 @@ class CombatIn(BaseModel):
     defender_in_range: bool = True
 
 
+class WeaponCombatResultOut(BaseModel):
+    name: str
+    attack_rolls: list[int]
+    attack_rerolls: list[int]
+    wound_rolls: list[int]
+    save_rolls: list[int]
+    total_damage: int
+    models_destroyed: int
+    hazardous_rolls: list[int]
+    hazardous_wounds: int
+
+
 class CombatOut(BaseModel):
     visible: bool
     in_range: bool
@@ -259,6 +271,7 @@ class CombatOut(BaseModel):
     half_range: bool
     moved_less_than_3: bool
     attack_rolls: list[int]
+    attack_rerolls: list[int]
     wound_rolls: list[int]
     save_rolls: list[int]
     total_damage: int
@@ -267,6 +280,7 @@ class CombatOut(BaseModel):
     hazardous_rolls: list[int]
     hazardous_wounds: int
     hazardous_models_destroyed: int
+    weapon_results: list[WeaponCombatResultOut]
 
 
 class ArmyListIn(BaseModel):

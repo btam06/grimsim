@@ -12,6 +12,8 @@ from app.seeds import (
 )
 from app.seeds.detachments import adeptus_mechanicus as adeptus_mechanicus_detachments
 from app.seeds.faction_units import adeptus_mechanicus as adeptus_mechanicus_units
+from app.seeds.faction_units import imperial_agents as imperial_agents_units
+from app.seeds.faction_units import imperial_knights as imperial_knights_units
 
 # To seed another table on startup: add a module here with a NAMES list and an
 # async def seed(session) function (see dispositions.py / factions.py), then
@@ -42,6 +44,8 @@ SEED_FUNCS = [
     datasheet_abilities.seed,
     adeptus_mechanicus_units.seed,
     adeptus_mechanicus_detachments.seed,
+    imperial_agents_units.seed,
+    imperial_knights_units.seed,
 ]
 
 

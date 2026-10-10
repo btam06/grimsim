@@ -17,6 +17,7 @@ function UnitFormPage({
   editingUnit,
   defaultListId,
   models,
+  modelOptions,
   weapons,
   wargear,
   factionUnits,
@@ -135,7 +136,7 @@ function UnitFormPage({
             <option value="" disabled>
               Select model
             </option>
-            {models.map((m) => (
+            {modelOptions.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.name}
               </option>

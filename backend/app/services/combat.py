@@ -78,23 +78,40 @@ def _apply_triggered_effects(
 
 @dataclass
 class _Target:
-    toughness: int
-    save: int
-    invulnerable: int | None
-    feel_no_pain: int | None
-    remaining_wounds: int
+    toughness        : int
+    save             : int
+    invulnerable     : int | None
+    feel_no_pain     : int | None
+    remaining_wounds : int
+
+
+@dataclass
+class WeaponCombatResult:
+    # The same breakdown as CombatResult below, scoped to a single weapon
+    # profile (every weapon instance sharing one name, across every model in
+    # the attacking unit that fired it) rather than the whole combat.
+    name             : str
+    attack_rolls     : list[int] = field(default_factory=list)
+    attack_rerolls   : list[int] = field(default_factory=list)
+    wound_rolls      : list[int] = field(default_factory=list)
+    save_rolls       : list[int] = field(default_factory=list)
+    total_damage     : int       = field(default=0)
+    models_destroyed : int       = field(default=0)
+    hazardous_rolls  : list[int] = field(default_factory=list)
+    hazardous_wounds : int       = field(default=0)
 
 
 @dataclass
 class CombatResult:
     # Raw die values (1-6) rolled at each step, in the order they were rolled,
     # rather than pass/fail counts - callers can see exactly what was rolled.
-    attack_rolls: list[int] = field(default_factory=list)
-    wound_rolls: list[int] = field(default_factory=list)
-    save_rolls: list[int] = field(default_factory=list)
-    total_damage: int = field(default=0)
-    models_destroyed: int = field(default=0)
-    defending_models_remaining: int = field(default=0)
+    attack_rolls               : list[int] = field(default_factory=list)
+    attack_rerolls             : list[int] = field(default_factory=list)
+    wound_rolls                : list[int] = field(default_factory=list)
+    save_rolls                 : list[int] = field(default_factory=list)
+    total_damage               : int       = field(default=0)
+    models_destroyed           : int       = field(default=0)
+    defending_models_remaining : int       = field(default=0)
     # Self-inflicted hazard checks made by the attacking unit (one per
     # hazardous weapon fired), and the total wounds they dealt after FNP.
     hazardous_rolls: list[int] = field(default_factory=list)
@@ -102,6 +119,9 @@ class CombatResult:
     # How many attacking models were destroyed outright by their own
     # hazardous wounds (checked once a model is done firing all its weapons).
     hazardous_models_destroyed: int = field(default=0)
+    # The same totals above, broken down per weapon profile (grouped by
+    # weapon name) instead of pooled across the whole attacking unit.
+    weapon_results: list[WeaponCombatResult] = field(default_factory=list)
 
 
 def resolve_combat(
@@ -167,6 +187,11 @@ def resolve_combat(
     )
 
     result = CombatResult()
+    # Accumulates the same breakdown as `result`, but bucketed per weapon name
+    # - every weapon instance sharing a name (e.g. five models each carrying
+    # their own "Boltgun") feeds into the same bucket. Built up alongside the
+    # pooled totals below, then flattened onto result.weapon_results at the end.
+    weapon_results_by_name: dict[str, WeaponCombatResult] = {}
 
     # A unit that can't see its target makes no attacks at all - this is checked
     # once for the whole attacking unit, since visibility is a property of the
@@ -200,6 +225,10 @@ def resolve_combat(
                 if is_ranged == in_engagement_range:
                     continue
 
+                weapon_result = weapon_results_by_name.setdefault(
+                    weapon.name, WeaponCombatResult(name=weapon.name)
+                )
+
                 abilities = list(weapon.abilities) + wargear_abilities
 
                 # Attacks characteristic: how many attack sequences this weapon makes,
@@ -226,6 +255,7 @@ def resolve_combat(
                     # on its own keywords, reduced by its own feel no pain.
                     hazard_roll = random.randint(1, 6)
                     result.hazardous_rolls.append(hazard_roll)
+                    weapon_result.hazardous_rolls.append(hazard_roll)
                     if hazard_roll <= 2:
                         shooter_keywords = {k.name for k in unit_model.model.keywords}
                         if "VEHICLE" in shooter_keywords:
@@ -239,6 +269,7 @@ def resolve_combat(
                             if shooter_fnp is not None and random.randint(1, 6) >= shooter_fnp:
                                 continue  # feel no pain negated this point of damage
                             result.hazardous_wounds += 1
+                            weapon_result.hazardous_wounds += 1
                             model_hazardous_damage += 1
 
                 while pending_attacks:
@@ -281,6 +312,7 @@ def resolve_combat(
                         # Hit roll: succeeds (hits) on a roll equal to or greater than skill.
                         hit_roll = random.randint(1, 6)
                         result.attack_rolls.append(hit_roll)
+                        weapon_result.attack_rolls.append(hit_roll)
                         _apply_triggered_effects(
                             abilities, {"step": "hit", "roll": hit_roll}, attack, pending_attacks
                         )
@@ -291,7 +323,8 @@ def resolve_combat(
                             # result - hit-step triggers (e.g. Sustained Hits) are
                             # re-checked against the new roll too.
                             hit_roll = random.randint(1, 6)
-                            result.attack_rolls.append(hit_roll)
+                            result.attack_rerolls.append(hit_roll)
+                            weapon_result.attack_rerolls.append(hit_roll)
                             _apply_triggered_effects(
                                 abilities, {"step": "hit", "roll": hit_roll}, attack, pending_attacks
                             )
@@ -308,6 +341,7 @@ def resolve_combat(
                     else:
                         wound_roll = random.randint(1, 6)
                         result.wound_rolls.append(wound_roll)
+                        weapon_result.wound_rolls.append(wound_roll)
                         _apply_triggered_effects(
                             abilities,
                             {"step": "wound", "roll": wound_roll, "defender_keywords": defender_keywords},
@@ -346,6 +380,7 @@ def resolve_combat(
                             save_needed = min(save_needed, target.invulnerable)
                         save_roll = random.randint(1, 6)
                         result.save_rolls.append(save_roll)
+                        weapon_result.save_rolls.append(save_roll)
                         _apply_triggered_effects(
                             abilities, {"step": "save", "roll": save_roll}, attack, pending_attacks
                         )
@@ -370,10 +405,12 @@ def resolve_combat(
                             continue  # feel no pain negated this point of damage
 
                         result.total_damage += 1
+                        weapon_result.total_damage += 1
                         target.remaining_wounds -= 1
                         if target.remaining_wounds <= 0:
                             targets.popleft()
                             result.models_destroyed += 1
+                            weapon_result.models_destroyed += 1
                             break  # this model is destroyed - no spillover to the next
 
             # End of combat for this attacking model: if the hazardous wounds it
@@ -382,4 +419,5 @@ def resolve_combat(
                 result.hazardous_models_destroyed += 1
 
     result.defending_models_remaining = len(targets)
+    result.weapon_results = list(weapon_results_by_name.values())
     return result

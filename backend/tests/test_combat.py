@@ -412,6 +412,93 @@ def test_resolve_combat_next_attack_targets_next_model_with_its_own_fnp(monkeypa
     assert result.defending_models_remaining == 1
 
 
+# --- weapon_results: per-weapon-profile breakdown ---
+
+
+def test_resolve_combat_weapon_results_breaks_down_a_single_weapon(monkeypatch):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+
+    weapon = _weapon(name="Boltgun", attacks="1", skill=2, strength=10, ap=-10, damage="1")
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    defender = _unit([_unit_model(_model(wounds=5, save=2, feel_no_pain=None), [])])
+
+    result = combat.resolve_combat(
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False
+    )
+    assert len(result.weapon_results) == 1
+    wr = result.weapon_results[0]
+    assert wr.name == "Boltgun"
+    assert wr.attack_rolls == result.attack_rolls
+    assert wr.wound_rolls == result.wound_rolls
+    assert wr.save_rolls == result.save_rolls
+    assert wr.total_damage == result.total_damage
+    assert wr.models_destroyed == result.models_destroyed
+
+
+def test_resolve_combat_weapon_results_groups_same_named_weapons_across_models(monkeypatch):
+    # Two different models each carry their own "Boltgun" weapon (different
+    # ids, same name) - they should be grouped into a single weapon_results
+    # entry rather than appearing as two separate profiles.
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+
+    weapon_a = _weapon(name="Boltgun", attacks="1", skill=2, strength=10, ap=-10, damage="1")
+    weapon_a.id = 1
+    weapon_b = _weapon(name="Boltgun", attacks="1", skill=2, strength=10, ap=-10, damage="1")
+    weapon_b.id = 2
+    attacker = _unit(
+        [
+            _unit_model(_model(), [weapon_a]),
+            _unit_model(_model(), [weapon_b]),
+        ]
+    )
+    defender = _unit([_unit_model(_model(wounds=5, save=2, feel_no_pain=None), [])])
+
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {weapon_a.id, weapon_b.id},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+    )
+    assert len(result.weapon_results) == 1
+    wr = result.weapon_results[0]
+    assert wr.name == "Boltgun"
+    assert len(wr.attack_rolls) == 2  # both models' Boltguns pooled into one entry
+    assert wr.total_damage == 2
+
+
+def test_resolve_combat_weapon_results_keeps_differently_named_weapons_separate(monkeypatch):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+
+    weapon_a = _weapon(name="Boltgun", attacks="1", skill=2, strength=10, ap=-10, damage="1")
+    weapon_a.id = 1
+    weapon_b = _weapon(name="Plasma Gun", attacks="1", skill=2, strength=10, ap=-10, damage="1")
+    weapon_b.id = 2
+    attacker = _unit([_unit_model(_model(), [weapon_a, weapon_b])])
+    defender = _unit([_unit_model(_model(wounds=5, save=2, feel_no_pain=None), [])])
+
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {weapon_a.id, weapon_b.id},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+    )
+    names = {wr.name for wr in result.weapon_results}
+    assert names == {"Boltgun", "Plasma Gun"}
+    for wr in result.weapon_results:
+        assert len(wr.attack_rolls) == 1
+
+
 # --- weapon ability conditions/effects ---
 
 
@@ -907,7 +994,8 @@ def test_resolve_combat_reroll_failed_hits_rerolls_once_on_a_failure(monkeypatch
         half_range=False,
         moved_less_than_3=False,
     )
-    assert result.attack_rolls == [2, 6]  # both the failed roll and the reroll are recorded
+    assert result.attack_rolls == [2]  # the original failed roll
+    assert result.attack_rerolls == [6]  # the reroll, kept separate
     assert result.total_damage == 1
 
 
@@ -933,6 +1021,7 @@ def test_resolve_combat_reroll_failed_hits_does_not_reroll_a_success(monkeypatch
         moved_less_than_3=False,
     )
     assert result.attack_rolls == [6]  # no reroll needed
+    assert result.attack_rerolls == []
     assert result.total_damage == 1
 
 
@@ -1065,7 +1154,8 @@ def test_resolve_combat_datasheet_ability_grants_unit_wide_reroll_failed_hits(mo
         half_range=False,
         moved_less_than_3=False,
     )
-    assert result.attack_rolls == [2, 6]  # both the failed roll and the reroll are recorded
+    assert result.attack_rolls == [2]  # the original failed roll
+    assert result.attack_rerolls == [6]  # the reroll, kept separate
     assert result.total_damage == 1
 
 
@@ -1089,6 +1179,7 @@ def test_resolve_combat_without_the_datasheet_ability_no_reroll_happens(monkeypa
         moved_less_than_3=False,
     )
     assert result.attack_rolls == [2]  # no reroll
+    assert result.attack_rerolls == []
     assert result.total_damage == 0
 
 
@@ -1125,7 +1216,8 @@ def test_resolve_combat_datasheet_ability_reroll_applies_to_every_model_in_the_u
         half_range=False,
         moved_less_than_3=False,
     )
-    assert result.attack_rolls == [2, 6]
+    assert result.attack_rolls == [2]  # model B's original failed roll
+    assert result.attack_rerolls == [6]  # the reroll, kept separate
     assert result.total_damage == 1
 
 
@@ -1790,7 +1882,8 @@ async def test_combat_endpoint_applies_seeded_reroll_failed_hits_datasheet_abili
     body = response.json()
     # The first hit roll fails (needs 4+, rolled a 2), but the unit's
     # datasheet ability re-rolls it and the second roll (6) succeeds.
-    assert body["attack_rolls"] == [2, 6]
+    assert body["attack_rolls"] == [2]
+    assert body["attack_rerolls"] == [6]
     assert body["total_damage"] == 1
 
 
@@ -1922,6 +2015,60 @@ async def test_combat_endpoint_applies_seeded_ignores_cover_weapon_ability(
     # The hit succeeded (proceeding to a wound roll) despite in_cover, because
     # the weapon's "Ignores Cover" ability negated the +1 penalty.
     assert len(body["wound_rolls"]) == 1
+
+
+async def test_combat_endpoint_groups_weapon_results_by_weapon_name(
+    client: AsyncClient, faction_id: int, monkeypatch
+):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+
+    attacker_model_id = await _create_model(client, faction_id)
+    weapon_a_id = await _create_weapon(
+        client, attacker_model_id, name="Autogun", strength=10, ap=-10, skill=2
+    )
+    weapon_b_id = await _create_weapon(
+        client, attacker_model_id, name="Autogun", strength=10, ap=-10, skill=2
+    )
+    weapon_c_id = await _create_weapon(
+        client, attacker_model_id, name="Las Pistol", strength=10, ap=-10, skill=2
+    )
+    attacker_fu = await _create_faction_unit(client, faction_id, "Attackers")
+    response = await client.post(
+        "/units",
+        json={
+            "faction_unit_id": attacker_fu,
+            "points": 100,
+            "unit_models": [
+                {
+                    "model_id": attacker_model_id,
+                    "weapon_ids": [weapon_a_id, weapon_b_id, weapon_c_id],
+                }
+            ],
+        },
+    )
+    assert response.status_code == 201
+    attacker_unit_id = response.json()["id"]
+
+    defender_model_id = await _create_model(client, faction_id, toughness=1, save=2, wounds=20)
+    defender_fu = await _create_faction_unit(client, faction_id, "Defenders")
+    defender_unit_id = await _create_unit(client, defender_fu, defender_model_id)
+
+    response = await client.post(
+        "/combat",
+        json={
+            "attacking_unit_id": attacker_unit_id,
+            "defending_unit_id": defender_unit_id,
+            "selected_weapon_ids": [weapon_a_id, weapon_b_id, weapon_c_id],
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    weapon_results_by_name = {wr["name"]: wr for wr in body["weapon_results"]}
+    assert set(weapon_results_by_name) == {"Autogun", "Las Pistol"}
+    # Two separate "Autogun" weapon instances (same name, different ids) are
+    # pooled into a single entry; "Las Pistol" stays separate.
+    assert len(weapon_results_by_name["Autogun"]["attack_rolls"]) == 2
+    assert len(weapon_results_by_name["Las Pistol"]["attack_rolls"]) == 1
 
 
 async def test_combat_endpoint_resolves_with_calculator_defaults(
