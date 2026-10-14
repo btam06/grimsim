@@ -36,12 +36,27 @@ function toPayload(form) {
   }
 }
 
+// Battlefield roles units are grouped under in the list builder, in order. A
+// unit goes under the first one that every one of its models has - so a
+// CHARACTER leading a unit sits with its bodyguard, not under Character.
+const UNIT_CATEGORIES = [
+  { label: 'Epic Hero', keyword: 'EPIC HERO' },
+  { label: 'Character', keyword: 'CHARACTER' },
+  { label: 'Battleline', keyword: 'BATTLELINE' },
+  { label: 'Infantry', keyword: 'INFANTRY' },
+  { label: 'Mounted', keyword: 'MOUNTED' },
+  { label: 'Dedicated Transport', keyword: 'DEDICATED TRANSPORT' },
+  { label: 'Monster', keyword: 'MONSTER' },
+  { label: 'Vehicle', keyword: 'VEHICLE' },
+]
+
 function ListFormPage({
   editingList,
   factions,
   detachments,
   units,
   models,
+  keywords,
   weapons,
   wargear,
   factionUnits,
@@ -58,6 +73,28 @@ function ListFormPage({
     (d) => String(d.faction_id) === form.faction_id
   )
   const unitsInThisList = editingList ? units.filter((u) => u.list_id === editingList.id) : []
+
+  // Keyword names every model in the unit has.
+  const sharedKeywords = (unit) => {
+    const perModel = unit.unit_models.map(
+      (um) =>
+        new Set(
+          (models.find((m) => m.id === um.model_id)?.keyword_ids ?? []).map(
+            (id) => keywords.find((k) => k.id === id)?.name
+          )
+        )
+    )
+    if (perModel.length === 0) return new Set()
+    return new Set([...perModel[0]].filter((name) => perModel.every((set) => set.has(name))))
+  }
+  const categoryOf = (unit) => {
+    const shared = sharedKeywords(unit)
+    return UNIT_CATEGORIES.find((c) => shared.has(c.keyword))?.label ?? 'Other'
+  }
+  // Only categories with units in them, in UNIT_CATEGORIES order, then Other.
+  const unitGroups = [...UNIT_CATEGORIES.map((c) => c.label), 'Other']
+    .map((label) => ({ label, units: unitsInThisList.filter((u) => categoryOf(u) === label) }))
+    .filter((group) => group.units.length > 0)
   const modelName = (id) => models.find((m) => m.id === id)?.name ?? `#${id}`
   const weaponName = (id) => weapons.find((w) => w.id === id)?.name ?? `#${id}`
   const wargearName = (id) => wargear.find((g) => g.id === id)?.name ?? `#${id}`
@@ -183,31 +220,34 @@ function ListFormPage({
           <button type="button" onClick={() => onAddUnit(editingList.id)}>
             + Add Unit
           </button>
-          {unitsInThisList.length > 0 && (
-            <ul>
-              {unitsInThisList.map((u) => (
-                <li key={u.id}>
-                  {factionUnitName(u.faction_unit_id)} — {u.points}pts
-                  {u.unit_models.length > 0 && (
-                    <ul>
-                      {u.unit_models.map((m) => (
-                        <li key={m.id}>
-                          {modelName(m.model_id)}
-                          {m.weapon_ids.length > 0 &&
-                            ` — Weapons: ${m.weapon_ids.map(weaponName).join(', ')}`}
-                          {m.wargear_ids.length > 0 &&
-                            ` — Wargear: ${m.wargear_ids.map(wargearName).join(', ')}`}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  <EditButton onClick={() => onEditUnit(u)} />
-                  <CopyButton onClick={() => handleCopyUnit(u)} />
-                  <DeleteButton onClick={() => handleDeleteUnit(u.id)} />
-                </li>
-              ))}
-            </ul>
-          )}
+          {unitGroups.map((group) => (
+            <div key={group.label}>
+              <h4>{group.label}</h4>
+              <ul>
+                {group.units.map((u) => (
+                  <li key={u.id}>
+                    {factionUnitName(u.faction_unit_id)} — {u.points}pts
+                    {u.unit_models.length > 0 && (
+                      <ul>
+                        {u.unit_models.map((m) => (
+                          <li key={m.id}>
+                            {modelName(m.model_id)}
+                            {m.weapon_ids.length > 0 &&
+                              ` — Weapons: ${m.weapon_ids.map(weaponName).join(', ')}`}
+                            {m.wargear_ids.length > 0 &&
+                              ` — Wargear: ${m.wargear_ids.map(wargearName).join(', ')}`}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <EditButton onClick={() => onEditUnit(u)} />
+                    <CopyButton onClick={() => handleCopyUnit(u)} />
+                    <DeleteButton onClick={() => handleDeleteUnit(u.id)} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </>
       )}
     </section>

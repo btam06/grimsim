@@ -141,6 +141,7 @@ function ListsPanel() {
         detachments={detachments}
         units={units}
         models={models}
+        keywords={keywords}
         weapons={weapons}
         wargear={wargear}
         factionUnits={factionUnits}
