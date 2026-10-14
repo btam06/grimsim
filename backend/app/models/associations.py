@@ -99,3 +99,24 @@ datasheet_ability_effects = Table(
     Column("datasheet_ability_id", ForeignKey("datasheet_abilities.id"), primary_key=True),
     Column("effect_id", ForeignKey("effects.id"), primary_key=True),
 )
+
+stratagem_detachments = Table(
+    "stratagem_detachments",
+    Base.metadata,
+    Column("stratagem_id", ForeignKey("stratagems.id"), primary_key=True),
+    Column("detachment_id", ForeignKey("detachments.id"), primary_key=True),
+)
+
+stratagem_conditions = Table(
+    "stratagem_conditions",
+    Base.metadata,
+    Column("stratagem_id", ForeignKey("stratagems.id"), primary_key=True),
+    Column("condition_id", ForeignKey("conditions.id"), primary_key=True),
+)
+
+stratagem_effects = Table(
+    "stratagem_effects",
+    Base.metadata,
+    Column("stratagem_id", ForeignKey("stratagems.id"), primary_key=True),
+    Column("effect_id", ForeignKey("effects.id"), primary_key=True),
+)

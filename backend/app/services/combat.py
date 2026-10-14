@@ -6,7 +6,7 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from app.combat_rules import CONDITIONS, EFFECTS
-from app.models import Model, Unit, WargearAbility, WeaponAbility
+from app.models import Model, Stratagem, Unit, WargearAbility, WeaponAbility
 
 _DICE_PATTERN = re.compile(r"^(?:(?P<flat>[0-9]+)|(?P<count>[0-9]*)D(?P<die>[36]))$")
 
@@ -52,7 +52,7 @@ def _target_priority(model: Model) -> tuple[int, int]:
 
 
 def _apply_triggered_effects(
-    abilities: list[WeaponAbility] | list[WargearAbility],
+    abilities: list[WeaponAbility] | list[WargearAbility] | list[Stratagem],
     context: dict,
     state: dict,
     pending: deque[dict],
@@ -76,13 +76,26 @@ def _apply_triggered_effects(
                 handler(state, pending)
 
 
-@dataclass
+# eq=False: targets are removed from the queue by identity, and two models
+# with identical stats must not be mistaken for one another.
+@dataclass(eq=False)
 class _Target:
     toughness        : int
     save             : int
     invulnerable     : int | None
     feel_no_pain     : int | None
     remaining_wounds : int
+    is_leader        : bool = False
+    is_support       : bool = False
+
+
+def _precision_target(targets: deque[_Target]) -> _Target:
+    # Precision picks leaders first, then supports, then everything else -
+    # within each group, the queue's existing order (worst save first) holds.
+    return min(
+        targets,
+        key=lambda target: 0 if target.is_leader else 1 if target.is_support else 2,
+    )
 
 
 @dataclass
@@ -135,6 +148,8 @@ def resolve_combat(
     half_range: bool,
     moved_less_than_3: bool,
     advanced: bool,
+    stratagems: list[Stratagem] | None = None,
+    apply_precision: bool = False,
 ) -> CombatResult:
     # The defending unit is a queue of individual models, each with its own wound pool.
     # Each attack targets whichever model is at the front of the queue; once that
@@ -154,6 +169,11 @@ def resolve_combat(
         for keyword in unit_model.model.keywords
     }
 
+    # Stratagems used on the attacking unit target the whole unit, so they're
+    # in play both for the unit-wide check below and for every weapon fired,
+    # the same as wargear abilities.
+    stratagems = list(stratagems or [])
+
     # Some wargear/datasheet abilities apply to the whole attacking unit rather
     # than just the model carrying them (e.g. "Ignore Cover (Unit)", or a
     # datasheet ability granting the unit a reroll) - checked once, across
@@ -169,7 +189,7 @@ def resolve_combat(
         ability
         for unit_model in attacker.unit_models
         for ability in unit_model.model.abilities
-    ]
+    ] + stratagems
     _apply_triggered_effects(
         all_unit_wide_abilities, {"step": "unit_wide"}, unit_wide_state, deque()
     )
@@ -183,6 +203,8 @@ def resolve_combat(
             invulnerable=unit_model.model.invulnerable,
             feel_no_pain=unit_model.model.feel_no_pain,
             remaining_wounds=unit_model.model.wounds,
+            is_leader=bool(unit_model.model.is_leader),
+            is_support=bool(unit_model.model.is_support),
         )
         for unit_model in ordered_unit_models
     )
@@ -222,7 +244,7 @@ def resolve_combat(
                     continue
 
                 is_ranged = weapon.weapon_type != "melee"
-                abilities = list(weapon.abilities) + wargear_abilities
+                abilities = list(weapon.abilities) + wargear_abilities + stratagems
 
                 # Weapon eligibility: a static, no-dice-rolled check of this
                 # weapon's own abilities (Assault/Pistol) run before deciding
@@ -253,6 +275,9 @@ def resolve_combat(
                     and not eligibility_state.get("assault")
                 ):
                     continue
+
+                # Precision only changes targeting when the attacker opts in.
+                uses_precision = apply_precision and eligibility_state.get("precision", False)
 
                 weapon_result = weapon_results_by_name.setdefault(
                     weapon.name, WeaponCombatResult(name=weapon.name)
@@ -360,7 +385,7 @@ def resolve_combat(
 
                     # Wound roll: threshold depends on this weapon's strength versus the
                     # toughness of whichever model is currently being targeted.
-                    target = targets[0]
+                    target = _precision_target(targets) if uses_precision else targets[0]
                     threshold = wound_threshold(weapon.strength, target.toughness)
 
                     if attack.get("auto_pass_wound"):
@@ -435,7 +460,7 @@ def resolve_combat(
                         weapon_result.total_damage += 1
                         target.remaining_wounds -= 1
                         if target.remaining_wounds <= 0:
-                            targets.popleft()
+                            targets.remove(target)
                             result.models_destroyed += 1
                             weapon_result.models_destroyed += 1
                             break  # this model is destroyed - no spillover to the next

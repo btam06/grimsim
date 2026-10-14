@@ -5,8 +5,10 @@ from sqlalchemy.orm import selectinload
 
 from app.db import get_session
 from app.models import (
+    ArmyList,
     DatasheetAbility,
     Model,
+    Stratagem,
     Unit,
     UnitModel,
     Wargear,
@@ -45,6 +47,7 @@ async def _load_unit(session: AsyncSession, unit_id: int) -> Unit | None:
                 DatasheetAbility.conditions
             ),
             model_loader.selectinload(Model.abilities).selectinload(DatasheetAbility.effects),
+            selectinload(Unit.army_list).selectinload(ArmyList.detachments),
         )
         .where(Unit.id == unit_id)
     )
@@ -70,6 +73,36 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
             detail="one or more selected_weapon_ids are not equipped by the attacking unit",
         )
 
+    stratagems: list[Stratagem] = []
+    if payload.stratagem_ids:
+        result = await session.execute(
+            select(Stratagem)
+            .options(
+                selectinload(Stratagem.detachments),
+                selectinload(Stratagem.conditions),
+                selectinload(Stratagem.effects),
+            )
+            .where(Stratagem.id.in_(payload.stratagem_ids))
+        )
+        stratagems = list(result.scalars().all())
+        if len(stratagems) != len(set(payload.stratagem_ids)):
+            raise HTTPException(status_code=400, detail="one or more stratagem_ids not found")
+
+        # A stratagem is usable if it's core, or if it belongs to one of the
+        # detachments the attacking unit's army list has taken.
+        attacker_detachment_ids = (
+            {d.id for d in attacker.army_list.detachments} if attacker.army_list else set()
+        )
+        for stratagem in stratagems:
+            if stratagem.is_core:
+                continue
+            if not {d.id for d in stratagem.detachments} & attacker_detachment_ids:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"stratagem '{stratagem.name}' is not available to the attacking "
+                    "unit's detachments",
+                )
+
     visible = True if payload.game_id is None else payload.defender_visible
     in_range = True if payload.game_id is None else payload.defender_in_range
 
@@ -84,6 +117,8 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
         half_range=payload.half_range,
         moved_less_than_3=payload.moved_less_than_3,
         advanced=payload.advanced,
+        stratagems=stratagems,
+        apply_precision=payload.apply_precision,
     )
 
     return CombatOut(

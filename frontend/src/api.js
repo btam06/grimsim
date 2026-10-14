@@ -38,6 +38,11 @@ export const createDetachment = (payload) =>
   request('/detachments', { method: 'POST', body: JSON.stringify(payload) })
 export const deleteDetachment = (id) => request(`/detachments/${id}`, { method: 'DELETE' })
 
+export const listStratagems = () => request('/stratagems')
+export const createStratagem = (payload) =>
+  request('/stratagems', { method: 'POST', body: JSON.stringify(payload) })
+export const deleteStratagem = (id) => request(`/stratagems/${id}`, { method: 'DELETE' })
+
 export const listLists = () => request('/lists')
 export const createList = (payload) =>
   request('/lists', { method: 'POST', body: JSON.stringify(payload) })

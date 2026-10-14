@@ -3,6 +3,9 @@ from app.models.associations import (
     datasheet_ability_links,
     detachment_dispositions,
     model_keyword_links,
+    stratagem_conditions,
+    stratagem_detachments,
+    stratagem_effects,
     unit_model_wargear,
     unit_model_weapons,
     wargear_ability_conditions,
@@ -23,6 +26,7 @@ from app.models.faction_ability import FactionAbility
 from app.models.faction_unit import FactionUnit
 from app.models.keyword import Keyword
 from app.models.model import Model
+from app.models.stratagem import Stratagem
 from app.models.unit import Unit
 from app.models.unit_model import UnitModel
 from app.models.wargear import Wargear
@@ -49,6 +53,7 @@ __all__ = [
     "Detachment",
     "Disposition",
     "ArmyList",
+    "Stratagem",
     "datasheet_ability_links",
     "unit_model_weapons",
     "unit_model_wargear",
@@ -60,4 +65,7 @@ __all__ = [
     "wargear_ability_effects",
     "model_keyword_links",
     "detachment_dispositions",
+    "stratagem_detachments",
+    "stratagem_conditions",
+    "stratagem_effects",
 ]

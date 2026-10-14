@@ -12,6 +12,7 @@ from app.models import (
     FactionAbility,
     FactionUnit,
     Keyword,
+    Stratagem,
     WargearAbility,
     WeaponAbility,
 )
@@ -24,6 +25,7 @@ from app.seeds import (
     factions,
     keywords,
     run_all,
+    stratagems,
     wargear_abilities,
     weapon_abilities,
 )
@@ -341,8 +343,8 @@ async def test_seed_weapon_abilities_skips_entries_with_missing_conditions_or_ef
 
     result = await session.execute(select(WeaponAbility.name))
     names = set(result.scalars().all())
-    # Only entries with no condition/effect dependencies at all (e.g. "Precision",
-    # which has none) can be created before conditions.seed/effects.seed have run.
+    # Only entries with no condition/effect dependencies at all can be created
+    # before conditions.seed/effects.seed have run.
     no_dependency_names = {
         name
         for name, _, condition_keywords, effect_keywords in weapon_abilities.ENTRIES
@@ -478,3 +480,43 @@ async def test_run_all_seeds_everything(session: AsyncSession):
     assert weapon_ability_names == {name for name, _, _, _ in weapon_abilities.ENTRIES}
     assert wargear_ability_names == {name for name, _, _, _ in wargear_abilities.ENTRIES}
     assert datasheet_ability_names == {name for name, _, _, _ in datasheet_abilities.ENTRIES}
+
+
+async def test_seed_core_stratagems_inserts_all_entries(session: AsyncSession):
+    await stratagems.seed(session)
+
+    rows = (await session.execute(select(Stratagem))).scalars().all()
+    assert {s.name for s in rows} == {name for name, _, _ in stratagems.CORE_ENTRIES}
+    assert all(s.is_core for s in rows)
+
+
+async def test_seed_core_stratagems_is_idempotent(session: AsyncSession):
+    await stratagems.seed(session)
+    await stratagems.seed(session)
+
+    rows = (await session.execute(select(Stratagem.name))).scalars().all()
+    assert len(rows) == len(stratagems.CORE_ENTRIES)
+
+
+async def test_seed_weapon_abilities_backfills_effects_on_previously_empty_entry(
+    session: AsyncSession,
+):
+    # "Precision" used to be seeded with no conditions/effects - an existing
+    # empty row gets them filled in rather than being skipped.
+    session.add(WeaponAbility(name="Precision", description="No mechanical effect."))
+    await session.commit()
+
+    await conditions.seed(session)
+    await effects.seed(session)
+    await weapon_abilities.seed(session)
+
+    session.expire_all()
+    precision = (
+        await session.execute(
+            select(WeaponAbility)
+            .options(selectinload(WeaponAbility.conditions), selectinload(WeaponAbility.effects))
+            .where(WeaponAbility.name == "Precision")
+        )
+    ).scalar_one()
+    assert [c.keyword for c in precision.conditions] == ["always"]
+    assert [e.keyword for e in precision.effects] == ["precision"]

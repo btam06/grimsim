@@ -15,6 +15,7 @@ from app.combat_rules.effects import (
     PLUS_ONE_SKILL_MELEE,
     PLUS_ONE_SKILL_RANGED,
     PLUS_ONE_TO_HIT,
+    PRECISION,
     REROLL_FAILED_HITS,
 )
 from app.models import Effect
@@ -91,6 +92,11 @@ ENTRIES = [
         PISTOL,
         "Pistol",
         "This weapon may be fired while its bearer is in engagement range.",
+    ),
+    (
+        PRECISION,
+        "Precision",
+        "If the attacker applies precision, this weapon's attacks target leaders first, then supports, then other models.",
     ),
 ]
 

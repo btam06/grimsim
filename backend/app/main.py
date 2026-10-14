@@ -17,6 +17,7 @@ from app.routers import (
     keywords,
     lists,
     models,
+    stratagems,
     units,
     wargear,
     wargear_abilities,
@@ -41,6 +42,7 @@ app.include_router(faction_units.router)
 app.include_router(faction_abilities.router)
 app.include_router(dispositions.router)
 app.include_router(detachments.router)
+app.include_router(stratagems.router)
 app.include_router(keywords.router)
 app.include_router(models.router)
 app.include_router(weapons.router)

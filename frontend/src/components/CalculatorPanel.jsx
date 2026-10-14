@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
-import { listFactionUnits, listUnits, listWeapons, runCombat } from '../api'
+import {
+  listEffects,
+  listFactionUnits,
+  listLists,
+  listStratagems,
+  listUnits,
+  listWeaponAbilities,
+  listWeapons,
+  runCombat,
+} from '../api'
 import Field from './Field'
 import Select from './Select'
 
@@ -19,6 +28,10 @@ function CalculatorPanel() {
   const [units, setUnits] = useState([])
   const [factionUnits, setFactionUnits] = useState([])
   const [weapons, setWeapons] = useState([])
+  const [lists, setLists] = useState([])
+  const [stratagems, setStratagems] = useState([])
+  const [weaponAbilities, setWeaponAbilities] = useState([])
+  const [effects, setEffects] = useState([])
   const [attackingUnitId, setAttackingUnitId] = useState('')
   const [defendingUnitId, setDefendingUnitId] = useState('')
   const [inEngagementRange, setInEngagementRange] = useState(false)
@@ -27,6 +40,8 @@ function CalculatorPanel() {
   const [movedLessThan3, setMovedLessThan3] = useState(false)
   const [advanced, setAdvanced] = useState(false)
   const [selectedWeaponNames, setSelectedWeaponNames] = useState([])
+  const [selectedStratagemIds, setSelectedStratagemIds] = useState([])
+  const [applyPrecision, setApplyPrecision] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
 
@@ -34,6 +49,10 @@ function CalculatorPanel() {
     listUnits().then(setUnits).catch((err) => setError(err.message))
     listFactionUnits().then(setFactionUnits).catch((err) => setError(err.message))
     listWeapons().then(setWeapons).catch((err) => setError(err.message))
+    listLists().then(setLists).catch((err) => setError(err.message))
+    listStratagems().then(setStratagems).catch((err) => setError(err.message))
+    listWeaponAbilities().then(setWeaponAbilities).catch((err) => setError(err.message))
+    listEffects().then(setEffects).catch((err) => setError(err.message))
   }, [])
 
   const unitLabel = (unit) => {
@@ -68,6 +87,47 @@ function CalculatorPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attackingUnitId, weapons])
 
+  // Core stratagems are always available; detachment stratagems only when
+  // the attacking unit's army list has taken one of their detachments.
+  const availableStratagems = useMemo(() => {
+    const list = lists.find((l) => l.id === attackingUnit?.list_id)
+    const detachmentIds = list?.detachment_ids ?? []
+    return stratagems.filter(
+      (s) => s.is_core || s.detachment_ids.some((id) => detachmentIds.includes(id))
+    )
+  }, [attackingUnit, lists, stratagems])
+
+  // Stratagems are opt-in, so clear them whenever the attacking unit changes.
+  useEffect(() => {
+    setSelectedStratagemIds([])
+  }, [attackingUnitId])
+
+  // Precision is only worth offering when something about to attack has the
+  // precision effect - a selected weapon's ability, or a selected stratagem.
+  const hasPrecision = useMemo(() => {
+    const precisionEffectId = effects.find((e) => e.keyword === 'precision')?.id
+    if (precisionEffectId === undefined) return false
+    const precisionAbilityIds = new Set(
+      weaponAbilities.filter((a) => a.effect_ids.includes(precisionEffectId)).map((a) => a.id)
+    )
+    const weaponHasPrecision = weaponGroups
+      .filter((g) => selectedWeaponNames.includes(g.name))
+      .flatMap((g) => g.weaponIds)
+      .some((id) =>
+        weapons.find((w) => w.id === id)?.ability_ids.some((aid) => precisionAbilityIds.has(aid))
+      )
+    const stratagemHasPrecision = stratagems.some(
+      (s) => selectedStratagemIds.includes(s.id) && s.effect_ids.includes(precisionEffectId)
+    )
+    return weaponHasPrecision || stratagemHasPrecision
+  }, [effects, weaponAbilities, weaponGroups, selectedWeaponNames, weapons, stratagems, selectedStratagemIds])
+
+  const toggleStratagemId = (id) => {
+    setSelectedStratagemIds((ids) =>
+      ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]
+    )
+  }
+
   const toggleWeaponName = (name) => {
     setSelectedWeaponNames((names) =>
       names.includes(name) ? names.filter((n) => n !== name) : [...names, name]
@@ -90,6 +150,8 @@ function CalculatorPanel() {
         attacking_unit_id: Number(attackingUnitId),
         defending_unit_id: Number(defendingUnitId),
         selected_weapon_ids: selectedWeaponIds,
+        stratagem_ids: selectedStratagemIds,
+        apply_precision: hasPrecision && applyPrecision,
         in_engagement_range: inEngagementRange,
         in_cover: inCover,
         half_range: halfRange,
@@ -139,6 +201,33 @@ function CalculatorPanel() {
               ))}
             </div>
           </div>
+        )}
+        {attackingUnit && availableStratagems.length > 0 && (
+          <div className="checkbox-group">
+            Stratagems
+            <div className="checkbox-grid">
+              {availableStratagems.map((s) => (
+                <label key={s.id} className="checkbox-field" title={s.description ?? ''}>
+                  <input
+                    type="checkbox"
+                    checked={selectedStratagemIds.includes(s.id)}
+                    onChange={() => toggleStratagemId(s.id)}
+                  />
+                  {s.name} ({s.cp} CP{s.is_core ? ', Core' : ''})
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+        {hasPrecision && (
+          <label className="checkbox-field">
+            <input
+              type="checkbox"
+              checked={applyPrecision}
+              onChange={(e) => setApplyPrecision(e.target.checked)}
+            />
+            Apply Precision (precision weapons target leaders, then supports, then other models)
+          </label>
         )}
         <div className="radio-group">
           Engagement

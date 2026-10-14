@@ -25,7 +25,10 @@ from app.combat_rules.effects import (
     NO_SAVE,
     PISTOL,
     PLUS_ONE_TO_HIT,
+    PRECISION,
 )
+from sqlalchemy.orm import selectinload
+
 from app.models import Condition, Effect, WeaponAbility
 
 # (name, description, [condition keywords], [effect keywords])
@@ -92,9 +95,9 @@ ENTRIES = [
     ),
     (
         "Precision",
-        "No mechanical effect.",
-        [],
-        [],
+        "If the attacker applies precision, attacks target leaders first, then supports, then other models.",
+        [ALWAYS],
+        [PRECISION],
     ),
     (
         "RAPID FIRE 1",
@@ -132,9 +135,15 @@ ENTRIES = [
 async def seed(session: AsyncSession) -> None:
     for name, description, condition_keywords, effect_keywords in ENTRIES:
         existing = (
-            await session.execute(select(WeaponAbility.id).where(WeaponAbility.name == name))
+            await session.execute(
+                select(WeaponAbility)
+                .options(selectinload(WeaponAbility.conditions), selectinload(WeaponAbility.effects))
+                .where(WeaponAbility.name == name)
+            )
         ).scalar_one_or_none()
-        if existing is not None:
+        # An existing row is left alone unless it was seeded before this entry
+        # had any conditions/effects (e.g. "Precision") - then fill them in.
+        if existing is not None and (existing.conditions or existing.effects):
             continue
 
         conditions = (
@@ -145,6 +154,13 @@ async def seed(session: AsyncSession) -> None:
         ).scalars().all()
         if len(conditions) != len(condition_keywords) or len(effects) != len(effect_keywords):
             continue  # conditions/effects haven't been seeded yet
+
+        if existing is not None:
+            if conditions or effects:
+                existing.description = description
+                existing.conditions = list(conditions)
+                existing.effects = list(effects)
+            continue
 
         session.add(
             WeaponAbility(

@@ -28,6 +28,7 @@ PLUS_ONE_SKILL_RANGED = "plus_one_skill_ranged"
 PLUS_ONE_SKILL_MELEE = "plus_one_skill_melee"
 ASSAULT = "assault"
 PISTOL = "pistol"
+PRECISION = "precision"
 
 
 def auto_pass_wound(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
@@ -114,6 +115,13 @@ def pistol(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
     state["pistol"] = True
 
 
+def precision(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # This weapon's attacks may (if the attacker chooses to apply precision)
+    # target leaders in the defending unit first, then supports, then
+    # everything else - instead of the normal order where they die last.
+    state["precision"] = True
+
+
 EFFECTS = {
     AUTO_PASS_WOUND: auto_pass_wound,
     ADD_EXTRA_HIT: add_extra_hit,
@@ -129,4 +137,5 @@ EFFECTS = {
     PLUS_ONE_SKILL_MELEE: plus_one_skill_melee,
     ASSAULT: assault,
     PISTOL: pistol,
+    PRECISION: precision,
 }

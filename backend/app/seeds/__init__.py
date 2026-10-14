@@ -8,6 +8,7 @@ from app.seeds import (
     faction_abilities,
     factions,
     keywords,
+    stratagems,
     wargear_abilities,
     weapon_abilities,
 )
@@ -34,6 +35,10 @@ from app.seeds.faction_units import imperial_knights as imperial_knights_units
 # datasheet_abilities.seed build abilities from them (each with an ENTRIES
 # list of (name, description, condition keywords, effect keywords)), so all
 # three must run after conditions.seed/effects.seed.
+#
+# stratagems.seed populates the core stratagems (usable by any detachment).
+# Detachment-specific stratagems can be seeded alongside their detachments in
+# app/seeds/detachments/, after that faction's detachments exist.
 SEED_FUNCS = [
     dispositions.seed,
     factions.seed,
@@ -46,6 +51,7 @@ SEED_FUNCS = [
     datasheet_abilities.seed,
     adeptus_mechanicus_units.seed,
     adeptus_mechanicus_detachments.seed,
+    stratagems.seed,
     imperial_agents_units.seed,
     imperial_knights_units.seed,
 ]

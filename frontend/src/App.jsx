@@ -9,6 +9,7 @@ import FactionsPanel from './components/FactionsPanel'
 import KeywordsPanel from './components/KeywordsPanel'
 import ListsPanel from './components/ListsPanel'
 import ModelsPanel from './components/ModelsPanel'
+import StratagemsPanel from './components/StratagemsPanel'
 import UnitsPanel from './components/UnitsPanel'
 import WargearAbilitiesPanel from './components/WargearAbilitiesPanel'
 import WeaponAbilitiesPanel from './components/WeaponAbilitiesPanel'
@@ -27,6 +28,7 @@ const TAB_GROUPS = {
     'Factions',
     'Faction Abilities',
     'Detachments',
+    'Stratagems',
   ],
   Debug: ['Weapons', 'Units', 'Faction Units'],
   Calculator: ['Calculator'],
@@ -88,6 +90,7 @@ function App() {
       {tab === 'Factions' && <FactionsPanel />}
       {tab === 'Faction Abilities' && <FactionAbilitiesPanel />}
       {tab === 'Detachments' && <DetachmentsPanel />}
+      {tab === 'Stratagems' && <StratagemsPanel />}
       {tab === 'Models' && <ModelsPanel />}
       {tab === 'Keywords' && <KeywordsPanel />}
       {tab === 'Weapons' && <WeaponsPanel />}

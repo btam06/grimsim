@@ -7,6 +7,7 @@ from app.models import (
     Effect,
     Keyword,
     Model,
+    Stratagem,
     Unit,
     UnitModel,
     Wargear,
@@ -1378,16 +1379,102 @@ def test_resolve_combat_datasheet_ability_reroll_applies_to_every_model_in_the_u
 # --- precision / rapid fire / hazardous / ignore cover (unit) ---
 
 
-def test_precision_weapon_ability_has_no_conditions_or_effects():
-    # "Precision" is seeded with empty condition/effect lists - confirm that an
-    # ability with nothing attached simply never triggers anything.
-    precision = _ability([], [])
-    weapon = _weapon(attacks="1", skill=2)
+def _precision_combat(defender_models, apply_precision, weapon_abilities):
+    weapon = _weapon(attacks="1", skill=2, strength=10, ap=-10, damage="1")
+    weapon.id = 1
+    weapon.abilities = weapon_abilities
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    defender = _unit([_unit_model(m, []) for m in defender_models])
+    return combat.resolve_combat(
+        attacker,
+        defender,
+        {weapon.id},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+        apply_precision=apply_precision,
+    )
+
+
+def _precision_defenders():
+    # One of each targeting group, listed so normal targeting would hit the
+    # trooper first.
+    leader = _model(name="Leader", is_leader=True, wounds=1, save=2)
+    support = _model(name="Support", is_support=True, wounds=1, save=2)
+    trooper = _model(name="Trooper", wounds=1, save=2)
+    return leader, support, trooper
+
+
+def test_precision_order_across_multiple_attacks(monkeypatch):
+    # Every roll is a 6, so a 7+ save on each model guarantees every attack
+    # destroys whichever model it targets.
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    precision = _ability([_condition("always")], [_effect("precision")])
+    leader = _model(name="Leader", is_leader=True, wounds=1, save=7)
+    support = _model(name="Support", is_support=True, wounds=1, save=7)
+    trooper = _model(name="Trooper", wounds=1, save=7)
+
+    picked = []
+    original = combat._precision_target
+
+    def spy(targets):
+        target = original(targets)
+        picked.append("leader" if target.is_leader else "support" if target.is_support else "other")
+        return target
+
+    monkeypatch.setattr(combat, "_precision_target", spy)
+    weapon = _weapon(attacks="3", skill=2, strength=10, ap=0, damage="1")
     weapon.id = 1
     weapon.abilities = [precision]
-    state: dict = {}
-    combat._apply_triggered_effects([precision], {"step": "hit", "roll": 6}, state, combat.deque())
-    assert state == {}
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    defender = _unit([_unit_model(m, []) for m in [trooper, support, leader]])
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {weapon.id},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+        apply_precision=True,
+    )
+    assert picked == ["leader", "support", "other"]
+    assert result.models_destroyed == 3
+
+
+def test_precision_not_applied_uses_normal_targeting(monkeypatch):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    precision = _ability([_condition("always")], [_effect("precision")])
+    called = []
+    monkeypatch.setattr(combat, "_precision_target", lambda t: called.append(1) or t[0])
+
+    _precision_combat(list(_precision_defenders()), False, [precision])
+    assert called == []
+
+
+def test_apply_precision_without_precision_weapon_uses_normal_targeting(monkeypatch):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    called = []
+    monkeypatch.setattr(combat, "_precision_target", lambda t: called.append(1) or t[0])
+
+    _precision_combat(list(_precision_defenders()), True, [])
+    assert called == []
+
+
+def test_precision_target_prefers_leader_then_support():
+    other = combat._Target(4, 3, None, None, 1)
+    support = combat._Target(4, 3, None, None, 1, is_support=True)
+    leader = combat._Target(4, 3, None, None, 1, is_leader=True)
+    assert combat._precision_target(combat.deque([other, support, leader])) is leader
+    assert combat._precision_target(combat.deque([other, support])) is support
+    assert combat._precision_target(combat.deque([other])) is other
 
 
 def test_within_half_range_condition_checks_pre_weapon_step_and_flag():
@@ -2450,6 +2537,176 @@ async def test_combat_endpoint_weapon_not_equipped_by_attacker_returns_400(
             "attacking_unit_id": attacker_unit_id,
             "defending_unit_id": defender_unit_id,
             "selected_weapon_ids": [other_weapon_id],
+        },
+    )
+    assert response.status_code == 400
+
+
+# --- stratagems ---
+
+
+def test_resolve_combat_stratagem_grants_unit_wide_reroll_failed_hits(monkeypatch):
+    rolls = iter([2, 6, 6, 1])  # hit (fails), reroll (succeeds), wound, save
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls))
+
+    stratagem = Stratagem(name="Rerolls", description=None, cp=1, is_core=True)
+    stratagem.conditions = [_condition("always")]
+    stratagem.effects = [_effect("reroll_failed_hits")]
+    weapon = _weapon(attacks="1", skill=4, strength=4, ap=-10, damage="1")
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    defender = _unit([_unit_model(_model(toughness=1, wounds=5, save=2), [])])
+
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {weapon.id},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+        stratagems=[stratagem],
+    )
+    assert result.attack_rolls == [2]
+    assert result.attack_rerolls == [6]
+    assert result.total_damage == 1
+
+
+def test_resolve_combat_stratagem_effect_applies_per_attack(monkeypatch):
+    # +1 to hit is an attack-level effect, so the stratagem must also be in
+    # play for each weapon, not only the unit-wide check.
+    rolls = iter([3, 6, 1])  # hit (3 vs skill 4, passes with +1), wound, save
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls))
+
+    stratagem = Stratagem(name="Plus One", description=None, cp=1, is_core=True)
+    stratagem.conditions = [_condition("always")]
+    stratagem.effects = [_effect("plus_one_to_hit")]
+    weapon = _weapon(attacks="1", skill=4, strength=4, ap=-10, damage="1")
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    defender = _unit([_unit_model(_model(toughness=1, wounds=5, save=2), [])])
+
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {weapon.id},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+        stratagems=[stratagem],
+    )
+    assert result.total_damage == 1
+
+
+async def _combat_units_in_list(client: AsyncClient, faction_id: int, detachment_ids: list[int]):
+    list_id = (
+        await client.post(
+            "/lists",
+            json={
+                "name": "List",
+                "points_limit": 1000,
+                "faction_id": faction_id,
+                "detachment_ids": detachment_ids,
+            },
+        )
+    ).json()["id"]
+    attacker_model_id = await _create_model(client, faction_id)
+    weapon_id = await _create_weapon(client, attacker_model_id)
+    attacker_fu = await _create_faction_unit(client, faction_id, "Attackers")
+    response = await client.post(
+        "/units",
+        json={
+            "faction_unit_id": attacker_fu,
+            "points": 100,
+            "list_id": list_id,
+            "unit_models": [{"model_id": attacker_model_id, "weapon_ids": [weapon_id]}],
+        },
+    )
+    assert response.status_code == 201
+    attacker_unit_id = response.json()["id"]
+
+    defender_model_id = await _create_model(client, faction_id)
+    defender_fu = await _create_faction_unit(client, faction_id, "Defenders")
+    defender_unit_id = await _create_unit(client, defender_fu, defender_model_id)
+    return attacker_unit_id, defender_unit_id, weapon_id
+
+
+async def _create_detachment(client: AsyncClient, faction_id: int, name: str) -> int:
+    return (
+        await client.post("/detachments", json={"name": name, "faction_id": faction_id, "dp": 1})
+    ).json()["id"]
+
+
+async def test_combat_endpoint_accepts_core_and_own_detachment_stratagems(
+    client: AsyncClient, faction_id: int
+):
+    detachment_id = await _create_detachment(client, faction_id, "Mine")
+    attacker_id, defender_id, weapon_id = await _combat_units_in_list(
+        client, faction_id, [detachment_id]
+    )
+    core_id = (
+        await client.post("/stratagems", json={"name": "Core", "cp": 1, "is_core": True})
+    ).json()["id"]
+    own_id = (
+        await client.post(
+            "/stratagems", json={"name": "Own", "cp": 1, "detachment_ids": [detachment_id]}
+        )
+    ).json()["id"]
+
+    response = await client.post(
+        "/combat",
+        json={
+            "attacking_unit_id": attacker_id,
+            "defending_unit_id": defender_id,
+            "selected_weapon_ids": [weapon_id],
+            "stratagem_ids": [core_id, own_id],
+        },
+    )
+    assert response.status_code == 200
+
+
+async def test_combat_endpoint_rejects_other_detachment_stratagem(
+    client: AsyncClient, faction_id: int
+):
+    mine = await _create_detachment(client, faction_id, "Mine")
+    other = await _create_detachment(client, faction_id, "Other")
+    attacker_id, defender_id, weapon_id = await _combat_units_in_list(client, faction_id, [mine])
+    other_id = (
+        await client.post(
+            "/stratagems", json={"name": "Theirs", "cp": 1, "detachment_ids": [other]}
+        )
+    ).json()["id"]
+
+    response = await client.post(
+        "/combat",
+        json={
+            "attacking_unit_id": attacker_id,
+            "defending_unit_id": defender_id,
+            "selected_weapon_ids": [weapon_id],
+            "stratagem_ids": [other_id],
+        },
+    )
+    assert response.status_code == 400
+
+
+async def test_combat_endpoint_invalid_stratagem_id_returns_400(
+    client: AsyncClient, faction_id: int
+):
+    attacker_id, defender_id, weapon_id = await _combat_units_in_list(client, faction_id, [])
+    response = await client.post(
+        "/combat",
+        json={
+            "attacking_unit_id": attacker_id,
+            "defending_unit_id": defender_id,
+            "selected_weapon_ids": [weapon_id],
+            "stratagem_ids": [9999],
         },
     )
     assert response.status_code == 400

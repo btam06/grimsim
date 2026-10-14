@@ -250,11 +250,48 @@ class DetachmentOut(BaseModel):
     disposition_ids: list[int]
 
 
+class StratagemIn(BaseModel):
+    name: str
+    description: str | None = None
+    cp: int = Field(ge=0)
+    is_core: bool = False
+    detachment_ids: list[int] = []
+    condition_ids: list[int] = []
+    effect_ids: list[int] = []
+
+    @model_validator(mode="after")
+    def check_core_xor_detachments(self):
+        # Core stratagems are usable by any detachment, so they're attached to
+        # none; every other stratagem must belong to at least one detachment.
+        if self.is_core and self.detachment_ids:
+            raise ValueError("core stratagems cannot be attached to detachments")
+        if not self.is_core and not self.detachment_ids:
+            raise ValueError("non-core stratagems must be attached to at least one detachment")
+        return self
+
+
+class StratagemOut(BaseModel):
+    id: int
+    name: str
+    description: str | None
+    cp: int
+    is_core: bool
+    detachment_ids: list[int]
+    condition_ids: list[int]
+    effect_ids: list[int]
+
+
 class CombatIn(BaseModel):
     game_id: int | None = None
     attacking_unit_id: int
     defending_unit_id: int
     selected_weapon_ids: list[int] = []
+    # Stratagems used on the attacking unit for this attack - each must be core
+    # or belong to one of the detachments in the attacking unit's army list.
+    stratagem_ids: list[int] = []
+    # Whether attacks from weapons with the Precision effect pick off leaders
+    # (then supports) first, rather than following normal targeting.
+    apply_precision: bool = False
     in_engagement_range: bool = False
     in_cover: bool = False
     half_range: bool = False
