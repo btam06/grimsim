@@ -74,6 +74,32 @@ section form .field {
   font-size: 0.85rem;
 }
 
+/* In a column-direction container the 140px flex-basis above would apply to
+   height, leaving a gap between the select box and its dropdown menu. */
+section form .field input,
+section form .field select,
+section form .field .select-wrapper {
+  flex: 0 0 auto;
+}
+
+section form .form-section {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  flex: 1 1 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0.5rem 0.75rem 0.75rem;
+  border: 1px solid #8884;
+  border-radius: 4px;
+}
+
+section form .form-section legend {
+  padding: 0 0.3rem;
+  font-size: 0.85rem;
+  font-weight: bold;
+}
+
 label.input-field {
   display: flex;
   flex-direction: column;
@@ -165,12 +191,4 @@ section ul li button {
 
 section > button {
   margin-bottom: 1rem;
-}
-
-.inline-form {
-  margin: 0.4rem 0 0;
-  padding: 0.5rem;
-  border: 1px solid #8884;
-  border-radius: 4px;
-  background: #8881;
 }

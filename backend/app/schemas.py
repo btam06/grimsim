@@ -36,6 +36,10 @@ class FactionAbilityOut(FactionAbilityIn):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    # Names of the selectable rule options this ability grants in combat
+    # (e.g. Doctrina Imperatives' Protector/Conqueror Imperatives), defined in
+    # the faction's app/seeds/factions/<faction>/abilities.py. Read-only.
+    rule_options: list[str] = []
 
 
 class KeywordIn(BaseModel):
@@ -64,6 +68,7 @@ class ModelIn(BaseModel):
     ability_ids: list[int] = []
     wargear_ids: list[int] = []
     keyword_ids: list[int] = []
+    faction_ability_ids: list[int] = []
 
 
 class ModelOut(BaseModel):
@@ -83,6 +88,7 @@ class ModelOut(BaseModel):
     ability_ids: list[int]
     wargear_ids: list[int]
     keyword_ids: list[int]
+    faction_ability_ids: list[int]
 
 
 class WeaponIn(BaseModel):
@@ -292,6 +298,11 @@ class CombatIn(BaseModel):
     # Whether attacks from weapons with the Precision effect pick off leaders
     # (then supports) first, rather than following normal targeting.
     apply_precision: bool = False
+    # Active rule options from faction abilities (e.g. "Protector Imperative"
+    # for Doctrina Imperatives), per side. A unit only gains an option if one
+    # of its models has the faction ability that grants it.
+    attacker_rule_options: list[str] = []
+    defender_rule_options: list[str] = []
     in_engagement_range: bool = False
     in_cover: bool = False
     half_range: bool = False

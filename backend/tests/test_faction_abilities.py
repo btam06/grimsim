@@ -65,3 +65,31 @@ async def test_delete_faction_ability(client: AsyncClient, faction_id: int):
 async def test_delete_nonexistent_faction_ability_returns_404(client: AsyncClient):
     response = await client.delete("/faction-abilities/9999")
     assert response.status_code == 404
+
+
+async def test_faction_ability_lists_its_rule_options(client: AsyncClient):
+    faction_id = (await client.post("/factions", json={"name": "Adeptus Mechanicus"})).json()["id"]
+    response = await client.post(
+        "/faction-abilities", json={"name": "Doctrina Imperatives", "faction_id": faction_id}
+    )
+    assert response.json()["rule_options"] == ["Protector Imperative", "Conqueror Imperative"]
+
+    response = await client.get("/faction-abilities")
+    assert response.json()[0]["rule_options"] == ["Protector Imperative", "Conqueror Imperative"]
+
+
+async def test_faction_ability_without_options_has_no_rule_options(
+    client: AsyncClient, faction_id: int
+):
+    response = await client.post(
+        "/faction-abilities", json={"name": "Oath of Moment", "faction_id": faction_id}
+    )
+    assert response.json()["rule_options"] == []
+
+
+async def test_waaagh_lists_riled_up_rule_option(client: AsyncClient):
+    faction_id = (await client.post("/factions", json={"name": "Orks"})).json()["id"]
+    response = await client.post(
+        "/faction-abilities", json={"name": "Waaagh!", "faction_id": faction_id}
+    )
+    assert response.json()["rule_options"] == ["Riled Up"]

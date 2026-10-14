@@ -18,19 +18,16 @@ import { createDisposition, listDispositions } from './api'
 
 const TAB_GROUPS = {
   Build: ['Lists'],
-  Data: [
-    'Models',
+  Data: ['Models', 'Datasheet Abilities', 'Dispositions', 'Factions', 'Detachments', 'Stratagems'],
+  Debug: [
+    'Weapons',
+    'Units',
+    'Faction Units',
     'Keywords',
-    'Datasheet Abilities',
     'Weapon Abilities',
     'Wargear Abilities',
-    'Dispositions',
-    'Factions',
     'Faction Abilities',
-    'Detachments',
-    'Stratagems',
   ],
-  Debug: ['Weapons', 'Units', 'Faction Units'],
   Calculator: ['Calculator'],
 }
 

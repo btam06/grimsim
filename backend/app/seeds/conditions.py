@@ -11,7 +11,11 @@ from app.combat_rules.conditions import (
     ANTI_VEHICLE_4,
     CRITICAL_HIT,
     CRITICAL_WOUND,
+    ATTACKER_IS_BATTLELINE,
+    MELEE_ATTACK_AGAINST_BATTLELINE,
     MOVED_LESS_THAN_3,
+    RANGED_MOVED_LESS_THAN_3,
+    TARGET_MONSTER_OR_VEHICLE,
     WITHIN_HALF_RANGE,
 )
 from app.models import Condition
@@ -61,6 +65,26 @@ ENTRIES = [
         MOVED_LESS_THAN_3,
         "Moved Less Than 3\"",
         "The attacking unit moved less than 3\" this turn.",
+    ),
+    (
+        TARGET_MONSTER_OR_VEHICLE,
+        "Target is Monster or Vehicle",
+        "The defending unit contains a MONSTER or VEHICLE model. Applies at every step.",
+    ),
+    (
+        RANGED_MOVED_LESS_THAN_3,
+        "Ranged Weapon, Moved Less Than 3\"",
+        "The weapon is ranged and the attacking unit moved less than 3\" this turn.",
+    ),
+    (
+        MELEE_ATTACK_AGAINST_BATTLELINE,
+        "Melee Attack Against Battleline",
+        "A melee attack against a defending unit that contains a BATTLELINE model.",
+    ),
+    (
+        ATTACKER_IS_BATTLELINE,
+        "Attacker is Battleline",
+        "The attacking unit contains a BATTLELINE model. Applies at every step.",
     ),
 ]
 

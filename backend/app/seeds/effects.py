@@ -10,6 +10,9 @@ from app.combat_rules.effects import (
     HAZARDOUS,
     IGNORE_COVER,
     IGNORE_COVER_UNIT,
+    IMPROVE_AP,
+    INVULNERABLE_5,
+    MINUS_ONE_TO_HIT,
     NO_SAVE,
     PISTOL,
     PLUS_ONE_SKILL_MELEE,
@@ -97,6 +100,21 @@ ENTRIES = [
         PRECISION,
         "Precision",
         "If the attacker applies precision, this weapon's attacks target leaders first, then supports, then other models.",
+    ),
+    (
+        MINUS_ONE_TO_HIT,
+        "-1 to Hit",
+        "This attack's hit roll needs 1 more to succeed.",
+    ),
+    (
+        IMPROVE_AP,
+        "Improve AP by 1",
+        "This attack's Armour Penetration is improved by 1.",
+    ),
+    (
+        INVULNERABLE_5,
+        "5+ Invulnerable Save",
+        "The targeted model has a 5+ invulnerable save against this attack (a better one is kept).",
     ),
 ]
 

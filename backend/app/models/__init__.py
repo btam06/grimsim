@@ -2,6 +2,7 @@ from app.models.army_list import ArmyList
 from app.models.associations import (
     datasheet_ability_links,
     detachment_dispositions,
+    model_faction_ability_links,
     model_keyword_links,
     stratagem_conditions,
     stratagem_detachments,
@@ -64,6 +65,7 @@ __all__ = [
     "wargear_ability_conditions",
     "wargear_ability_effects",
     "model_keyword_links",
+    "model_faction_ability_links",
     "detachment_dispositions",
     "stratagem_detachments",
     "stratagem_conditions",

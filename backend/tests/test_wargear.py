@@ -101,3 +101,84 @@ async def test_wargear_ability_can_be_attached_to_multiple_wargear(
     gear_by_id = {g["id"]: g for g in response.json()}
     assert gear_by_id[gear_a_id]["ability_ids"] == [ability_id]
     assert gear_by_id[gear_b_id]["ability_ids"] == [ability_id]
+
+
+async def test_update_wargear(client: AsyncClient, faction_id: int):
+    model_id = await _create_model(client, faction_id)
+    ability_id = await _create_wargear_ability(client)
+    wargear_id = (
+        await client.post("/wargear", json={"name": "Auspex", "model_id": model_id})
+    ).json()["id"]
+
+    response = await client.put(
+        f"/wargear/{wargear_id}",
+        json={
+            "name": "Refractor Field",
+            "model_id": model_id,
+            "description": "Shiny",
+            "ability_ids": [ability_id],
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == "Refractor Field"
+    assert body["description"] == "Shiny"
+    assert body["ability_ids"] == [ability_id]
+
+
+async def test_update_nonexistent_wargear_returns_404(client: AsyncClient, faction_id: int):
+    model_id = await _create_model(client, faction_id)
+    response = await client.put("/wargear/9999", json={"name": "X", "model_id": model_id})
+    assert response.status_code == 404
+
+
+async def test_update_wargear_with_invalid_ability_id_returns_400(
+    client: AsyncClient, faction_id: int
+):
+    model_id = await _create_model(client, faction_id)
+    wargear_id = (
+        await client.post("/wargear", json={"name": "Auspex", "model_id": model_id})
+    ).json()["id"]
+    response = await client.put(
+        f"/wargear/{wargear_id}",
+        json={"name": "Auspex", "model_id": model_id, "ability_ids": [9999]},
+    )
+    assert response.status_code == 400
+
+
+async def test_delete_wargear(client: AsyncClient, faction_id: int):
+    model_id = await _create_model(client, faction_id)
+    wargear_id = (
+        await client.post("/wargear", json={"name": "Auspex", "model_id": model_id})
+    ).json()["id"]
+
+    response = await client.delete(f"/wargear/{wargear_id}")
+    assert response.status_code == 204
+    assert (await client.get("/wargear")).json() == []
+
+
+async def test_delete_nonexistent_wargear_returns_404(client: AsyncClient):
+    response = await client.delete("/wargear/9999")
+    assert response.status_code == 404
+
+
+async def test_delete_wargear_equipped_by_unit_returns_400(client: AsyncClient, faction_id: int):
+    model_id = await _create_model(client, faction_id)
+    wargear_id = (
+        await client.post("/wargear", json={"name": "Auspex", "model_id": model_id})
+    ).json()["id"]
+    faction_unit_id = (
+        await client.post("/faction-units", json={"name": "Squad", "faction_id": faction_id})
+    ).json()["id"]
+    response = await client.post(
+        "/units",
+        json={
+            "faction_unit_id": faction_unit_id,
+            "points": 100,
+            "unit_models": [{"model_id": model_id, "wargear_ids": [wargear_id]}],
+        },
+    )
+    assert response.status_code == 201
+
+    response = await client.delete(f"/wargear/{wargear_id}")
+    assert response.status_code == 400

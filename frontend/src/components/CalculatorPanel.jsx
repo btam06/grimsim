@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   listEffects,
+  listFactionAbilities,
   listFactionUnits,
   listLists,
+  listModels,
   listStratagems,
   listUnits,
   listWeaponAbilities,
@@ -24,6 +26,27 @@ function DiceRolls({ rolls }) {
   ))
 }
 
+// One radio group per faction ability with rule options (e.g. Doctrina
+// Imperatives), for picking which option is active for one side - or none.
+function RuleOptionPicker({ side, abilities, choices, onChange }) {
+  return abilities.map((ability) => (
+    <div key={ability.id} className="radio-group">
+      {side} — {ability.name}
+      {['', ...ability.rule_options].map((option) => (
+        <label key={option || 'none'} className="radio-option">
+          <input
+            type="radio"
+            name={`${side}-rule-${ability.id}`}
+            checked={(choices[ability.id] ?? '') === option}
+            onChange={() => onChange({ ...choices, [ability.id]: option })}
+          />
+          {option || 'None'}
+        </label>
+      ))}
+    </div>
+  ))
+}
+
 function CalculatorPanel() {
   const [units, setUnits] = useState([])
   const [factionUnits, setFactionUnits] = useState([])
@@ -32,6 +55,11 @@ function CalculatorPanel() {
   const [stratagems, setStratagems] = useState([])
   const [weaponAbilities, setWeaponAbilities] = useState([])
   const [effects, setEffects] = useState([])
+  const [models, setModels] = useState([])
+  const [factionAbilities, setFactionAbilities] = useState([])
+  // {faction ability id: selected rule option name ('' for none)}, per side.
+  const [attackerRuleChoices, setAttackerRuleChoices] = useState({})
+  const [defenderRuleChoices, setDefenderRuleChoices] = useState({})
   const [attackingUnitId, setAttackingUnitId] = useState('')
   const [defendingUnitId, setDefendingUnitId] = useState('')
   const [inEngagementRange, setInEngagementRange] = useState(false)
@@ -53,6 +81,8 @@ function CalculatorPanel() {
     listStratagems().then(setStratagems).catch((err) => setError(err.message))
     listWeaponAbilities().then(setWeaponAbilities).catch((err) => setError(err.message))
     listEffects().then(setEffects).catch((err) => setError(err.message))
+    listModels().then(setModels).catch((err) => setError(err.message))
+    listFactionAbilities().then(setFactionAbilities).catch((err) => setError(err.message))
   }, [])
 
   const unitLabel = (unit) => {
@@ -101,6 +131,33 @@ function CalculatorPanel() {
   useEffect(() => {
     setSelectedStratagemIds([])
   }, [attackingUnitId])
+
+  // Faction abilities with rule options held by any model in a unit - a unit
+  // gains an option if one of its models has the ability.
+  const ruleAbilitiesFor = (unit) => {
+    if (!unit) return []
+    const heldIds = new Set(
+      unit.unit_models.flatMap(
+        (um) => models.find((m) => m.id === um.model_id)?.faction_ability_ids ?? []
+      )
+    )
+    return factionAbilities.filter((a) => heldIds.has(a.id) && a.rule_options.length > 0)
+  }
+  const defendingUnit = units.find((u) => u.id === Number(defendingUnitId))
+  const attackerRuleAbilities = ruleAbilitiesFor(attackingUnit)
+  const defenderRuleAbilities = ruleAbilitiesFor(defendingUnit)
+
+  useEffect(() => {
+    setAttackerRuleChoices({})
+  }, [attackingUnitId])
+
+  useEffect(() => {
+    setDefenderRuleChoices({})
+  }, [defendingUnitId])
+
+  // Only send choices for abilities the unit currently has.
+  const selectedRuleOptions = (abilities, choices) =>
+    abilities.map((a) => choices[a.id]).filter(Boolean)
 
   // Precision is only worth offering when something about to attack has the
   // precision effect - a selected weapon's ability, or a selected stratagem.
@@ -152,6 +209,8 @@ function CalculatorPanel() {
         selected_weapon_ids: selectedWeaponIds,
         stratagem_ids: selectedStratagemIds,
         apply_precision: hasPrecision && applyPrecision,
+        attacker_rule_options: selectedRuleOptions(attackerRuleAbilities, attackerRuleChoices),
+        defender_rule_options: selectedRuleOptions(defenderRuleAbilities, defenderRuleChoices),
         in_engagement_range: inEngagementRange,
         in_cover: inCover,
         half_range: halfRange,
@@ -219,73 +278,95 @@ function CalculatorPanel() {
             </div>
           </div>
         )}
-        {hasPrecision && (
+        {(attackerRuleAbilities.length > 0 || defenderRuleAbilities.length > 0) && (
+          <fieldset className="form-section">
+            <legend>Faction Rules</legend>
+            <RuleOptionPicker
+              side="Attacker"
+              abilities={attackerRuleAbilities}
+              choices={attackerRuleChoices}
+              onChange={setAttackerRuleChoices}
+            />
+            <RuleOptionPicker
+              side="Defender"
+              abilities={defenderRuleAbilities}
+              choices={defenderRuleChoices}
+              onChange={setDefenderRuleChoices}
+            />
+          </fieldset>
+        )}
+        <fieldset className="form-section">
+          <legend>Engagement</legend>
+          <div className="radio-group">
+            <label className="radio-option">
+              <input
+                type="radio"
+                name="in_engagement_range"
+                checked={!inEngagementRange}
+                onChange={() => setInEngagementRange(false)}
+              />
+              Ranged
+            </label>
+            <label className="radio-option">
+              <input
+                type="radio"
+                name="in_engagement_range"
+                checked={inEngagementRange}
+                onChange={() => setInEngagementRange(true)}
+              />
+              Melee (in engagement range)
+            </label>
+          </div>
+        </fieldset>
+        <fieldset className="form-section">
+          <legend>Modifiers</legend>
+          {!inEngagementRange && (
+            <>
+              <label className="checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={inCover}
+                  onChange={(e) => setInCover(e.target.checked)}
+                />
+                Defender in cover (+1 to hit for ranged attacks)
+              </label>
+              <label className="checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={halfRange}
+                  onChange={(e) => setHalfRange(e.target.checked)}
+                />
+                Shooting model is within half range
+              </label>
+              <label className="checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={advanced}
+                  onChange={(e) => setAdvanced(e.target.checked)}
+                />
+                Attacking unit advanced this turn
+              </label>
+            </>
+          )}
           <label className="checkbox-field">
             <input
               type="checkbox"
-              checked={applyPrecision}
-              onChange={(e) => setApplyPrecision(e.target.checked)}
+              checked={movedLessThan3}
+              onChange={(e) => setMovedLessThan3(e.target.checked)}
             />
-            Apply Precision (precision weapons target leaders, then supports, then other models)
+            Attacking unit moved less than 3" this turn
           </label>
-        )}
-        <div className="radio-group">
-          Engagement
-          <label className="radio-option">
-            <input
-              type="radio"
-              name="in_engagement_range"
-              checked={!inEngagementRange}
-              onChange={() => setInEngagementRange(false)}
-            />
-            Ranged
-          </label>
-          <label className="radio-option">
-            <input
-              type="radio"
-              name="in_engagement_range"
-              checked={inEngagementRange}
-              onChange={() => setInEngagementRange(true)}
-            />
-            Melee (in engagement range)
-          </label>
-        </div>
-        {!inEngagementRange && (
-          <>
+          {hasPrecision && (
             <label className="checkbox-field">
               <input
                 type="checkbox"
-                checked={inCover}
-                onChange={(e) => setInCover(e.target.checked)}
+                checked={applyPrecision}
+                onChange={(e) => setApplyPrecision(e.target.checked)}
               />
-              Defender in cover (+1 to hit for ranged attacks)
+              Apply Precision (precision weapons target leaders, then supports, then other models)
             </label>
-            <label className="checkbox-field">
-              <input
-                type="checkbox"
-                checked={halfRange}
-                onChange={(e) => setHalfRange(e.target.checked)}
-              />
-              Shooting model is within half range
-            </label>
-            <label className="checkbox-field">
-              <input
-                type="checkbox"
-                checked={advanced}
-                onChange={(e) => setAdvanced(e.target.checked)}
-              />
-              Attacking unit advanced this turn
-            </label>
-          </>
-        )}
-        <label className="checkbox-field">
-          <input
-            type="checkbox"
-            checked={movedLessThan3}
-            onChange={(e) => setMovedLessThan3(e.target.checked)}
-          />
-          Attacking unit moved less than 3" this turn
-        </label>
+          )}
+        </fieldset>
         <button type="submit">Calculate</button>
       </form>
 
@@ -312,10 +393,14 @@ function CalculatorPanel() {
                   </li>
                   <li>Total damage dealt: {wr.total_damage}</li>
                   <li>Defending models destroyed: {wr.models_destroyed}</li>
-                  <li>
-                    Hazardous rolls: <DiceRolls rolls={wr.hazardous_rolls} />
-                  </li>
-                  <li>Hazardous wounds taken: {wr.hazardous_wounds}</li>
+                  {wr.hazardous_rolls.length > 0 && (
+                    <>
+                      <li>
+                        Hazardous rolls: <DiceRolls rolls={wr.hazardous_rolls} />
+                      </li>
+                      <li>Hazardous wounds taken: {wr.hazardous_wounds}</li>
+                    </>
+                  )}
                 </ul>
               </li>
             ))}
@@ -326,8 +411,12 @@ function CalculatorPanel() {
             <li>Total damage dealt: {result.total_damage}</li>
             <li>Defending models destroyed: {result.models_destroyed}</li>
             <li>Defending models remaining: {result.defending_models_remaining}</li>
-            <li>Hazardous wounds taken: {result.hazardous_wounds}</li>
-            <li>Hazardous attackers destroyed: {result.hazardous_models_destroyed}</li>
+            {result.hazardous_rolls.length > 0 && (
+              <>
+                <li>Hazardous wounds taken: {result.hazardous_wounds}</li>
+                <li>Hazardous attackers destroyed: {result.hazardous_models_destroyed}</li>
+              </>
+            )}
           </ul>
         </>
       )}

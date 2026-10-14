@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   listDatasheetAbilities,
+  listFactionAbilities,
   listFactions,
   listKeywords,
   listModels,
@@ -11,6 +12,7 @@ import {
 } from '../api'
 import ModelFormPage from './ModelFormPage'
 import ModelsListPage from './ModelsListPage'
+import WargearFormPage from './WargearFormPage'
 import WeaponFormPage from './WeaponFormPage'
 
 function ModelsPanel() {
@@ -18,6 +20,7 @@ function ModelsPanel() {
   const [factions, setFactions] = useState([])
   const [abilities, setAbilities] = useState([])
   const [keywords, setKeywords] = useState([])
+  const [factionAbilities, setFactionAbilities] = useState([])
   const [weaponAbilities, setWeaponAbilities] = useState([])
   const [wargearAbilities, setWargearAbilities] = useState([])
   const [weapons, setWeapons] = useState([])
@@ -26,6 +29,7 @@ function ModelsPanel() {
   const [view, setView] = useState('list')
   const [editingModel, setEditingModel] = useState(null)
   const [editingWeapon, setEditingWeapon] = useState(null)
+  const [editingWargear, setEditingWargear] = useState(null)
 
   const refreshModels = () => listModels().then(setModels).catch((err) => setError(err.message))
   const refreshWeapons = () => listWeapons().then(setWeapons).catch((err) => setError(err.message))
@@ -41,6 +45,9 @@ function ModelsPanel() {
       .catch((err) => setError(err.message))
     listKeywords()
       .then(setKeywords)
+      .catch((err) => setError(err.message))
+    listFactionAbilities()
+      .then(setFactionAbilities)
       .catch((err) => setError(err.message))
     listWeaponAbilities()
       .then(setWeaponAbilities)
@@ -71,6 +78,24 @@ function ModelsPanel() {
     refreshWeapons()
   }
 
+  const goBackToModelFormFromWargear = () => {
+    setView('model-form')
+    setEditingWargear(null)
+    refreshWargear()
+  }
+
+  if (view === 'wargear-form') {
+    return (
+      <WargearFormPage
+        editingWargear={editingWargear}
+        defaultModelId={editingModel?.id ?? null}
+        wargearAbilities={wargearAbilities}
+        onSaved={goBackToModelFormFromWargear}
+        onCancel={goBackToModelFormFromWargear}
+      />
+    )
+  }
+
   if (view === 'weapon-form') {
     return (
       <WeaponFormPage
@@ -90,9 +115,9 @@ function ModelsPanel() {
         factions={factions}
         abilities={abilities}
         keywords={keywords}
+        factionAbilities={factionAbilities}
         weapons={weapons}
         wargear={wargear}
-        wargearAbilities={wargearAbilities}
         onSaved={goToList}
         onSavedStay={stayOnForm}
         onCancel={goToList}
@@ -108,6 +133,14 @@ function ModelsPanel() {
           setEditingWeapon(weapon)
           setView('weapon-form')
         }}
+        onAddWargear={() => {
+          setEditingWargear(null)
+          setView('wargear-form')
+        }}
+        onEditWargear={(item) => {
+          setEditingWargear(item)
+          setView('wargear-form')
+        }}
       />
     )
   }
@@ -117,6 +150,7 @@ function ModelsPanel() {
       models={models}
       abilities={abilities}
       keywords={keywords}
+      factionAbilities={factionAbilities}
       weapons={weapons}
       wargear={wargear}
       error={error}

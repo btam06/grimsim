@@ -5,12 +5,17 @@ from typing import TYPE_CHECKING
 from sqlalchemy import Boolean, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.associations import datasheet_ability_links, model_keyword_links
+from app.models.associations import (
+    datasheet_ability_links,
+    model_faction_ability_links,
+    model_keyword_links,
+)
 from app.models.base import Base
 
 if TYPE_CHECKING:
     from app.models.datasheet_ability import DatasheetAbility
     from app.models.faction import Faction
+    from app.models.faction_ability import FactionAbility
     from app.models.keyword import Keyword
     from app.models.unit_model import UnitModel
     from app.models.wargear import Wargear
@@ -43,5 +48,11 @@ class Model(Base):
     )
     keywords: Mapped[list["Keyword"]] = relationship(
         secondary=model_keyword_links, back_populates="models"
+    )
+    # Faction-wide rules this model has access to (e.g. Doctrina Imperatives).
+    # Like a keyword in that it's a tag on the model, but it names a rule from
+    # app/seeds/factions/<faction>/abilities.py rather than a datasheet keyword.
+    faction_abilities: Mapped[list["FactionAbility"]] = relationship(
+        secondary=model_faction_ability_links, back_populates="models"
     )
     unit_models: Mapped[list["UnitModel"]] = relationship(back_populates="model")

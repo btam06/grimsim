@@ -5,17 +5,20 @@ from typing import TYPE_CHECKING
 from sqlalchemy import ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.models.associations import model_faction_ability_links
 from app.models.base import Base
 
 if TYPE_CHECKING:
     from app.models.faction import Faction
+    from app.models.model import Model
 
 
 class FactionAbility(Base):
     # A faction-wide special rule (e.g. "Oath of Moment", "Waaagh!") - purely
     # descriptive, unlike WeaponAbility/WargearAbility/DatasheetAbility there
     # are deliberately no conditions/effects here for the combat engine to key
-    # off; it exists for reference only.
+    # off; it exists for reference only. Models are given access to it
+    # explicitly (Model.faction_abilities).
     __tablename__ = "faction_abilities"
     __table_args__ = (UniqueConstraint("faction_id", "name"),)
 
@@ -25,3 +28,6 @@ class FactionAbility(Base):
     faction_id: Mapped[int] = mapped_column(ForeignKey("factions.id"))
 
     faction: Mapped["Faction"] = relationship(back_populates="faction_abilities")
+    models: Mapped[list["Model"]] = relationship(
+        secondary=model_faction_ability_links, back_populates="faction_abilities"
+    )

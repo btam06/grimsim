@@ -2,18 +2,34 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.db import get_session
 from app.models import Faction, FactionAbility
 from app.schemas import FactionAbilityIn, FactionAbilityOut
+from app.seeds import factions as faction_seeds
 
 router = APIRouter(prefix="/faction-abilities", tags=["faction-abilities"])
 
 
+def _to_out(faction_ability: FactionAbility, faction_name: str) -> FactionAbilityOut:
+    return FactionAbilityOut(
+        id=faction_ability.id,
+        name=faction_ability.name,
+        description=faction_ability.description,
+        faction_id=faction_ability.faction_id,
+        rule_options=list(faction_seeds.rule_options(faction_name, faction_ability.name)),
+    )
+
+
 @router.get("", response_model=list[FactionAbilityOut])
 async def list_faction_abilities(session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(FactionAbility).order_by(FactionAbility.id))
-    return result.scalars().all()
+    result = await session.execute(
+        select(FactionAbility)
+        .options(selectinload(FactionAbility.faction))
+        .order_by(FactionAbility.id)
+    )
+    return [_to_out(fa, fa.faction.name) for fa in result.scalars().all()]
 
 
 @router.post("", response_model=FactionAbilityOut, status_code=201)
@@ -35,7 +51,7 @@ async def create_faction_ability(
         raise HTTPException(
             status_code=400, detail="faction ability name must be unique within its faction"
         ) from exc
-    return faction_ability
+    return _to_out(faction_ability, faction.name)
 
 
 @router.delete("/{faction_ability_id}", status_code=204)

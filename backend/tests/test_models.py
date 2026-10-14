@@ -243,3 +243,87 @@ async def test_update_model_with_invalid_faction_returns_400(client: AsyncClient
 async def test_update_nonexistent_model_returns_404(client: AsyncClient, faction_id: int):
     response = await client.put("/models/9999", json=_model_payload(faction_id))
     assert response.status_code == 404
+
+
+async def _create_faction_ability(
+    client: AsyncClient, faction_id: int, name: str = "Doctrina Imperatives"
+) -> int:
+    response = await client.post(
+        "/faction-abilities", json={"name": name, "faction_id": faction_id}
+    )
+    assert response.status_code == 201
+    return response.json()["id"]
+
+
+async def test_create_model_with_faction_abilities(client: AsyncClient, faction_id: int):
+    faction_ability_id = await _create_faction_ability(client, faction_id)
+
+    response = await client.post(
+        "/models", json=_model_payload(faction_id, faction_ability_ids=[faction_ability_id])
+    )
+    assert response.status_code == 201
+    assert response.json()["faction_ability_ids"] == [faction_ability_id]
+    # Faction abilities are their own thing, not keywords or datasheet abilities.
+    assert response.json()["keyword_ids"] == []
+    assert response.json()["ability_ids"] == []
+
+    response = await client.get("/models")
+    assert response.json()[0]["faction_ability_ids"] == [faction_ability_id]
+
+
+async def test_create_model_defaults_to_no_faction_abilities(
+    client: AsyncClient, faction_id: int
+):
+    response = await client.post("/models", json=_model_payload(faction_id))
+    assert response.json()["faction_ability_ids"] == []
+
+
+async def test_create_model_with_invalid_faction_ability_id_returns_400(
+    client: AsyncClient, faction_id: int
+):
+    response = await client.post(
+        "/models", json=_model_payload(faction_id, faction_ability_ids=[9999])
+    )
+    assert response.status_code == 400
+
+
+async def test_update_model_replaces_faction_abilities(client: AsyncClient, faction_id: int):
+    model_id = (await client.post("/models", json=_model_payload(faction_id))).json()["id"]
+    ability_a = await _create_faction_ability(client, faction_id, "Doctrina Imperatives")
+    ability_b = await _create_faction_ability(client, faction_id, "Canticles")
+
+    response = await client.put(
+        f"/models/{model_id}", json=_model_payload(faction_id, faction_ability_ids=[ability_a])
+    )
+    assert response.json()["faction_ability_ids"] == [ability_a]
+
+    response = await client.put(
+        f"/models/{model_id}", json=_model_payload(faction_id, faction_ability_ids=[ability_b])
+    )
+    assert response.json()["faction_ability_ids"] == [ability_b]
+
+    response = await client.put(f"/models/{model_id}", json=_model_payload(faction_id))
+    assert response.json()["faction_ability_ids"] == []
+
+
+async def test_update_model_with_invalid_faction_ability_id_returns_400(
+    client: AsyncClient, faction_id: int
+):
+    model_id = (await client.post("/models", json=_model_payload(faction_id))).json()["id"]
+    response = await client.put(
+        f"/models/{model_id}", json=_model_payload(faction_id, faction_ability_ids=[9999])
+    )
+    assert response.status_code == 400
+
+
+async def test_deleting_faction_ability_removes_it_from_models(
+    client: AsyncClient, faction_id: int
+):
+    faction_ability_id = await _create_faction_ability(client, faction_id)
+    await client.post(
+        "/models", json=_model_payload(faction_id, faction_ability_ids=[faction_ability_id])
+    )
+
+    response = await client.delete(f"/faction-abilities/{faction_ability_id}")
+    assert response.status_code == 204
+    assert (await client.get("/models")).json()[0]["faction_ability_ids"] == []

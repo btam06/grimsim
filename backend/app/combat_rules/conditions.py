@@ -20,6 +20,10 @@ ANTI_VEHICLE_3 = "anti_vehicle_3"
 ANTI_VEHICLE_4 = "anti_vehicle_4"
 WITHIN_HALF_RANGE = "within_half_range"
 MOVED_LESS_THAN_3 = "moved_less_than_3"
+TARGET_MONSTER_OR_VEHICLE = "target_monster_or_vehicle"
+RANGED_MOVED_LESS_THAN_3 = "ranged_moved_less_than_3"
+MELEE_ATTACK_AGAINST_BATTLELINE = "melee_attack_against_battleline"
+ATTACKER_IS_BATTLELINE = "attacker_is_battleline"
 
 
 def critical_hit(context: dict) -> bool:
@@ -110,6 +114,35 @@ def moved_less_than_3(context: dict) -> bool:
     return context.get("step") == "pre_hit" and context.get("moved_less_than_3", False)
 
 
+def target_monster_or_vehicle(context: dict) -> bool:
+    # True at every step (like `always`) when the defending unit contains a
+    # MONSTER or VEHICLE model - e.g. for a +1 to hit against big targets.
+    defender_keywords = context.get("defender_keywords", set())
+    return "MONSTER" in defender_keywords or "VEHICLE" in defender_keywords
+
+
+def ranged_moved_less_than_3(context: dict) -> bool:
+    # Like moved_less_than_3, but only for a ranged weapon - e.g. for granting
+    # Heavy to a unit's ranged weapons without affecting its melee weapons.
+    return moved_less_than_3(context) and context.get("is_ranged", False)
+
+
+def melee_attack_against_battleline(context: dict) -> bool:
+    # True at the pre-hit check of a melee attack against a defending unit
+    # that contains a BATTLELINE model (e.g. Protector Imperative's -1 to hit).
+    return (
+        context.get("step") == "pre_hit"
+        and not context.get("is_ranged", True)
+        and "BATTLELINE" in context.get("defender_keywords", set())
+    )
+
+
+def attacker_is_battleline(context: dict) -> bool:
+    # True at every step (like `always`) when the attacking unit contains a
+    # BATTLELINE model (e.g. Conqueror Imperative's improved AP).
+    return "BATTLELINE" in context.get("attacker_keywords", set())
+
+
 CONDITIONS = {
     CRITICAL_HIT: critical_hit,
     CRITICAL_WOUND: critical_wound,
@@ -122,4 +155,8 @@ CONDITIONS = {
     ANTI_VEHICLE_4: anti_vehicle_4,
     WITHIN_HALF_RANGE: within_half_range,
     MOVED_LESS_THAN_3: moved_less_than_3,
+    TARGET_MONSTER_OR_VEHICLE: target_monster_or_vehicle,
+    RANGED_MOVED_LESS_THAN_3: ranged_moved_less_than_3,
+    MELEE_ATTACK_AGAINST_BATTLELINE: melee_attack_against_battleline,
+    ATTACKER_IS_BATTLELINE: attacker_is_battleline,
 }

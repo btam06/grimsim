@@ -4,9 +4,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db import get_session
+from app.combat_rules import Rule
 from app.models import (
     ArmyList,
     DatasheetAbility,
+    FactionAbility,
     Model,
     Stratagem,
     Unit,
@@ -17,6 +19,7 @@ from app.models import (
     WeaponAbility,
 )
 from app.schemas import CombatIn, CombatOut, WeaponCombatResultOut
+from app.seeds import factions as faction_seeds
 from app.services import combat as combat_service
 
 router = APIRouter(prefix="/combat", tags=["combat"])
@@ -47,11 +50,47 @@ async def _load_unit(session: AsyncSession, unit_id: int) -> Unit | None:
                 DatasheetAbility.conditions
             ),
             model_loader.selectinload(Model.abilities).selectinload(DatasheetAbility.effects),
+            model_loader.selectinload(Model.faction_abilities).selectinload(
+                FactionAbility.faction
+            ),
             selectinload(Unit.army_list).selectinload(ArmyList.detachments),
         )
         .where(Unit.id == unit_id)
     )
     return result.scalar_one_or_none()
+
+
+def _validate_rule_options(option_names: list[str], field: str) -> None:
+    unknown = [name for name in option_names if name not in faction_seeds.OPTION_OWNERS]
+    if unknown:
+        raise HTTPException(
+            status_code=400, detail=f"unknown {field}: {', '.join(unknown)}"
+        )
+    # Only one option per faction ability can be active at a time (e.g. not
+    # both the Protector and Conqueror Imperatives).
+    owners = [faction_seeds.OPTION_OWNERS[name] for name in set(option_names)]
+    if len(owners) != len(set(owners)):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field} has more than one option for the same faction ability",
+        )
+
+
+def _active_rules(unit: Unit, option_names: list[str]) -> list[Rule]:
+    # A faction ability's options apply to the whole unit if any of its models
+    # has that faction ability; options for abilities it lacks are ignored.
+    held = {
+        (faction_ability.faction.name, faction_ability.name)
+        for unit_model in unit.unit_models
+        for faction_ability in unit_model.model.faction_abilities
+    }
+    return [
+        rule
+        for faction_name, ability_name in held
+        for option_name, rules in faction_seeds.rule_options(faction_name, ability_name).items()
+        if option_name in option_names
+        for rule in rules
+    ]
 
 
 @router.post("", response_model=CombatOut)
@@ -103,6 +142,9 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
                     "unit's detachments",
                 )
 
+    _validate_rule_options(payload.attacker_rule_options, "attacker_rule_options")
+    _validate_rule_options(payload.defender_rule_options, "defender_rule_options")
+
     visible = True if payload.game_id is None else payload.defender_visible
     in_range = True if payload.game_id is None else payload.defender_in_range
 
@@ -119,6 +161,8 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
         advanced=payload.advanced,
         stratagems=stratagems,
         apply_precision=payload.apply_precision,
+        attacker_rules=_active_rules(attacker, payload.attacker_rule_options),
+        defender_rules=_active_rules(defender, payload.defender_rule_options),
     )
 
     return CombatOut(

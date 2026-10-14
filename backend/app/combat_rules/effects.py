@@ -29,6 +29,9 @@ PLUS_ONE_SKILL_MELEE = "plus_one_skill_melee"
 ASSAULT = "assault"
 PISTOL = "pistol"
 PRECISION = "precision"
+MINUS_ONE_TO_HIT = "minus_one_to_hit"
+IMPROVE_AP = "improve_ap"
+INVULNERABLE_5 = "invulnerable_5"
 
 
 def auto_pass_wound(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
@@ -122,6 +125,24 @@ def precision(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
     state["precision"] = True
 
 
+def minus_one_to_hit(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # This attack's hit roll needs 1 more to succeed (e.g. a defensive rule
+    # on the unit being attacked). Cancels out a +1 to hit.
+    state["minus_one_to_hit"] = True
+
+
+def improve_ap(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # This attack's Armour Penetration is improved by 1 (e.g. AP-1 becomes
+    # AP-2), worsening the defender's armour save but not its invulnerable.
+    state["improve_ap"] = True
+
+
+def invulnerable_5(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # The model this attack targets has a 5+ invulnerable save against it
+    # (e.g. Orks while riled up). If it already has a better one, that's kept.
+    state["invulnerable_save"] = min(state.get("invulnerable_save", 7), 5)
+
+
 EFFECTS = {
     AUTO_PASS_WOUND: auto_pass_wound,
     ADD_EXTRA_HIT: add_extra_hit,
@@ -138,4 +159,7 @@ EFFECTS = {
     ASSAULT: assault,
     PISTOL: pistol,
     PRECISION: precision,
+    MINUS_ONE_TO_HIT: minus_one_to_hit,
+    IMPROVE_AP: improve_ap,
+    INVULNERABLE_5: invulnerable_5,
 }

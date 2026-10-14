@@ -5,7 +5,7 @@ import re
 from collections import deque
 from dataclasses import dataclass, field
 
-from app.combat_rules import CONDITIONS, EFFECTS
+from app.combat_rules import CONDITIONS, EFFECTS, Rule
 from app.models import Model, Stratagem, Unit, WargearAbility, WeaponAbility
 
 _DICE_PATTERN = re.compile(r"^(?:(?P<flat>[0-9]+)|(?P<count>[0-9]*)D(?P<die>[36]))$")
@@ -51,8 +51,14 @@ def _target_priority(model: Model) -> tuple[int, int]:
     return (0 if is_priority_target else 1, -_effective_save(model))
 
 
+def _keyword(item) -> str:
+    # Ability/stratagem rows hold Condition/Effect rows; code-defined Rules
+    # hold the bare keyword strings.
+    return item if isinstance(item, str) else item.keyword
+
+
 def _apply_triggered_effects(
-    abilities: list[WeaponAbility] | list[WargearAbility] | list[Stratagem],
+    abilities: list[WeaponAbility] | list[WargearAbility] | list[Stratagem] | list[Rule],
     context: dict,
     state: dict,
     pending: deque[dict],
@@ -64,14 +70,14 @@ def _apply_triggered_effects(
     # hardcoded implementation) are simply ignored.
     for ability in abilities:
         matched = any(
-            CONDITIONS[condition.keyword](context)
+            CONDITIONS[_keyword(condition)](context)
             for condition in ability.conditions
-            if condition.keyword in CONDITIONS
+            if _keyword(condition) in CONDITIONS
         )
         if not matched:
             continue
         for effect in ability.effects:
-            handler = EFFECTS.get(effect.keyword)
+            handler = EFFECTS.get(_keyword(effect))
             if handler is not None:
                 handler(state, pending)
 
@@ -150,6 +156,8 @@ def resolve_combat(
     advanced: bool,
     stratagems: list[Stratagem] | None = None,
     apply_precision: bool = False,
+    attacker_rules: list[Rule] | None = None,
+    defender_rules: list[Rule] | None = None,
 ) -> CombatResult:
     # The defending unit is a queue of individual models, each with its own wound pool.
     # Each attack targets whichever model is at the front of the queue; once that
@@ -168,6 +176,19 @@ def resolve_combat(
         for unit_model in defender.unit_models
         for keyword in unit_model.model.keywords
     }
+    # Likewise for the attacking unit - e.g. for "if this unit has BATTLELINE".
+    attacker_keywords = {
+        keyword.name
+        for unit_model in attacker.unit_models
+        for keyword in unit_model.model.keywords
+    }
+
+    # Code-defined rules (e.g. an active Doctrina Imperative) from faction
+    # abilities: the attacking unit's own "attacker" rules are in play like
+    # stratagems; the defending unit's "defender" rules are in play for every
+    # weapon too, modifying the attacks made against it.
+    attacker_rules = [r for r in attacker_rules or [] if r.side == "attacker"]
+    defender_rules = [r for r in defender_rules or [] if r.side == "defender"]
 
     # Stratagems used on the attacking unit target the whole unit, so they're
     # in play both for the unit-wide check below and for every weapon fired,
@@ -189,9 +210,16 @@ def resolve_combat(
         ability
         for unit_model in attacker.unit_models
         for ability in unit_model.model.abilities
-    ] + stratagems
+    ] + stratagems + attacker_rules
     _apply_triggered_effects(
-        all_unit_wide_abilities, {"step": "unit_wide"}, unit_wide_state, deque()
+        all_unit_wide_abilities,
+        {
+            "step": "unit_wide",
+            "defender_keywords": defender_keywords,
+            "attacker_keywords": attacker_keywords,
+        },
+        unit_wide_state,
+        deque(),
     )
     unit_ignores_cover = unit_wide_state.get("ignore_cover_unit", False)
     unit_rerolls_failed_hits = unit_wide_state.get("reroll_failed_hits", False)
@@ -244,7 +272,19 @@ def resolve_combat(
                     continue
 
                 is_ranged = weapon.weapon_type != "melee"
-                abilities = list(weapon.abilities) + wargear_abilities + stratagems
+                abilities = (
+                    list(weapon.abilities)
+                    + wargear_abilities
+                    + stratagems
+                    + attacker_rules
+                    + defender_rules
+                )
+                # Shared by every step's context for this weapon.
+                weapon_context = {
+                    "is_ranged": is_ranged,
+                    "defender_keywords": defender_keywords,
+                    "attacker_keywords": attacker_keywords,
+                }
 
                 # Weapon eligibility: a static, no-dice-rolled check of this
                 # weapon's own abilities (Assault/Pistol) run before deciding
@@ -252,7 +292,10 @@ def resolve_combat(
                 # override the engagement-range/advance restrictions below.
                 eligibility_state: dict = {}
                 _apply_triggered_effects(
-                    abilities, {"step": "weapon_eligibility"}, eligibility_state, deque()
+                    abilities,
+                    {"step": "weapon_eligibility", **weapon_context},
+                    eligibility_state,
+                    deque(),
                 )
 
                 # Being in engagement range normally swaps which weapons are
@@ -298,7 +341,7 @@ def resolve_combat(
                 pre_weapon_state: dict = {}
                 _apply_triggered_effects(
                     abilities,
-                    {"step": "pre_weapon", "half_range": half_range},
+                    {"step": "pre_weapon", "half_range": half_range, **weapon_context},
                     pre_weapon_state,
                     pending_attacks,
                 )
@@ -339,7 +382,11 @@ def resolve_combat(
                         # attack before the hit roll's threshold is set.
                         _apply_triggered_effects(
                             abilities,
-                            {"step": "pre_hit", "moved_less_than_3": moved_less_than_3},
+                            {
+                                "step": "pre_hit",
+                                "moved_less_than_3": moved_less_than_3,
+                                **weapon_context,
+                            },
                             attack,
                             pending_attacks,
                         )
@@ -354,8 +401,12 @@ def resolve_combat(
                             and not attack.get("ignore_cover")
                         ):
                             effective_skill += 1
+                        # +1 and -1 to hit are each a single flag, so stacking
+                        # sources of either never exceeds a net +/-1.
                         if attack.get("plus_one_to_hit"):
                             effective_skill -= 1
+                        if attack.get("minus_one_to_hit"):
+                            effective_skill += 1
                         if is_ranged and attack.get("plus_one_skill_ranged"):
                             effective_skill -= 1
                         if not is_ranged and attack.get("plus_one_skill_melee"):
@@ -366,7 +417,10 @@ def resolve_combat(
                         result.attack_rolls.append(hit_roll)
                         weapon_result.attack_rolls.append(hit_roll)
                         _apply_triggered_effects(
-                            abilities, {"step": "hit", "roll": hit_roll}, attack, pending_attacks
+                            abilities,
+                            {"step": "hit", "roll": hit_roll, **weapon_context},
+                            attack,
+                            pending_attacks,
                         )
                         if hit_roll < effective_skill and (
                             attack.get("reroll_failed_hits") or unit_rerolls_failed_hits
@@ -378,7 +432,10 @@ def resolve_combat(
                             result.attack_rerolls.append(hit_roll)
                             weapon_result.attack_rerolls.append(hit_roll)
                             _apply_triggered_effects(
-                                abilities, {"step": "hit", "roll": hit_roll}, attack, pending_attacks
+                                abilities,
+                                {"step": "hit", "roll": hit_roll, **weapon_context},
+                                attack,
+                                pending_attacks,
                             )
                         if hit_roll < effective_skill:
                             continue
@@ -396,7 +453,7 @@ def resolve_combat(
                         weapon_result.wound_rolls.append(wound_roll)
                         _apply_triggered_effects(
                             abilities,
-                            {"step": "wound", "roll": wound_roll, "defender_keywords": defender_keywords},
+                            {"step": "wound", "roll": wound_roll, **weapon_context},
                             attack,
                             pending_attacks,
                         )
@@ -410,7 +467,7 @@ def resolve_combat(
                             # actual natural 6 would.
                             _apply_triggered_effects(
                                 abilities,
-                                {"step": "wound", "roll": 6, "defender_keywords": defender_keywords},
+                                {"step": "wound", "roll": 6, **weapon_context},
                                 attack,
                                 pending_attacks,
                             )
@@ -427,14 +484,22 @@ def resolve_combat(
                     if attack.get("no_save"):
                         save_passed = False
                     else:
-                        save_needed = target.save - weapon.ap
+                        ap = weapon.ap - 1 if attack.get("improve_ap") else weapon.ap
+                        save_needed = target.save - ap
                         if target.invulnerable is not None:
                             save_needed = min(save_needed, target.invulnerable)
+                        # An invulnerable save granted by a rule (e.g. Waaagh!'s
+                        # 5+ while riled up) - also unaffected by AP.
+                        if attack.get("invulnerable_save") is not None:
+                            save_needed = min(save_needed, attack["invulnerable_save"])
                         save_roll = random.randint(1, 6)
                         result.save_rolls.append(save_roll)
                         weapon_result.save_rolls.append(save_roll)
                         _apply_triggered_effects(
-                            abilities, {"step": "save", "roll": save_roll}, attack, pending_attacks
+                            abilities,
+                            {"step": "save", "roll": save_roll, **weapon_context},
+                            attack,
+                            pending_attacks,
                         )
                         save_passed = save_roll >= save_needed
                     if save_passed:

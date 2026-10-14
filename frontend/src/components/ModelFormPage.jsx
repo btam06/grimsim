@@ -1,7 +1,6 @@
 import { useState } from 'react'
-import { createModel, deleteWeapon, updateModel } from '../api'
+import { createModel, deleteWargear, deleteWeapon, updateModel } from '../api'
 import { skillLabel } from '../weaponDisplay'
-import AddWargearForm from './AddWargearForm'
 import Field from './Field'
 import MultiSelect from './MultiSelect'
 import Select from './Select'
@@ -23,6 +22,7 @@ function buildEmptyForm() {
     ability_ids: [],
     wargear_ids: [],
     keyword_ids: [],
+    faction_ability_ids: [],
   }
 }
 
@@ -43,6 +43,7 @@ function formFromModel(model) {
     ability_ids: model.ability_ids,
     wargear_ids: [],
     keyword_ids: model.keyword_ids,
+    faction_ability_ids: model.faction_ability_ids,
   }
 }
 
@@ -63,6 +64,7 @@ function toPayload(form) {
     ability_ids: form.ability_ids,
     wargear_ids: form.wargear_ids,
     keyword_ids: form.keyword_ids,
+    faction_ability_ids: form.faction_ability_ids,
   }
 }
 
@@ -71,15 +73,17 @@ function ModelFormPage({
   factions,
   abilities,
   keywords,
+  factionAbilities,
   weapons,
   wargear,
-  wargearAbilities,
   onSaved,
   onSavedStay,
   onCancel,
   onInventoryChanged,
   onAddWeapon,
   onEditWeapon,
+  onAddWargear,
+  onEditWargear,
 }) {
   const [form, setForm] = useState(editingModel ? formFromModel(editingModel) : buildEmptyForm())
   const [error, setError] = useState(null)
@@ -128,12 +132,31 @@ function ModelFormPage({
     }
   }
 
+  const handleDeleteWargear = async (id) => {
+    setError(null)
+    try {
+      await deleteWargear(id)
+      onInventoryChanged()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  // Offer the selected faction's abilities, plus any already attached (so one
+  // from another faction stays visible and can be removed).
+  const factionAbilityOptions = factionAbilities.filter(
+    (a) => String(a.faction_id) === form.faction_id || form.faction_ability_ids.includes(a.id)
+  )
+
   const wargearOptions = wargear.map((g) => ({
     id: g.id,
     name: `${g.name} (currently on model #${g.model_id})`,
   }))
   const weaponsOnThisModel = editingModel
     ? weapons.filter((w) => w.model_id === editingModel.id)
+    : []
+  const wargearOnThisModel = editingModel
+    ? wargear.filter((g) => g.model_id === editingModel.id)
     : []
 
   return (
@@ -211,6 +234,14 @@ function ModelFormPage({
           />
         </div>
         <label className="field">
+          Faction Abilities
+          <MultiSelect
+            options={factionAbilityOptions}
+            value={form.faction_ability_ids}
+            onChange={(faction_ability_ids) => setForm({ ...form, faction_ability_ids })}
+          />
+        </label>
+        <label className="field">
           Datasheet Abilities
           <MultiSelect
             options={abilities}
@@ -257,11 +288,26 @@ function ModelFormPage({
               ))}
             </ul>
           )}
-          <AddWargearForm
-            modelId={editingModel.id}
-            wargearAbilities={wargearAbilities}
-            onAdded={onInventoryChanged}
-          />
+          <h3>Wargear</h3>
+          <button type="button" onClick={() => onAddWargear(editingModel.id)}>
+            + Add Wargear
+          </button>
+          {wargearOnThisModel.length > 0 && (
+            <ul>
+              {wargearOnThisModel.map((g) => (
+                <li key={g.id}>
+                  {g.name}
+                  {g.description ? ` — ${g.description}` : ''}
+                  <button type="button" onClick={() => onEditWargear(g)}>
+                    Edit
+                  </button>
+                  <button type="button" onClick={() => handleDeleteWargear(g.id)}>
+                    Delete
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </>
       )}
     </section>

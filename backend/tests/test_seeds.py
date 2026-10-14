@@ -1,3 +1,4 @@
+import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -21,7 +22,6 @@ from app.seeds import (
     datasheet_abilities,
     dispositions,
     effects,
-    faction_abilities,
     factions,
     keywords,
     run_all,
@@ -29,8 +29,6 @@ from app.seeds import (
     wargear_abilities,
     weapon_abilities,
 )
-from app.seeds.detachments import adeptus_mechanicus as adeptus_mechanicus_detachments
-from app.seeds.faction_units import adeptus_mechanicus, imperial_agents, imperial_knights
 
 
 async def test_seed_dispositions_inserts_all_names(session: AsyncSession):
@@ -96,182 +94,142 @@ async def test_seed_factions_does_not_duplicate_existing(session: AsyncSession, 
     assert len(names) == len(factions.NAMES) + 1
 
 
-async def test_seed_faction_abilities_has_one_entry_per_faction():
-    assert {faction_name for faction_name, _, _ in faction_abilities.ENTRIES} == set(
-        factions.NAMES
+FACTION_IDS = [faction.__name__.rsplit(".", 1)[-1] for faction in factions.FACTIONS]
+
+
+def _ability_pairs():
+    return {
+        (faction.info.FACTION_NAME, name)
+        for faction in factions.FACTIONS
+        for name, _ in faction.abilities.ENTRIES
+    }
+
+
+def _unit_pairs():
+    return {
+        (faction.info.FACTION_NAME, name)
+        for faction in factions.FACTIONS
+        for name in faction.units.NAMES
+    }
+
+
+def _detachment_pairs():
+    return {
+        (faction.info.FACTION_NAME, name)
+        for faction in factions.FACTIONS
+        for name, _, _ in faction.detachments.ENTRIES
+    }
+
+
+async def _pairs(session: AsyncSession, model) -> set[tuple[str, str]]:
+    # (faction name, row name) for every row of a faction-owned table.
+    result = await session.execute(
+        select(Faction.name, model.name).join(Faction, model.faction_id == Faction.id)
     )
+    return set(result.all())
 
 
-async def test_seed_faction_abilities_has_no_duplicate_names_within_a_faction():
-    seen = set()
-    for faction_name, ability_name, _ in faction_abilities.ENTRIES:
-        assert (faction_name, ability_name) not in seen
-        seen.add((faction_name, ability_name))
+async def test_seed_faction_names_come_from_each_faction_info():
+    assert factions.NAMES == [faction.info.FACTION_NAME for faction in factions.FACTIONS]
+    assert len(factions.NAMES) == len(set(factions.NAMES))
+
+
+@pytest.mark.parametrize("faction", factions.FACTIONS, ids=FACTION_IDS)
+async def test_seed_faction_folder_has_no_duplicate_names(faction):
+    abilities = [name for name, _ in faction.abilities.ENTRIES]
+    detachments = [name for name, _, _ in faction.detachments.ENTRIES]
+    assert len(abilities) == len(set(abilities))
+    assert len(faction.units.NAMES) == len(set(faction.units.NAMES))
+    assert len(detachments) == len(set(detachments))
+
+
+@pytest.mark.parametrize("faction", factions.FACTIONS, ids=FACTION_IDS)
+async def test_seed_faction_folder_has_at_least_one_ability(faction):
+    assert faction.abilities.ENTRIES
 
 
 async def test_seed_faction_abilities_inserts_all_entries(session: AsyncSession):
     await factions.seed(session)
-    await faction_abilities.seed(session)
+    await factions.seed_abilities(session)
 
-    result = await session.execute(select(FactionAbility.name))
-    names = set(result.scalars().all())
-    assert names == {ability_name for _, ability_name, _ in faction_abilities.ENTRIES}
+    assert await _pairs(session, FactionAbility) == _ability_pairs()
 
 
 async def test_seed_faction_abilities_is_idempotent(session: AsyncSession):
     await factions.seed(session)
-    await faction_abilities.seed(session)
-    await faction_abilities.seed(session)
+    await factions.seed_abilities(session)
+    await factions.seed_abilities(session)
 
-    result = await session.execute(select(FactionAbility.name))
-    names = result.scalars().all()
-    assert len(names) == len(faction_abilities.ENTRIES)
+    names = (await session.execute(select(FactionAbility.name))).scalars().all()
+    assert len(names) == len(_ability_pairs())
 
 
 async def test_seed_faction_abilities_skips_entries_whose_faction_is_missing(
     session: AsyncSession,
 ):
-    await faction_abilities.seed(session)
+    await factions.seed_abilities(session)
 
-    result = await session.execute(select(FactionAbility))
-    assert result.scalars().all() == []
-
-
-async def test_seed_adeptus_mechanicus_units_has_no_duplicate_names():
-    assert len(adeptus_mechanicus.NAMES) == len(set(adeptus_mechanicus.NAMES))
+    assert (await session.execute(select(FactionAbility))).scalars().all() == []
 
 
-async def test_seed_adeptus_mechanicus_units_inserts_all_names(session: AsyncSession):
+async def test_seed_faction_units_inserts_all_names(session: AsyncSession):
     await factions.seed(session)
-    await adeptus_mechanicus.seed(session)
+    await factions.seed_units(session)
 
-    result = await session.execute(select(FactionUnit.name))
-    names = set(result.scalars().all())
-    assert names == set(adeptus_mechanicus.NAMES)
+    assert await _pairs(session, FactionUnit) == _unit_pairs()
 
 
-async def test_seed_adeptus_mechanicus_units_is_idempotent(session: AsyncSession):
+async def test_seed_faction_units_is_idempotent(session: AsyncSession):
     await factions.seed(session)
-    await adeptus_mechanicus.seed(session)
-    await adeptus_mechanicus.seed(session)
+    await factions.seed_units(session)
+    await factions.seed_units(session)
 
-    result = await session.execute(select(FactionUnit.name))
-    names = result.scalars().all()
-    assert len(names) == len(adeptus_mechanicus.NAMES)
-
-
-async def test_seed_adeptus_mechanicus_units_skips_if_faction_missing(session: AsyncSession):
-    await adeptus_mechanicus.seed(session)
-
-    result = await session.execute(select(FactionUnit.name))
-    assert result.scalars().all() == []
+    names = (await session.execute(select(FactionUnit.name))).scalars().all()
+    assert len(names) == len(_unit_pairs())
 
 
-async def test_seed_imperial_agents_units_has_no_duplicate_names():
-    assert len(imperial_agents.NAMES) == len(set(imperial_agents.NAMES))
+async def test_seed_faction_units_skips_if_faction_missing(session: AsyncSession):
+    await factions.seed_units(session)
+
+    assert (await session.execute(select(FactionUnit))).scalars().all() == []
 
 
-async def test_seed_imperial_agents_units_inserts_all_names(session: AsyncSession):
-    await factions.seed(session)
-    await imperial_agents.seed(session)
-
-    result = await session.execute(select(FactionUnit.name))
-    names = set(result.scalars().all())
-    assert names == set(imperial_agents.NAMES)
-
-
-async def test_seed_imperial_agents_units_is_idempotent(session: AsyncSession):
-    await factions.seed(session)
-    await imperial_agents.seed(session)
-    await imperial_agents.seed(session)
-
-    result = await session.execute(select(FactionUnit.name))
-    names = result.scalars().all()
-    assert len(names) == len(imperial_agents.NAMES)
-
-
-async def test_seed_imperial_agents_units_skips_if_faction_missing(session: AsyncSession):
-    await imperial_agents.seed(session)
-
-    result = await session.execute(select(FactionUnit.name))
-    assert result.scalars().all() == []
-
-
-async def test_seed_imperial_knights_units_has_no_duplicate_names():
-    assert len(imperial_knights.NAMES) == len(set(imperial_knights.NAMES))
-
-
-async def test_seed_imperial_knights_units_inserts_all_names(session: AsyncSession):
-    await factions.seed(session)
-    await imperial_knights.seed(session)
-
-    result = await session.execute(select(FactionUnit.name))
-    names = set(result.scalars().all())
-    assert names == set(imperial_knights.NAMES)
-
-
-async def test_seed_imperial_knights_units_is_idempotent(session: AsyncSession):
-    await factions.seed(session)
-    await imperial_knights.seed(session)
-    await imperial_knights.seed(session)
-
-    result = await session.execute(select(FactionUnit.name))
-    names = result.scalars().all()
-    assert len(names) == len(imperial_knights.NAMES)
-
-
-async def test_seed_imperial_knights_units_skips_if_faction_missing(session: AsyncSession):
-    await imperial_knights.seed(session)
-
-    result = await session.execute(select(FactionUnit.name))
-    assert result.scalars().all() == []
-
-
-async def test_seed_adeptus_mechanicus_detachments_has_no_duplicate_names():
-    names = [name for name, _, _ in adeptus_mechanicus_detachments.ENTRIES]
-    assert len(names) == len(set(names))
-
-
-async def test_seed_adeptus_mechanicus_detachments_inserts_all_entries(session: AsyncSession):
+async def test_seed_detachments_inserts_all_entries(session: AsyncSession):
     await dispositions.seed(session)
     await factions.seed(session)
-    await adeptus_mechanicus_detachments.seed(session)
+    await factions.seed_detachments(session)
 
-    result = await session.execute(
-        select(Detachment).options(selectinload(Detachment.dispositions))
-    )
-    detachments = result.scalars().all()
-    names = {d.name for d in detachments}
-    assert names == {name for name, _, _ in adeptus_mechanicus_detachments.ENTRIES}
+    assert await _pairs(session, Detachment) == _detachment_pairs()
 
-    dp_by_name = {name: dp for name, _, dp in adeptus_mechanicus_detachments.ENTRIES}
-    disposition_by_name = {
-        name: disposition_name for name, disposition_name, _ in adeptus_mechanicus_detachments.ENTRIES
+    detachments = (
+        await session.execute(select(Detachment).options(selectinload(Detachment.dispositions)))
+    ).scalars().all()
+    expected = {
+        name: (disposition_name, dp)
+        for faction in factions.FACTIONS
+        for name, disposition_name, dp in faction.detachments.ENTRIES
     }
-    for d in detachments:
-        assert d.dp == dp_by_name[d.name]
-        assert [disp.name for disp in d.dispositions] == [disposition_by_name[d.name]]
+    for detachment in detachments:
+        disposition_name, dp = expected[detachment.name]
+        assert detachment.dp == dp
+        assert [d.name for d in detachment.dispositions] == [disposition_name]
 
 
-async def test_seed_adeptus_mechanicus_detachments_is_idempotent(session: AsyncSession):
+async def test_seed_detachments_is_idempotent(session: AsyncSession):
     await dispositions.seed(session)
     await factions.seed(session)
-    await adeptus_mechanicus_detachments.seed(session)
-    await adeptus_mechanicus_detachments.seed(session)
+    await factions.seed_detachments(session)
+    await factions.seed_detachments(session)
 
-    result = await session.execute(select(Detachment.name))
-    names = result.scalars().all()
-    assert len(names) == len(adeptus_mechanicus_detachments.ENTRIES)
+    names = (await session.execute(select(Detachment.name))).scalars().all()
+    assert len(names) == len(_detachment_pairs())
 
 
-async def test_seed_adeptus_mechanicus_detachments_skips_if_faction_missing(
-    session: AsyncSession,
-):
+async def test_seed_detachments_skips_if_faction_missing(session: AsyncSession):
     await dispositions.seed(session)
-    await adeptus_mechanicus_detachments.seed(session)
+    await factions.seed_detachments(session)
 
-    result = await session.execute(select(Detachment.name))
-    assert result.scalars().all() == []
+    assert (await session.execute(select(Detachment))).scalars().all() == []
 
 
 async def test_seed_conditions_inserts_all_entries(session: AsyncSession):
@@ -438,22 +396,9 @@ async def test_run_all_seeds_everything(session: AsyncSession):
     faction_names = set((await session.execute(select(Faction.name))).scalars().all())
     # Pairs rather than bare names: a unit name (e.g. "Skitarii Rangers") can
     # legitimately appear under more than one faction's roster.
-    faction_unit_pairs = {
-        (faction_id, name)
-        for faction_id, name in (
-            await session.execute(select(FactionUnit.faction_id, FactionUnit.name))
-        ).all()
-    }
-    faction_id_by_name = dict(
-        (await session.execute(select(Faction.name, Faction.id))).all()
-    )
-    faction_ability_pairs = {
-        (faction_id, name)
-        for faction_id, name in (
-            await session.execute(select(FactionAbility.faction_id, FactionAbility.name))
-        ).all()
-    }
-    detachment_names = set((await session.execute(select(Detachment.name))).scalars().all())
+    faction_unit_pairs = await _pairs(session, FactionUnit)
+    faction_ability_pairs = await _pairs(session, FactionAbility)
+    detachment_pairs = await _pairs(session, Detachment)
     keyword_names = set((await session.execute(select(Keyword.name))).scalars().all())
     condition_keywords = set((await session.execute(select(Condition.keyword))).scalars().all())
     effect_keywords = set((await session.execute(select(Effect.keyword))).scalars().all())
@@ -464,16 +409,9 @@ async def test_run_all_seeds_everything(session: AsyncSession):
     )
     assert disposition_names == set(dispositions.NAMES)
     assert faction_names == set(factions.NAMES)
-    assert faction_ability_pairs == {
-        (faction_id_by_name[faction_name], ability_name)
-        for faction_name, ability_name, _ in faction_abilities.ENTRIES
-    }
-    assert faction_unit_pairs == (
-        {(faction_id_by_name[adeptus_mechanicus.FACTION_NAME], name) for name in adeptus_mechanicus.NAMES}
-        | {(faction_id_by_name[imperial_agents.FACTION_NAME], name) for name in imperial_agents.NAMES}
-        | {(faction_id_by_name[imperial_knights.FACTION_NAME], name) for name in imperial_knights.NAMES}
-    )
-    assert detachment_names == {name for name, _, _ in adeptus_mechanicus_detachments.ENTRIES}
+    assert faction_ability_pairs == _ability_pairs()
+    assert faction_unit_pairs == _unit_pairs()
+    assert detachment_pairs == _detachment_pairs()
     assert keyword_names == set(keywords.NAMES)
     assert condition_keywords == {keyword for keyword, _, _ in conditions.ENTRIES}
     assert effect_keywords == {keyword for keyword, _, _ in effects.ENTRIES}
@@ -520,3 +458,26 @@ async def test_seed_weapon_abilities_backfills_effects_on_previously_empty_entry
     ).scalar_one()
     assert [c.keyword for c in precision.conditions] == ["always"]
     assert [e.keyword for e in precision.effects] == ["precision"]
+
+
+async def test_faction_rule_options_use_known_conditions_and_effects():
+    from app.combat_rules import CONDITIONS, EFFECTS
+
+    for options in factions.RULE_OPTIONS.values():
+        for rules in options.values():
+            for rule in rules:
+                assert set(rule.conditions) <= set(CONDITIONS)
+                assert set(rule.effects) <= set(EFFECTS)
+
+
+async def test_faction_rule_options_belong_to_a_seeded_ability_and_have_unique_names():
+    option_names = [
+        option_name for options in factions.RULE_OPTIONS.values() for option_name in options
+    ]
+    assert len(option_names) == len(set(option_names))
+    assert set(factions.RULE_OPTIONS) <= _ability_pairs()
+
+
+async def test_doctrina_imperatives_has_protector_and_conqueror_options():
+    options = factions.rule_options("Adeptus Mechanicus", "Doctrina Imperatives")
+    assert set(options) == {"Protector Imperative", "Conqueror Imperative"}

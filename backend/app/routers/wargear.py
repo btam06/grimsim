@@ -48,3 +48,56 @@ async def create_wargear(payload: WargearIn, session: AsyncSession = Depends(get
         await session.rollback()
         raise HTTPException(status_code=400, detail="invalid model_id") from exc
     return _to_out(item)
+
+
+@router.put("/{wargear_id}", response_model=WargearOut)
+async def update_wargear(
+    wargear_id: int, payload: WargearIn, session: AsyncSession = Depends(get_session)
+):
+    item = (
+        await session.execute(
+            select(Wargear).options(selectinload(Wargear.abilities)).where(Wargear.id == wargear_id)
+        )
+    ).scalar_one_or_none()
+    if item is None:
+        raise HTTPException(status_code=404, detail="wargear not found")
+
+    abilities: list[WargearAbility] = []
+    if payload.ability_ids:
+        result = await session.execute(
+            select(WargearAbility).where(WargearAbility.id.in_(payload.ability_ids))
+        )
+        abilities = list(result.scalars().all())
+        if len(abilities) != len(set(payload.ability_ids)):
+            raise HTTPException(status_code=400, detail="one or more ability_ids not found")
+
+    item.name = payload.name
+    item.model_id = payload.model_id
+    item.description = payload.description
+    item.abilities = abilities
+
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=400, detail="invalid model_id") from exc
+    return _to_out(item)
+
+
+@router.delete("/{wargear_id}", status_code=204)
+async def delete_wargear(wargear_id: int, session: AsyncSession = Depends(get_session)):
+    item = (
+        await session.execute(select(Wargear).where(Wargear.id == wargear_id))
+    ).scalar_one_or_none()
+    if item is None:
+        raise HTTPException(status_code=404, detail="wargear not found")
+
+    await session.delete(item)
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="cannot delete wargear: it is currently equipped by one or more units",
+        ) from exc

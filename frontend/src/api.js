@@ -71,6 +71,9 @@ export const deleteWeapon = (id) => request(`/weapons/${id}`, { method: 'DELETE'
 export const listWargear = () => request('/wargear')
 export const createWargear = (payload) =>
   request('/wargear', { method: 'POST', body: JSON.stringify(payload) })
+export const updateWargear = (id, payload) =>
+  request(`/wargear/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
+export const deleteWargear = (id) => request(`/wargear/${id}`, { method: 'DELETE' })
 
 export const listUnits = () => request('/units')
 export const createUnit = (payload) =>

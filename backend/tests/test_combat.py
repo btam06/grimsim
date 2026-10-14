@@ -15,6 +15,8 @@ from app.models import (
     Weapon,
     WeaponAbility,
 )
+from app.seeds.factions.adeptus_mechanicus import abilities as admech_abilities
+from app.seeds.factions.orks import abilities as orks_abilities
 from app.services import combat
 
 
@@ -2710,3 +2712,382 @@ async def test_combat_endpoint_invalid_stratagem_id_returns_400(
         },
     )
     assert response.status_code == 400
+
+
+# --- target is monster or vehicle ---
+
+
+@pytest.mark.parametrize(
+    "keywords,expected",
+    [({"MONSTER"}, True), ({"VEHICLE"}, True), ({"INFANTRY"}, False), (set(), False)],
+)
+def test_target_monster_or_vehicle_condition(keywords, expected):
+    condition = combat.CONDITIONS["target_monster_or_vehicle"]
+    # Step-agnostic: matches (or not) the same way at every step.
+    for step in ("unit_wide", "weapon_eligibility", "pre_weapon", "pre_hit", "hit", "wound", "save"):
+        assert condition({"step": step, "defender_keywords": keywords}) is expected
+
+
+@pytest.mark.parametrize("defender_keyword,expected_damage", [("VEHICLE", 1), ("INFANTRY", 0)])
+def test_resolve_combat_plus_one_to_hit_only_against_monster_or_vehicle(
+    monkeypatch, defender_keyword, expected_damage
+):
+    rolls = iter([3, 6, 1])  # hit (3 vs skill 4 - only passes with +1), wound, save
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+
+    ability = _ability([_condition("target_monster_or_vehicle")], [_effect("plus_one_to_hit")])
+    weapon = _weapon(attacks="1", skill=4, strength=10, ap=-10, damage="1")
+    weapon.id = 1
+    weapon.abilities = [ability]
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    defender = _unit(
+        [_unit_model(_model(toughness=1, wounds=5, save=2, keywords=[_keyword(defender_keyword)]), [])]
+    )
+
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {weapon.id},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+    )
+    assert result.total_damage == expected_damage
+
+
+# --- Doctrina Imperatives (faction ability rule options) ---
+
+PROTECTOR = admech_abilities.OPTIONS["Doctrina Imperatives"]["Protector Imperative"]
+CONQUEROR = admech_abilities.OPTIONS["Doctrina Imperatives"]["Conqueror Imperative"]
+
+
+def _doctrina_combat(
+    weapon,
+    attacker_rules=None,
+    defender_rules=None,
+    attacker_keywords=(),
+    defender_keywords=(),
+    **flags,
+):
+    weapon.id = 1
+    attacker = _unit(
+        [_unit_model(_model(keywords=[_keyword(k) for k in attacker_keywords]), [weapon])]
+    )
+    defender = _unit(
+        [
+            _unit_model(
+                _model(
+                    toughness=1,
+                    wounds=10,
+                    save=2,
+                    keywords=[_keyword(k) for k in defender_keywords],
+                ),
+                [],
+            )
+        ]
+    )
+    options = dict(
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+    )
+    options.update(flags)
+    return combat.resolve_combat(
+        attacker,
+        defender,
+        {weapon.id},
+        attacker_rules=attacker_rules,
+        defender_rules=defender_rules,
+        **options,
+    )
+
+
+def _hits(result) -> int:
+    # Every test weapon is S10 against T1 with a guaranteed-failed save, so
+    # each hit becomes exactly one point of damage.
+    return result.total_damage
+
+
+def test_protector_improves_ballistic_skill_of_ranged_weapons(monkeypatch):
+    rolls = iter([3, 6, 1])  # hit 3 vs BS4 (passes only with BS+1), wound, save
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=4, strength=10, ap=-10, weapon_type="ranged")
+
+    assert _hits(_doctrina_combat(weapon, attacker_rules=PROTECTOR)) == 1
+
+
+def test_protector_does_not_improve_melee_weapon_skill(monkeypatch):
+    rolls = iter([3, 6, 1])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=4, strength=10, ap=-10, weapon_type="melee", range=None)
+
+    result = _doctrina_combat(weapon, attacker_rules=PROTECTOR, in_engagement_range=True)
+    assert _hits(result) == 0
+
+
+def test_protector_grants_heavy_to_ranged_weapons(monkeypatch):
+    rolls = iter([2, 6, 1])  # hit 2 vs BS4: needs BS+1 and Heavy's +1
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=4, strength=10, ap=-10, weapon_type="ranged")
+
+    assert _hits(_doctrina_combat(weapon, attacker_rules=PROTECTOR, moved_less_than_3=True)) == 1
+
+
+def test_protector_heavy_does_not_stack_with_a_weapon_that_already_has_heavy(monkeypatch):
+    # BS5 with BS+1 and a single +1 to hit needs a 3; a doubled Heavy would
+    # wrongly let a 2 through.
+    rolls = iter([2, 6, 1])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    heavy = _ability([_condition("moved_less_than_3")], [_effect("plus_one_to_hit")])
+    weapon = _weapon(attacks="1", skill=5, strength=10, ap=-10, weapon_type="ranged")
+    weapon.abilities = [heavy]
+
+    assert _hits(_doctrina_combat(weapon, attacker_rules=PROTECTOR, moved_less_than_3=True)) == 0
+
+
+@pytest.mark.parametrize(
+    "defender_keyword,weapon_type,expected",
+    [
+        ("BATTLELINE", "melee", 0),  # 3 vs WS3 becomes a miss at -1
+        ("INFANTRY", "melee", 1),  # not BATTLELINE - no penalty
+        ("BATTLELINE", "ranged", 1),  # only melee attacks are penalised
+    ],
+)
+def test_protector_on_defender_gives_melee_attacks_against_battleline_minus_one_to_hit(
+    monkeypatch, defender_keyword, weapon_type, expected
+):
+    rolls = iter([3, 6, 1])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(
+        attacks="1",
+        skill=3,
+        strength=10,
+        ap=-10,
+        weapon_type=weapon_type,
+        range=None if weapon_type == "melee" else 24,
+    )
+
+    result = _doctrina_combat(
+        weapon,
+        defender_rules=PROTECTOR,
+        defender_keywords=[defender_keyword],
+        in_engagement_range=weapon_type == "melee",
+    )
+    assert _hits(result) == expected
+
+
+def test_defender_rules_do_not_apply_to_the_attacker_and_vice_versa(monkeypatch):
+    # The attacker having Protector doesn't penalise its own melee attacks, and
+    # the defender having Protector doesn't grant the attacker BS+1.
+    rolls = iter([3, 6, 1, 3, 6, 1])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    melee = _weapon(attacks="1", skill=3, strength=10, ap=-10, weapon_type="melee", range=None)
+    result = _doctrina_combat(
+        melee,
+        attacker_rules=PROTECTOR,
+        defender_keywords=["BATTLELINE"],
+        in_engagement_range=True,
+    )
+    assert _hits(result) == 1
+
+    ranged = _weapon(attacks="1", skill=4, strength=10, ap=-10, weapon_type="ranged")
+    assert _hits(_doctrina_combat(ranged, defender_rules=PROTECTOR)) == 0
+
+
+def test_conqueror_grants_assault_to_ranged_weapons(monkeypatch):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, weapon_type="ranged")
+
+    assert _doctrina_combat(weapon, advanced=True).attack_rolls == []
+    assert _doctrina_combat(weapon, attacker_rules=CONQUEROR, advanced=True).attack_rolls == [6]
+
+
+def test_conqueror_improves_weapon_skill_of_melee_weapons(monkeypatch):
+    rolls = iter([3, 6, 1])  # hit 3 vs WS4 passes only with WS+1
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=4, strength=10, ap=-10, weapon_type="melee", range=None)
+
+    result = _doctrina_combat(weapon, attacker_rules=CONQUEROR, in_engagement_range=True)
+    assert _hits(result) == 1
+
+
+def test_conqueror_does_not_improve_ranged_weapon_skill(monkeypatch):
+    rolls = iter([3, 6, 1])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=4, strength=10, ap=-10, weapon_type="ranged")
+
+    assert _hits(_doctrina_combat(weapon, attacker_rules=CONQUEROR)) == 0
+
+
+@pytest.mark.parametrize("attacker_keyword,expected", [("BATTLELINE", 1), ("INFANTRY", 0)])
+def test_conqueror_improves_ap_for_battleline_attackers(monkeypatch, attacker_keyword, expected):
+    # Save 2+ against AP-1 needs a 3; with AP improved to -2 it needs a 4.
+    rolls = iter([6, 6, 3])  # hit, wound, save 3
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=-1, weapon_type="ranged")
+
+    result = _doctrina_combat(
+        weapon, attacker_rules=CONQUEROR, attacker_keywords=[attacker_keyword]
+    )
+    assert result.total_damage == expected
+
+
+def test_improved_ap_does_not_worsen_invulnerable_save(monkeypatch):
+    rolls = iter([6, 6, 4])  # hit, wound, save 4 vs a 4+ invulnerable
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=-3, weapon_type="ranged")
+    weapon.id = 1
+    attacker = _unit(
+        [_unit_model(_model(keywords=[_keyword("BATTLELINE")]), [weapon])]
+    )
+    defender = _unit([_unit_model(_model(toughness=1, wounds=10, save=3, invulnerable=4), [])])
+
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {weapon.id},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+        attacker_rules=CONQUEROR,
+    )
+    assert result.total_damage == 0
+
+
+async def _admech_setup(client: AsyncClient, *, with_doctrina: bool):
+    faction_id = (await client.post("/factions", json={"name": "Adeptus Mechanicus"})).json()["id"]
+    doctrina_id = (
+        await client.post(
+            "/faction-abilities",
+            json={"name": "Doctrina Imperatives", "faction_id": faction_id},
+        )
+    ).json()["id"]
+    attacker_model_id = await _create_model(
+        client, faction_id, faction_ability_ids=[doctrina_id] if with_doctrina else []
+    )
+    weapon_id = await _create_weapon(
+        client, attacker_model_id, strength=10, ap=-10, skill=4, weapon_type="ranged"
+    )
+    attacker_fu = await _create_faction_unit(client, faction_id, "Skitarii")
+    attacker_unit_id = await _create_unit(client, attacker_fu, attacker_model_id, weapon_id)
+
+    defender_model_id = await _create_model(client, faction_id, toughness=1, save=2, wounds=10)
+    defender_fu = await _create_faction_unit(client, faction_id, "Targets")
+    defender_unit_id = await _create_unit(client, defender_fu, defender_model_id)
+    return attacker_unit_id, defender_unit_id, weapon_id
+
+
+@pytest.mark.parametrize("with_doctrina,expected_damage", [(True, 1), (False, 0)])
+async def test_combat_endpoint_applies_rule_option_only_to_units_with_the_faction_ability(
+    client: AsyncClient, monkeypatch, with_doctrina, expected_damage
+):
+    rolls = iter([3, 6, 1])  # hit 3 vs BS4 - passes only with Protector's BS+1
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    attacker_id, defender_id, weapon_id = await _admech_setup(
+        client, with_doctrina=with_doctrina
+    )
+
+    response = await client.post(
+        "/combat",
+        json={
+            "attacking_unit_id": attacker_id,
+            "defending_unit_id": defender_id,
+            "selected_weapon_ids": [weapon_id],
+            "attacker_rule_options": ["Protector Imperative"],
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["total_damage"] == expected_damage
+
+
+@pytest.mark.parametrize(
+    "options",
+    [["Not A Real Imperative"], ["Protector Imperative", "Conqueror Imperative"]],
+)
+async def test_combat_endpoint_rejects_invalid_rule_options(
+    client: AsyncClient, options
+):
+    attacker_id, defender_id, weapon_id = await _admech_setup(client, with_doctrina=True)
+
+    for field in ("attacker_rule_options", "defender_rule_options"):
+        response = await client.post(
+            "/combat",
+            json={
+                "attacking_unit_id": attacker_id,
+                "defending_unit_id": defender_id,
+                "selected_weapon_ids": [weapon_id],
+                field: options,
+            },
+        )
+        assert response.status_code == 400
+
+
+# --- Waaagh! (Orks) ---
+
+RILED_UP = orks_abilities.OPTIONS["Waaagh!"]["Riled Up"]
+
+
+def _riled_up_defence(monkeypatch, save_roll, defender_rules, invulnerable=None):
+    # AP-4 against a 3+ save needs a 7 - only an invulnerable save can stop it.
+    rolls = iter([6, 6, save_roll])  # hit, wound, save
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=-4, weapon_type="ranged")
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    defender = _unit(
+        [_unit_model(_model(toughness=1, wounds=10, save=3, invulnerable=invulnerable), [])]
+    )
+    return combat.resolve_combat(
+        attacker,
+        defender,
+        {weapon.id},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+        defender_rules=defender_rules,
+    )
+
+
+def test_riled_up_defender_has_5_plus_invulnerable_save(monkeypatch):
+    assert _riled_up_defence(monkeypatch, 5, RILED_UP).total_damage == 0
+    assert _riled_up_defence(monkeypatch, 4, RILED_UP).total_damage == 1
+
+
+def test_without_riled_up_there_is_no_invulnerable_save(monkeypatch):
+    assert _riled_up_defence(monkeypatch, 5, None).total_damage == 1
+
+
+def test_riled_up_keeps_a_better_existing_invulnerable_save(monkeypatch):
+    assert _riled_up_defence(monkeypatch, 4, RILED_UP, invulnerable=4).total_damage == 0
+
+
+def test_riled_up_attacker_ranged_weapons_have_assault(monkeypatch):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, weapon_type="ranged")
+
+    assert _doctrina_combat(weapon, advanced=True).attack_rolls == []
+    assert _doctrina_combat(weapon, attacker_rules=RILED_UP, advanced=True).attack_rolls == [6]
+
+
+def test_riled_up_invulnerable_is_defender_only(monkeypatch):
+    # An attacking unit that's riled up doesn't hand its target a 5+ invulnerable.
+    rolls = iter([6, 6, 5])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=-4, weapon_type="ranged")
+    assert _doctrina_combat(weapon, attacker_rules=RILED_UP).total_damage == 1

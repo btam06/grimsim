@@ -120,3 +120,10 @@ stratagem_effects = Table(
     Column("stratagem_id", ForeignKey("stratagems.id"), primary_key=True),
     Column("effect_id", ForeignKey("effects.id"), primary_key=True),
 )
+
+model_faction_ability_links = Table(
+    "model_faction_ability_links",
+    Base.metadata,
+    Column("model_id", ForeignKey("models.id"), primary_key=True),
+    Column("faction_ability_id", ForeignKey("faction_abilities.id"), primary_key=True),
+)

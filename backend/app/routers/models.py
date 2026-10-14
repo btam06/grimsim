@@ -5,14 +5,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db import get_session
-from app.models import DatasheetAbility, Keyword, Model, Wargear
+from app.models import DatasheetAbility, FactionAbility, Keyword, Model, Wargear
 from app.schemas import ModelIn, ModelOut
 
 router = APIRouter(prefix="/models", tags=["models"])
 
 
 def _to_out(
-    model: Model, ability_ids: list[int], wargear_ids: list[int], keyword_ids: list[int]
+    model: Model,
+    ability_ids: list[int],
+    wargear_ids: list[int],
+    keyword_ids: list[int],
+    faction_ability_ids: list[int],
 ) -> ModelOut:
     return ModelOut(
         id=model.id,
@@ -31,6 +35,7 @@ def _to_out(
         ability_ids=ability_ids,
         wargear_ids=wargear_ids,
         keyword_ids=keyword_ids,
+        faction_ability_ids=faction_ability_ids,
     )
 
 
@@ -44,6 +49,20 @@ async def _build_keywords(session: AsyncSession, keyword_ids: list[int]) -> list
     return keywords
 
 
+async def _build_faction_abilities(
+    session: AsyncSession, faction_ability_ids: list[int]
+) -> list[FactionAbility]:
+    if not faction_ability_ids:
+        return []
+    result = await session.execute(
+        select(FactionAbility).where(FactionAbility.id.in_(faction_ability_ids))
+    )
+    faction_abilities = list(result.scalars().all())
+    if len(faction_abilities) != len(set(faction_ability_ids)):
+        raise HTTPException(status_code=400, detail="one or more faction_ability_ids not found")
+    return faction_abilities
+
+
 @router.get("", response_model=list[ModelOut])
 async def list_models(session: AsyncSession = Depends(get_session)):
     result = await session.execute(
@@ -52,6 +71,7 @@ async def list_models(session: AsyncSession = Depends(get_session)):
             selectinload(Model.abilities),
             selectinload(Model.wargear),
             selectinload(Model.keywords),
+            selectinload(Model.faction_abilities),
         )
         .order_by(Model.id)
     )
@@ -61,6 +81,7 @@ async def list_models(session: AsyncSession = Depends(get_session)):
             [a.id for a in model.abilities],
             [g.id for g in model.wargear],
             [k.id for k in model.keywords],
+            [fa.id for fa in model.faction_abilities],
         )
         for model in result.scalars().all()
     ]
@@ -78,11 +99,15 @@ async def create_model(payload: ModelIn, session: AsyncSession = Depends(get_ses
             raise HTTPException(status_code=400, detail="one or more ability_ids not found")
 
     keywords = await _build_keywords(session, payload.keyword_ids)
+    faction_abilities = await _build_faction_abilities(session, payload.faction_ability_ids)
 
     model = Model(
-        **payload.model_dump(exclude={"ability_ids", "wargear_ids", "keyword_ids"}),
+        **payload.model_dump(
+            exclude={"ability_ids", "wargear_ids", "keyword_ids", "faction_ability_ids"}
+        ),
         abilities=abilities,
         keywords=keywords,
+        faction_abilities=faction_abilities,
     )
     session.add(model)
     try:
@@ -103,7 +128,11 @@ async def create_model(payload: ModelIn, session: AsyncSession = Depends(get_ses
 
     await session.commit()
     return _to_out(
-        model, [a.id for a in abilities], [g.id for g in wargear], [k.id for k in keywords]
+        model,
+        [a.id for a in abilities],
+        [g.id for g in wargear],
+        [k.id for k in keywords],
+        [fa.id for fa in faction_abilities],
     )
 
 
@@ -113,7 +142,11 @@ async def update_model(
 ):
     result = await session.execute(
         select(Model)
-        .options(selectinload(Model.abilities), selectinload(Model.keywords))
+        .options(
+            selectinload(Model.abilities),
+            selectinload(Model.keywords),
+            selectinload(Model.faction_abilities),
+        )
         .where(Model.id == model_id)
     )
     model = result.scalar_one_or_none()
@@ -130,6 +163,7 @@ async def update_model(
             raise HTTPException(status_code=400, detail="one or more ability_ids not found")
 
     keywords = await _build_keywords(session, payload.keyword_ids)
+    faction_abilities = await _build_faction_abilities(session, payload.faction_ability_ids)
 
     model.name = payload.name
     model.faction_id = payload.faction_id
@@ -145,6 +179,7 @@ async def update_model(
     model.is_leader = payload.is_leader
     model.abilities = abilities
     model.keywords = keywords
+    model.faction_abilities = faction_abilities
 
     try:
         await session.flush()
@@ -169,6 +204,7 @@ async def update_model(
             selectinload(Model.abilities),
             selectinload(Model.wargear),
             selectinload(Model.keywords),
+            selectinload(Model.faction_abilities),
         )
         .where(Model.id == model_id)
     )
@@ -178,4 +214,5 @@ async def update_model(
         [a.id for a in model.abilities],
         [g.id for g in model.wargear],
         [k.id for k in model.keywords],
+        [fa.id for fa in model.faction_abilities],
     )
