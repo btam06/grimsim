@@ -10,6 +10,7 @@ import { skillLabel } from '../weaponDisplay'
 import Field from './Field'
 import MultiSelect from './MultiSelect'
 import Select from './Select'
+import { DeleteButton, EditButton } from './IconButtons'
 
 function buildEmptyForm() {
   return {
@@ -294,12 +295,8 @@ function ModelFormPage({
                   {w.name} —{w.range !== null ? ` R${w.range}"` : ''} A{w.attacks} S{w.strength} AP
                   {w.ap} D{w.damage} {skillLabel(w.weapon_type)}
                   {w.skill}+
-                  <button type="button" onClick={() => onEditWeapon(w)}>
-                    Edit
-                  </button>
-                  <button type="button" onClick={() => handleDeleteWeapon(w.id)}>
-                    Delete
-                  </button>
+                  <EditButton onClick={() => onEditWeapon(w)} />
+                  <DeleteButton onClick={() => handleDeleteWeapon(w.id)} />
                 </li>
               ))}
             </ul>
@@ -314,12 +311,8 @@ function ModelFormPage({
                 <li key={g.id}>
                   {g.name}
                   {g.description ? ` — ${g.description}` : ''}
-                  <button type="button" onClick={() => onEditWargear(g)}>
-                    Edit
-                  </button>
-                  <button type="button" onClick={() => handleDeleteWargear(g.id)}>
-                    Delete
-                  </button>
+                  <EditButton onClick={() => onEditWargear(g)} />
+                  <DeleteButton onClick={() => handleDeleteWargear(g.id)} />
                 </li>
               ))}
             </ul>
@@ -334,9 +327,7 @@ function ModelFormPage({
                 <li key={a.id}>
                   {a.name}
                   {a.description ? ` — ${a.description}` : ''}
-                  <button type="button" onClick={() => onEditAbility(a)}>
-                    Edit
-                  </button>
+                  <EditButton onClick={() => onEditAbility(a)} />
                   <button type="button" onClick={() => handleRemoveAbility(a.id)}>
                     Remove
                   </button>

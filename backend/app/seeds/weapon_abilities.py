@@ -14,6 +14,8 @@ from app.combat_rules.conditions import (
     CRITICAL_WOUND,
     MOVED_LESS_THAN_3,
     PRE_WEAPON_NOT_MONSTER_OR_VEHICLE,
+    TARGET_INFANTRY,
+    TARGET_MONSTER_OR_VEHICLE,
     TARGET_NOT_MONSTER_OR_VEHICLE,
     WITHIN_HALF_RANGE,
 )
@@ -21,8 +23,11 @@ from app.combat_rules.effects import (
     ADD_EXTRA_ATTACK,
     ADD_EXTRA_HIT,
     ADD_SIX_ATTACKS,
+    ADD_TWO_EXTRA_HITS,
+    ADD_THREE_ATTACKS,
     ASSAULT,
     AUTO_PASS_WOUND,
+    BLAST,
     CANNOT_ATTACK,
     FORCE_CRITICAL_WOUND,
     HAZARDOUS,
@@ -31,6 +36,7 @@ from app.combat_rules.effects import (
     PISTOL,
     PLUS_ONE_TO_HIT,
     PRECISION,
+    REROLL_FAILED_WOUNDS,
 )
 from sqlalchemy.orm import selectinload
 
@@ -43,6 +49,12 @@ ENTRIES = [
         "Each critical hit (an unmodified roll of 6 to hit) scores 1 additional hit.",
         [CRITICAL_HIT],
         [ADD_EXTRA_HIT],
+    ),
+    (
+        "Sustained 2",
+        "Each critical hit (an unmodified roll of 6 to hit) scores 2 additional hits.",
+        [CRITICAL_HIT],
+        [ADD_TWO_EXTRA_HITS],
     ),
     (
         "Ignores Cover",
@@ -157,6 +169,44 @@ ENTRIES = [
         "If this weapon targets a unit (excluding MONSTER/VEHICLE units), it has +6 A.",
         [PRE_WEAPON_NOT_MONSTER_OR_VEHICLE],
         [ADD_SIX_ATTACKS],
+    ),
+    (
+        "Rapid Fire 3",
+        "When the shooting model is within half range, this weapon makes 3 additional attacks.",
+        [WITHIN_HALF_RANGE],
+        [ADD_THREE_ATTACKS],
+    ),
+    (
+        "Blast",
+        "This weapon makes 1 additional attack for every five models in the target unit.",
+        [ALWAYS],
+        [BLAST],
+    ),
+    (
+        # Descriptive only: the calculator doesn't model line of sight, and
+        # Indirect Fire only changes anything against a target that isn't visible.
+        "Indirect Fire",
+        "This weapon can target units that are not visible to the attacking model.",
+        [],
+        [],
+    ),
+    (
+        "Twin-linked",
+        "Each time an attack is made with this weapon, you can re-roll that attack's Wound roll.",
+        [ALWAYS],
+        [REROLL_FAILED_WOUNDS],
+    ),
+    (
+        "Blistering Salvoes: Infantry",
+        "Each time an attack is made with this weapon that targets an INFANTRY unit, add 1 to the Hit roll.",
+        [TARGET_INFANTRY],
+        [PLUS_ONE_TO_HIT],
+    ),
+    (
+        "Blistering Salvoes: Monster/Vehicle",
+        "Each time an attack is made with this weapon that targets a MONSTER or VEHICLE unit, add 1 to the Hit roll.",
+        [TARGET_MONSTER_OR_VEHICLE],
+        [PLUS_ONE_TO_HIT],
     ),
 ]
 

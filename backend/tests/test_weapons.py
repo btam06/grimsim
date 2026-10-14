@@ -259,3 +259,34 @@ async def test_delete_weapon_equipped_by_unit_returns_400(client: AsyncClient, f
 
     response = await client.delete(f"/weapons/{weapon_id}")
     assert response.status_code == 400
+
+
+async def test_create_weapon_accepts_dice_with_a_modifier(client: AsyncClient, faction_id: int):
+    model_id = (
+        await client.post(
+            "/models",
+            json={
+                "name": "Frame",
+                "faction_id": faction_id,
+                "save": 2,
+                "toughness": 10,
+                "oc": 3,
+                "movement": 10,
+                "wounds": 12,
+                "leadership": 7,
+            },
+        )
+    ).json()["id"]
+    payload = {
+        "name": "Ferrumite cannon",
+        "model_id": model_id,
+        "damage": "D6+1",
+        "range": 48,
+        "strength": 12,
+        "ap": -3,
+        "attacks": "3",
+        "skill": 4,
+    }
+    assert (await client.post("/weapons", json=payload)).status_code == 201
+    payload["damage"] = "D6+"
+    assert (await client.post("/weapons", json=payload)).status_code == 422

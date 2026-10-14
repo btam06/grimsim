@@ -2,7 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-DICE_PATTERN = r"^([0-9]+|[0-9]*D[36])$"
+DICE_PATTERN = r"^([0-9]+|[0-9]*D[36](\+[0-9]+)?)$"
 
 
 class FactionIn(BaseModel):
@@ -317,6 +317,7 @@ class WeaponCombatResultOut(BaseModel):
     attack_rolls: list[int]
     attack_rerolls: list[int]
     wound_rolls: list[int]
+    wound_rerolls: list[int]
     save_rolls: list[int]
     fnp_rolls: list[int]
     total_damage: int
@@ -336,6 +337,7 @@ class CombatOut(BaseModel):
     attack_rolls: list[int]
     attack_rerolls: list[int]
     wound_rolls: list[int]
+    wound_rerolls: list[int]
     save_rolls: list[int]
     fnp_rolls: list[int]
     total_damage: int
@@ -344,6 +346,8 @@ class CombatOut(BaseModel):
     hazardous_rolls: list[int]
     hazardous_wounds: int
     hazardous_models_destroyed: int
+    deadly_demise_rolls: list[int]
+    deadly_demise_explosions: int
     weapon_results: list[WeaponCombatResultOut]
 
 

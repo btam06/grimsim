@@ -397,6 +397,11 @@ function CalculatorPanel() {
                   <li>
                     Wound rolls: <DiceRolls rolls={wr.wound_rolls} />
                   </li>
+                  {wr.wound_rerolls.length > 0 && (
+                    <li>
+                      Wound rerolls: <DiceRolls rolls={wr.wound_rerolls} />
+                    </li>
+                  )}
                   <li>
                     Save rolls: <DiceRolls rolls={wr.save_rolls} />
                   </li>
@@ -429,6 +434,14 @@ function CalculatorPanel() {
               <>
                 <li>Hazardous wounds taken: {result.hazardous_wounds}</li>
                 <li>Hazardous attackers destroyed: {result.hazardous_models_destroyed}</li>
+              </>
+            )}
+            {result.deadly_demise_rolls.length > 0 && (
+              <>
+                <li>
+                  Deadly Demise rolls: <DiceRolls rolls={result.deadly_demise_rolls} />
+                </li>
+                <li>Deadly Demise explosions: {result.deadly_demise_explosions}</li>
               </>
             )}
           </ul>

@@ -893,3 +893,110 @@ async def test_run_all_seeds_tech_priest_dominus(session: AsyncSession):
     assert [a.name for a in weapons["Volkite blaster"].abilities] == ["Devastating Wounds"]
     assert weapons["Macrostubber pistol"].abilities == []
     assert weapons["Omnissian axe"].weapon_type == "melee"
+
+
+async def test_run_all_seeds_skorpius_disintegrator(session: AsyncSession):
+    await run_all(session)
+
+    frame = (
+        await session.execute(
+            select(Model)
+            .options(
+                selectinload(Model.keywords),
+                selectinload(Model.abilities),
+                selectinload(Model.faction_abilities),
+                selectinload(Model.weapons).selectinload(Weapon.abilities),
+            )
+            .where(Model.name == "Skorpius Disintegrator")
+        )
+    ).scalar_one()
+    assert (frame.movement, frame.toughness, frame.save, frame.wounds) == (10, 10, 2, 12)
+    assert (frame.leadership, frame.oc, frame.invulnerable) == (7, 3, None)
+    assert "SKORPIUS DISINTEGRATOR" in {k.name for k in frame.keywords}
+    assert [a.name for a in frame.faction_abilities] == ["Doctrina Imperatives"]
+    assert {a.name for a in frame.abilities} == {"Deadly Demise D3", "Broad Spectrum Data-tether"}
+
+    names = sorted(w.name for w in frame.weapons)
+    assert names.count("Cognis heavy stubber") == 3
+    assert len(names) == 7
+    weapons = {w.name: w for w in frame.weapons}
+    assert weapons["Ferrumite cannon"].damage == "D6+1"
+    assert weapons["Belleros energy cannon"].attacks == "2D6"
+    assert {a.name for a in weapons["Belleros energy cannon"].abilities} == {
+        "Blast",
+        "Indirect Fire",
+        "Blistering Salvoes: Infantry",
+    }
+    assert [a.name for a in weapons["Disruptor missile launcher"].abilities] == ["Twin-linked"]
+
+
+async def test_seed_datasheets_fills_in_missing_copies_of_a_weapon(session: AsyncSession):
+    # A Disintegrator left with one heavy stubber gets the other two back.
+    await run_all(session)
+    load = (
+        select(Model)
+        .options(selectinload(Model.weapons))
+        .where(Model.name == "Skorpius Disintegrator")
+    )
+    frame = (await session.execute(load)).scalar_one()
+    stubbers = [w for w in frame.weapons if w.name == "Cognis heavy stubber"]
+    for extra in stubbers[1:]:
+        frame.weapons.remove(extra)
+        await session.delete(extra)
+    await session.commit()
+
+    await factions.seed_datasheets(session)
+
+    session.expire_all()
+    frame = (await session.execute(load)).scalar_one()
+    assert [w.name for w in frame.weapons].count("Cognis heavy stubber") == 3
+
+
+async def test_run_all_seeds_sicarian_infiltrators_and_princeps(session: AsyncSession):
+    await run_all(session)
+
+    models = {
+        m.name: m
+        for m in (
+            await session.execute(
+                select(Model)
+                .options(
+                    selectinload(Model.keywords),
+                    selectinload(Model.abilities),
+                    selectinload(Model.faction_abilities),
+                    selectinload(Model.weapons).selectinload(Weapon.abilities),
+                )
+                .where(Model.name.in_(["Sicarian Infiltrator", "Sicarian Infiltrator Princeps"]))
+            )
+        )
+        .scalars()
+        .all()
+    }
+    assert set(models) == {"Sicarian Infiltrator", "Sicarian Infiltrator Princeps"}
+    for model in models.values():
+        assert (model.movement, model.toughness, model.save, model.wounds) == (8, 4, 4, 2)
+        assert (model.leadership, model.oc, model.invulnerable) == (7, 1, 5)
+        assert {k.name for k in model.keywords} == {
+            "INFANTRY",
+            "IMPERIUM",
+            "SKITARII",
+            "SICARIAN",
+            "INFILTRATORS",
+        }
+        assert [a.name for a in model.faction_abilities] == ["Doctrina Imperatives"]
+        assert {a.name for a in model.abilities} == {
+            "Infiltrators",
+            "Stealth",
+            "Voices in the Code",
+            "Neurostatic Interference (Aura)",
+        }
+        weapons = {w.name: w for w in model.weapons}
+        assert set(weapons) == {
+            "Flechette blaster pistol",
+            "Stubcarbine pistol",
+            "Power weapon",
+            "Taser goad",
+        }
+        assert [a.name for a in weapons["Taser goad"].abilities] == ["Sustained 2"]
+        assert [a.name for a in weapons["Flechette blaster pistol"].abilities] == ["Pistol"]
+        assert [a.name for a in weapons["Stubcarbine pistol"].abilities] == ["Pistol"]

@@ -16,10 +16,12 @@ from app.combat_rules.conditions import (
     MELEE_ATTACK_AGAINST_BATTLELINE,
     MOVED_LESS_THAN_3,
     PRE_WEAPON_NOT_MONSTER_OR_VEHICLE,
+    RANGED_ATTACK,
     RANGED_MOVED_LESS_THAN_3,
     RILED_UP_RANGED_CRITICAL_HIT,
     TARGET_ELECTRO_PRIESTS_LED_BY_CHARACTER,
     TARGET_HAS_CHARACTER,
+    TARGET_INFANTRY,
     TARGET_LED_BY_CHARACTER,
     TARGET_MONSTER_OR_VEHICLE,
     TARGET_NOT_MONSTER_OR_VEHICLE,
@@ -127,6 +129,16 @@ ENTRIES = [
         TARGET_ELECTRO_PRIESTS_LED_BY_CHARACTER,
         "Target is Electro-priests Led by Character",
         "The defending unit is ELECTRO-PRIESTS led by a CHARACTER. Applies at every step.",
+    ),
+    (
+        TARGET_INFANTRY,
+        "Target is Infantry",
+        "The defending unit contains an INFANTRY model. Applies at every step.",
+    ),
+    (
+        RANGED_ATTACK,
+        "Ranged Attack",
+        "A ranged attack, checked before its hit roll.",
     ),
 ]
 

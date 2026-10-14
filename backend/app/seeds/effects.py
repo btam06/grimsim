@@ -5,9 +5,14 @@ from app.combat_rules.effects import (
     ADD_EXTRA_ATTACK,
     ADD_EXTRA_HIT,
     ADD_SIX_ATTACKS,
+    ADD_TWO_EXTRA_HITS,
+    ADD_THREE_ATTACKS,
     ASSAULT,
     AUTO_PASS_WOUND,
+    BENEFIT_OF_COVER,
+    BLAST,
     CANNOT_ATTACK,
+    DEADLY_DEMISE,
     FEEL_NO_PAIN_4,
     FEEL_NO_PAIN_5,
     FORCE_CRITICAL_WOUND,
@@ -25,6 +30,7 @@ from app.combat_rules.effects import (
     PLUS_ONE_TO_HIT,
     PRECISION,
     REROLL_FAILED_HITS,
+    REROLL_FAILED_WOUNDS,
 )
 from app.models import Effect
 
@@ -145,6 +151,36 @@ ENTRIES = [
         FEEL_NO_PAIN_4,
         "Feel No Pain 4+",
         "The targeted model has Feel No Pain 4+ against this attack (a better one is kept).",
+    ),
+    (
+        ADD_THREE_ATTACKS,
+        "Add Three Attacks",
+        "Adds three additional attacks to this weapon, each with its own hit roll.",
+    ),
+    (
+        BLAST,
+        "Blast",
+        "This weapon makes 1 additional attack for every five models in the target unit.",
+    ),
+    (
+        REROLL_FAILED_WOUNDS,
+        "Re-roll Failed Wounds",
+        "If this attack's wound roll fails, it is rolled once more and the second result is used.",
+    ),
+    (
+        DEADLY_DEMISE,
+        "Deadly Demise",
+        "When a model with this is destroyed, roll a D6: on a 6 it explodes.",
+    ),
+    (
+        ADD_TWO_EXTRA_HITS,
+        "Add Two Extra Hits",
+        "Adds two additional hits to the attack chain.",
+    ),
+    (
+        BENEFIT_OF_COVER,
+        "Benefit of Cover",
+        "The target has the Benefit of Cover against this attack, as if it were in cover.",
     ),
 ]
 

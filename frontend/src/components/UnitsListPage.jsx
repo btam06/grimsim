@@ -1,3 +1,5 @@
+import { DeleteButton, EditButton } from './IconButtons'
+
 function UnitsListPage({
   units,
   models,
@@ -35,12 +37,8 @@ function UnitsListPage({
                     return parts.join(' — ')
                   })
                   .join('; ')}
-            <button type="button" onClick={() => onEdit(u)}>
-              Edit
-            </button>
-            <button type="button" onClick={() => onDelete(u.id)}>
-              Delete
-            </button>
+            <EditButton onClick={() => onEdit(u)} />
+            <DeleteButton onClick={() => onDelete(u.id)} />
           </li>
         ))}
       </ul>

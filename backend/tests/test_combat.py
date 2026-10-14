@@ -3503,3 +3503,213 @@ def test_granted_fnp_keeps_a_models_better_own_fnp(monkeypatch):
     tough = _model(name="Bodyguard", wounds=1, save=7, feel_no_pain=3)
     result = _lord_combat(monkeypatch, [_dominus(), tough], [3])
     assert result.total_damage == 0
+
+
+# --- Skorpius Disintegrator: D6+1, Blast, Rapid Fire 3, Twin-linked,
+#     Blistering Salvoes, Deadly Demise ---
+
+
+def test_roll_dice_with_modifier(monkeypatch):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 4)
+    assert combat.roll_dice("D6+1") == 5
+    assert combat.roll_dice("2D6+2") == 10
+
+
+def _many_targets(n, **overrides):
+    return [_model(toughness=1, wounds=1, save=7, **overrides) for _ in range(n)]
+
+
+def _fire(weapon, defender_models, **flags):
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    defender = _unit([_unit_model(m, []) for m in defender_models])
+    options = dict(
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+    )
+    options.update(flags)
+    return combat.resolve_combat(attacker, defender, {weapon.id}, **options)
+
+
+@pytest.mark.parametrize("models,expected_attacks", [(4, 2), (5, 3), (10, 4), (11, 4)])
+def test_blast_adds_an_attack_per_five_target_models(monkeypatch, models, expected_attacks):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 1)  # every attack misses
+    weapon = _weapon(attacks="2", skill=4, weapon_type="ranged")
+    weapon.abilities = [_ability([_condition("always")], [_effect("blast")])]
+
+    assert len(_fire(weapon, _many_targets(models)).attack_rolls) == expected_attacks
+
+
+@pytest.mark.parametrize("half_range,expected_attacks", [(True, 6), (False, 3)])
+def test_rapid_fire_3_adds_three_attacks_within_half_range(
+    monkeypatch, half_range, expected_attacks
+):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 1)
+    weapon = _weapon(attacks="3", skill=4, weapon_type="ranged")
+    weapon.abilities = [_ability([_condition("within_half_range")], [_effect("add_three_attacks")])]
+
+    result = _fire(weapon, _many_targets(1), half_range=half_range)
+    assert len(result.attack_rolls) == expected_attacks
+
+
+def _twin_linked():
+    return _ability([_condition("always")], [_effect("reroll_failed_wounds")])
+
+
+def test_twin_linked_rerolls_a_failed_wound(monkeypatch):
+    # S4 vs T4 needs 4+: a 2 fails, the re-roll of 5 succeeds.
+    rolls = iter([6, 2, 5, 1])  # hit, wound, wound re-roll, save
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=4, ap=0, damage="1", weapon_type="ranged")
+    weapon.abilities = [_twin_linked()]
+
+    result = _fire(weapon, [_model(toughness=4, wounds=5, save=7)])
+    assert result.wound_rolls == [2]
+    assert result.wound_rerolls == [5]
+    assert result.weapon_results[0].wound_rerolls == [5]
+    assert result.total_damage == 1
+
+
+def test_twin_linked_does_not_reroll_a_successful_wound(monkeypatch):
+    rolls = iter([6, 4, 1])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=4, ap=0, damage="1", weapon_type="ranged")
+    weapon.abilities = [_twin_linked()]
+
+    result = _fire(weapon, [_model(toughness=4, wounds=5, save=7)])
+    assert result.wound_rerolls == []
+
+
+def test_twin_linked_reroll_of_a_six_still_triggers_devastating_wounds(monkeypatch):
+    # The re-rolled 6 is a critical wound, so Devastating Wounds skips the save.
+    rolls = iter([6, 1, 6])  # hit, wound 1 (fails), re-roll 6; no save roll
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=4, ap=0, damage="1", weapon_type="ranged")
+    devastating = _ability([_condition("critical_wound")], [_effect("no_save")])
+    weapon.abilities = [_twin_linked(), devastating]
+
+    result = _fire(weapon, [_model(toughness=4, wounds=5, save=2)])
+    assert result.save_rolls == []
+    assert result.total_damage == 1
+
+
+@pytest.mark.parametrize(
+    "condition,target_keyword,expected_damage",
+    [
+        ("target_infantry", "INFANTRY", 1),
+        ("target_infantry", "VEHICLE", 0),
+        ("target_monster_or_vehicle", "VEHICLE", 1),
+        ("target_monster_or_vehicle", "INFANTRY", 0),
+    ],
+)
+def test_blistering_salvoes_plus_one_to_hit_by_target_type(
+    monkeypatch, condition, target_keyword, expected_damage
+):
+    rolls = iter([3, 6, 1])  # hit 3 vs BS4 passes only with +1
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=4, strength=10, ap=-10, damage="1", weapon_type="ranged")
+    weapon.abilities = [_ability([_condition(condition)], [_effect("plus_one_to_hit")])]
+
+    target = _model(toughness=1, wounds=5, save=7, keywords=[_keyword(target_keyword)])
+    assert _fire(weapon, [target]).total_damage == expected_damage
+
+
+def _deadly_demise_model(**overrides):
+    demise = _datasheet_ability([_condition("always")], [_effect("deadly_demise")])
+    return _model(**{"toughness": 1, "wounds": 1, "save": 7, "abilities": [demise], **overrides})
+
+
+@pytest.mark.parametrize("demise_roll,explosions", [(6, 1), (5, 0)])
+def test_deadly_demise_rolls_when_the_model_is_destroyed(monkeypatch, demise_roll, explosions):
+    rolls = iter([6, 6, 1, demise_roll])  # hit, wound, save, deadly demise
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=0, damage="1", weapon_type="ranged")
+
+    result = _fire(weapon, [_deadly_demise_model()])
+    assert result.models_destroyed == 1
+    assert result.deadly_demise_rolls == [demise_roll]
+    assert result.deadly_demise_explosions == explosions
+
+
+def test_deadly_demise_does_not_roll_for_a_surviving_or_ordinary_model(monkeypatch):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=0, damage="1", weapon_type="ranged")
+
+    survivor = _fire(weapon, [_deadly_demise_model(wounds=5)])
+    assert survivor.deadly_demise_rolls == []
+    ordinary = _fire(weapon, _many_targets(1))
+    assert ordinary.models_destroyed == 1
+    assert ordinary.deadly_demise_rolls == []
+
+
+# --- Sicarian Infiltrators: Sustained Hits 2, Stealth ---
+
+
+def test_sustained_2_scores_two_extra_hits_on_a_critical(monkeypatch):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)  # critical hit, all wound
+    weapon = _weapon(
+        attacks="1", skill=4, strength=10, ap=0, damage="1", weapon_type="melee", range=None
+    )
+    weapon.abilities = [_ability([_condition("critical_hit")], [_effect("add_two_extra_hits")])]
+
+    result = _fire(weapon, [_model(toughness=1, wounds=10, save=7)], in_engagement_range=True)
+    assert result.attack_rolls == [6]
+    assert result.total_damage == 3
+
+
+STEALTH = datasheet_ability_seeds.RULES["Stealth"]
+
+
+def _stealth_shot(monkeypatch, weapon_type="ranged", weapon_abilities=(), **flags):
+    # Hit 3 vs skill 3: it hits, unless the target has the benefit of cover.
+    rolls = iter([3, 6, 1])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(
+        attacks="1",
+        skill=3,
+        strength=10,
+        ap=-10,
+        damage="1",
+        weapon_type=weapon_type,
+        range=None if weapon_type == "melee" else 24,
+    )
+    weapon.abilities = list(weapon_abilities)
+    return _doctrina_combat(
+        weapon, in_engagement_range=weapon_type == "melee", **flags
+    ).total_damage
+
+
+def test_stealth_gives_the_unit_cover_against_ranged_attacks(monkeypatch):
+    assert _stealth_shot(monkeypatch, defender_rules=STEALTH) == 0
+    # The same as the defender being in cover.
+    assert _stealth_shot(monkeypatch, in_cover=True) == 0
+    assert _stealth_shot(monkeypatch) == 1
+
+
+def test_stealth_does_not_affect_melee_attacks(monkeypatch):
+    assert _stealth_shot(monkeypatch, weapon_type="melee", defender_rules=STEALTH) == 1
+
+
+def test_stealth_cover_does_not_stack_with_being_in_cover(monkeypatch):
+    # Hit 4 vs skill 3: still hits with one +1 (cover), would miss at +2.
+    rolls = iter([4, 6, 1])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, damage="1", weapon_type="ranged")
+
+    result = _doctrina_combat(weapon, defender_rules=STEALTH, in_cover=True)
+    assert result.total_damage == 1
+
+
+def test_ignores_cover_ignores_stealth(monkeypatch):
+    ignores_cover = _ability([_condition("always")], [_effect("ignore_cover")])
+    damage = _stealth_shot(monkeypatch, weapon_abilities=[ignores_cover], defender_rules=STEALTH)
+    assert damage == 1
+
+
+def test_stealth_does_not_affect_the_stealthy_units_own_attacks(monkeypatch):
+    assert _stealth_shot(monkeypatch, attacker_rules=STEALTH) == 1

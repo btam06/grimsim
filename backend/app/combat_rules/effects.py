@@ -37,6 +37,12 @@ ADD_SIX_ATTACKS = "add_six_attacks"
 MINUS_ONE_TO_WOUND = "minus_one_to_wound"
 FEEL_NO_PAIN_5 = "feel_no_pain_5"
 FEEL_NO_PAIN_4 = "feel_no_pain_4"
+ADD_THREE_ATTACKS = "add_three_attacks"
+BLAST = "blast"
+REROLL_FAILED_WOUNDS = "reroll_failed_wounds"
+DEADLY_DEMISE = "deadly_demise"
+ADD_TWO_EXTRA_HITS = "add_two_extra_hits"
+BENEFIT_OF_COVER = "benefit_of_cover"
 
 
 def auto_pass_wound(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
@@ -178,6 +184,46 @@ def feel_no_pain_4(state: dict[str, Any], pending: deque[dict[str, Any]]) -> Non
     state["feel_no_pain"] = min(state.get("feel_no_pain", 7), 4)
 
 
+def add_three_attacks(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # Queues three additional attacks for this weapon, each with its own hit
+    # roll (e.g. Rapid Fire 3 within half range).
+    for _ in range(3):
+        pending.append({"auto_hit": False})
+
+
+def blast(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # Marks this weapon as Blast - the engine adds 1 attack for every five
+    # models in the target unit when the weapon fires.
+    state["blast"] = True
+
+
+def reroll_failed_wounds(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # If this attack's wound roll fails, it is rolled once more and the second
+    # result is used instead (e.g. Twin-linked).
+    state["reroll_failed_wounds"] = True
+
+
+def deadly_demise(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # A marker rather than an attack modifier: a model with an ability that has
+    # this effect rolls a D6 when destroyed, exploding on a 6. The engine reads
+    # it straight off the defending model's abilities, so this does nothing.
+    pass
+
+
+def add_two_extra_hits(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # Queues two additional hits onto the attack chain (e.g. Sustained Hits 2) -
+    # like add_extra_hit, each skips straight to the wound step.
+    for _ in range(2):
+        pending.append({"auto_hit": True})
+
+
+def benefit_of_cover(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # The target has the Benefit of Cover against this attack (e.g. Stealth),
+    # exactly as if the defender were in cover - it doesn't stack with being in
+    # cover, and Ignores Cover still ignores it.
+    state["benefit_of_cover"] = True
+
+
 EFFECTS = {
     AUTO_PASS_WOUND: auto_pass_wound,
     ADD_EXTRA_HIT: add_extra_hit,
@@ -202,4 +248,10 @@ EFFECTS = {
     MINUS_ONE_TO_WOUND: minus_one_to_wound,
     FEEL_NO_PAIN_5: feel_no_pain_5,
     FEEL_NO_PAIN_4: feel_no_pain_4,
+    ADD_THREE_ATTACKS: add_three_attacks,
+    BLAST: blast,
+    REROLL_FAILED_WOUNDS: reroll_failed_wounds,
+    DEADLY_DEMISE: deadly_demise,
+    ADD_TWO_EXTRA_HITS: add_two_extra_hits,
+    BENEFIT_OF_COVER: benefit_of_cover,
 }

@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.combat_rules import Rule
 from app.combat_rules.conditions import (
     ALWAYS,
+    RANGED_ATTACK,
     RILED_UP_RANGED_CRITICAL_HIT,
     TARGET_ELECTRO_PRIESTS_LED_BY_CHARACTER,
     TARGET_HAS_CHARACTER,
@@ -11,6 +12,8 @@ from app.combat_rules.conditions import (
 )
 from app.combat_rules.effects import (
     ADD_EXTRA_HIT,
+    BENEFIT_OF_COVER,
+    DEADLY_DEMISE,
     FEEL_NO_PAIN_4,
     FEEL_NO_PAIN_5,
     MINUS_ONE_TO_WOUND,
@@ -58,6 +61,53 @@ ENTRIES = [
         [],
         [],
     ),
+    (
+        # Only whether it explodes is resolved, not the D3 mortal wounds.
+        "Deadly Demise D3",
+        "When this model is destroyed, roll one D6. On a 6, each unit within 6\" of it "
+        "suffers D3 mortal wounds.",
+        [ALWAYS],
+        [DEADLY_DEMISE],
+    ),
+    (
+        # Descriptive only: gaining CP is outside the combat engine.
+        "Broad Spectrum Data-tether",
+        "Each time you target this unit with a Stratagem, roll one D6: on a 5+, you gain 1CP.",
+        [],
+        [],
+    ),
+    (
+        "Stealth",
+        "Each time a ranged attack targets this unit, this unit has the Benefit of Cover.",
+        [],
+        [],
+    ),
+    (
+        # Descriptive only: a deployment rule.
+        "Infiltrators",
+        "During deployment, this unit can be set up anywhere on the battlefield that is more "
+        "than 9\" horizontally away from the enemy deployment zone and all enemy models.",
+        [],
+        [],
+    ),
+    (
+        # Descriptive only: Battle-shock is outside the combat engine.
+        "Voices in the Code",
+        "At the start of the Fight phase, each enemy unit within Engagement Range of one or more "
+        "units with this ability must take a Battle-shock test.",
+        [],
+        [],
+    ),
+    (
+        # Descriptive only: Battle-shock/Leadership is outside the combat engine.
+        "Neurostatic Interference (Aura)",
+        "While an enemy unit is within 6\" of this unit, each time a Battle-shock or Leadership "
+        "test is taken for that unit, subtract 1 from that test. While this unit is within 6\" "
+        "of one or more friendly ADEPTUS MECHANICUS BATTLELINE units, subtract 2 from that test "
+        "instead.",
+        [],
+        [],
+    ),
 ]
 
 # Code-defined rules for abilities above, by name - for rules the
@@ -81,6 +131,9 @@ RULES = {
             effects=(FEEL_NO_PAIN_4,),
             side="defender",
         ),
+    ],
+    "Stealth": [
+        Rule(conditions=(RANGED_ATTACK,), effects=(BENEFIT_OF_COVER,), side="defender"),
     ],
 }
 

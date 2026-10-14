@@ -310,20 +310,32 @@ async def seed_datasheets(session: AsyncSession) -> None:
                                 lookup(datasheet_abilities, name, "datasheet ability", datasheet.NAME)
                             )
                             changed = True
-                    weapons_by_name = {w.name: w for w in model.weapons}
+                    # Matched by name, counting copies - a datasheet can give a
+                    # model several of the same weapon (e.g. 3 heavy stubbers).
+                    weapons_by_name: dict[str, list[Weapon]] = {}
+                    for w in model.weapons:
+                        weapons_by_name.setdefault(w.name, []).append(w)
+                    specs_by_name: dict[str, list] = {}
                     for weapon in spec.weapons:
-                        existing_weapon = weapons_by_name.get(weapon.name)
-                        if existing_weapon is None:
+                        specs_by_name.setdefault(weapon.name, []).append(weapon)
+                    for name, weapon_specs in specs_by_name.items():
+                        existing_weapons = weapons_by_name.get(name, [])
+                        for weapon in weapon_specs[len(existing_weapons):]:
                             model.weapons.append(build_weapon(weapon, datasheet.NAME))
                             changed = True
-                            continue
-                        weapon_ability_names = {a.name for a in existing_weapon.abilities}
-                        for name in weapon.abilities:
-                            if name not in weapon_ability_names:
-                                existing_weapon.abilities.append(
-                                    lookup(weapon_abilities, name, "weapon ability", datasheet.NAME)
-                                )
-                                changed = True
+                        for existing_weapon in existing_weapons:
+                            ability_names = {a.name for a in existing_weapon.abilities}
+                            for ability_name in weapon_specs[0].abilities:
+                                if ability_name not in ability_names:
+                                    existing_weapon.abilities.append(
+                                        lookup(
+                                            weapon_abilities,
+                                            ability_name,
+                                            "weapon ability",
+                                            datasheet.NAME,
+                                        )
+                                    )
+                                    changed = True
                     wargear_names = {g.name for g in model.wargear}
                     for gear in spec.wargear:
                         if gear.name not in wargear_names:

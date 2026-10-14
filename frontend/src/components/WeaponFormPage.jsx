@@ -86,10 +86,10 @@ function WeaponFormPage({
         <Field label="Name">
           <input value={form.name} onChange={handleChange('name')} required />
         </Field>
-        <Field label="Damage (e.g. 1, 2, D3, D6, 2D6)">
+        <Field label="Damage (e.g. 1, 2, D3, D6, 2D6, D6+1)">
           <input
             type="text"
-            pattern="([0-9]+|[0-9]*D[36])"
+            pattern="([0-9]+|[0-9]*D[36](\+[0-9]+)?)"
             value={form.damage}
             onChange={handleChange('damage')}
             required
@@ -109,10 +109,10 @@ function WeaponFormPage({
         <Field label="AP">
           <input type="number" max="0" value={form.ap} onChange={handleChange('ap')} required />
         </Field>
-        <Field label="Attacks (e.g. 1, 2, D3, D6, 2D6)">
+        <Field label="Attacks (e.g. 1, 2, D3, D6, 2D6, D6+1)">
           <input
             type="text"
-            pattern="([0-9]+|[0-9]*D[36])"
+            pattern="([0-9]+|[0-9]*D[36](\+[0-9]+)?)"
             value={form.attacks}
             onChange={handleChange('attacks')}
             required

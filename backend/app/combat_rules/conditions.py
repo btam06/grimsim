@@ -30,6 +30,8 @@ RILED_UP_RANGED_CRITICAL_HIT = "riled_up_ranged_critical_hit"
 PRE_WEAPON_NOT_MONSTER_OR_VEHICLE = "pre_weapon_not_monster_or_vehicle"
 TARGET_HAS_CHARACTER = "target_has_character"
 TARGET_LED_BY_CHARACTER = "target_led_by_character"
+TARGET_INFANTRY = "target_infantry"
+RANGED_ATTACK = "ranged_attack"
 TARGET_ELECTRO_PRIESTS_LED_BY_CHARACTER = "target_electro_priests_led_by_character"
 
 # Name of the Orks Waaagh! rule option that riles a unit up (see
@@ -205,6 +207,19 @@ def target_electro_priests_led_by_character(context: dict) -> bool:
     )
 
 
+def target_infantry(context: dict) -> bool:
+    # True at every step when the defending unit contains an INFANTRY model -
+    # e.g. "each time this model makes an attack ... that targets an INFANTRY
+    # unit, add 1 to the Hit roll".
+    return "INFANTRY" in context.get("defender_keywords", set())
+
+
+def ranged_attack(context: dict) -> bool:
+    # True at the pre-hit check of a ranged attack - e.g. Stealth's -1 to hit
+    # for ranged attacks targeting the unit.
+    return context.get("step") == "pre_hit" and context.get("is_ranged", False)
+
+
 CONDITIONS = {
     CRITICAL_HIT: critical_hit,
     CRITICAL_WOUND: critical_wound,
@@ -227,5 +242,7 @@ CONDITIONS = {
     PRE_WEAPON_NOT_MONSTER_OR_VEHICLE: pre_weapon_not_monster_or_vehicle,
     TARGET_HAS_CHARACTER: target_has_character,
     TARGET_LED_BY_CHARACTER: target_led_by_character,
+    TARGET_INFANTRY: target_infantry,
+    RANGED_ATTACK: ranged_attack,
     TARGET_ELECTRO_PRIESTS_LED_BY_CHARACTER: target_electro_priests_led_by_character,
 }

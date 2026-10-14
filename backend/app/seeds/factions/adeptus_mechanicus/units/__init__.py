@@ -1,4 +1,10 @@
-from . import fulgurite_electro_priests, skitarii_rangers, tech_priest_dominus
+from . import (
+    fulgurite_electro_priests,
+    sicarian_infiltrators,
+    skitarii_rangers,
+    skorpius_disintegrator,
+    tech_priest_dominus,
+)
 
 # Unit (datasheet) names in this faction's roster.
 NAMES = [
@@ -13,6 +19,7 @@ NAMES = [
     "Skitarii Rangers",
     "Skitarii Vanguard",
     "Skorpius Dunerider",
+    "Skorpius Disintegrator",
     "Archaeopter Fusilave",
     "Archaeopter Stratoraptor",
     "Corpuscarii Electro-priests",
@@ -38,4 +45,10 @@ NAMES = [
 
 # Full datasheets (models, stats, weapons) for units above - see
 # app/seeds/datasheets.py. Units without one are seeded by name only.
-DATASHEETS = [fulgurite_electro_priests, skitarii_rangers, tech_priest_dominus]
+DATASHEETS = [
+    fulgurite_electro_priests,
+    sicarian_infiltrators,
+    skitarii_rangers,
+    skorpius_disintegrator,
+    tech_priest_dominus,
+]

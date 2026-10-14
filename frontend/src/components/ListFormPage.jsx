@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { createList, deleteUnit, updateList } from '../api'
+import { createList, createUnit, deleteUnit, updateList } from '../api'
 import Field from './Field'
 import Select from './Select'
+import { CopyButton, DeleteButton, EditButton } from './IconButtons'
 
 const POINTS_LIMIT_OPTIONS = [
   { id: '2000', name: '2000 points' },
@@ -94,6 +95,27 @@ function ListFormPage({
     }
   }
 
+  // Duplicates a unit - same datasheet, points and per-model loadout - into
+  // this list, as a new unit that can then be edited on its own.
+  const handleCopyUnit = async (unit) => {
+    setError(null)
+    try {
+      await createUnit({
+        faction_unit_id: unit.faction_unit_id,
+        points: unit.points,
+        list_id: unit.list_id,
+        unit_models: unit.unit_models.map((m) => ({
+          model_id: m.model_id,
+          weapon_ids: m.weapon_ids,
+          wargear_ids: m.wargear_ids,
+        })),
+      })
+      onUnitsChanged()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
   const handleDeleteUnit = async (id) => {
     setError(null)
     try {
@@ -179,12 +201,9 @@ function ListFormPage({
                       ))}
                     </ul>
                   )}
-                  <button type="button" onClick={() => onEditUnit(u)}>
-                    Edit
-                  </button>
-                  <button type="button" onClick={() => handleDeleteUnit(u.id)}>
-                    Delete
-                  </button>
+                  <EditButton onClick={() => onEditUnit(u)} />
+                  <CopyButton onClick={() => handleCopyUnit(u)} />
+                  <DeleteButton onClick={() => handleDeleteUnit(u.id)} />
                 </li>
               ))}
             </ul>

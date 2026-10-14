@@ -8,18 +8,21 @@ from dataclasses import dataclass, field
 from app.combat_rules import CONDITIONS, EFFECTS, Rule
 from app.models import Model, Stratagem, Unit, WargearAbility, WeaponAbility
 
-_DICE_PATTERN = re.compile(r"^(?:(?P<flat>[0-9]+)|(?P<count>[0-9]*)D(?P<die>[36]))$")
+_DICE_PATTERN = re.compile(
+    r"^(?:(?P<flat>[0-9]+)|(?P<count>[0-9]*)D(?P<die>[36])(?:\+(?P<plus>[0-9]+))?)$"
+)
 
 
 def roll_dice(notation: str) -> int:
-    # notation is either a flat number or dice notation (D3/D6/2D6/...); roll it to
-    # a value. Used for both a weapon's damage and its number of attacks.
+    # notation is either a flat number or dice notation (D3/D6/2D6/D6+1/...); roll
+    # it to a value. Used for both a weapon's damage and its number of attacks.
     match = _DICE_PATTERN.match(notation)
     if match["flat"] is not None:
         return int(match["flat"])
     count = int(match["count"]) if match["count"] else 1
     die = int(match["die"])
-    return sum(random.randint(1, die) for _ in range(count))
+    plus = int(match["plus"]) if match["plus"] else 0
+    return sum(random.randint(1, die) for _ in range(count)) + plus
 
 
 def wound_threshold(strength: int, toughness: int) -> int:
@@ -93,6 +96,9 @@ class _Target:
     remaining_wounds : int
     is_leader        : bool = False
     is_support       : bool = False
+    # Rolls to explode when destroyed (a datasheet ability with the
+    # deadly_demise effect, e.g. "Deadly Demise D3").
+    deadly_demise    : bool = False
 
 
 def _precision_target(targets: deque[_Target]) -> _Target:
@@ -113,6 +119,7 @@ class WeaponCombatResult:
     attack_rolls     : list[int] = field(default_factory=list)
     attack_rerolls   : list[int] = field(default_factory=list)
     wound_rolls      : list[int] = field(default_factory=list)
+    wound_rerolls    : list[int] = field(default_factory=list)
     save_rolls       : list[int] = field(default_factory=list)
     fnp_rolls        : list[int] = field(default_factory=list)
     total_damage     : int       = field(default=0)
@@ -128,6 +135,7 @@ class CombatResult:
     attack_rolls               : list[int] = field(default_factory=list)
     attack_rerolls             : list[int] = field(default_factory=list)
     wound_rolls                : list[int] = field(default_factory=list)
+    wound_rerolls              : list[int] = field(default_factory=list)
     save_rolls                 : list[int] = field(default_factory=list)
     # The defending models' feel no pain rolls, one per point of damage
     # against a model that has feel no pain (not the attacker's own, from
@@ -143,6 +151,10 @@ class CombatResult:
     # How many attacking models were destroyed outright by their own
     # hazardous wounds (checked once a model is done firing all its weapons).
     hazardous_models_destroyed: int = field(default=0)
+    # Deadly Demise: one D6 per destroyed defending model that has it; a 6
+    # means it explodes. (The explosion's mortal wounds aren't resolved.)
+    deadly_demise_rolls: list[int] = field(default_factory=list)
+    deadly_demise_explosions: int = field(default=0)
     # The same totals above, broken down per weapon profile (grouped by
     # weapon name) instead of pooled across the whole attacking unit.
     weapon_results: list[WeaponCombatResult] = field(default_factory=list)
@@ -254,6 +266,11 @@ def resolve_combat(
             remaining_wounds=unit_model.model.wounds,
             is_leader=bool(unit_model.model.is_leader),
             is_support=bool(unit_model.model.is_support),
+            deadly_demise=any(
+                effect.keyword == "deadly_demise"
+                for ability in unit_model.model.abilities
+                for effect in ability.effects
+            ),
         )
         for unit_model in ordered_unit_models
     )
@@ -374,6 +391,11 @@ def resolve_combat(
                     pre_weapon_state,
                     pending_attacks,
                 )
+                if pre_weapon_state.get("blast"):
+                    # Blast: +1 attack for every five models in the target unit
+                    # (those still alive when this weapon fires), rounding down.
+                    for _ in range(len(targets) // 5):
+                        pending_attacks.append({"auto_hit": False})
                 if pre_weapon_state.get("hazardous"):
                     # Hazard roll: a 1-2 means the firing model takes damage based
                     # on its own keywords, reduced by its own feel no pain.
@@ -424,7 +446,7 @@ def resolve_combat(
                         # ignores cover.
                         effective_skill = weapon.skill
                         if (
-                            in_cover
+                            (in_cover or attack.get("benefit_of_cover"))
                             and is_ranged
                             and not unit_ignores_cover
                             and not attack.get("ignore_cover")
@@ -477,38 +499,50 @@ def resolve_combat(
                     if attack.get("auto_pass_wound"):
                         wound_passed = True
                     else:
-                        wound_roll = random.randint(1, 6)
-                        result.wound_rolls.append(wound_roll)
-                        weapon_result.wound_rolls.append(wound_roll)
-                        _apply_triggered_effects(
-                            abilities,
-                            {"step": "wound", "roll": wound_roll, **weapon_context},
-                            attack,
-                            pending_attacks,
-                        )
-                        if attack.get("critical_wound"):
-                            # An Anti-X-style ability (e.g. Anti-Infantry 4+) matched
-                            # this roll against the defending unit's keywords - it
-                            # counts as a critical wound regardless of the actual roll,
-                            # so re-run the wound-step trigger check with a synthetic
-                            # natural-6 context to also fire any other critical-wound-
-                            # dependent effects (e.g. Devastating Wounds), same as an
-                            # actual natural 6 would.
+                        wound_passed = False
+                        # A failed wound roll may be re-rolled once (e.g. Twin-linked),
+                        # with the wound-step triggers re-checked against the new roll.
+                        for is_reroll in (False, True):
+                            if is_reroll and not attack.get("reroll_failed_wounds"):
+                                break
+                            wound_roll = random.randint(1, 6)
+                            if is_reroll:
+                                result.wound_rerolls.append(wound_roll)
+                                weapon_result.wound_rerolls.append(wound_roll)
+                            else:
+                                result.wound_rolls.append(wound_roll)
+                                weapon_result.wound_rolls.append(wound_roll)
                             _apply_triggered_effects(
                                 abilities,
-                                {"step": "wound", "roll": 6, **weapon_context},
+                                {"step": "wound", "roll": wound_roll, **weapon_context},
                                 attack,
                                 pending_attacks,
                             )
-                            wound_passed = True
-                        else:
-                            # An unmodified 6 always wounds and a 1 always
-                            # fails, whatever the modifiers.
-                            if attack.get("minus_one_to_wound"):
-                                threshold += 1
-                            wound_passed = wound_roll != 1 and (
-                                wound_roll == 6 or wound_roll >= threshold
-                            )
+                            if attack.get("critical_wound"):
+                                # An Anti-X-style ability (e.g. Anti-Infantry 4+)
+                                # matched this roll against the defending unit's
+                                # keywords - it counts as a critical wound regardless
+                                # of the actual roll, so re-run the wound-step trigger
+                                # check with a synthetic natural-6 context to also
+                                # fire any other critical-wound-dependent effects
+                                # (e.g. Devastating Wounds), same as an actual
+                                # natural 6 would.
+                                _apply_triggered_effects(
+                                    abilities,
+                                    {"step": "wound", "roll": 6, **weapon_context},
+                                    attack,
+                                    pending_attacks,
+                                )
+                                wound_passed = True
+                            else:
+                                # An unmodified 6 always wounds and a 1 always
+                                # fails, whatever the modifiers.
+                                needed = threshold + (1 if attack.get("minus_one_to_wound") else 0)
+                                wound_passed = wound_roll != 1 and (
+                                    wound_roll == 6 or wound_roll >= needed
+                                )
+                            if wound_passed:
+                                break
                     if not wound_passed:
                         continue
 
@@ -572,6 +606,11 @@ def resolve_combat(
                         target.remaining_wounds -= 1
                         if target.remaining_wounds <= 0:
                             targets.remove(target)
+                            if target.deadly_demise:
+                                demise_roll = random.randint(1, 6)
+                                result.deadly_demise_rolls.append(demise_roll)
+                                if demise_roll == 6:
+                                    result.deadly_demise_explosions += 1
                             result.models_destroyed += 1
                             weapon_result.models_destroyed += 1
                             break  # this model is destroyed - no spillover to the next

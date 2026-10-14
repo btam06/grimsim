@@ -1,5 +1,6 @@
 import { skillLabel } from '../weaponDisplay'
 import FactionFilter from './FactionFilter'
+import { EditButton } from './IconButtons'
 
 function ModelsListPage({
   models,
@@ -55,9 +56,7 @@ function ModelsListPage({
                 ` — Abilities: ${m.ability_ids.map(abilityName).join(', ')}`}
               {m.wargear_ids.length > 0 &&
                 ` — Wargear: ${m.wargear_ids.map(wargearName).join(', ')}`}
-              <button type="button" onClick={() => onEdit(m)}>
-                Edit
-              </button>
+              <EditButton onClick={() => onEdit(m)} />
             </div>
             {weaponsFor(m.id).length > 0 && (
               <ul>

@@ -166,11 +166,6 @@ function ListsPanel() {
       factionFilter={factionFilter}
       onFactionFilterChange={setFactionFilter}
       detachments={detachments}
-      units={units}
-      models={models}
-      weapons={weapons}
-      wargear={wargear}
-      factionUnits={factionUnits}
       error={error}
       onEdit={(list) => {
         setEditingList(list)
