@@ -34,7 +34,7 @@ from app.models import Condition, Effect, WeaponAbility
 # (name, description, [condition keywords], [effect keywords])
 ENTRIES = [
     (
-        "SUSTAINED 1",
+        "Sustained 1",
         "Each critical hit (an unmodified roll of 6 to hit) scores 1 additional hit.",
         [CRITICAL_HIT],
         [ADD_EXTRA_HIT],
@@ -100,7 +100,7 @@ ENTRIES = [
         [PRECISION],
     ),
     (
-        "RAPID FIRE 1",
+        "Rapid Fire 1",
         "When the shooting model is within half range, this weapon makes 1 additional attack.",
         [WITHIN_HALF_RANGE],
         [ADD_EXTRA_ATTACK],
@@ -132,7 +132,36 @@ ENTRIES = [
 ]
 
 
+# {old name: new name} for entries that have been renamed. Existing rows are
+# renamed in place (keeping them attached to their weapons) rather than a
+# second row being seeded under the new name.
+RENAMED = {
+    "SUSTAINED 1": "Sustained 1",
+    "RAPID FIRE 1": "Rapid Fire 1",
+}
+
+
+async def _rename(session: AsyncSession) -> None:
+    rows = (
+        await session.execute(select(WeaponAbility).where(WeaponAbility.name.in_(RENAMED)))
+    ).scalars().all()
+    taken = set(
+        (
+            await session.execute(
+                select(WeaponAbility.name).where(WeaponAbility.name.in_(RENAMED.values()))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for row in rows:
+        if RENAMED[row.name] not in taken:
+            row.name = RENAMED[row.name]
+    await session.flush()
+
+
 async def seed(session: AsyncSession) -> None:
+    await _rename(session)
     for name, description, condition_keywords, effect_keywords in ENTRIES:
         existing = (
             await session.execute(

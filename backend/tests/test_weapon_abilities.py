@@ -50,7 +50,7 @@ async def test_create_weapon_ability_with_conditions_and_effects(
     response = await client.post(
         "/weapon-abilities",
         json={
-            "name": "SUSTAINED 1",
+            "name": "Sustained 1",
             "condition_ids": [condition_id],
             "effect_ids": [effect_id],
         },

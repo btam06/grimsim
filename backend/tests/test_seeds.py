@@ -13,8 +13,11 @@ from app.models import (
     FactionAbility,
     FactionUnit,
     Keyword,
+    Model,
     Stratagem,
+    Wargear,
     WargearAbility,
+    Weapon,
     WeaponAbility,
 )
 from app.seeds import (
@@ -481,3 +484,147 @@ async def test_faction_rule_options_belong_to_a_seeded_ability_and_have_unique_n
 async def test_doctrina_imperatives_has_protector_and_conqueror_options():
     options = factions.rule_options("Adeptus Mechanicus", "Doctrina Imperatives")
     assert set(options) == {"Protector Imperative", "Conqueror Imperative"}
+
+
+DATASHEETS = [
+    (faction, datasheet)
+    for faction in factions.FACTIONS
+    for datasheet in getattr(faction.units, "DATASHEETS", [])
+]
+DATASHEET_IDS = [datasheet.NAME for _, datasheet in DATASHEETS]
+
+
+@pytest.mark.parametrize("faction,datasheet", DATASHEETS, ids=DATASHEET_IDS)
+async def test_datasheet_references_only_seeded_names(faction, datasheet):
+    assert datasheet.NAME in faction.units.NAMES
+    weapon_ability_names = {name for name, _, _, _ in weapon_abilities.ENTRIES}
+    faction_ability_names = {name for name, _ in faction.abilities.ENTRIES}
+    for spec in datasheet.MODELS:
+        assert set(spec.keywords) <= set(keywords.NAMES)
+        assert set(spec.faction_abilities) <= faction_ability_names
+        for weapon in spec.weapons:
+            assert set(weapon.abilities) <= weapon_ability_names
+            assert (weapon.range is None) == (weapon.weapon_type == "melee")
+        wargear_ability_names = {name for name, _, _, _ in wargear_abilities.ENTRIES}
+        for gear in spec.wargear:
+            assert set(gear.abilities) <= wargear_ability_names
+
+
+async def test_run_all_seeds_skitarii_rangers(session: AsyncSession):
+    await run_all(session)
+
+    ranger = (
+        await session.execute(
+            select(Model)
+            .options(
+                selectinload(Model.keywords),
+                selectinload(Model.faction_abilities),
+                selectinload(Model.weapons).selectinload(Weapon.abilities),
+                selectinload(Model.wargear).selectinload(Wargear.abilities),
+            )
+            .join(Faction)
+            .where(Model.name == "Skitarii Ranger", Faction.name == "Adeptus Mechanicus")
+        )
+    ).scalar_one()
+    assert (ranger.movement, ranger.toughness, ranger.save, ranger.wounds) == (6, 3, 4, 1)
+    assert (ranger.leadership, ranger.oc, ranger.invulnerable) == (7, 2, 5)
+    assert {"INFANTRY", "BATTLELINE", "SKITARII", "RANGERS"} <= {k.name for k in ranger.keywords}
+    assert [a.name for a in ranger.faction_abilities] == ["Doctrina Imperatives"]
+
+    weapons = {w.name: w for w in ranger.weapons}
+    assert len(weapons) == 8
+    arc_rifle = weapons["Arc rifle"]
+    assert (arc_rifle.range, arc_rifle.attacks, arc_rifle.skill) == (30, "1", 4)
+    assert (arc_rifle.strength, arc_rifle.ap, arc_rifle.damage) == (8, -1, "D3")
+    assert {a.name for a in arc_rifle.abilities} == {
+        "Anti-Vehicle 4+",
+        "Devastating Wounds",
+        "Rapid Fire 1",
+    }
+    assert weapons["Alpha combat weapon"].weapon_type == "melee"
+    assert weapons["Alpha combat weapon"].range is None
+
+    assert [g.name for g in ranger.wargear] == ["Omnispex"]
+    assert [a.name for a in ranger.wargear[0].abilities] == ["Ignore Cover (Unit)"]
+
+
+async def test_seed_datasheets_is_idempotent(session: AsyncSession):
+    await run_all(session)
+    await factions.seed_datasheets(session)
+
+    names = (await session.execute(select(Model.name))).scalars().all()
+    assert names.count("Skitarii Ranger") == 1
+    weapons = (await session.execute(select(Weapon.name))).scalars().all()
+    assert weapons.count("Galvanic rifle") == 1
+
+
+async def test_seed_datasheets_rejects_unknown_references(session: AsyncSession):
+    # Without keywords/weapon abilities seeded, the datasheet's references
+    # can't be resolved - that's an error rather than a silently bare model.
+    await factions.seed(session)
+    await factions.seed_abilities(session)
+
+    with pytest.raises(ValueError, match="Skitarii Rangers"):
+        await factions.seed_datasheets(session)
+
+
+async def test_seed_weapon_abilities_renames_old_names_in_place(session: AsyncSession):
+    # A database seeded before the rename keeps its row (and the weapons
+    # linked to it) under the new name, instead of gaining a duplicate.
+    old = WeaponAbility(name="RAPID FIRE 1", description="old")
+    session.add(old)
+    await session.commit()
+    old_id = old.id
+
+    await conditions.seed(session)
+    await effects.seed(session)
+    await weapon_abilities.seed(session)
+
+    rows = (
+        await session.execute(
+            select(WeaponAbility.id, WeaponAbility.name).where(
+                WeaponAbility.name.in_(["RAPID FIRE 1", "Rapid Fire 1"])
+            )
+        )
+    ).all()
+    assert rows == [(old_id, "Rapid Fire 1")]
+
+
+async def test_seed_datasheets_adds_missing_weapons_and_wargear_to_existing_model(
+    session: AsyncSession,
+):
+    # A Ranger seeded before the datasheet gained (say) its Omnispex, and
+    # whose user-edited weapon must be left alone.
+    await run_all(session)
+    ranger = (
+        await session.execute(
+            select(Model)
+            .options(selectinload(Model.weapons), selectinload(Model.wargear))
+            .where(Model.name == "Skitarii Ranger")
+        )
+    ).scalar_one()
+    omnispex = ranger.wargear[0]
+    arc_rifle = next(w for w in ranger.weapons if w.name == "Arc rifle")
+    galvanic = next(w for w in ranger.weapons if w.name == "Galvanic rifle")
+    ranger.wargear.remove(omnispex)
+    ranger.weapons.remove(arc_rifle)
+    await session.delete(omnispex)
+    await session.delete(arc_rifle)
+    galvanic.attacks = "3"  # a user edit
+    await session.commit()
+
+    await factions.seed_datasheets(session)
+
+    session.expire_all()
+    ranger = (
+        await session.execute(
+            select(Model)
+            .options(selectinload(Model.weapons), selectinload(Model.wargear))
+            .where(Model.name == "Skitarii Ranger")
+        )
+    ).scalar_one()
+    weapons = {w.name: w for w in ranger.weapons}
+    assert "Arc rifle" in weapons
+    assert len(ranger.weapons) == 8
+    assert weapons["Galvanic rifle"].attacks == "3"
+    assert [g.name for g in ranger.wargear] == ["Omnispex"]

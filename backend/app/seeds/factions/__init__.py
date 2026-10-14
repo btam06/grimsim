@@ -1,8 +1,20 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.combat_rules import Rule
-from app.models import Detachment, Faction, FactionAbility, FactionUnit
+from app.models import (
+    Detachment,
+    Faction,
+    FactionAbility,
+    FactionUnit,
+    Keyword,
+    Model,
+    Wargear,
+    WargearAbility,
+    Weapon,
+    WeaponAbility,
+)
 from app.seeds.factions import (
     adeptus_custodes,
     adeptus_mechanicus,
@@ -36,7 +48,10 @@ from app.seeds.lookup import get_dispositions_by_name
 #                            optional OPTIONS dict of rule options an ability
 #                            grants (e.g. Doctrina Imperatives' Protector and
 #                            Conqueror Imperatives) - see rule_options below
-#   units/__init__.py        NAMES of the faction's units (datasheets)
+#   units/__init__.py        NAMES of the faction's units, plus an optional
+#                            DATASHEETS list of per-unit modules (e.g.
+#                            units/skitarii_rangers.py) declaring each unit's
+#                            models and weapons - see app/seeds/datasheets.py
 #   detachments/__init__.py  ENTRIES of (name, disposition name, dp)
 #
 # To add a faction: copy an existing folder, fill it in, then register it in
@@ -188,4 +203,125 @@ async def seed_detachments(session: AsyncSession) -> None:
 
     if missing:
         session.add_all(missing)
+        await session.commit()
+
+
+async def seed_datasheets(session: AsyncSession) -> None:
+    # Creates the models (with stats, keywords, faction abilities, weapons and
+    # wargear) declared by each faction's units.DATASHEETS. For a model that
+    # already exists in its faction (by name), only weapons/wargear it's
+    # missing (by name) are added - nothing existing is changed or removed, so
+    # additions to a datasheet reach previously seeded models. Must run after
+    # keywords, weapon/wargear abilities and faction abilities are seeded,
+    # since everything is referenced by name - a name that isn't found is an
+    # error, not skipped.
+    faction_ids = await _faction_ids_by_name(session)
+    keywords = {k.name: k for k in (await session.execute(select(Keyword))).scalars().all()}
+    weapon_abilities = {
+        a.name: a for a in (await session.execute(select(WeaponAbility))).scalars().all()
+    }
+    wargear_abilities = {
+        a.name: a for a in (await session.execute(select(WargearAbility))).scalars().all()
+    }
+    faction_abilities = {
+        (a.faction_id, a.name): a
+        for a in (await session.execute(select(FactionAbility))).scalars().all()
+    }
+    existing = {
+        (model.faction_id, model.name): model
+        for model in (
+            await session.execute(
+                select(Model).options(selectinload(Model.weapons), selectinload(Model.wargear))
+            )
+        )
+        .scalars()
+        .all()
+    }
+
+    def lookup(table: dict, key, kind: str, datasheet: str):
+        if key not in table:
+            raise ValueError(f"datasheet {datasheet!r} references unknown {kind} {key!r}")
+        return table[key]
+
+    def build_weapon(weapon, datasheet: str) -> Weapon:
+        return Weapon(
+            name=weapon.name,
+            weapon_type=weapon.weapon_type,
+            range=weapon.range,
+            attacks=weapon.attacks,
+            skill=weapon.skill,
+            strength=weapon.strength,
+            ap=weapon.ap,
+            damage=weapon.damage,
+            abilities=[
+                lookup(weapon_abilities, name, "weapon ability", datasheet)
+                for name in weapon.abilities
+            ],
+        )
+
+    def build_wargear(gear, datasheet: str) -> Wargear:
+        return Wargear(
+            name=gear.name,
+            description=gear.description,
+            abilities=[
+                lookup(wargear_abilities, name, "wargear ability", datasheet)
+                for name in gear.abilities
+            ],
+        )
+
+    changed = False
+    for faction in FACTIONS:
+        faction_id = faction_ids.get(faction.info.FACTION_NAME)
+        if faction_id is None:
+            continue  # faction hasn't been seeded yet
+        for datasheet in getattr(faction.units, "DATASHEETS", []):
+            for spec in datasheet.MODELS:
+                model = existing.get((faction_id, spec.name))
+                if model is not None:
+                    weapon_names = {w.name for w in model.weapons}
+                    for weapon in spec.weapons:
+                        if weapon.name not in weapon_names:
+                            model.weapons.append(build_weapon(weapon, datasheet.NAME))
+                            changed = True
+                    wargear_names = {g.name for g in model.wargear}
+                    for gear in spec.wargear:
+                        if gear.name not in wargear_names:
+                            model.wargear.append(build_wargear(gear, datasheet.NAME))
+                            changed = True
+                    continue
+
+                session.add(
+                    Model(
+                        name=spec.name,
+                        faction_id=faction_id,
+                        movement=spec.movement,
+                        toughness=spec.toughness,
+                        save=spec.save,
+                        wounds=spec.wounds,
+                        leadership=spec.leadership,
+                        oc=spec.oc,
+                        invulnerable=spec.invulnerable,
+                        feel_no_pain=spec.feel_no_pain,
+                        is_support=spec.is_support,
+                        is_leader=spec.is_leader,
+                        keywords=[
+                            lookup(keywords, name, "keyword", datasheet.NAME)
+                            for name in spec.keywords
+                        ],
+                        faction_abilities=[
+                            lookup(
+                                faction_abilities,
+                                (faction_id, name),
+                                "faction ability",
+                                datasheet.NAME,
+                            )
+                            for name in spec.faction_abilities
+                        ],
+                        weapons=[build_weapon(w, datasheet.NAME) for w in spec.weapons],
+                        wargear=[build_wargear(g, datasheet.NAME) for g in spec.wargear],
+                    )
+                )
+                changed = True
+
+    if changed:
         await session.commit()

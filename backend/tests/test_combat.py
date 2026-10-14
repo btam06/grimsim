@@ -1486,7 +1486,7 @@ def test_within_half_range_condition_checks_pre_weapon_step_and_flag():
 
 
 def test_resolve_combat_rapid_fire_1_adds_an_extra_attack_within_half_range(monkeypatch):
-    # RAPID FIRE 1: within_half_range -> add_extra_attack. The extra attack is
+    # Rapid Fire 1: within_half_range -> add_extra_attack. The extra attack is
     # a fresh attack, not an auto-hit, so it still needs its own hit roll.
     monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
 
@@ -2243,7 +2243,7 @@ async def test_combat_endpoint_applies_seeded_hazardous_and_rapid_fire_abilities
 
     abilities = (await client.get("/weapon-abilities")).json()
     hazardous_id = next(a["id"] for a in abilities if a["name"] == "Hazardous")
-    rapid_fire_id = next(a["id"] for a in abilities if a["name"] == "RAPID FIRE 1")
+    rapid_fire_id = next(a["id"] for a in abilities if a["name"] == "Rapid Fire 1")
 
     attacker_model_id = await _create_model(client, faction_id)
     weapon_id = await _create_weapon(

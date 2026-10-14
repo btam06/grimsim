@@ -1,3 +1,5 @@
+from . import skitarii_rangers
+
 # Unit (datasheet) names in this faction's roster.
 NAMES = [
     "Belisarius Cawl",
@@ -33,3 +35,7 @@ NAMES = [
     "Sydonian Dragoons With Radium Jezzails",
     "Sydonian Dragoons With Taser Lances",
 ]
+
+# Full datasheets (models, stats, weapons) for units above - see
+# app/seeds/datasheets.py. Units without one are seeded by name only.
+DATASHEETS = [skitarii_rangers]

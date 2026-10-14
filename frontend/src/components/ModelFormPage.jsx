@@ -90,6 +90,24 @@ function ModelFormPage({
 
   const handleChange = (field) => (e) => setForm({ ...form, [field]: e.target.value })
 
+  // A faction with a single faction ability (e.g. Orks' Waaagh!) almost
+  // always grants it to its models, so tick it when that faction is picked.
+  // It can still be unticked.
+  const selectFaction = (faction_id) => {
+    const factionAbilityIds = factionAbilities
+      .filter((a) => String(a.faction_id) === faction_id)
+      .map((a) => a.id)
+    const onlyAbilityId = factionAbilityIds.length === 1 ? factionAbilityIds[0] : null
+    setForm({
+      ...form,
+      faction_id,
+      faction_ability_ids:
+        onlyAbilityId === null || form.faction_ability_ids.includes(onlyAbilityId)
+          ? form.faction_ability_ids
+          : [...form.faction_ability_ids, onlyAbilityId],
+    })
+  }
+
   const save = () =>
     editingModel ? updateModel(editingModel.id, toPayload(form)) : createModel(toPayload(form))
 
@@ -171,7 +189,7 @@ function ModelFormPage({
           <Select
             options={factions}
             value={form.faction_id}
-            onChange={(faction_id) => setForm({ ...form, faction_id })}
+            onChange={selectFaction}
             placeholder="Select faction"
           />
         </Field>
