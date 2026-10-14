@@ -14,6 +14,15 @@ function slotsFromUnit(unit) {
   }))
 }
 
+// A model's only ranged weapon (or only melee weapon) is always carried, so
+// it's selected automatically and can't be unselected. Ranged and melee are
+// checked separately; a weapon with no type counts as ranged.
+function requiredWeaponIds(modelWeapons) {
+  const ranged = modelWeapons.filter((w) => w.weapon_type !== 'melee')
+  const melee = modelWeapons.filter((w) => w.weapon_type === 'melee')
+  return [ranged, melee].filter((group) => group.length === 1).map((group) => group[0].id)
+}
+
 function UnitFormPage({
   editingUnit,
   defaultListId,
@@ -44,6 +53,7 @@ function UnitFormPage({
 
   const weaponOptionsForSlot = weapons.filter((w) => String(w.model_id) === slot.model_id)
   const wargearOptionsForSlot = wargear.filter((g) => String(g.model_id) === slot.model_id)
+  const requiredWeaponIdsForSlot = requiredWeaponIds(weaponOptionsForSlot)
 
   const addSlot = () => {
     if (!slot.model_id) return
@@ -55,7 +65,13 @@ function UnitFormPage({
 
   const removeSlot = (index) => setSlots(slots.filter((_, i) => i !== index))
 
+  const selectModel = (model_id) => {
+    const modelWeapons = weapons.filter((w) => String(w.model_id) === model_id)
+    setSlot({ model_id, weapon_ids: requiredWeaponIds(modelWeapons), wargear_ids: [] })
+  }
+
   const toggleSlotWeapon = (weaponId) => {
+    if (requiredWeaponIdsForSlot.includes(weaponId)) return
     setSlot({
       ...slot,
       weapon_ids: slot.weapon_ids.includes(weaponId)
@@ -129,7 +145,7 @@ function UnitFormPage({
           <Select
             options={modelOptions}
             value={slot.model_id}
-            onChange={(model_id) => setSlot({ model_id, weapon_ids: [], wargear_ids: [] })}
+            onChange={selectModel}
             placeholder="Select model"
           />
         </Field>
@@ -144,6 +160,7 @@ function UnitFormPage({
                 <input
                   type="checkbox"
                   checked={slot.weapon_ids.includes(w.id)}
+                  disabled={requiredWeaponIdsForSlot.includes(w.id)}
                   onChange={() => toggleSlotWeapon(w.id)}
                 />
                 {w.name}
