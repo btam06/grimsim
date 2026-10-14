@@ -392,7 +392,9 @@ def test_resolve_combat_next_attack_targets_next_model_with_its_own_fnp(monkeypa
     # (no fnp roll consumed). The *second* attack (same weapon, two attacks total)
     # then targets the second model, which does have FNP - that attack's damage
     # must be checked against the second model's own threshold.
-    rolls = iter([6, 6, 1, 6, 6, 1, 2])  # attack1: hit,wound,save(fail); attack2: hit,wound,save(fail),fnp(fail)
+    # Phase order: both hits, both wounds, then each wound's save (and damage) in
+    # turn - attack 1's save fails (model 1 dies), attack 2's save fails, fnp fails.
+    rolls = iter([6, 6, 6, 6, 1, 1, 2])
     monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls))
 
     weapon = _weapon(attacks="2", skill=2, strength=10, ap=-10, damage="1")
@@ -1448,7 +1450,11 @@ def test_precision_order_across_multiple_attacks(monkeypatch):
         advanced=False,
         apply_precision=True,
     )
-    assert picked == ["leader", "support", "other"]
+    # The wound phase checks who each attack would be allocated to (no one has
+    # died yet, so the leader each time); allocation then picks leader, then
+    # support, then the rest as each dies.
+    assert picked[:3] == ["leader", "leader", "leader"]
+    assert picked[3:] == ["leader", "support", "other"]
     assert result.models_destroyed == 3
 
 
@@ -3713,3 +3719,84 @@ def test_ignores_cover_ignores_stealth(monkeypatch):
 
 def test_stealth_does_not_affect_the_stealthy_units_own_attacks(monkeypatch):
     assert _stealth_shot(monkeypatch, attacker_rules=STEALTH) == 1
+
+
+
+# --- phase order: all hits, then all wounds, then saves/damage ---
+
+
+def test_resolve_combat_rolls_all_hits_before_any_wounds(monkeypatch):
+    # 3 attacks: the hit rolls come first (6, 5, 4), then the wound rolls (6, 6, 6),
+    # then one save per wound - not hit/wound/save per attack.
+    rolls = iter([6, 5, 4, 6, 6, 6, 1, 1, 1])
+    calls = []
+
+    def roll(a, b):
+        value = next(rolls)
+        calls.append(value)
+        return value
+
+    monkeypatch.setattr(combat.random, "randint", roll)
+    weapon = _weapon(attacks="3", skill=4, strength=10, ap=0, damage="1", weapon_type="ranged")
+    result = _fire(weapon, [_model(toughness=1, wounds=10, save=2)])
+
+    assert result.attack_rolls == [6, 5, 4]
+    assert result.wound_rolls == [6, 6, 6]
+    assert result.save_rolls == [1, 1, 1]
+    assert result.total_damage == 3
+
+
+def test_resolve_combat_batches_a_profile_across_models(monkeypatch):
+    # Two models each with a one-attack "Gun": both hit rolls are made before
+    # either wound roll.
+    rolls = iter([6, 2, 6, 1])  # hit (model 1), hit (model 2, misses), wound, save
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    gun_a = _weapon(name="Gun", attacks="1", skill=4, strength=10, ap=0, damage="1")
+    gun_a.id = 1
+    gun_b = _weapon(name="Gun", attacks="1", skill=4, strength=10, ap=0, damage="1")
+    gun_b.id = 2
+    attacker = _unit([_unit_model(_model(), [gun_a]), _unit_model(_model(), [gun_b])])
+    defender = _unit([_unit_model(_model(toughness=1, wounds=10, save=2), [])])
+
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {1, 2},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+    )
+    assert result.attack_rolls == [6, 2]
+    assert result.wound_rolls == [6]
+    assert result.save_rolls == [1]
+
+
+def test_resolve_combat_sustained_hits_join_the_hit_phase(monkeypatch):
+    # 2 attacks: a critical (sustained adds a hit) and a miss; the extra hit
+    # goes to the wound phase with the first, so 2 wound rolls follow both hits.
+    rolls = iter([6, 1, 6, 6, 1, 1])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="2", skill=4, strength=10, ap=0, damage="1", weapon_type="ranged")
+    weapon.abilities = [_ability([_condition("critical_hit")], [_effect("add_extra_hit")])]
+
+    result = _fire(weapon, [_model(toughness=1, wounds=10, save=2)])
+    assert result.attack_rolls == [6, 1]
+    assert result.wound_rolls == [6, 6]
+    assert result.total_damage == 2
+
+
+def test_resolve_combat_still_rolls_every_hit_after_the_unit_is_wiped(monkeypatch):
+    # All the hit and wound rolls happen up front, as at the table; only the
+    # saves stop once there's no one left to allocate to.
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6 if b == 6 else 1)
+    weapon = _weapon(attacks="3", skill=2, strength=10, ap=-10, damage="1", weapon_type="ranged")
+
+    result = _fire(weapon, [_model(toughness=1, wounds=1, save=7)])
+    assert len(result.attack_rolls) == 3
+    assert len(result.wound_rolls) == 3
+    assert len(result.save_rolls) == 1
+    assert result.models_destroyed == 1

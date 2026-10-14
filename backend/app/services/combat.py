@@ -282,6 +282,13 @@ def resolve_combat(
     # pooled totals below, then flattened onto result.weapon_results at the end.
     weapon_results_by_name: dict[str, WeaponCombatResult] = {}
 
+    # Every attack the unit makes, queued per weapon profile (every weapon
+    # sharing a name, across every model firing one - e.g. all ten Galvanic
+    # rifles) as (attack state, the weapon instance it came from) pairs.
+    # Profiles are then resolved one at a time, in phases, like at the table:
+    # all hit rolls, then all wound rolls, then saves and damage.
+    profiles: dict[str, list[tuple[dict, dict]]] = {}
+
     # A unit that can't see its target makes no attacks at all - this is checked
     # once for the whole attacking unit, since visibility is a property of the
     # engagement as a whole, not of any one model within it.
@@ -365,17 +372,21 @@ def resolve_combat(
                 ):
                     continue
 
-                # Precision only changes targeting when the attacker opts in.
-                uses_precision = apply_precision and eligibility_state.get("precision", False)
-
                 weapon_result = weapon_results_by_name.setdefault(
                     weapon.name, WeaponCombatResult(name=weapon.name)
                 )
+                fired = {
+                    "weapon": weapon,
+                    "abilities": abilities,
+                    "context": weapon_context,
+                    "is_ranged": is_ranged,
+                    # Precision only changes targeting when the attacker opts in.
+                    "uses_precision": apply_precision and eligibility_state.get("precision", False),
+                    "result": weapon_result,
+                }
 
-                # Attacks characteristic: how many attack sequences this weapon makes,
+                # Attacks characteristic: how many attacks this weapon makes,
                 # rolled once per weapon (flat or dice notation, e.g. "2", "D3", "2D6").
-                # This is a queue rather than a fixed range because an effect (e.g.
-                # "add an extra hit") can append more attacks onto it mid-resolution.
                 pending_attacks: deque[dict] = deque(
                     {"auto_hit": False} for _ in range(roll_dice(weapon.attacks))
                 )
@@ -393,7 +404,8 @@ def resolve_combat(
                 )
                 if pre_weapon_state.get("blast"):
                     # Blast: +1 attack for every five models in the target unit
-                    # (those still alive when this weapon fires), rounding down.
+                    # (counted when targets are declared, before any attacks
+                    # resolve), rounding down.
                     for _ in range(len(targets) // 5):
                         pending_attacks.append({"auto_hit": False})
                 if pre_weapon_state.get("hazardous"):
@@ -418,207 +430,231 @@ def resolve_combat(
                             weapon_result.hazardous_wounds += 1
                             model_hazardous_damage += 1
 
-                while pending_attacks:
-                    if not targets:
-                        break  # defending unit has no models left to attack
-                    attack = pending_attacks.popleft()
-
-                    if attack["auto_hit"]:
-                        # Granted outright by an effect (e.g. sustained hits) - it's
-                        # already a hit, so no hit roll and no hit-step triggers.
-                        pass
-                    else:
-                        # Pre-hit: lets a static trait (e.g. "always ignore cover",
-                        # or Heavy when the unit moved less than 3") mark this
-                        # attack before the hit roll's threshold is set.
-                        _apply_triggered_effects(
-                            abilities,
-                            {
-                                "step": "pre_hit",
-                                "moved_less_than_3": moved_less_than_3,
-                                **weapon_context,
-                            },
-                            attack,
-                            pending_attacks,
-                        )
-                        # A ranged attack against a target in cover needs a roll 1
-                        # higher to hit, unless this attack (or the whole unit)
-                        # ignores cover.
-                        effective_skill = weapon.skill
-                        if (
-                            (in_cover or attack.get("benefit_of_cover"))
-                            and is_ranged
-                            and not unit_ignores_cover
-                            and not attack.get("ignore_cover")
-                        ):
-                            effective_skill += 1
-                        # +1 and -1 to hit are each a single flag, so stacking
-                        # sources of either never exceeds a net +/-1.
-                        if attack.get("plus_one_to_hit"):
-                            effective_skill -= 1
-                        if attack.get("minus_one_to_hit"):
-                            effective_skill += 1
-                        if is_ranged and attack.get("plus_one_skill_ranged"):
-                            effective_skill -= 1
-                        if not is_ranged and attack.get("plus_one_skill_melee"):
-                            effective_skill -= 1
-
-                        # Hit roll: succeeds (hits) on a roll equal to or greater than skill.
-                        hit_roll = random.randint(1, 6)
-                        result.attack_rolls.append(hit_roll)
-                        weapon_result.attack_rolls.append(hit_roll)
-                        _apply_triggered_effects(
-                            abilities,
-                            {"step": "hit", "roll": hit_roll, **weapon_context},
-                            attack,
-                            pending_attacks,
-                        )
-                        if hit_roll < effective_skill and (
-                            attack.get("reroll_failed_hits") or unit_rerolls_failed_hits
-                        ):
-                            # Re-roll a failed hit once, replacing the original
-                            # result - hit-step triggers (e.g. Sustained Hits) are
-                            # re-checked against the new roll too.
-                            hit_roll = random.randint(1, 6)
-                            result.attack_rerolls.append(hit_roll)
-                            weapon_result.attack_rerolls.append(hit_roll)
-                            _apply_triggered_effects(
-                                abilities,
-                                {"step": "hit", "roll": hit_roll, **weapon_context},
-                                attack,
-                                pending_attacks,
-                            )
-                        if hit_roll < effective_skill:
-                            continue
-
-                    # Wound roll: threshold depends on this weapon's strength versus the
-                    # toughness of whichever model is currently being targeted.
-                    target = _precision_target(targets) if uses_precision else targets[0]
-                    threshold = wound_threshold(weapon.strength, target.toughness)
-
-                    if attack.get("auto_pass_wound"):
-                        wound_passed = True
-                    else:
-                        wound_passed = False
-                        # A failed wound roll may be re-rolled once (e.g. Twin-linked),
-                        # with the wound-step triggers re-checked against the new roll.
-                        for is_reroll in (False, True):
-                            if is_reroll and not attack.get("reroll_failed_wounds"):
-                                break
-                            wound_roll = random.randint(1, 6)
-                            if is_reroll:
-                                result.wound_rerolls.append(wound_roll)
-                                weapon_result.wound_rerolls.append(wound_roll)
-                            else:
-                                result.wound_rolls.append(wound_roll)
-                                weapon_result.wound_rolls.append(wound_roll)
-                            _apply_triggered_effects(
-                                abilities,
-                                {"step": "wound", "roll": wound_roll, **weapon_context},
-                                attack,
-                                pending_attacks,
-                            )
-                            if attack.get("critical_wound"):
-                                # An Anti-X-style ability (e.g. Anti-Infantry 4+)
-                                # matched this roll against the defending unit's
-                                # keywords - it counts as a critical wound regardless
-                                # of the actual roll, so re-run the wound-step trigger
-                                # check with a synthetic natural-6 context to also
-                                # fire any other critical-wound-dependent effects
-                                # (e.g. Devastating Wounds), same as an actual
-                                # natural 6 would.
-                                _apply_triggered_effects(
-                                    abilities,
-                                    {"step": "wound", "roll": 6, **weapon_context},
-                                    attack,
-                                    pending_attacks,
-                                )
-                                wound_passed = True
-                            else:
-                                # An unmodified 6 always wounds and a 1 always
-                                # fails, whatever the modifiers.
-                                needed = threshold + (1 if attack.get("minus_one_to_wound") else 0)
-                                wound_passed = wound_roll != 1 and (
-                                    wound_roll == 6 or wound_roll >= needed
-                                )
-                            if wound_passed:
-                                break
-                    if not wound_passed:
-                        continue
-
-                    # Save roll: armor save is worsened by the weapon's AP, but the
-                    # defender may use their invulnerable save instead if it's better.
-                    # An effect (e.g. devastating wounds) can mark this attack to skip
-                    # the roll entirely - no save of any kind, armor or invulnerable.
-                    if attack.get("no_save"):
-                        save_passed = False
-                    else:
-                        ap = weapon.ap - 1 if attack.get("improve_ap") else weapon.ap
-                        save_needed = target.save - ap
-                        if target.invulnerable is not None:
-                            save_needed = min(save_needed, target.invulnerable)
-                        # An invulnerable save granted by a rule (e.g. Waaagh!'s
-                        # 5+ while riled up) - also unaffected by AP.
-                        if attack.get("invulnerable_save") is not None:
-                            save_needed = min(save_needed, attack["invulnerable_save"])
-                        save_roll = random.randint(1, 6)
-                        result.save_rolls.append(save_roll)
-                        weapon_result.save_rolls.append(save_roll)
-                        _apply_triggered_effects(
-                            abilities,
-                            {"step": "save", "roll": save_roll, **weapon_context},
-                            attack,
-                            pending_attacks,
-                        )
-                        save_passed = save_roll >= save_needed
-                    if save_passed:
-                        continue  # save succeeded - no damage from this attack
-
-                    # Damage roll: how many wounds this one failed save inflicts.
-                    damage = roll_dice(weapon.damage)
-
-                    # Apply damage a single point at a time, each rolling feel no pain
-                    # separately, against the one model this attack is targeting. If
-                    # that model dies partway through, this attack's remaining damage
-                    # is wasted rather than carrying onto the next model - the next
-                    # attack (if any) simply finds that next model at the front of
-                    # the queue instead.
-                    # The model's own feel no pain, or a better one granted by a
-                    # rule (e.g. a leader's Lord of the Machine Cult).
-                    feel_no_pain = min(
-                        (
-                            fnp
-                            for fnp in (target.feel_no_pain, attack.get("feel_no_pain"))
-                            if fnp is not None
-                        ),
-                        default=None,
-                    )
-                    for _ in range(damage):
-                        if feel_no_pain is not None:
-                            fnp_roll = random.randint(1, 6)
-                            result.fnp_rolls.append(fnp_roll)
-                            weapon_result.fnp_rolls.append(fnp_roll)
-                            if fnp_roll >= feel_no_pain:
-                                continue  # feel no pain negated this point of damage
-
-                        result.total_damage += 1
-                        weapon_result.total_damage += 1
-                        target.remaining_wounds -= 1
-                        if target.remaining_wounds <= 0:
-                            targets.remove(target)
-                            if target.deadly_demise:
-                                demise_roll = random.randint(1, 6)
-                                result.deadly_demise_rolls.append(demise_roll)
-                                if demise_roll == 6:
-                                    result.deadly_demise_explosions += 1
-                            result.models_destroyed += 1
-                            weapon_result.models_destroyed += 1
-                            break  # this model is destroyed - no spillover to the next
+                profiles.setdefault(weapon.name, []).extend(
+                    (attack, fired) for attack in pending_attacks
+                )
 
             # End of combat for this attacking model: if the hazardous wounds it
             # took while firing added up to (or past) its own wounds, it died.
             if model_hazardous_damage >= unit_model.model.wounds:
                 result.hazardous_models_destroyed += 1
+
+    def target_for(fired: dict) -> _Target:
+        # The model an attack is allocated to: whoever is at the front of the
+        # queue, or a Precision weapon's pick.
+        return _precision_target(targets) if fired["uses_precision"] else targets[0]
+
+    for profile_attacks in profiles.values():
+        # Hit phase: every attack of this profile rolls to hit. Extra attacks
+        # and hits an effect adds (e.g. Sustained Hits) join the same phase -
+        # an extra hit is already a hit, so it skips the roll.
+        hits: list[tuple[dict, dict]] = []
+        queue = deque(profile_attacks)
+        while queue:
+            attack, fired = queue.popleft()
+            if attack["auto_hit"]:
+                hits.append((attack, fired))
+                continue
+            weapon = fired["weapon"]
+            abilities = fired["abilities"]
+            weapon_context = fired["context"]
+            is_ranged = fired["is_ranged"]
+            weapon_result = fired["result"]
+            spawned: deque[dict] = deque()
+
+            # Pre-hit: lets a static trait (e.g. "always ignore cover", or Heavy
+            # when the unit moved less than 3") mark this attack before the hit
+            # roll's threshold is set.
+            _apply_triggered_effects(
+                abilities,
+                {"step": "pre_hit", "moved_less_than_3": moved_less_than_3, **weapon_context},
+                attack,
+                spawned,
+            )
+            # A ranged attack against a target in cover needs a roll 1 higher to
+            # hit, unless this attack (or the whole unit) ignores cover.
+            effective_skill = weapon.skill
+            if (
+                (in_cover or attack.get("benefit_of_cover"))
+                and is_ranged
+                and not unit_ignores_cover
+                and not attack.get("ignore_cover")
+            ):
+                effective_skill += 1
+            # +1 and -1 to hit are each a single flag, so stacking sources of
+            # either never exceeds a net +/-1.
+            if attack.get("plus_one_to_hit"):
+                effective_skill -= 1
+            if attack.get("minus_one_to_hit"):
+                effective_skill += 1
+            if is_ranged and attack.get("plus_one_skill_ranged"):
+                effective_skill -= 1
+            if not is_ranged and attack.get("plus_one_skill_melee"):
+                effective_skill -= 1
+
+            # Hit roll: succeeds (hits) on a roll equal to or greater than skill.
+            hit_roll = random.randint(1, 6)
+            result.attack_rolls.append(hit_roll)
+            weapon_result.attack_rolls.append(hit_roll)
+            _apply_triggered_effects(
+                abilities, {"step": "hit", "roll": hit_roll, **weapon_context}, attack, spawned
+            )
+            if hit_roll < effective_skill and (
+                attack.get("reroll_failed_hits") or unit_rerolls_failed_hits
+            ):
+                # Re-roll a failed hit once, replacing the original result -
+                # hit-step triggers (e.g. Sustained Hits) are re-checked against
+                # the new roll too.
+                hit_roll = random.randint(1, 6)
+                result.attack_rerolls.append(hit_roll)
+                weapon_result.attack_rerolls.append(hit_roll)
+                _apply_triggered_effects(
+                    abilities, {"step": "hit", "roll": hit_roll, **weapon_context}, attack, spawned
+                )
+            queue.extend((extra, fired) for extra in spawned)
+            if hit_roll >= effective_skill:
+                hits.append((attack, fired))
+
+        # Wound phase: every hit rolls to wound. Nothing has been destroyed yet
+        # this phase, so each wound roll is against the Toughness of the model
+        # its attack will be allocated to first.
+        if not targets:
+            continue  # the defending unit was wiped out by an earlier profile
+        wounds: list[tuple[dict, dict]] = []
+        for attack, fired in hits:
+            weapon = fired["weapon"]
+            abilities = fired["abilities"]
+            weapon_context = fired["context"]
+            weapon_result = fired["result"]
+            threshold = wound_threshold(weapon.strength, target_for(fired).toughness)
+
+            if attack.get("auto_pass_wound"):
+                wound_passed = True
+            else:
+                wound_passed = False
+                # A failed wound roll may be re-rolled once (e.g. Twin-linked),
+                # with the wound-step triggers re-checked against the new roll.
+                for is_reroll in (False, True):
+                    if is_reroll and not attack.get("reroll_failed_wounds"):
+                        break
+                    wound_roll = random.randint(1, 6)
+                    if is_reroll:
+                        result.wound_rerolls.append(wound_roll)
+                        weapon_result.wound_rerolls.append(wound_roll)
+                    else:
+                        result.wound_rolls.append(wound_roll)
+                        weapon_result.wound_rolls.append(wound_roll)
+                    _apply_triggered_effects(
+                        abilities,
+                        {"step": "wound", "roll": wound_roll, **weapon_context},
+                        attack,
+                        deque(),
+                    )
+                    if attack.get("critical_wound"):
+                        # An Anti-X-style ability (e.g. Anti-Infantry 4+) matched
+                        # this roll against the defending unit's keywords - it
+                        # counts as a critical wound regardless of the actual
+                        # roll, so re-run the wound-step trigger check with a
+                        # synthetic natural-6 context to also fire any other
+                        # critical-wound-dependent effects (e.g. Devastating
+                        # Wounds), same as an actual natural 6 would.
+                        _apply_triggered_effects(
+                            abilities,
+                            {"step": "wound", "roll": 6, **weapon_context},
+                            attack,
+                            deque(),
+                        )
+                        wound_passed = True
+                    else:
+                        # An unmodified 6 always wounds and a 1 always fails,
+                        # whatever the modifiers.
+                        needed = threshold + (1 if attack.get("minus_one_to_wound") else 0)
+                        wound_passed = wound_roll != 1 and (
+                            wound_roll == 6 or wound_roll >= needed
+                        )
+                    if wound_passed:
+                        break
+            if wound_passed:
+                wounds.append((attack, fired))
+
+        # Saves and damage: each wound is allocated to a model and resolved in
+        # turn - its save is rolled against the model it's allocated to, which
+        # can change as earlier wounds destroy models.
+        for attack, fired in wounds:
+            if not targets:
+                break  # defending unit has no models left
+            weapon = fired["weapon"]
+            abilities = fired["abilities"]
+            weapon_context = fired["context"]
+            weapon_result = fired["result"]
+            target = target_for(fired)
+
+            # Save roll: armor save is worsened by the weapon's AP, but the
+            # defender may use their invulnerable save instead if it's better.
+            # An effect (e.g. devastating wounds) can mark this attack to skip
+            # the roll entirely - no save of any kind, armor or invulnerable.
+            if attack.get("no_save"):
+                save_passed = False
+            else:
+                ap = weapon.ap - 1 if attack.get("improve_ap") else weapon.ap
+                save_needed = target.save - ap
+                if target.invulnerable is not None:
+                    save_needed = min(save_needed, target.invulnerable)
+                # An invulnerable save granted by a rule (e.g. Waaagh!'s 5+ while
+                # riled up) - also unaffected by AP.
+                if attack.get("invulnerable_save") is not None:
+                    save_needed = min(save_needed, attack["invulnerable_save"])
+                save_roll = random.randint(1, 6)
+                result.save_rolls.append(save_roll)
+                weapon_result.save_rolls.append(save_roll)
+                _apply_triggered_effects(
+                    abilities,
+                    {"step": "save", "roll": save_roll, **weapon_context},
+                    attack,
+                    deque(),
+                )
+                save_passed = save_roll >= save_needed
+            if save_passed:
+                continue  # save succeeded - no damage from this attack
+
+            # Damage roll: how many wounds this one failed save inflicts.
+            damage = roll_dice(weapon.damage)
+
+            # Apply damage a single point at a time, each rolling feel no pain
+            # separately, against the one model this attack is allocated to. If
+            # that model dies partway through, this attack's remaining damage is
+            # wasted rather than carrying onto the next model.
+            # The model's own feel no pain, or a better one granted by a rule
+            # (e.g. a leader's Lord of the Machine Cult).
+            feel_no_pain = min(
+                (
+                    fnp
+                    for fnp in (target.feel_no_pain, attack.get("feel_no_pain"))
+                    if fnp is not None
+                ),
+                default=None,
+            )
+            for _ in range(damage):
+                if feel_no_pain is not None:
+                    fnp_roll = random.randint(1, 6)
+                    result.fnp_rolls.append(fnp_roll)
+                    weapon_result.fnp_rolls.append(fnp_roll)
+                    if fnp_roll >= feel_no_pain:
+                        continue  # feel no pain negated this point of damage
+
+                result.total_damage += 1
+                weapon_result.total_damage += 1
+                target.remaining_wounds -= 1
+                if target.remaining_wounds <= 0:
+                    targets.remove(target)
+                    if target.deadly_demise:
+                        demise_roll = random.randint(1, 6)
+                        result.deadly_demise_rolls.append(demise_roll)
+                        if demise_roll == 6:
+                            result.deadly_demise_explosions += 1
+                    result.models_destroyed += 1
+                    weapon_result.models_destroyed += 1
+                    break  # this model is destroyed - no spillover to the next
 
     result.defending_models_remaining = len(targets)
     result.weapon_results = list(weapon_results_by_name.values())
