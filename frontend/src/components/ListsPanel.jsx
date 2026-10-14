@@ -25,6 +25,8 @@ const ALLIED_FACTION_RULES = [
 
 function ListsPanel() {
   const [lists, setLists] = useState([])
+  // Kept here rather than on the list page, so it survives opening a form.
+  const [factionFilter, setFactionFilter] = useState('')
   const [factions, setFactions] = useState([])
   const [detachments, setDetachments] = useState([])
   const [units, setUnits] = useState([])
@@ -161,6 +163,8 @@ function ListsPanel() {
     <ListsListPage
       lists={lists}
       factions={factions}
+      factionFilter={factionFilter}
+      onFactionFilterChange={setFactionFilter}
       detachments={detachments}
       units={units}
       models={models}

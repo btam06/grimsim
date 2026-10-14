@@ -144,7 +144,7 @@ function ListFormPage({
                   checked={form.detachment_ids.includes(d.id)}
                   onChange={() => toggleDetachment(d.id)}
                 />
-                {d.name}
+                {d.name} (DP {d.dp})
               </label>
             ))}
           </div>

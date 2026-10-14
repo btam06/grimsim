@@ -216,3 +216,41 @@ async def update_model(
         [k.id for k in model.keywords],
         [fa.id for fa in model.faction_abilities],
     )
+
+
+async def _model_with_abilities(session: AsyncSession, model_id: int) -> Model:
+    model = (
+        await session.execute(
+            select(Model).options(selectinload(Model.abilities)).where(Model.id == model_id)
+        )
+    ).scalar_one_or_none()
+    if model is None:
+        raise HTTPException(status_code=404, detail="model not found")
+    return model
+
+
+@router.put("/{model_id}/abilities/{ability_id}", status_code=204)
+async def attach_datasheet_ability(
+    model_id: int, ability_id: int, session: AsyncSession = Depends(get_session)
+):
+    # Gives this model a (shared) datasheet ability; a no-op if it already has it.
+    model = await _model_with_abilities(session, model_id)
+    ability = (
+        await session.execute(select(DatasheetAbility).where(DatasheetAbility.id == ability_id))
+    ).scalar_one_or_none()
+    if ability is None:
+        raise HTTPException(status_code=404, detail="datasheet ability not found")
+    if ability not in model.abilities:
+        model.abilities.append(ability)
+        await session.commit()
+
+
+@router.delete("/{model_id}/abilities/{ability_id}", status_code=204)
+async def detach_datasheet_ability(
+    model_id: int, ability_id: int, session: AsyncSession = Depends(get_session)
+):
+    # Removes a datasheet ability from this model only - the ability itself,
+    # and any other models that have it, are untouched.
+    model = await _model_with_abilities(session, model_id)
+    model.abilities = [a for a in model.abilities if a.id != ability_id]
+    await session.commit()

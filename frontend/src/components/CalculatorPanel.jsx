@@ -217,7 +217,16 @@ function CalculatorPanel() {
         moved_less_than_3: movedLessThan3,
         advanced,
       })
-      setResult(response)
+      // Feel no pain rolls are only worth showing if the defender has FNP -
+      // its own, or granted by a rule (e.g. a leader), which shows up as FNP
+      // rolls having been made. Captured now, so changing the defender
+      // afterwards doesn't affect it.
+      const defenderHasFnp =
+        response.fnp_rolls.length > 0 ||
+        (defendingUnit?.unit_models ?? []).some(
+          (um) => models.find((m) => m.id === um.model_id)?.feel_no_pain != null
+        )
+      setResult({ ...response, defenderHasFnp })
     } catch (err) {
       setError(err.message)
     }
@@ -391,6 +400,11 @@ function CalculatorPanel() {
                   <li>
                     Save rolls: <DiceRolls rolls={wr.save_rolls} />
                   </li>
+                  {result.defenderHasFnp && (
+                    <li>
+                      Feel no pain rolls: <DiceRolls rolls={wr.fnp_rolls} />
+                    </li>
+                  )}
                   <li>Total damage dealt: {wr.total_damage}</li>
                   <li>Defending models destroyed: {wr.models_destroyed}</li>
                   {wr.hazardous_rolls.length > 0 && (

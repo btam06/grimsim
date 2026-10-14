@@ -318,6 +318,7 @@ class WeaponCombatResultOut(BaseModel):
     attack_rerolls: list[int]
     wound_rolls: list[int]
     save_rolls: list[int]
+    fnp_rolls: list[int]
     total_damage: int
     models_destroyed: int
     hazardous_rolls: list[int]
@@ -336,6 +337,7 @@ class CombatOut(BaseModel):
     attack_rerolls: list[int]
     wound_rolls: list[int]
     save_rolls: list[int]
+    fnp_rolls: list[int]
     total_damage: int
     models_destroyed: int
     defending_models_remaining: int

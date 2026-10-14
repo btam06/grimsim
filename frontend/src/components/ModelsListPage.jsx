@@ -1,7 +1,11 @@
 import { skillLabel } from '../weaponDisplay'
+import FactionFilter from './FactionFilter'
 
 function ModelsListPage({
   models,
+  factions,
+  factionFilter,
+  onFactionFilterChange,
   abilities,
   keywords,
   factionAbilities,
@@ -16,6 +20,9 @@ function ModelsListPage({
   const factionAbilityName = (id) => factionAbilities.find((a) => a.id === id)?.name ?? `#${id}`
   const wargearName = (id) => wargear.find((g) => g.id === id)?.name ?? `#${id}`
   const weaponsFor = (modelId) => weapons.filter((w) => w.model_id === modelId)
+  const visibleModels = models.filter(
+    (m) => factionFilter === '' || String(m.faction_id) === factionFilter
+  )
 
   return (
     <section>
@@ -24,8 +31,14 @@ function ModelsListPage({
       <button type="button" onClick={onAddNew}>
         + Add Model
       </button>
+      <FactionFilter
+        factions={factions}
+        items={models}
+        value={factionFilter}
+        onChange={onFactionFilterChange}
+      />
       <ul>
-        {models.map((m) => (
+        {visibleModels.map((m) => (
           <li key={m.id}>
             <div>
               {m.name} — M{m.movement}" T{m.toughness} Sv{m.save}+ W{m.wounds} OC{m.oc} Ld

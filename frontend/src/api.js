@@ -99,3 +99,9 @@ export const listEffects = () => request('/effects')
 export const listDatasheetAbilities = () => request('/datasheet-abilities')
 export const createDatasheetAbility = (payload) =>
   request('/datasheet-abilities', { method: 'POST', body: JSON.stringify(payload) })
+export const updateDatasheetAbility = (id, payload) =>
+  request(`/datasheet-abilities/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
+export const attachDatasheetAbility = (modelId, abilityId) =>
+  request(`/models/${modelId}/abilities/${abilityId}`, { method: 'PUT' })
+export const detachDatasheetAbility = (modelId, abilityId) =>
+  request(`/models/${modelId}/abilities/${abilityId}`, { method: 'DELETE' })

@@ -1,6 +1,10 @@
+import FactionFilter from './FactionFilter'
+
 function ListsListPage({
   lists,
   factions,
+  factionFilter,
+  onFactionFilterChange,
   detachments,
   units,
   models,
@@ -19,6 +23,9 @@ function ListsListPage({
   const wargearName = (id) => wargear.find((g) => g.id === id)?.name ?? `#${id}`
   const factionUnitName = (id) => factionUnits.find((fu) => fu.id === id)?.name ?? `#${id}`
   const unitsForList = (listId) => units.filter((u) => u.list_id === listId)
+  const visibleLists = lists.filter(
+    (l) => factionFilter === '' || String(l.faction_id) === factionFilter
+  )
 
   return (
     <section>
@@ -27,8 +34,14 @@ function ListsListPage({
       <button type="button" onClick={onAddNew}>
         + Add List
       </button>
+      <FactionFilter
+        factions={factions}
+        items={lists}
+        value={factionFilter}
+        onChange={onFactionFilterChange}
+      />
       <ul>
-        {lists.map((l) => (
+        {visibleLists.map((l) => (
           <li key={l.id}>
             {l.name} — {l.points_limit}pts, {factionName(l.faction_id)}
             {l.detachment_ids.length > 0 &&

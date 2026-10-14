@@ -10,15 +10,20 @@ from app.combat_rules.conditions import (
     ANTI_VEHICLE_3,
     ANTI_VEHICLE_4,
     CRITICAL_HIT,
+    CRITICAL_HIT_NOT_MONSTER_OR_VEHICLE,
     CRITICAL_WOUND,
     MOVED_LESS_THAN_3,
+    PRE_WEAPON_NOT_MONSTER_OR_VEHICLE,
+    TARGET_NOT_MONSTER_OR_VEHICLE,
     WITHIN_HALF_RANGE,
 )
 from app.combat_rules.effects import (
     ADD_EXTRA_ATTACK,
     ADD_EXTRA_HIT,
+    ADD_SIX_ATTACKS,
     ASSAULT,
     AUTO_PASS_WOUND,
+    CANNOT_ATTACK,
     FORCE_CRITICAL_WOUND,
     HAZARDOUS,
     IGNORE_COVER,
@@ -49,6 +54,12 @@ ENTRIES = [
         "Lethal Hits",
         "Each critical hit (an unmodified roll of 6 to hit) automatically wounds.",
         [CRITICAL_HIT],
+        [AUTO_PASS_WOUND],
+    ),
+    (
+        "Lethal Hits: non-Monster/Vehicle",
+        "Lethal Hits, but only against a unit with no MONSTER or VEHICLE model.",
+        [CRITICAL_HIT_NOT_MONSTER_OR_VEHICLE],
         [AUTO_PASS_WOUND],
     ),
     (
@@ -128,6 +139,24 @@ ENTRIES = [
         "This weapon may be fired while the attacking unit is in engagement range, without becoming a melee weapon.",
         [ALWAYS],
         [PISTOL],
+    ),
+    (
+        "Close-Quarters",
+        "This weapon may be fired while the attacking unit is in engagement range (as Pistol).",
+        [ALWAYS],
+        [PISTOL],
+    ),
+    (
+        "Hunter: Monster/Vehicle",
+        "This profile can only target units that contain a MONSTER or VEHICLE model.",
+        [TARGET_NOT_MONSTER_OR_VEHICLE],
+        [CANNOT_ATTACK],
+    ),
+    (
+        "Blitz Dem Gitz!",
+        "If this weapon targets a unit (excluding MONSTER/VEHICLE units), it has +6 A.",
+        [PRE_WEAPON_NOT_MONSTER_OR_VEHICLE],
+        [ADD_SIX_ATTACKS],
     ),
 ]
 

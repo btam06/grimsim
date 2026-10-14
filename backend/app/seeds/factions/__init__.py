@@ -4,6 +4,7 @@ from sqlalchemy.orm import selectinload
 
 from app.combat_rules import Rule
 from app.models import (
+    DatasheetAbility,
     Detachment,
     Faction,
     FactionAbility,
@@ -207,14 +208,18 @@ async def seed_detachments(session: AsyncSession) -> None:
 
 
 async def seed_datasheets(session: AsyncSession) -> None:
-    # Creates the models (with stats, keywords, faction abilities, weapons and
-    # wargear) declared by each faction's units.DATASHEETS. For a model that
-    # already exists in its faction (by name), only weapons/wargear it's
-    # missing (by name) are added - nothing existing is changed or removed, so
-    # additions to a datasheet reach previously seeded models. Must run after
-    # keywords, weapon/wargear abilities and faction abilities are seeded,
-    # since everything is referenced by name - a name that isn't found is an
-    # error, not skipped.
+    # Creates the models (with stats, keywords, faction/datasheet abilities,
+    # weapons and wargear) declared by each faction's units.DATASHEETS.
+    #
+    # For a model that already exists in its faction (by name), only what it's
+    # missing (by name) is added: faction/datasheet abilities, weapons,
+    # wargear, and abilities on same-named weapons. Nothing existing is changed
+    # or removed, so additions to a datasheet reach previously seeded models
+    # without overwriting edits. (Stats and keywords aren't synced.)
+    #
+    # Must run after keywords, weapon/wargear/datasheet abilities and faction
+    # abilities are seeded, since everything is referenced by name - a name
+    # that isn't found is an error, not skipped.
     faction_ids = await _faction_ids_by_name(session)
     keywords = {k.name: k for k in (await session.execute(select(Keyword))).scalars().all()}
     weapon_abilities = {
@@ -222,6 +227,9 @@ async def seed_datasheets(session: AsyncSession) -> None:
     }
     wargear_abilities = {
         a.name: a for a in (await session.execute(select(WargearAbility))).scalars().all()
+    }
+    datasheet_abilities = {
+        a.name: a for a in (await session.execute(select(DatasheetAbility))).scalars().all()
     }
     faction_abilities = {
         (a.faction_id, a.name): a
@@ -231,7 +239,12 @@ async def seed_datasheets(session: AsyncSession) -> None:
         (model.faction_id, model.name): model
         for model in (
             await session.execute(
-                select(Model).options(selectinload(Model.weapons), selectinload(Model.wargear))
+                select(Model).options(
+                    selectinload(Model.weapons).selectinload(Weapon.abilities),
+                    selectinload(Model.wargear),
+                    selectinload(Model.abilities),
+                    selectinload(Model.faction_abilities),
+                )
             )
         )
         .scalars()
@@ -278,11 +291,39 @@ async def seed_datasheets(session: AsyncSession) -> None:
             for spec in datasheet.MODELS:
                 model = existing.get((faction_id, spec.name))
                 if model is not None:
-                    weapon_names = {w.name for w in model.weapons}
+                    faction_ability_names = {a.name for a in model.faction_abilities}
+                    for name in spec.faction_abilities:
+                        if name not in faction_ability_names:
+                            model.faction_abilities.append(
+                                lookup(
+                                    faction_abilities,
+                                    (faction_id, name),
+                                    "faction ability",
+                                    datasheet.NAME,
+                                )
+                            )
+                            changed = True
+                    ability_names = {a.name for a in model.abilities}
+                    for name in spec.abilities:
+                        if name not in ability_names:
+                            model.abilities.append(
+                                lookup(datasheet_abilities, name, "datasheet ability", datasheet.NAME)
+                            )
+                            changed = True
+                    weapons_by_name = {w.name: w for w in model.weapons}
                     for weapon in spec.weapons:
-                        if weapon.name not in weapon_names:
+                        existing_weapon = weapons_by_name.get(weapon.name)
+                        if existing_weapon is None:
                             model.weapons.append(build_weapon(weapon, datasheet.NAME))
                             changed = True
+                            continue
+                        weapon_ability_names = {a.name for a in existing_weapon.abilities}
+                        for name in weapon.abilities:
+                            if name not in weapon_ability_names:
+                                existing_weapon.abilities.append(
+                                    lookup(weapon_abilities, name, "weapon ability", datasheet.NAME)
+                                )
+                                changed = True
                     wargear_names = {g.name for g in model.wargear}
                     for gear in spec.wargear:
                         if gear.name not in wargear_names:
@@ -316,6 +357,10 @@ async def seed_datasheets(session: AsyncSession) -> None:
                                 datasheet.NAME,
                             )
                             for name in spec.faction_abilities
+                        ],
+                        abilities=[
+                            lookup(datasheet_abilities, name, "datasheet ability", datasheet.NAME)
+                            for name in spec.abilities
                         ],
                         weapons=[build_weapon(w, datasheet.NAME) for w in spec.weapons],
                         wargear=[build_wargear(g, datasheet.NAME) for g in spec.wargear],

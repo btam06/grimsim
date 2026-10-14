@@ -59,7 +59,8 @@ function UnitFormPage({
     if (!slot.model_id) return
     const count = Math.max(1, Number(quantity) || 1)
     setSlots([...slots, ...Array.from({ length: count }, () => slot)])
-    setSlot(EMPTY_SLOT)
+    // Keep the model/weapons/wargear selected, so adding more of the same (or
+    // a variation on it) doesn't mean re-picking everything.
     setQuantity('1')
   }
 

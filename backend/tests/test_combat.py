@@ -15,6 +15,7 @@ from app.models import (
     Weapon,
     WeaponAbility,
 )
+from app.seeds import datasheet_abilities as datasheet_ability_seeds
 from app.seeds.factions.adeptus_mechanicus import abilities as admech_abilities
 from app.seeds.factions.orks import abilities as orks_abilities
 from app.services import combat
@@ -3091,3 +3092,414 @@ def test_riled_up_invulnerable_is_defender_only(monkeypatch):
     monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=-4, weapon_type="ranged")
     assert _doctrina_combat(weapon, attacker_rules=RILED_UP).total_damage == 1
+
+
+# --- Hunter: Monster/Vehicle and Close-Quarters ---
+
+
+def _hunter_weapon(**overrides):
+    hunter = _ability([_condition("target_not_monster_or_vehicle")], [_effect("cannot_attack")])
+    weapon = _weapon(attacks="3", skill=4, strength=12, ap=-2, damage="3", **overrides)
+    weapon.abilities = [hunter]
+    return weapon
+
+
+@pytest.mark.parametrize(
+    "defender_keyword,expected_attacks", [("VEHICLE", 3), ("MONSTER", 3), ("INFANTRY", 0)]
+)
+def test_hunter_profile_only_attacks_monsters_and_vehicles(
+    monkeypatch, defender_keyword, expected_attacks
+):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    weapon = _hunter_weapon(weapon_type="ranged")
+
+    result = _doctrina_combat(weapon, defender_keywords=[defender_keyword])
+    assert len(result.attack_rolls) == expected_attacks
+    # A profile that can't attack doesn't show up in the results at all.
+    assert bool(result.weapon_results) == bool(expected_attacks)
+
+
+def test_hunter_melee_profile_is_restricted_too(monkeypatch):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    weapon = _hunter_weapon(weapon_type="melee", range=None)
+
+    result = _doctrina_combat(weapon, defender_keywords=["INFANTRY"], in_engagement_range=True)
+    assert result.attack_rolls == []
+
+
+def test_close_quarters_fires_in_engagement_range(monkeypatch):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    close_quarters = _ability([_condition("always")], [_effect("pistol")])
+    weapon = _weapon(attacks="1", skill=4, strength=10, ap=-2, damage="3", weapon_type="ranged")
+    weapon.abilities = [close_quarters]
+
+    result = _doctrina_combat(weapon, in_engagement_range=True)
+    assert result.attack_rolls == [6]
+
+
+# --- Lethal Hits: non-Monster/Vehicle ---
+
+
+@pytest.mark.parametrize(
+    "defender_keyword,expected_wound_rolls", [("INFANTRY", []), ("VEHICLE", [1]), ("MONSTER", [1])]
+)
+def test_lethal_hits_non_monster_vehicle_only_auto_wounds_other_targets(
+    monkeypatch, defender_keyword, expected_wound_rolls
+):
+    # A critical hit auto-wounds (no wound roll) only against non-MONSTER/VEHICLE.
+    rolls = iter([6, 1, 1])  # hit (critical), wound roll if one is made, save
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    lethal = _ability(
+        [_condition("critical_hit_not_monster_or_vehicle")], [_effect("auto_pass_wound")]
+    )
+    weapon = _weapon(attacks="1", skill=4, strength=7, ap=-2, damage="2", weapon_type="ranged")
+    weapon.abilities = [lethal]
+
+    result = _doctrina_combat(weapon, defender_keywords=[defender_keyword])
+    assert result.wound_rolls == expected_wound_rolls
+
+
+def test_critical_hit_not_monster_or_vehicle_condition():
+    condition = combat.CONDITIONS["critical_hit_not_monster_or_vehicle"]
+    assert condition({"step": "hit", "roll": 6, "defender_keywords": {"INFANTRY"}}) is True
+    assert condition({"step": "hit", "roll": 5, "defender_keywords": {"INFANTRY"}}) is False
+    assert condition({"step": "hit", "roll": 6, "defender_keywords": {"VEHICLE"}}) is False
+    assert condition({"step": "wound", "roll": 6, "defender_keywords": set()}) is False
+
+
+# --- Big Mek Dakkarig: Even More Dakka, Blitz Dem Gitz! ---
+
+
+def _even_more_dakka():
+    return _datasheet_ability(
+        [_condition("riled_up_ranged_critical_hit")], [_effect("add_extra_hit")]
+    )
+
+
+def _dakka_combat(weapon, attacker_options, **flags):
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(abilities=[_even_more_dakka()]), [weapon])])
+    defender = _unit([_unit_model(_model(toughness=1, wounds=20, save=7), [])])
+    options = dict(
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+    )
+    options.update(flags)
+    return combat.resolve_combat(
+        attacker, defender, {weapon.id}, attacker_options=attacker_options, **options
+    )
+
+
+@pytest.mark.parametrize("attacker_options,expected_damage", [({"Riled Up"}, 2), (set(), 1)])
+def test_even_more_dakka_gives_sustained_hits_only_when_riled_up(
+    monkeypatch, attacker_options, expected_damage
+):
+    # One critical hit: riled up, it scores an extra (sustained) hit.
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    weapon = _weapon(attacks="1", skill=4, strength=10, ap=0, damage="1", weapon_type="ranged")
+
+    assert _dakka_combat(weapon, attacker_options).total_damage == expected_damage
+
+
+def test_even_more_dakka_does_not_affect_melee_attacks(monkeypatch):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    weapon = _weapon(
+        attacks="1", skill=3, strength=10, ap=0, damage="1", weapon_type="melee", range=None
+    )
+
+    result = _dakka_combat(weapon, {"Riled Up"}, in_engagement_range=True)
+    assert result.total_damage == 1
+
+
+@pytest.mark.parametrize(
+    "defender_keyword,expected_attacks", [("INFANTRY", 8 + 6), ("VEHICLE", 8), ("MONSTER", 8)]
+)
+def test_blitz_dem_gitz_adds_six_attacks_against_non_monster_vehicle(
+    monkeypatch, defender_keyword, expected_attacks
+):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 1)  # every hit misses
+    blitz = _ability(
+        [_condition("pre_weapon_not_monster_or_vehicle")], [_effect("add_six_attacks")]
+    )
+    weapon = _weapon(attacks="8", skill=4, strength=7, ap=-2, damage="2", weapon_type="ranged")
+    weapon.abilities = [blitz]
+
+    result = _doctrina_combat(weapon, defender_keywords=[defender_keyword])
+    assert len(result.attack_rolls) == expected_attacks
+
+
+async def test_combat_endpoint_passes_riled_up_to_datasheet_abilities(
+    client: AsyncClient, session, monkeypatch
+):
+    # End to end: a model with Waaagh! and Even More Dakka, riled up via the
+    # attacker_rule_options, gets sustained hits.
+    from app.seeds import conditions as conditions_seed
+    from app.seeds import datasheet_abilities as datasheet_abilities_seed
+    from app.seeds import effects as effects_seed
+
+    await conditions_seed.seed(session)
+    await effects_seed.seed(session)
+    await datasheet_abilities_seed.seed(session)
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+
+    faction_id = (await client.post("/factions", json={"name": "Orks"})).json()["id"]
+    waaagh_id = (
+        await client.post("/faction-abilities", json={"name": "Waaagh!", "faction_id": faction_id})
+    ).json()["id"]
+    dakka_id = next(
+        a["id"] for a in (await client.get("/datasheet-abilities")).json()
+        if a["name"] == "Even More Dakka"
+    )
+    model_id = await _create_model(
+        client, faction_id, faction_ability_ids=[waaagh_id], ability_ids=[dakka_id]
+    )
+    weapon_id = await _create_weapon(
+        client, model_id, strength=10, ap=0, skill=4, weapon_type="ranged"
+    )
+    attacker_unit = await _create_unit(
+        client, await _create_faction_unit(client, faction_id, "Dakkarig"), model_id, weapon_id
+    )
+    defender_model = await _create_model(client, faction_id, toughness=1, save=7, wounds=20)
+    defender_unit = await _create_unit(
+        client, await _create_faction_unit(client, faction_id, "Targets"), defender_model
+    )
+
+    async def damage(options):
+        response = await client.post(
+            "/combat",
+            json={
+                "attacking_unit_id": attacker_unit,
+                "defending_unit_id": defender_unit,
+                "selected_weapon_ids": [weapon_id],
+                "attacker_rule_options": options,
+            },
+        )
+        assert response.status_code == 200
+        return response.json()["total_damage"]
+
+    assert await damage(["Riled Up"]) == 2
+    assert await damage([]) == 1
+
+
+# --- Electro-infusion (defensive datasheet rule) and -1 to wound ---
+
+ELECTRO_INFUSION = datasheet_ability_seeds.RULES["Electro-infusion"]
+
+
+@pytest.mark.parametrize(
+    "defender_keywords,wound_roll,expected_damage",
+    [
+        (["CHARACTER"], 4, 0),  # S4 vs T4 needs 4+; with -1 it needs 5+
+        (["CHARACTER"], 5, 1),
+        ([], 4, 1),  # no CHARACTER leading - no penalty
+    ],
+)
+def test_electro_infusion_gives_minus_one_to_wound_while_led_by_a_character(
+    monkeypatch, defender_keywords, wound_roll, expected_damage
+):
+    rolls = iter([6, wound_roll, 1])  # hit, wound, save
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=4, ap=-10, damage="1", weapon_type="ranged")
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    defender = _unit(
+        [
+            _unit_model(
+                _model(
+                    toughness=4,
+                    wounds=10,
+                    save=7,
+                    keywords=[_keyword(k) for k in defender_keywords],
+                ),
+                [],
+            )
+        ]
+    )
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {weapon.id},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+        defender_rules=ELECTRO_INFUSION,
+    )
+    assert result.total_damage == expected_damage
+
+
+def test_minus_one_to_wound_never_stops_an_unmodified_six(monkeypatch):
+    # S2 vs T4 needs 6+; at -1 that would be 7+, but a natural 6 still wounds.
+    rolls = iter([6, 6, 1])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=2, ap=-10, damage="1", weapon_type="ranged")
+
+    result = _doctrina_combat(
+        weapon, defender_rules=ELECTRO_INFUSION, defender_keywords=["CHARACTER"]
+    )
+    assert result.total_damage == 1
+
+
+def test_electro_infusion_does_not_affect_its_own_units_attacks(monkeypatch):
+    # As the attacker's rule it does nothing, even against a CHARACTER.
+    rolls = iter([6, 4, 1])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=4, ap=-10, damage="1", weapon_type="ranged")
+    result = _doctrina_combat(
+        weapon, attacker_rules=ELECTRO_INFUSION, defender_keywords=["CHARACTER"]
+    )
+    # _doctrina_combat's defender is T1, so S4 wounds on 2+: a 4 succeeds.
+    assert result.total_damage == 1
+
+
+@pytest.mark.parametrize("with_character,expected_damage", [(True, 0), (False, 1)])
+async def test_combat_endpoint_applies_defending_units_datasheet_rules(
+    client: AsyncClient, faction_id: int, monkeypatch, with_character, expected_damage
+):
+    rolls = iter([6, 4, 1])  # hit, wound 4 (S4 vs T4: fails only at -1), save
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    infusion_id = (
+        await client.post("/datasheet-abilities", json={"name": "Electro-infusion"})
+    ).json()["id"]
+    character_id = (await client.post("/keywords", json={"name": "CHARACTER"})).json()["id"]
+
+    attacker_model = await _create_model(client, faction_id)
+    weapon_id = await _create_weapon(
+        client, attacker_model, strength=4, ap=-10, skill=3, weapon_type="ranged"
+    )
+    shooters = await _create_faction_unit(client, faction_id, "Shooters")
+    attacker_unit = await _create_unit(client, shooters, attacker_model, weapon_id)
+    priest = await _create_model(
+        client,
+        faction_id,
+        toughness=4,
+        save=7,
+        wounds=10,
+        ability_ids=[infusion_id],
+        keyword_ids=[character_id] if with_character else [],
+    )
+    defender_unit = await _create_unit(
+        client, await _create_faction_unit(client, faction_id, "Priests"), priest
+    )
+
+    response = await client.post(
+        "/combat",
+        json={
+            "attacking_unit_id": attacker_unit,
+            "defending_unit_id": defender_unit,
+            "selected_weapon_ids": [weapon_id],
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["total_damage"] == expected_damage
+
+
+# --- feel no pain rolls in results ---
+
+
+def test_fnp_rolls_are_recorded_one_per_point_of_damage(monkeypatch):
+    # D3 damage rolls 3; the defender's 5+ FNP then rolls 5 (saved), 2, 6 (saved).
+    rolls = iter([6, 6, 1, 3, 5, 2, 6])  # hit, wound, save, damage, fnp x3
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, damage="D3", weapon_type="ranged")
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    defender = _unit([_unit_model(_model(toughness=1, wounds=10, save=7, feel_no_pain=5), [])])
+
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {weapon.id},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+    )
+    assert result.fnp_rolls == [5, 2, 6]
+    assert result.weapon_results[0].fnp_rolls == [5, 2, 6]
+    assert result.total_damage == 1
+
+
+def test_no_fnp_rolls_without_feel_no_pain(monkeypatch):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, damage="2", weapon_type="ranged")
+
+    assert _doctrina_combat(weapon).fnp_rolls == []
+
+
+# --- Lord of the Machine Cult (leader-granted feel no pain) ---
+
+LORD_OF_THE_MACHINE_CULT = datasheet_ability_seeds.RULES["Lord of the Machine Cult"]
+
+
+def _lord_combat(monkeypatch, defender_models, fnp_rolls):
+    # One 1-damage attack that always gets through to damage; the FNP rolls
+    # (if any are made) come next.
+    rolls = iter([6, 6, 1, *fnp_rolls])  # hit, wound, save, fnp...
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, damage="1", weapon_type="ranged")
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    defender = _unit([_unit_model(m, []) for m in defender_models])
+    return combat.resolve_combat(
+        attacker,
+        defender,
+        {weapon.id},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+        defender_rules=LORD_OF_THE_MACHINE_CULT,
+    )
+
+
+def _dominus():
+    return _model(name="Dominus", is_leader=True, wounds=4, save=7, keywords=[_keyword("CHARACTER")])
+
+
+def _bodyguard(*keywords):
+    return _model(name="Bodyguard", wounds=1, save=7, keywords=[_keyword(k) for k in keywords])
+
+
+@pytest.mark.parametrize("fnp_roll,expected_damage", [(5, 0), (4, 1)])
+def test_lord_of_the_machine_cult_gives_led_unit_fnp_5(monkeypatch, fnp_roll, expected_damage):
+    result = _lord_combat(monkeypatch, [_dominus(), _bodyguard("INFANTRY")], [fnp_roll])
+    assert result.fnp_rolls == [fnp_roll]
+    assert result.total_damage == expected_damage
+
+
+@pytest.mark.parametrize("fnp_roll,expected_damage", [(4, 0), (3, 1)])
+def test_lord_of_the_machine_cult_gives_led_electro_priests_fnp_4(
+    monkeypatch, fnp_roll, expected_damage
+):
+    result = _lord_combat(
+        monkeypatch, [_dominus(), _bodyguard("INFANTRY", "ELECTRO-PRIESTS")], [fnp_roll]
+    )
+    assert result.total_damage == expected_damage
+
+
+def test_lord_of_the_machine_cult_does_nothing_for_a_lone_dominus(monkeypatch):
+    result = _lord_combat(monkeypatch, [_dominus()], [6])
+    assert result.fnp_rolls == []
+    assert result.total_damage == 1
+
+
+def test_granted_fnp_keeps_a_models_better_own_fnp(monkeypatch):
+    # The bodyguard's own FNP 3+ beats the granted 5+: a 3 still saves.
+    tough = _model(name="Bodyguard", wounds=1, save=7, feel_no_pain=3)
+    result = _lord_combat(monkeypatch, [_dominus(), tough], [3])
+    assert result.total_damage == 0

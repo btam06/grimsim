@@ -24,6 +24,17 @@ TARGET_MONSTER_OR_VEHICLE = "target_monster_or_vehicle"
 RANGED_MOVED_LESS_THAN_3 = "ranged_moved_less_than_3"
 MELEE_ATTACK_AGAINST_BATTLELINE = "melee_attack_against_battleline"
 ATTACKER_IS_BATTLELINE = "attacker_is_battleline"
+TARGET_NOT_MONSTER_OR_VEHICLE = "target_not_monster_or_vehicle"
+CRITICAL_HIT_NOT_MONSTER_OR_VEHICLE = "critical_hit_not_monster_or_vehicle"
+RILED_UP_RANGED_CRITICAL_HIT = "riled_up_ranged_critical_hit"
+PRE_WEAPON_NOT_MONSTER_OR_VEHICLE = "pre_weapon_not_monster_or_vehicle"
+TARGET_HAS_CHARACTER = "target_has_character"
+TARGET_LED_BY_CHARACTER = "target_led_by_character"
+TARGET_ELECTRO_PRIESTS_LED_BY_CHARACTER = "target_electro_priests_led_by_character"
+
+# Name of the Orks Waaagh! rule option that riles a unit up (see
+# app/seeds/factions/orks/abilities.py), for "if this unit is riled up".
+RILED_UP = "Riled Up"
 
 
 def critical_hit(context: dict) -> bool:
@@ -143,6 +154,57 @@ def attacker_is_battleline(context: dict) -> bool:
     return "BATTLELINE" in context.get("attacker_keywords", set())
 
 
+def target_not_monster_or_vehicle(context: dict) -> bool:
+    # The opposite of target_monster_or_vehicle, at every step - e.g. for a
+    # HUNTER: MONSTER/VEHICLE profile that can't attack anything else.
+    return not target_monster_or_vehicle(context)
+
+
+def critical_hit_not_monster_or_vehicle(context: dict) -> bool:
+    # A critical hit against a defending unit with no MONSTER or VEHICLE model
+    # (e.g. for "LETHAL HITS: non-MONSTER/VEHICLE").
+    return critical_hit(context) and target_not_monster_or_vehicle(context)
+
+
+def riled_up_ranged_critical_hit(context: dict) -> bool:
+    # A critical hit with a ranged weapon while the attacking unit is riled up
+    # (e.g. Even More Dakka's [SUSTAINED HITS 1]).
+    return (
+        critical_hit(context)
+        and context.get("is_ranged", False)
+        and RILED_UP in context.get("attacker_options", set())
+    )
+
+
+def pre_weapon_not_monster_or_vehicle(context: dict) -> bool:
+    # Checked once per weapon (not per attack): the defending unit has no
+    # MONSTER or VEHICLE model - e.g. for Blitz Dem Gitz!'s extra attacks.
+    return context.get("step") == "pre_weapon" and target_not_monster_or_vehicle(context)
+
+
+def target_has_character(context: dict) -> bool:
+    # True at every step when the defending unit contains a CHARACTER model -
+    # e.g. "while a CHARACTER model is leading this unit" on a defensive rule.
+    return "CHARACTER" in context.get("defender_keywords", set())
+
+
+def target_led_by_character(context: dict) -> bool:
+    # True at every step when the defending unit is a CHARACTER leading a unit:
+    # it has at least one CHARACTER model and at least one other model. (A lone
+    # CHARACTER isn't leading anything.)
+    per_model = context.get("defender_model_keywords", [])
+    return any("CHARACTER" in keywords for keywords in per_model) and any(
+        "CHARACTER" not in keywords for keywords in per_model
+    )
+
+
+def target_electro_priests_led_by_character(context: dict) -> bool:
+    # As target_led_by_character, for a led unit with the ELECTRO-PRIESTS keyword.
+    return target_led_by_character(context) and "ELECTRO-PRIESTS" in context.get(
+        "defender_keywords", set()
+    )
+
+
 CONDITIONS = {
     CRITICAL_HIT: critical_hit,
     CRITICAL_WOUND: critical_wound,
@@ -159,4 +221,11 @@ CONDITIONS = {
     RANGED_MOVED_LESS_THAN_3: ranged_moved_less_than_3,
     MELEE_ATTACK_AGAINST_BATTLELINE: melee_attack_against_battleline,
     ATTACKER_IS_BATTLELINE: attacker_is_battleline,
+    TARGET_NOT_MONSTER_OR_VEHICLE: target_not_monster_or_vehicle,
+    CRITICAL_HIT_NOT_MONSTER_OR_VEHICLE: critical_hit_not_monster_or_vehicle,
+    RILED_UP_RANGED_CRITICAL_HIT: riled_up_ranged_critical_hit,
+    PRE_WEAPON_NOT_MONSTER_OR_VEHICLE: pre_weapon_not_monster_or_vehicle,
+    TARGET_HAS_CHARACTER: target_has_character,
+    TARGET_LED_BY_CHARACTER: target_led_by_character,
+    TARGET_ELECTRO_PRIESTS_LED_BY_CHARACTER: target_electro_priests_led_by_character,
 }

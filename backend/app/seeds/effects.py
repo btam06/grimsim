@@ -4,8 +4,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.combat_rules.effects import (
     ADD_EXTRA_ATTACK,
     ADD_EXTRA_HIT,
+    ADD_SIX_ATTACKS,
     ASSAULT,
     AUTO_PASS_WOUND,
+    CANNOT_ATTACK,
+    FEEL_NO_PAIN_4,
+    FEEL_NO_PAIN_5,
     FORCE_CRITICAL_WOUND,
     HAZARDOUS,
     IGNORE_COVER,
@@ -13,6 +17,7 @@ from app.combat_rules.effects import (
     IMPROVE_AP,
     INVULNERABLE_5,
     MINUS_ONE_TO_HIT,
+    MINUS_ONE_TO_WOUND,
     NO_SAVE,
     PISTOL,
     PLUS_ONE_SKILL_MELEE,
@@ -115,6 +120,31 @@ ENTRIES = [
         INVULNERABLE_5,
         "5+ Invulnerable Save",
         "The targeted model has a 5+ invulnerable save against this attack (a better one is kept).",
+    ),
+    (
+        CANNOT_ATTACK,
+        "Cannot Attack",
+        "This weapon can't be used against the current target.",
+    ),
+    (
+        ADD_SIX_ATTACKS,
+        "Add Six Attacks",
+        "Adds six additional attacks to this weapon, each with its own hit roll.",
+    ),
+    (
+        MINUS_ONE_TO_WOUND,
+        "-1 to Wound",
+        "This attack's wound roll needs 1 more to succeed (an unmodified 6 still wounds).",
+    ),
+    (
+        FEEL_NO_PAIN_5,
+        "Feel No Pain 5+",
+        "The targeted model has Feel No Pain 5+ against this attack (a better one is kept).",
+    ),
+    (
+        FEEL_NO_PAIN_4,
+        "Feel No Pain 4+",
+        "The targeted model has Feel No Pain 4+ against this attack (a better one is kept).",
     ),
 ]
 

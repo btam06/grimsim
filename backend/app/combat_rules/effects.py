@@ -32,6 +32,11 @@ PRECISION = "precision"
 MINUS_ONE_TO_HIT = "minus_one_to_hit"
 IMPROVE_AP = "improve_ap"
 INVULNERABLE_5 = "invulnerable_5"
+CANNOT_ATTACK = "cannot_attack"
+ADD_SIX_ATTACKS = "add_six_attacks"
+MINUS_ONE_TO_WOUND = "minus_one_to_wound"
+FEEL_NO_PAIN_5 = "feel_no_pain_5"
+FEEL_NO_PAIN_4 = "feel_no_pain_4"
 
 
 def auto_pass_wound(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
@@ -143,6 +148,36 @@ def invulnerable_5(state: dict[str, Any], pending: deque[dict[str, Any]]) -> Non
     state["invulnerable_save"] = min(state.get("invulnerable_save", 7), 5)
 
 
+def cannot_attack(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # This weapon can't be used against the current target at all (e.g. a
+    # HUNTER profile against a unit without the keywords it hunts).
+    state["cannot_attack"] = True
+
+
+def add_six_attacks(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # Queues six additional attacks for this weapon, each with its own hit
+    # roll (e.g. "+6 A").
+    for _ in range(6):
+        pending.append({"auto_hit": False})
+
+
+def minus_one_to_wound(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # This attack's wound roll needs 1 more to succeed (an unmodified 6 still
+    # always wounds).
+    state["minus_one_to_wound"] = True
+
+
+def feel_no_pain_5(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # The model this attack targets has Feel No Pain 5+ against its damage. If
+    # it already has a better one (its own, or another granted), that's kept.
+    state["feel_no_pain"] = min(state.get("feel_no_pain", 7), 5)
+
+
+def feel_no_pain_4(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # As feel_no_pain_5, but 4+.
+    state["feel_no_pain"] = min(state.get("feel_no_pain", 7), 4)
+
+
 EFFECTS = {
     AUTO_PASS_WOUND: auto_pass_wound,
     ADD_EXTRA_HIT: add_extra_hit,
@@ -162,4 +197,9 @@ EFFECTS = {
     MINUS_ONE_TO_HIT: minus_one_to_hit,
     IMPROVE_AP: improve_ap,
     INVULNERABLE_5: invulnerable_5,
+    CANNOT_ATTACK: cannot_attack,
+    ADD_SIX_ATTACKS: add_six_attacks,
+    MINUS_ONE_TO_WOUND: minus_one_to_wound,
+    FEEL_NO_PAIN_5: feel_no_pain_5,
+    FEEL_NO_PAIN_4: feel_no_pain_4,
 }

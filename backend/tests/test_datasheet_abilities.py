@@ -79,3 +79,41 @@ async def test_create_datasheet_ability_with_invalid_effect_id_returns_400(clien
         "/datasheet-abilities", json={"name": "Bad", "effect_ids": [9999]}
     )
     assert response.status_code == 400
+
+
+async def test_update_datasheet_ability(client: AsyncClient, session: AsyncSession):
+    condition_id = await _create_condition(session)
+    effect_id = await _create_effect(session)
+    ability_id = (await client.post("/datasheet-abilities", json={"name": "Old"})).json()["id"]
+
+    response = await client.put(
+        f"/datasheet-abilities/{ability_id}",
+        json={
+            "name": "New",
+            "description": "Updated",
+            "condition_ids": [condition_id],
+            "effect_ids": [effect_id],
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["name"], body["description"]) == ("New", "Updated")
+    assert body["condition_ids"] == [condition_id]
+    assert body["effect_ids"] == [effect_id]
+
+    response = await client.put(f"/datasheet-abilities/{ability_id}", json={"name": "New"})
+    assert response.json()["condition_ids"] == []
+    assert response.json()["effect_ids"] == []
+
+
+async def test_update_nonexistent_datasheet_ability_returns_404(client: AsyncClient):
+    response = await client.put("/datasheet-abilities/9999", json={"name": "X"})
+    assert response.status_code == 404
+
+
+async def test_update_datasheet_ability_with_invalid_effect_id_returns_400(client: AsyncClient):
+    ability_id = (await client.post("/datasheet-abilities", json={"name": "A"})).json()["id"]
+    response = await client.put(
+        f"/datasheet-abilities/{ability_id}", json={"name": "A", "effect_ids": [9999]}
+    )
+    assert response.status_code == 400

@@ -327,3 +327,38 @@ async def test_deleting_faction_ability_removes_it_from_models(
     response = await client.delete(f"/faction-abilities/{faction_ability_id}")
     assert response.status_code == 204
     assert (await client.get("/models")).json()[0]["faction_ability_ids"] == []
+
+
+async def test_attach_and_detach_datasheet_ability(client: AsyncClient, faction_id: int):
+    model_a = (await client.post("/models", json=_model_payload(faction_id))).json()["id"]
+    model_b = (
+        await client.post("/models", json=_model_payload(faction_id, name="Other"))
+    ).json()["id"]
+    ability_id = (await client.post("/datasheet-abilities", json={"name": "Shared"})).json()["id"]
+
+    for model_id in (model_a, model_b):
+        response = await client.put(f"/models/{model_id}/abilities/{ability_id}")
+        assert response.status_code == 204
+    # Attaching twice is a no-op.
+    assert (await client.put(f"/models/{model_a}/abilities/{ability_id}")).status_code == 204
+
+    models = {m["id"]: m for m in (await client.get("/models")).json()}
+    assert models[model_a]["ability_ids"] == [ability_id]
+    assert models[model_b]["ability_ids"] == [ability_id]
+
+    # Detaching from one model leaves the ability and the other model alone.
+    response = await client.delete(f"/models/{model_a}/abilities/{ability_id}")
+    assert response.status_code == 204
+    models = {m["id"]: m for m in (await client.get("/models")).json()}
+    assert models[model_a]["ability_ids"] == []
+    assert models[model_b]["ability_ids"] == [ability_id]
+    assert [a["id"] for a in (await client.get("/datasheet-abilities")).json()] == [ability_id]
+
+
+async def test_attach_datasheet_ability_unknown_ids_return_404(client: AsyncClient, faction_id: int):
+    model_id = (await client.post("/models", json=_model_payload(faction_id))).json()["id"]
+    ability_id = (await client.post("/datasheet-abilities", json={"name": "A"})).json()["id"]
+
+    assert (await client.put(f"/models/9999/abilities/{ability_id}")).status_code == 404
+    assert (await client.put(f"/models/{model_id}/abilities/9999")).status_code == 404
+    assert (await client.delete(f"/models/9999/abilities/{ability_id}")).status_code == 404

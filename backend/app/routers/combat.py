@@ -19,6 +19,7 @@ from app.models import (
     WeaponAbility,
 )
 from app.schemas import CombatIn, CombatOut, WeaponCombatResultOut
+from app.seeds import datasheet_abilities as datasheet_ability_seeds
 from app.seeds import factions as faction_seeds
 from app.services import combat as combat_service
 
@@ -76,7 +77,8 @@ def _validate_rule_options(option_names: list[str], field: str) -> None:
         )
 
 
-def _active_rules(unit: Unit, option_names: list[str]) -> list[Rule]:
+def _active_options(unit: Unit, option_names: list[str]) -> dict[str, list[Rule]]:
+    # {option name: rules} for the selected options this unit actually gains.
     # A faction ability's options apply to the whole unit if any of its models
     # has that faction ability; options for abilities it lacks are ignored.
     held = {
@@ -84,13 +86,25 @@ def _active_rules(unit: Unit, option_names: list[str]) -> list[Rule]:
         for unit_model in unit.unit_models
         for faction_ability in unit_model.model.faction_abilities
     }
-    return [
-        rule
+    return {
+        option_name: rules
         for faction_name, ability_name in held
         for option_name, rules in faction_seeds.rule_options(faction_name, ability_name).items()
         if option_name in option_names
-        for rule in rules
-    ]
+    }
+
+
+def _rules(options: dict[str, list[Rule]]) -> list[Rule]:
+    return [rule for rules in options.values() for rule in rules]
+
+
+def _datasheet_rules(unit: Unit) -> list[Rule]:
+    # Code-defined rules for the datasheet abilities any of the unit's models
+    # has (see app/seeds/datasheet_abilities.py RULES), once per ability.
+    names = {
+        ability.name for unit_model in unit.unit_models for ability in unit_model.model.abilities
+    }
+    return [rule for name in names for rule in datasheet_ability_seeds.RULES.get(name, [])]
 
 
 @router.post("", response_model=CombatOut)
@@ -145,6 +159,9 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
     _validate_rule_options(payload.attacker_rule_options, "attacker_rule_options")
     _validate_rule_options(payload.defender_rule_options, "defender_rule_options")
 
+    attacker_options = _active_options(attacker, payload.attacker_rule_options)
+    defender_options = _active_options(defender, payload.defender_rule_options)
+
     visible = True if payload.game_id is None else payload.defender_visible
     in_range = True if payload.game_id is None else payload.defender_in_range
 
@@ -161,8 +178,9 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
         advanced=payload.advanced,
         stratagems=stratagems,
         apply_precision=payload.apply_precision,
-        attacker_rules=_active_rules(attacker, payload.attacker_rule_options),
-        defender_rules=_active_rules(defender, payload.defender_rule_options),
+        attacker_rules=_rules(attacker_options) + _datasheet_rules(attacker),
+        defender_rules=_rules(defender_options) + _datasheet_rules(defender),
+        attacker_options=set(attacker_options),
     )
 
     return CombatOut(
@@ -177,6 +195,7 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
         attack_rerolls=result.attack_rerolls,
         wound_rolls=result.wound_rolls,
         save_rolls=result.save_rolls,
+        fnp_rolls=result.fnp_rolls,
         total_damage=result.total_damage,
         models_destroyed=result.models_destroyed,
         defending_models_remaining=result.defending_models_remaining,
@@ -190,6 +209,7 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
                 attack_rerolls=wr.attack_rerolls,
                 wound_rolls=wr.wound_rolls,
                 save_rolls=wr.save_rolls,
+                fnp_rolls=wr.fnp_rolls,
                 total_damage=wr.total_damage,
                 models_destroyed=wr.models_destroyed,
                 hazardous_rolls=wr.hazardous_rolls,

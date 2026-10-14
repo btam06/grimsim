@@ -1,5 +1,11 @@
 import { useState } from 'react'
-import { createModel, deleteWargear, deleteWeapon, updateModel } from '../api'
+import {
+  createModel,
+  deleteWargear,
+  deleteWeapon,
+  detachDatasheetAbility,
+  updateModel,
+} from '../api'
 import { skillLabel } from '../weaponDisplay'
 import Field from './Field'
 import MultiSelect from './MultiSelect'
@@ -20,7 +26,6 @@ function buildEmptyForm() {
     is_support: false,
     is_leader: false,
     ability_ids: [],
-    wargear_ids: [],
     keyword_ids: [],
     faction_ability_ids: [],
   }
@@ -41,7 +46,6 @@ function formFromModel(model) {
     is_support: model.is_support,
     is_leader: model.is_leader,
     ability_ids: model.ability_ids,
-    wargear_ids: [],
     keyword_ids: model.keyword_ids,
     faction_ability_ids: model.faction_ability_ids,
   }
@@ -62,7 +66,6 @@ function toPayload(form) {
     is_support: form.is_support,
     is_leader: form.is_leader,
     ability_ids: form.ability_ids,
-    wargear_ids: form.wargear_ids,
     keyword_ids: form.keyword_ids,
     faction_ability_ids: form.faction_ability_ids,
   }
@@ -84,6 +87,8 @@ function ModelFormPage({
   onEditWeapon,
   onAddWargear,
   onEditWargear,
+  onAddAbility,
+  onEditAbility,
 }) {
   const [form, setForm] = useState(editingModel ? formFromModel(editingModel) : buildEmptyForm())
   const [error, setError] = useState(null)
@@ -150,6 +155,18 @@ function ModelFormPage({
     }
   }
 
+  // Datasheet abilities are shared, so this only takes the ability off this
+  // model. It's kept in the form too, so saving the model doesn't re-add it.
+  const handleRemoveAbility = async (id) => {
+    setError(null)
+    try {
+      await detachDatasheetAbility(editingModel.id, id)
+      setForm({ ...form, ability_ids: form.ability_ids.filter((x) => x !== id) })
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
   const handleDeleteWargear = async (id) => {
     setError(null)
     try {
@@ -166,13 +183,10 @@ function ModelFormPage({
     (a) => String(a.faction_id) === form.faction_id || form.faction_ability_ids.includes(a.id)
   )
 
-  const wargearOptions = wargear.map((g) => ({
-    id: g.id,
-    name: `${g.name} (currently on model #${g.model_id})`,
-  }))
   const weaponsOnThisModel = editingModel
     ? weapons.filter((w) => w.model_id === editingModel.id)
     : []
+  const abilitiesOnThisModel = abilities.filter((a) => form.ability_ids.includes(a.id))
   const wargearOnThisModel = editingModel
     ? wargear.filter((g) => g.model_id === editingModel.id)
     : []
@@ -259,22 +273,6 @@ function ModelFormPage({
             onChange={(faction_ability_ids) => setForm({ ...form, faction_ability_ids })}
           />
         </label>
-        <label className="field">
-          Datasheet Abilities
-          <MultiSelect
-            options={abilities}
-            value={form.ability_ids}
-            onChange={(ability_ids) => setForm({ ...form, ability_ids })}
-          />
-        </label>
-        <label className="field">
-          Existing Wargear (reassigns additional wargear to this model)
-          <MultiSelect
-            options={wargearOptions}
-            value={form.wargear_ids}
-            onChange={(wargear_ids) => setForm({ ...form, wargear_ids })}
-          />
-        </label>
         <button type="submit">{editingModel ? 'Save Changes' : 'Add Model'}</button>
         <button type="button" onClick={handleSaveAndStay}>
           {editingModel ? 'Save & Continue Editing' : 'Add & Continue Editing'}
@@ -321,6 +319,26 @@ function ModelFormPage({
                   </button>
                   <button type="button" onClick={() => handleDeleteWargear(g.id)}>
                     Delete
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <h3>Datasheet Abilities</h3>
+          <button type="button" onClick={onAddAbility}>
+            + Add Datasheet Ability
+          </button>
+          {abilitiesOnThisModel.length > 0 && (
+            <ul>
+              {abilitiesOnThisModel.map((a) => (
+                <li key={a.id}>
+                  {a.name}
+                  {a.description ? ` — ${a.description}` : ''}
+                  <button type="button" onClick={() => onEditAbility(a)}>
+                    Edit
+                  </button>
+                  <button type="button" onClick={() => handleRemoveAbility(a.id)}>
+                    Remove
                   </button>
                 </li>
               ))}

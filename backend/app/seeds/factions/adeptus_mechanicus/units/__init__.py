@@ -1,4 +1,4 @@
-from . import skitarii_rangers
+from . import fulgurite_electro_priests, skitarii_rangers, tech_priest_dominus
 
 # Unit (datasheet) names in this faction's roster.
 NAMES = [
@@ -38,4 +38,4 @@ NAMES = [
 
 # Full datasheets (models, stats, weapons) for units above - see
 # app/seeds/datasheets.py. Units without one are seeded by name only.
-DATASHEETS = [skitarii_rangers]
+DATASHEETS = [fulgurite_electro_priests, skitarii_rangers, tech_priest_dominus]

@@ -6,7 +6,7 @@ from typing import Literal
 # The shape of a hardcoded datasheet, as declared in
 # app/seeds/factions/<faction>/units/<unit>.py and seeded by
 # app.seeds.factions.seed_datasheets. Abilities and keywords are referenced by
-# name and must already be seeded (weapon abilities, wargear abilities,
+# name and must already be seeded (weapon/wargear/datasheet abilities,
 # keywords, and this faction's faction abilities).
 
 
@@ -45,5 +45,6 @@ class ModelSpec:
     is_leader: bool = False
     keywords: tuple[str, ...] = ()  # Keyword names
     faction_abilities: tuple[str, ...] = ()  # FactionAbility names in this faction
+    abilities: tuple[str, ...] = ()  # DatasheetAbility names
     weapons: tuple[WeaponSpec, ...] = field(default=())
     wargear: tuple[WargearSpec, ...] = field(default=())

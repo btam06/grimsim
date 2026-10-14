@@ -114,6 +114,7 @@ class WeaponCombatResult:
     attack_rerolls   : list[int] = field(default_factory=list)
     wound_rolls      : list[int] = field(default_factory=list)
     save_rolls       : list[int] = field(default_factory=list)
+    fnp_rolls        : list[int] = field(default_factory=list)
     total_damage     : int       = field(default=0)
     models_destroyed : int       = field(default=0)
     hazardous_rolls  : list[int] = field(default_factory=list)
@@ -128,6 +129,10 @@ class CombatResult:
     attack_rerolls             : list[int] = field(default_factory=list)
     wound_rolls                : list[int] = field(default_factory=list)
     save_rolls                 : list[int] = field(default_factory=list)
+    # The defending models' feel no pain rolls, one per point of damage
+    # against a model that has feel no pain (not the attacker's own, from
+    # hazardous - those aren't recorded).
+    fnp_rolls                  : list[int] = field(default_factory=list)
     total_damage               : int       = field(default=0)
     models_destroyed           : int       = field(default=0)
     defending_models_remaining : int       = field(default=0)
@@ -158,6 +163,7 @@ def resolve_combat(
     apply_precision: bool = False,
     attacker_rules: list[Rule] | None = None,
     defender_rules: list[Rule] | None = None,
+    attacker_options: set[str] | None = None,
 ) -> CombatResult:
     # The defending unit is a queue of individual models, each with its own wound pool.
     # Each attack targets whichever model is at the front of the queue; once that
@@ -176,6 +182,12 @@ def resolve_combat(
         for unit_model in defender.unit_models
         for keyword in unit_model.model.keywords
     }
+    # The same keywords, but kept per defending model - e.g. to tell a
+    # CHARACTER leading a unit apart from a CHARACTER on its own.
+    defender_model_keywords = [
+        frozenset(keyword.name for keyword in unit_model.model.keywords)
+        for unit_model in defender.unit_models
+    ]
     # Likewise for the attacking unit - e.g. for "if this unit has BATTLELINE".
     attacker_keywords = {
         keyword.name
@@ -201,22 +213,31 @@ def resolve_combat(
     # every model's wargear and datasheet abilities, regardless of which
     # weapon is firing.
     unit_wide_state: dict = {}
+    # Datasheet abilities belong to the unit, so (unlike wargear) they're also
+    # in play for every weapon any of its models fires - e.g. "this unit's
+    # ranged attacks have [SUSTAINED HITS 1]".
+    datasheet_abilities = [
+        ability
+        for unit_model in attacker.unit_models
+        for ability in unit_model.model.abilities
+    ]
+    # Names of the faction-ability rule options active for the attacking unit
+    # (e.g. "Riled Up"), for conditions like "if this unit is riled up".
+    attacker_options = set(attacker_options or ())
     all_unit_wide_abilities = [
         ability
         for unit_model in attacker.unit_models
         for gear in unit_model.wargear
         for ability in gear.abilities
-    ] + [
-        ability
-        for unit_model in attacker.unit_models
-        for ability in unit_model.model.abilities
-    ] + stratagems + attacker_rules
+    ] + datasheet_abilities + stratagems + attacker_rules
     _apply_triggered_effects(
         all_unit_wide_abilities,
         {
             "step": "unit_wide",
             "defender_keywords": defender_keywords,
             "attacker_keywords": attacker_keywords,
+            "attacker_options": attacker_options,
+            "defender_model_keywords": defender_model_keywords,
         },
         unit_wide_state,
         deque(),
@@ -275,6 +296,7 @@ def resolve_combat(
                 abilities = (
                     list(weapon.abilities)
                     + wargear_abilities
+                    + datasheet_abilities
                     + stratagems
                     + attacker_rules
                     + defender_rules
@@ -284,6 +306,8 @@ def resolve_combat(
                     "is_ranged": is_ranged,
                     "defender_keywords": defender_keywords,
                     "attacker_keywords": attacker_keywords,
+                    "attacker_options": attacker_options,
+                    "defender_model_keywords": defender_model_keywords,
                 }
 
                 # Weapon eligibility: a static, no-dice-rolled check of this
@@ -297,6 +321,11 @@ def resolve_combat(
                     eligibility_state,
                     deque(),
                 )
+
+                # A weapon restricted to certain targets (e.g. a HUNTER
+                # profile) that can't attack this one doesn't attack at all.
+                if eligibility_state.get("cannot_attack"):
+                    continue
 
                 # Being in engagement range normally swaps which weapons are
                 # usable: melee weapons fight instead of ranged weapons
@@ -473,7 +502,13 @@ def resolve_combat(
                             )
                             wound_passed = True
                         else:
-                            wound_passed = wound_roll >= threshold
+                            # An unmodified 6 always wounds and a 1 always
+                            # fails, whatever the modifiers.
+                            if attack.get("minus_one_to_wound"):
+                                threshold += 1
+                            wound_passed = wound_roll != 1 and (
+                                wound_roll == 6 or wound_roll >= threshold
+                            )
                     if not wound_passed:
                         continue
 
@@ -514,12 +549,23 @@ def resolve_combat(
                     # is wasted rather than carrying onto the next model - the next
                     # attack (if any) simply finds that next model at the front of
                     # the queue instead.
+                    # The model's own feel no pain, or a better one granted by a
+                    # rule (e.g. a leader's Lord of the Machine Cult).
+                    feel_no_pain = min(
+                        (
+                            fnp
+                            for fnp in (target.feel_no_pain, attack.get("feel_no_pain"))
+                            if fnp is not None
+                        ),
+                        default=None,
+                    )
                     for _ in range(damage):
-                        if (
-                            target.feel_no_pain is not None
-                            and random.randint(1, 6) >= target.feel_no_pain
-                        ):
-                            continue  # feel no pain negated this point of damage
+                        if feel_no_pain is not None:
+                            fnp_roll = random.randint(1, 6)
+                            result.fnp_rolls.append(fnp_roll)
+                            weapon_result.fnp_rolls.append(fnp_roll)
+                            if fnp_roll >= feel_no_pain:
+                                continue  # feel no pain negated this point of damage
 
                         result.total_damage += 1
                         weapon_result.total_damage += 1

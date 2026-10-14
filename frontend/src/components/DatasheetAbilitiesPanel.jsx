@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { createDatasheetAbility, listConditions, listDatasheetAbilities, listEffects } from '../api'
 import Field from './Field'
+import MultiSelect from './MultiSelect'
 
 function DatasheetAbilitiesPanel() {
   const [abilities, setAbilities] = useState([])
@@ -23,10 +24,6 @@ function DatasheetAbilitiesPanel() {
 
   const conditionName = (id) => conditions.find((c) => c.id === id)?.name ?? `#${id}`
   const effectName = (id) => effects.find((e) => e.id === id)?.name ?? `#${id}`
-
-  const toggleId = (list, setList, id) => {
-    setList(list.includes(id) ? list.filter((x) => x !== id) : [...list, id])
-  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -59,35 +56,13 @@ function DatasheetAbilitiesPanel() {
         <Field label="Description (optional)">
           <input value={description} onChange={(e) => setDescription(e.target.value)} />
         </Field>
-        <div className="checkbox-group">
+        <div className="field">
           Conditions
-          <div className="checkbox-grid">
-            {conditions.map((c) => (
-              <label key={c.id} className="checkbox-field">
-                <input
-                  type="checkbox"
-                  checked={conditionIds.includes(c.id)}
-                  onChange={() => toggleId(conditionIds, setConditionIds, c.id)}
-                />
-                {c.name}
-              </label>
-            ))}
-          </div>
+          <MultiSelect options={conditions} value={conditionIds} onChange={setConditionIds} />
         </div>
-        <div className="checkbox-group">
+        <div className="field">
           Effects
-          <div className="checkbox-grid">
-            {effects.map((e) => (
-              <label key={e.id} className="checkbox-field">
-                <input
-                  type="checkbox"
-                  checked={effectIds.includes(e.id)}
-                  onChange={() => toggleId(effectIds, setEffectIds, e.id)}
-                />
-                {e.name}
-              </label>
-            ))}
-          </div>
+          <MultiSelect options={effects} value={effectIds} onChange={setEffectIds} />
         </div>
         <button type="submit">Add</button>
       </form>

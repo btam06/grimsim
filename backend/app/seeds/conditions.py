@@ -10,12 +10,19 @@ from app.combat_rules.conditions import (
     ANTI_VEHICLE_3,
     ANTI_VEHICLE_4,
     CRITICAL_HIT,
+    CRITICAL_HIT_NOT_MONSTER_OR_VEHICLE,
     CRITICAL_WOUND,
     ATTACKER_IS_BATTLELINE,
     MELEE_ATTACK_AGAINST_BATTLELINE,
     MOVED_LESS_THAN_3,
+    PRE_WEAPON_NOT_MONSTER_OR_VEHICLE,
     RANGED_MOVED_LESS_THAN_3,
+    RILED_UP_RANGED_CRITICAL_HIT,
+    TARGET_ELECTRO_PRIESTS_LED_BY_CHARACTER,
+    TARGET_HAS_CHARACTER,
+    TARGET_LED_BY_CHARACTER,
     TARGET_MONSTER_OR_VEHICLE,
+    TARGET_NOT_MONSTER_OR_VEHICLE,
     WITHIN_HALF_RANGE,
 )
 from app.models import Condition
@@ -85,6 +92,41 @@ ENTRIES = [
         ATTACKER_IS_BATTLELINE,
         "Attacker is Battleline",
         "The attacking unit contains a BATTLELINE model. Applies at every step.",
+    ),
+    (
+        TARGET_NOT_MONSTER_OR_VEHICLE,
+        "Target is not Monster or Vehicle",
+        "The defending unit contains no MONSTER or VEHICLE model. Applies at every step.",
+    ),
+    (
+        CRITICAL_HIT_NOT_MONSTER_OR_VEHICLE,
+        "Critical Hit vs non-Monster/Vehicle",
+        "The hit roll was a natural 6 against a defending unit with no MONSTER or VEHICLE model.",
+    ),
+    (
+        RILED_UP_RANGED_CRITICAL_HIT,
+        "Riled Up Ranged Critical Hit",
+        "A natural 6 to hit with a ranged weapon while the attacking unit is riled up.",
+    ),
+    (
+        PRE_WEAPON_NOT_MONSTER_OR_VEHICLE,
+        "Weapon Targets non-Monster/Vehicle",
+        "Checked once per weapon: the defending unit has no MONSTER or VEHICLE model.",
+    ),
+    (
+        TARGET_HAS_CHARACTER,
+        "Target has Character",
+        "The defending unit contains a CHARACTER model. Applies at every step.",
+    ),
+    (
+        TARGET_LED_BY_CHARACTER,
+        "Target Led by Character",
+        "The defending unit is a CHARACTER leading other models. Applies at every step.",
+    ),
+    (
+        TARGET_ELECTRO_PRIESTS_LED_BY_CHARACTER,
+        "Target is Electro-priests Led by Character",
+        "The defending unit is ELECTRO-PRIESTS led by a CHARACTER. Applies at every step.",
     ),
 ]
 
