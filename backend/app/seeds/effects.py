@@ -17,6 +17,7 @@ from app.combat_rules.effects import (
     FEEL_NO_PAIN_5,
     FORCE_CRITICAL_WOUND,
     HAZARDOUS,
+    HEAVY,
     IGNORE_COVER,
     IGNORE_COVER_UNIT,
     IMPROVE_AP,
@@ -181,6 +182,11 @@ ENTRIES = [
         BENEFIT_OF_COVER,
         "Benefit of Cover",
         "The target has the Benefit of Cover against this attack, as if it were in cover.",
+    ),
+    (
+        HEAVY,
+        "Heavy",
+        "+1 to hit for this attack's weapon. Counts once, however many sources grant Heavy.",
     ),
 ]
 

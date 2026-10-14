@@ -1000,3 +1000,89 @@ async def test_run_all_seeds_sicarian_infiltrators_and_princeps(session: AsyncSe
         assert [a.name for a in weapons["Taser goad"].abilities] == ["Sustained 2"]
         assert [a.name for a in weapons["Flechette blaster pistol"].abilities] == ["Pistol"]
         assert [a.name for a in weapons["Stubcarbine pistol"].abilities] == ["Pistol"]
+
+
+async def test_seed_weapon_abilities_resyncs_heavy_to_the_heavy_effect(session: AsyncSession):
+    # A database seeded when Heavy was a generic +1 to hit gets the HEAVY flag
+    # instead - in place, so weapons that have Heavy keep it.
+    await conditions.seed(session)
+    await effects.seed(session)
+    old_effect = (
+        await session.execute(select(Effect).where(Effect.keyword == "plus_one_to_hit"))
+    ).scalar_one()
+    moved = (
+        await session.execute(select(Condition).where(Condition.keyword == "moved_less_than_3"))
+    ).scalar_one()
+    heavy = WeaponAbility(
+        name="Heavy", description="old", conditions=[moved], effects=[old_effect]
+    )
+    session.add(heavy)
+    await session.commit()
+    heavy_id = heavy.id
+
+    await weapon_abilities.seed(session)
+
+    session.expire_all()
+    heavy = (
+        await session.execute(
+            select(WeaponAbility)
+            .options(selectinload(WeaponAbility.conditions), selectinload(WeaponAbility.effects))
+            .where(WeaponAbility.name == "Heavy")
+        )
+    ).scalar_one()
+    assert heavy.id == heavy_id
+    assert [c.keyword for c in heavy.conditions] == ["moved_less_than_3"]
+    assert [e.keyword for e in heavy.effects] == ["heavy"]
+
+
+async def test_run_all_seeds_skitarii_vanguard(session: AsyncSession):
+    await run_all(session)
+
+    models = {
+        m.name: m
+        for m in (
+            await session.execute(
+                select(Model)
+                .options(
+                    selectinload(Model.keywords),
+                    selectinload(Model.faction_abilities),
+                    selectinload(Model.wargear),
+                    selectinload(Model.weapons).selectinload(Weapon.abilities),
+                )
+                .where(Model.name.in_(["Skitarii Vanguard", "Skitarii Vanguard Alpha"]))
+            )
+        )
+        .scalars()
+        .all()
+    }
+    assert set(models) == {"Skitarii Vanguard", "Skitarii Vanguard Alpha"}
+    for model in models.values():
+        assert (model.movement, model.toughness, model.save, model.wounds) == (6, 3, 4, 1)
+        assert (model.leadership, model.oc, model.invulnerable) == (7, 2, 5)
+        keywords = {k.name for k in model.keywords}
+        assert "VANGUARD" in keywords and "RANGERS" not in keywords
+        assert "BATTLELINE" in keywords
+        assert [a.name for a in model.faction_abilities] == ["Doctrina Imperatives"]
+
+    vanguard = {w.name: w for w in models["Skitarii Vanguard"].weapons}
+    assert set(vanguard) == {
+        "Arc rifle",
+        "Radium carbine",
+        "Plasma caliver – standard",
+        "Plasma caliver – supercharge",
+        "Transuranic arquebus",
+        "Close combat weapon",
+    }
+    carbine = vanguard["Radium carbine"]
+    assert (carbine.range, carbine.attacks, carbine.skill) == (18, "3", 4)
+    assert (carbine.strength, carbine.ap, carbine.damage) == (3, 0, "1")
+    assert [a.name for a in carbine.abilities] == ["Anti-Infantry 4+"]
+    assert [g.name for g in models["Skitarii Vanguard"].wargear] == ["Omnispex"]
+
+    alpha = {w.name for w in models["Skitarii Vanguard Alpha"].weapons}
+    assert alpha == {
+        "Radium carbine",
+        "Close combat weapon",
+        "Alpha combat weapon",
+        "Mechanicus pistol",
+    }

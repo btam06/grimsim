@@ -31,6 +31,7 @@ from app.combat_rules.effects import (
     CANNOT_ATTACK,
     FORCE_CRITICAL_WOUND,
     HAZARDOUS,
+    HEAVY,
     IGNORE_COVER,
     NO_SAVE,
     PISTOL,
@@ -138,7 +139,7 @@ ENTRIES = [
         "Heavy",
         "If the attacking unit moved less than 3\" this turn, this weapon's attacks get +1 to hit.",
         [MOVED_LESS_THAN_3],
-        [PLUS_ONE_TO_HIT],
+        [HEAVY],
     ),
     (
         "Assault",
@@ -239,6 +240,16 @@ async def _rename(session: AsyncSession) -> None:
     await session.flush()
 
 
+# Entries whose conditions/effects have changed since they were first seeded.
+# Existing rows with these names have them reset to the entry above on
+# startup (rather than being left alone, as other existing rows are).
+RESYNCED = {
+    # Was a generic +1 to hit; now the HEAVY flag, so Heavy from more than one
+    # source still counts once.
+    "Heavy",
+}
+
+
 async def seed(session: AsyncSession) -> None:
     await _rename(session)
     for name, description, condition_keywords, effect_keywords in ENTRIES:
@@ -250,8 +261,13 @@ async def seed(session: AsyncSession) -> None:
             )
         ).scalar_one_or_none()
         # An existing row is left alone unless it was seeded before this entry
-        # had any conditions/effects (e.g. "Precision") - then fill them in.
-        if existing is not None and (existing.conditions or existing.effects):
+        # had any conditions/effects (e.g. "Precision") - then fill them in -
+        # or it's listed in RESYNCED.
+        if (
+            existing is not None
+            and (existing.conditions or existing.effects)
+            and name not in RESYNCED
+        ):
             continue
 
         conditions = (

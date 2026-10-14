@@ -2,6 +2,7 @@ from . import (
     fulgurite_electro_priests,
     sicarian_infiltrators,
     skitarii_rangers,
+    skitarii_vanguard,
     skorpius_disintegrator,
     tech_priest_dominus,
 )
@@ -49,6 +50,7 @@ DATASHEETS = [
     fulgurite_electro_priests,
     sicarian_infiltrators,
     skitarii_rangers,
+    skitarii_vanguard,
     skorpius_disintegrator,
     tech_priest_dominus,
 ]

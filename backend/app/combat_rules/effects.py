@@ -43,6 +43,7 @@ REROLL_FAILED_WOUNDS = "reroll_failed_wounds"
 DEADLY_DEMISE = "deadly_demise"
 ADD_TWO_EXTRA_HITS = "add_two_extra_hits"
 BENEFIT_OF_COVER = "benefit_of_cover"
+HEAVY = "heavy"
 
 
 def auto_pass_wound(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
@@ -95,7 +96,9 @@ def hazardous(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
 def plus_one_to_hit(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
     # This attack's hit roll needs 1 less to succeed (e.g. Heavy, when the
     # firing unit moved less than 3" this turn).
-    state["plus_one_to_hit"] = True
+    # Counted per source: several +1s add up before the hit roll's modifiers
+    # are capped at +1/-1 overall.
+    state["plus_one_to_hit"] = state.get("plus_one_to_hit", 0) + 1
 
 
 def reroll_failed_hits(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
@@ -139,7 +142,8 @@ def precision(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
 def minus_one_to_hit(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
     # This attack's hit roll needs 1 more to succeed (e.g. a defensive rule
     # on the unit being attacked). Cancels out a +1 to hit.
-    state["minus_one_to_hit"] = True
+    # Counted per source, like plus_one_to_hit.
+    state["minus_one_to_hit"] = state.get("minus_one_to_hit", 0) + 1
 
 
 def improve_ap(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
@@ -224,6 +228,14 @@ def benefit_of_cover(state: dict[str, Any], pending: deque[dict[str, Any]]) -> N
     state["benefit_of_cover"] = True
 
 
+def heavy(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # This attack's weapon has [HEAVY] in effect (its bearer's unit moved less
+    # than 3"): +1 to hit. A flag rather than a count - a weapon either has
+    # Heavy or it doesn't, so Heavy from more than one source (its own profile
+    # and e.g. Protector Imperative) is still a single +1.
+    state["heavy"] = True
+
+
 EFFECTS = {
     AUTO_PASS_WOUND: auto_pass_wound,
     ADD_EXTRA_HIT: add_extra_hit,
@@ -254,4 +266,5 @@ EFFECTS = {
     DEADLY_DEMISE: deadly_demise,
     ADD_TWO_EXTRA_HITS: add_two_extra_hits,
     BENEFIT_OF_COVER: benefit_of_cover,
+    HEAVY: heavy,
 }

@@ -317,13 +317,21 @@ def resolve_combat(
                     continue
 
                 is_ranged = weapon.weapon_type != "melee"
-                abilities = (
-                    list(weapon.abilities)
-                    + wargear_abilities
-                    + datasheet_abilities
-                    + stratagems
-                    + attacker_rules
-                    + defender_rules
+                # Each distinct ability once - e.g. a datasheet ability every model
+                # in the unit has is still one rule - so effects that count their
+                # sources (like +1 to hit) aren't multiplied by model count.
+                abilities = list(
+                    {
+                        id(ability): ability
+                        for ability in (
+                            list(weapon.abilities)
+                            + wargear_abilities
+                            + datasheet_abilities
+                            + stratagems
+                            + attacker_rules
+                            + defender_rules
+                        )
+                    }.values()
                 )
                 # Shared by every step's context for this weapon.
                 weapon_context = {
@@ -448,12 +456,12 @@ def resolve_combat(
         # Hit phase: every attack of this profile rolls to hit. Extra attacks
         # and hits an effect adds (e.g. Sustained Hits) join the same phase -
         # an extra hit is already a hit, so it skips the roll.
-        hits: list[tuple[dict, dict]] = []
+        successful_hits: list[tuple[dict, dict]] = []
         queue = deque(profile_attacks)
         while queue:
             attack, fired = queue.popleft()
             if attack["auto_hit"]:
-                hits.append((attack, fired))
+                successful_hits.append((attack, fired))
                 continue
             weapon = fired["weapon"]
             abilities = fired["abilities"]
@@ -471,26 +479,34 @@ def resolve_combat(
                 attack,
                 spawned,
             )
-            # A ranged attack against a target in cover needs a roll 1 higher to
-            # hit, unless this attack (or the whole unit) ignores cover.
-            effective_skill = weapon.skill
+            # Hit roll modifiers: every +1 and -1 to hit adds up, then the total
+            # is capped at +1/-1 - so +2 and -1 is still +1. A ranged attack
+            # against a target in cover counts as a -1, unless this attack (or
+            # the whole unit) ignores cover.
+            hit_modifier = attack.get("plus_one_to_hit", 0) - attack.get("minus_one_to_hit", 0)
+            # [HEAVY] is one +1, however many sources grant it.
+            if attack.get("heavy"):
+                hit_modifier += 1
             if (
                 (in_cover or attack.get("benefit_of_cover"))
                 and is_ranged
                 and not unit_ignores_cover
                 and not attack.get("ignore_cover")
             ):
-                effective_skill += 1
-            # +1 and -1 to hit are each a single flag, so stacking sources of
-            # either never exceeds a net +/-1.
-            if attack.get("plus_one_to_hit"):
-                effective_skill -= 1
-            if attack.get("minus_one_to_hit"):
-                effective_skill += 1
+                hit_modifier -= 1
+            hit_modifier = max(-1, min(1, hit_modifier))
+            effective_skill = weapon.skill - hit_modifier
+            # Improving the BS/WS characteristic itself (e.g. a Doctrina
+            # Imperative) isn't a hit roll modifier, so it's outside the cap.
             if is_ranged and attack.get("plus_one_skill_ranged"):
                 effective_skill -= 1
             if not is_ranged and attack.get("plus_one_skill_melee"):
                 effective_skill -= 1
+
+            def hits(roll: int) -> bool:
+                # An unmodified 6 always hits and a 1 always fails, whatever the
+                # modifiers.
+                return roll != 1 and (roll == 6 or roll >= effective_skill)
 
             # Hit roll: succeeds (hits) on a roll equal to or greater than skill.
             hit_roll = random.randint(1, 6)
@@ -499,7 +515,7 @@ def resolve_combat(
             _apply_triggered_effects(
                 abilities, {"step": "hit", "roll": hit_roll, **weapon_context}, attack, spawned
             )
-            if hit_roll < effective_skill and (
+            if not hits(hit_roll) and (
                 attack.get("reroll_failed_hits") or unit_rerolls_failed_hits
             ):
                 # Re-roll a failed hit once, replacing the original result -
@@ -512,8 +528,8 @@ def resolve_combat(
                     abilities, {"step": "hit", "roll": hit_roll, **weapon_context}, attack, spawned
                 )
             queue.extend((extra, fired) for extra in spawned)
-            if hit_roll >= effective_skill:
-                hits.append((attack, fired))
+            if hits(hit_roll):
+                successful_hits.append((attack, fired))
 
         # Wound phase: every hit rolls to wound. Nothing has been destroyed yet
         # this phase, so each wound roll is against the Toughness of the model
@@ -521,7 +537,7 @@ def resolve_combat(
         if not targets:
             continue  # the defending unit was wiped out by an earlier profile
         wounds: list[tuple[dict, dict]] = []
-        for attack, fired in hits:
+        for attack, fired in successful_hits:
             weapon = fired["weapon"]
             abilities = fired["abilities"]
             weapon_context = fired["context"]

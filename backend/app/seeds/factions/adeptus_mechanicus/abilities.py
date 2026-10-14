@@ -7,11 +7,11 @@ from app.combat_rules.conditions import (
 )
 from app.combat_rules.effects import (
     ASSAULT,
+    HEAVY,
     IMPROVE_AP,
     MINUS_ONE_TO_HIT,
     PLUS_ONE_SKILL_MELEE,
     PLUS_ONE_SKILL_RANGED,
-    PLUS_ONE_TO_HIT,
 )
 
 DOCTRINA_IMPERATIVES = "Doctrina Imperatives"
@@ -34,7 +34,7 @@ OPTIONS = {
     DOCTRINA_IMPERATIVES: {
         "Protector Imperative": [
             # Ranged weapons have [HEAVY].
-            Rule(conditions=(RANGED_MOVED_LESS_THAN_3,), effects=(PLUS_ONE_TO_HIT,)),
+            Rule(conditions=(RANGED_MOVED_LESS_THAN_3,), effects=(HEAVY,)),
             # Improve the Ballistic Skill of ranged weapons by 1.
             Rule(conditions=(ALWAYS,), effects=(PLUS_ONE_SKILL_RANGED,)),
             # Melee attacks targeting this unit, if it is BATTLELINE: -1 to hit.

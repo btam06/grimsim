@@ -3800,3 +3800,147 @@ def test_resolve_combat_still_rolls_every_hit_after_the_unit_is_wiped(monkeypatc
     assert len(result.wound_rolls) == 3
     assert len(result.save_rolls) == 1
     assert result.models_destroyed == 1
+
+
+# --- hit roll modifiers: summed, then capped at +1/-1 ---
+
+
+def _plus_one(condition="always"):
+    return _ability([_condition(condition)], [_effect("plus_one_to_hit")])
+
+
+def _minus_one():
+    return _ability([_condition("always")], [_effect("minus_one_to_hit")])
+
+
+def _hit_with(monkeypatch, hit_roll, skill, abilities=(), **flags):
+    # One attack that always wounds and always gets through, so damage tells
+    # us whether it hit.
+    rolls = iter([hit_roll, 6, 1])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(
+        attacks="1", skill=skill, strength=10, ap=-10, damage="1", weapon_type="ranged"
+    )
+    weapon.abilities = list(abilities)
+    return _fire(weapon, [_model(toughness=1, wounds=10, save=7)], **flags).total_damage == 1
+
+
+def test_plus_two_and_minus_one_nets_plus_one(monkeypatch):
+    abilities = [_plus_one(), _plus_one(), _minus_one()]
+    assert _hit_with(monkeypatch, 4, skill=5, abilities=abilities)
+    assert not _hit_with(monkeypatch, 3, skill=5, abilities=abilities)
+
+
+def test_two_plus_ones_are_capped_at_plus_one(monkeypatch):
+    abilities = [_plus_one(), _plus_one()]
+    assert _hit_with(monkeypatch, 3, skill=4, abilities=abilities)
+    assert not _hit_with(monkeypatch, 2, skill=4, abilities=abilities)
+
+
+def test_two_minus_ones_are_capped_at_minus_one(monkeypatch):
+    # Cover counts as a -1 too: cover plus another -1 is still just -1.
+    abilities = [_minus_one()]
+    assert _hit_with(monkeypatch, 4, skill=3, abilities=abilities, in_cover=True)
+    assert not _hit_with(monkeypatch, 3, skill=3, abilities=abilities, in_cover=True)
+
+
+def test_ballistic_skill_improvement_is_outside_the_cap(monkeypatch):
+    # +1 to hit (capped) plus BS improved by 1 (a characteristic change): BS4 hits on 2+.
+    abilities = [
+        _plus_one(),
+        _plus_one(),
+        _ability([_condition("always")], [_effect("plus_one_skill_ranged")]),
+    ]
+    assert _hit_with(monkeypatch, 2, skill=4, abilities=abilities)
+
+
+def test_unmodified_one_always_misses(monkeypatch):
+    abilities = [_plus_one(), _ability([_condition("always")], [_effect("plus_one_skill_ranged")])]
+    assert not _hit_with(monkeypatch, 1, skill=2, abilities=abilities)
+
+
+def test_unmodified_six_always_hits(monkeypatch):
+    assert _hit_with(monkeypatch, 6, skill=6, abilities=[_minus_one()])
+
+
+def test_a_shared_datasheet_ability_counts_once_however_many_models_have_it(monkeypatch):
+    # Both models have the same +1 to hit ability; with a -1 against it, the
+    # net is 0 (one +1, one -1) - not +1 from counting it per model.
+    rolls = iter([3, 6, 1])  # hit 3 vs BS4: only hits at a net +1
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    shared = _datasheet_ability([_condition("always")], [_effect("plus_one_to_hit")])
+    weapon = _weapon(attacks="1", skill=4, strength=10, ap=-10, damage="1", weapon_type="ranged")
+    weapon.id = 1
+    weapon.abilities = [_minus_one()]
+    attacker = _unit(
+        [
+            _unit_model(_model(abilities=[shared]), [weapon]),
+            _unit_model(_model(abilities=[shared]), []),
+        ]
+    )
+    defender = _unit([_unit_model(_model(toughness=1, wounds=10, save=7), [])])
+
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {weapon.id},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+    )
+    assert result.total_damage == 0
+
+
+# --- [HEAVY] counts once ---
+
+
+def _heavy():
+    return _ability([_condition("moved_less_than_3")], [_effect("heavy")])
+
+
+def test_heavy_from_two_sources_is_one_plus_one(monkeypatch):
+    # The weapon's own Heavy and Protector's Heavy, against a -1: net 0, so a
+    # BS4 weapon still needs a 4 (Protector's BS+1 left out to isolate Heavy).
+    protector_heavy = PROTECTOR[0]
+    abilities = [_heavy(), _minus_one()]
+
+    def hit(roll):
+        rolls = iter([roll, 6, 1])
+        monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+        weapon = _weapon(
+            attacks="1", skill=4, strength=10, ap=-10, damage="1", weapon_type="ranged"
+        )
+        weapon.id = 1
+        weapon.abilities = abilities
+        return combat.resolve_combat(
+            _unit([_unit_model(_model(), [weapon])]),
+            _unit([_unit_model(_model(toughness=1, wounds=10, save=7), [])]),
+            {weapon.id},
+            in_engagement_range=False,
+            visible=True,
+            in_range=True,
+            in_cover=False,
+            half_range=False,
+            moved_less_than_3=True,
+            advanced=False,
+            attacker_rules=[protector_heavy],
+        ).total_damage == 1
+
+    assert hit(4)
+    assert not hit(3)
+
+
+def test_heavy_applies_when_moved_less_than_3(monkeypatch):
+    assert _hit_with(monkeypatch, 3, skill=4, abilities=[_heavy()], moved_less_than_3=True)
+    assert not _hit_with(monkeypatch, 3, skill=4, abilities=[_heavy()])
+
+
+def test_heavy_stacks_with_a_different_plus_one_before_the_cap(monkeypatch):
+    # Heavy +1 and another +1 (e.g. Blistering Salvoes) is +2, so with a -1 it
+    # nets +1: BS4 hits on a 3.
+    abilities = [_heavy(), _plus_one(), _minus_one()]
+    assert _hit_with(monkeypatch, 3, skill=4, abilities=abilities, moved_less_than_3=True)
