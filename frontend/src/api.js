@@ -133,8 +133,11 @@ export const advanceGame = (id) => request(`/games/${id}/advance`, { method: 'PO
 export const listUsableStratagems = (id, seat) => request(`/games/${id}/stratagems?seat=${seat}`)
 export const playGameStratagem = (id, payload) =>
   request(`/games/${id}/stratagems`, { method: 'POST', body: JSON.stringify(payload) })
-export const achieveSecondary = (id, cardId) =>
-  request(`/games/${id}/secondaries/${cardId}/achieve`, { method: 'POST' })
+export const achieveSecondary = (id, cardId, points) =>
+  request(`/games/${id}/secondaries/${cardId}/achieve`, {
+    method: 'POST',
+    body: JSON.stringify({ points }),
+  })
 export const discardSecondary = (id, cardId) =>
   request(`/games/${id}/secondaries/${cardId}/discard`, { method: 'POST' })
 export const scorePrimary = (id, payload) =>

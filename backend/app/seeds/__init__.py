@@ -7,6 +7,7 @@ from app.seeds import (
     effects,
     factions,
     keywords,
+    missions,
     stratagems,
     wargear_abilities,
     weapon_abilities,
@@ -33,8 +34,13 @@ from app.seeds import (
 # three must run after conditions.seed/effects.seed.
 #
 # stratagems.seed populates the core stratagems (usable by any detachment).
+#
+# missions.seed loads primary/secondary mission cards from a local, uncommitted
+# data file if present (see app/seeds/missions.py); it must run after
+# dispositions.seed.
 SEED_FUNCS = [
     dispositions.seed,
+    missions.seed,
     factions.seed,
     factions.seed_abilities,
     keywords.seed,

@@ -1,14 +1,5 @@
-from . import (
-    belisarius_cawl,
-    fulgurite_electro_priests,
-    sicarian_infiltrators,
-    skitarii_rangers,
-    skitarii_vanguard,
-    skorpius_disintegrator,
-    tech_priest_dominus,
-)
-
-# Unit (datasheet) names in this faction's roster.
+# Unit (datasheet) names in this faction's roster. Full datasheets are loaded
+# from app/data/datasheets/ - see app/data/README.md.
 NAMES = [
     "Belisarius Cawl",
     "Thulia Ghuld",
@@ -43,16 +34,4 @@ NAMES = [
     "Onager Dunecrawler",
     "Sydonian Dragoons With Radium Jezzails",
     "Sydonian Dragoons With Taser Lances",
-]
-
-# Full datasheets (models, stats, weapons) for units above - see
-# app/seeds/datasheets.py. Units without one are seeded by name only.
-DATASHEETS = [
-    belisarius_cawl,
-    fulgurite_electro_priests,
-    sicarian_infiltrators,
-    skitarii_rangers,
-    skitarii_vanguard,
-    skorpius_disintegrator,
-    tech_priest_dominus,
 ]

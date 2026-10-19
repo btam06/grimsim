@@ -10,9 +10,9 @@ from app.models.base import Base
 if TYPE_CHECKING:
     from app.models.disposition import Disposition
 
-# When a secondary mission can be completed: during its owner's turn, or
-# during their opponent's.
-SECONDARY_COMPLETES_ON = ("your_turn", "opponent_turn")
+# When a secondary mission can be completed: during its owner's turn, during
+# their opponent's, or either (e.g. "at the end of a turn").
+SECONDARY_COMPLETES_ON = ("your_turn", "opponent_turn", "either")
 
 
 class SecondaryMission(Base):

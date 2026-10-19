@@ -41,6 +41,7 @@ from app.seeds.factions import (
     tyranids,
     world_eaters,
 )
+from app.seeds import datasheets as datasheet_data
 from app.seeds.lookup import get_dispositions_by_name
 
 # One folder per faction, each with:
@@ -49,10 +50,10 @@ from app.seeds.lookup import get_dispositions_by_name
 #                            optional OPTIONS dict of rule options an ability
 #                            grants (e.g. Doctrina Imperatives' Protector and
 #                            Conqueror Imperatives) - see rule_options below
-#   units/__init__.py        NAMES of the faction's units, plus an optional
-#                            DATASHEETS list of per-unit modules (e.g.
-#                            units/skitarii_rangers.py) declaring each unit's
-#                            models and weapons - see app/seeds/datasheets.py
+#   units/__init__.py        NAMES of the faction's units
+#
+# Full datasheets (models, stats, weapons...) aren't in here: they're loaded
+# from app/data/datasheets/<faction folder name>.json - see app/data/README.md.
 #   detachments/__init__.py  ENTRIES of (name, disposition name, dp)
 #
 # To add a faction: copy an existing folder, fill it in, then register it in
@@ -209,7 +210,7 @@ async def seed_detachments(session: AsyncSession) -> None:
 
 async def seed_datasheets(session: AsyncSession) -> None:
     # Creates the models (with stats, keywords, faction/datasheet abilities,
-    # weapons and wargear) declared by each faction's units.DATASHEETS.
+    # weapons and wargear) in each faction's app/data/datasheets/<faction>.json.
     #
     # For a model that already exists in its faction (by name), only what it's
     # missing (by name) is added: faction/datasheet abilities, weapons,
@@ -287,8 +288,9 @@ async def seed_datasheets(session: AsyncSession) -> None:
         faction_id = faction_ids.get(faction.info.FACTION_NAME)
         if faction_id is None:
             continue  # faction hasn't been seeded yet
-        for datasheet in getattr(faction.units, "DATASHEETS", []):
-            for spec in datasheet.MODELS:
+        faction_slug = faction.__name__.rsplit(".", 1)[-1]
+        for datasheet in datasheet_data.load(faction_slug):
+            for spec in datasheet.models:
                 model = existing.get((faction_id, spec.name))
                 if model is not None:
                     faction_ability_names = {a.name for a in model.faction_abilities}
@@ -299,7 +301,7 @@ async def seed_datasheets(session: AsyncSession) -> None:
                                     faction_abilities,
                                     (faction_id, name),
                                     "faction ability",
-                                    datasheet.NAME,
+                                    datasheet.name,
                                 )
                             )
                             changed = True
@@ -307,7 +309,9 @@ async def seed_datasheets(session: AsyncSession) -> None:
                     for name in spec.abilities:
                         if name not in ability_names:
                             model.abilities.append(
-                                lookup(datasheet_abilities, name, "datasheet ability", datasheet.NAME)
+                                lookup(
+                                    datasheet_abilities, name, "datasheet ability", datasheet.name
+                                )
                             )
                             changed = True
                     # Matched by name, counting copies - a datasheet can give a
@@ -321,7 +325,7 @@ async def seed_datasheets(session: AsyncSession) -> None:
                     for name, weapon_specs in specs_by_name.items():
                         existing_weapons = weapons_by_name.get(name, [])
                         for weapon in weapon_specs[len(existing_weapons):]:
-                            model.weapons.append(build_weapon(weapon, datasheet.NAME))
+                            model.weapons.append(build_weapon(weapon, datasheet.name))
                             changed = True
                         for existing_weapon in existing_weapons:
                             ability_names = {a.name for a in existing_weapon.abilities}
@@ -332,14 +336,14 @@ async def seed_datasheets(session: AsyncSession) -> None:
                                             weapon_abilities,
                                             ability_name,
                                             "weapon ability",
-                                            datasheet.NAME,
+                                            datasheet.name,
                                         )
                                     )
                                     changed = True
                     wargear_names = {g.name for g in model.wargear}
                     for gear in spec.wargear:
                         if gear.name not in wargear_names:
-                            model.wargear.append(build_wargear(gear, datasheet.NAME))
+                            model.wargear.append(build_wargear(gear, datasheet.name))
                             changed = True
                     continue
 
@@ -358,7 +362,7 @@ async def seed_datasheets(session: AsyncSession) -> None:
                         is_support=spec.is_support,
                         is_leader=spec.is_leader,
                         keywords=[
-                            lookup(keywords, name, "keyword", datasheet.NAME)
+                            lookup(keywords, name, "keyword", datasheet.name)
                             for name in spec.keywords
                         ],
                         faction_abilities=[
@@ -366,16 +370,16 @@ async def seed_datasheets(session: AsyncSession) -> None:
                                 faction_abilities,
                                 (faction_id, name),
                                 "faction ability",
-                                datasheet.NAME,
+                                datasheet.name,
                             )
                             for name in spec.faction_abilities
                         ],
                         abilities=[
-                            lookup(datasheet_abilities, name, "datasheet ability", datasheet.NAME)
+                            lookup(datasheet_abilities, name, "datasheet ability", datasheet.name)
                             for name in spec.abilities
                         ],
-                        weapons=[build_weapon(w, datasheet.NAME) for w in spec.weapons],
-                        wargear=[build_wargear(g, datasheet.NAME) for g in spec.wargear],
+                        weapons=[build_weapon(w, datasheet.name) for w in spec.weapons],
+                        wargear=[build_wargear(g, datasheet.name) for g in spec.wargear],
                     )
                 )
                 changed = True

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Literal
 
-# The shape of a hardcoded datasheet, as declared in
-# app/seeds/factions/<faction>/units/<unit>.py and seeded by
-# app.seeds.factions.seed_datasheets. Abilities and keywords are referenced by
-# name and must already be seeded (weapon/wargear/datasheet abilities,
-# keywords, and this faction's faction abilities).
+from app.seeds import data_files
+
+# The shape of a datasheet, loaded from app/data/datasheets/<faction>.json
+# (see app/data/README.md) and seeded by app.seeds.factions.seed_datasheets.
+# Abilities and keywords are referenced by name and must already be seeded
+# (weapon/wargear/datasheet abilities, keywords, and this faction's faction
+# abilities).
 
 
 @dataclass(frozen=True)
@@ -48,3 +51,44 @@ class ModelSpec:
     abilities: tuple[str, ...] = ()  # DatasheetAbility names
     weapons: tuple[WeaponSpec, ...] = field(default=())
     wargear: tuple[WargearSpec, ...] = field(default=())
+
+
+@dataclass(frozen=True)
+class Datasheet:
+    name: str  # the faction unit's name, e.g. "Skitarii Rangers"
+    models: tuple[ModelSpec, ...]
+
+
+def _weapon(data: dict) -> WeaponSpec:
+    return WeaponSpec(**{**data, "abilities": tuple(data.get("abilities", ()))})
+
+
+def _wargear(data: dict) -> WargearSpec:
+    return WargearSpec(**{**data, "abilities": tuple(data.get("abilities", ()))})
+
+
+def _model(data: dict) -> ModelSpec:
+    return ModelSpec(
+        **{
+            **data,
+            "keywords": tuple(data.get("keywords", ())),
+            "faction_abilities": tuple(data.get("faction_abilities", ())),
+            "abilities": tuple(data.get("abilities", ())),
+            "weapons": tuple(_weapon(w) for w in data.get("weapons", ())),
+            "wargear": tuple(_wargear(g) for g in data.get("wargear", ())),
+        }
+    )
+
+
+def load(faction_slug: str) -> list[Datasheet]:
+    # A faction's datasheets, from app/data/datasheets/<faction_slug>.json
+    # (the faction's folder name, e.g. "adeptus_mechanicus"); none if there's
+    # no file.
+    path = data_files.data_dir() / "datasheets" / f"{faction_slug}.json"
+    if not path.exists():
+        return []
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return [
+        Datasheet(name=sheet["name"], models=tuple(_model(m) for m in sheet["models"]))
+        for sheet in data["datasheets"]
+    ]

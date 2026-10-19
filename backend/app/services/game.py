@@ -260,15 +260,19 @@ def use_stratagem(game: Game, player: GamePlayer, stratagem: Stratagem) -> None:
     )
 
 
-def achieve_secondary(game: Game, card: GameSecondary) -> None:
+def achieve_secondary(game: Game, card: GameSecondary, points: int | None = None) -> None:
+    # Scores the card's VP for the player's mode, or `points` if given (many
+    # cards score more or less depending on the outcome).
     _require_in_progress(game)
     player = card.player
     if card.status != "active":
         raise _bad_request("that secondary isn't active")
-    completes_on_your_turn = card.mission.completes_on == "your_turn"
-    if completes_on_your_turn != (game.turn_seat == player.seat):
-        whose = "their own" if completes_on_your_turn else "their opponent's"
-        raise _bad_request(f"{card.mission.name} can only be completed in {whose} turn")
+    completes_on = card.mission.completes_on
+    if completes_on != "either":
+        completes_on_your_turn = completes_on == "your_turn"
+        if completes_on_your_turn != (game.turn_seat == player.seat):
+            whose = "their own" if completes_on_your_turn else "their opponent's"
+            raise _bad_request(f"{card.mission.name} can only be completed in {whose} turn")
     if any(
         s.game_secondary_id == card.id
         and s.battle_round == game.battle_round
@@ -282,7 +286,7 @@ def achieve_secondary(game: Game, card: GameSecondary) -> None:
             battle_round=game.battle_round,
             turn_seat=game.turn_seat,
             kind="secondary",
-            points=mission_points(card),
+            points=mission_points(card) if points is None else points,
             game_secondary_id=card.id,
         )
     )

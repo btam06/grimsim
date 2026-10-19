@@ -20,6 +20,8 @@ from app.models import (
     Weapon,
     WeaponAbility,
 )
+from app.seeds import data_files
+from app.seeds import datasheets as datasheet_data
 from app.seeds import (
     conditions,
     datasheet_abilities,
@@ -492,115 +494,6 @@ async def test_doctrina_imperatives_has_protector_and_conqueror_options():
     assert set(options) == {"Protector Imperative", "Conqueror Imperative"}
 
 
-DATASHEETS = [
-    (faction, datasheet)
-    for faction in factions.FACTIONS
-    for datasheet in getattr(faction.units, "DATASHEETS", [])
-]
-DATASHEET_IDS = [datasheet.NAME for _, datasheet in DATASHEETS]
-
-
-@pytest.mark.parametrize("faction,datasheet", DATASHEETS, ids=DATASHEET_IDS)
-async def test_datasheet_references_only_seeded_names(faction, datasheet):
-    assert datasheet.NAME in faction.units.NAMES
-    weapon_ability_names = {name for name, _, _, _ in weapon_abilities.ENTRIES}
-    faction_ability_names = {name for name, _ in faction.abilities.ENTRIES}
-    for spec in datasheet.MODELS:
-        assert set(spec.keywords) <= set(keywords.NAMES)
-        assert set(spec.faction_abilities) <= faction_ability_names
-        for weapon in spec.weapons:
-            assert set(weapon.abilities) <= weapon_ability_names
-            assert (weapon.range is None) == (weapon.weapon_type == "melee")
-        wargear_ability_names = {name for name, _, _, _ in wargear_abilities.ENTRIES}
-        for gear in spec.wargear:
-            assert set(gear.abilities) <= wargear_ability_names
-
-
-async def test_run_all_seeds_skitarii_rangers(session: AsyncSession):
-    await run_all(session)
-
-    ranger = (
-        await session.execute(
-            select(Model)
-            .options(
-                selectinload(Model.keywords),
-                selectinload(Model.faction_abilities),
-                selectinload(Model.weapons).selectinload(Weapon.abilities),
-                selectinload(Model.wargear).selectinload(Wargear.abilities),
-            )
-            .join(Faction)
-            .where(Model.name == "Skitarii Ranger", Faction.name == "Adeptus Mechanicus")
-        )
-    ).scalar_one()
-    assert (ranger.movement, ranger.toughness, ranger.save, ranger.wounds) == (6, 3, 4, 1)
-    assert (ranger.leadership, ranger.oc, ranger.invulnerable) == (7, 2, 5)
-    assert {"INFANTRY", "BATTLELINE", "SKITARII", "RANGERS"} <= {k.name for k in ranger.keywords}
-    assert [a.name for a in ranger.faction_abilities] == ["Doctrina Imperatives"]
-
-    weapons = {w.name: w for w in ranger.weapons}
-    assert set(weapons) == {
-        "Arc rifle",
-        "Galvanic rifle",
-        "Plasma caliver – standard",
-        "Plasma caliver – supercharge",
-        "Transuranic arquebus",
-        "Close combat weapon",
-    }
-    arc_rifle = weapons["Arc rifle"]
-    assert (arc_rifle.range, arc_rifle.attacks, arc_rifle.skill) == (30, "1", 4)
-    assert (arc_rifle.strength, arc_rifle.ap, arc_rifle.damage) == (8, -1, "D3")
-    assert {a.name for a in arc_rifle.abilities} == {
-        "Anti-Vehicle 4+",
-        "Devastating Wounds",
-        "Rapid Fire 1",
-    }
-    alpha = (
-        await session.execute(
-            select(Model)
-            .options(selectinload(Model.weapons), selectinload(Model.wargear))
-            .where(Model.name == "Skitarii Ranger Alpha")
-        )
-    ).scalar_one()
-    alpha_weapons = {w.name: w for w in alpha.weapons}
-    assert set(alpha_weapons) == {
-        "Galvanic rifle",
-        "Close combat weapon",
-        "Alpha combat weapon",
-        "Mechanicus pistol",
-    }
-    assert alpha_weapons["Alpha combat weapon"].weapon_type == "melee"
-    assert alpha_weapons["Alpha combat weapon"].range is None
-    assert alpha.wargear == []
-    assert (alpha.toughness, alpha.save, alpha.wounds, alpha.invulnerable) == (3, 4, 1, 5)
-
-    assert [g.name for g in ranger.wargear] == ["Omnispex"]
-    assert [a.name for a in ranger.wargear[0].abilities] == ["Ignore Cover (Unit)"]
-
-
-async def test_seed_datasheets_is_idempotent(session: AsyncSession):
-    await run_all(session)
-    models_before = (await session.execute(select(Model.name))).scalars().all()
-    weapons_before = (await session.execute(select(Weapon.model_id, Weapon.name))).all()
-
-    await factions.seed_datasheets(session)
-
-    models_after = (await session.execute(select(Model.name))).scalars().all()
-    weapons_after = (await session.execute(select(Weapon.model_id, Weapon.name))).all()
-    assert sorted(models_after) == sorted(models_before)
-    assert models_after.count("Skitarii Ranger") == 1
-    assert sorted(weapons_after) == sorted(weapons_before)
-
-
-async def test_seed_datasheets_rejects_unknown_references(session: AsyncSession):
-    # Without keywords/weapon abilities seeded, the datasheet's references
-    # can't be resolved - that's an error rather than a silently bare model.
-    await factions.seed(session)
-    await factions.seed_abilities(session)
-
-    with pytest.raises(ValueError, match="references unknown"):
-        await factions.seed_datasheets(session)
-
-
 async def test_seed_weapon_abilities_renames_old_names_in_place(session: AsyncSession):
     # A database seeded before the rename keeps its row (and the weapons
     # linked to it) under the new name, instead of gaining a duplicate.
@@ -623,170 +516,6 @@ async def test_seed_weapon_abilities_renames_old_names_in_place(session: AsyncSe
     assert rows == [(old_id, "Rapid Fire 1")]
 
 
-async def test_seed_datasheets_adds_missing_weapons_and_wargear_to_existing_model(
-    session: AsyncSession,
-):
-    # A Ranger seeded before the datasheet gained (say) its Omnispex, and
-    # whose user-edited weapon must be left alone.
-    await run_all(session)
-    ranger = (
-        await session.execute(
-            select(Model)
-            .options(selectinload(Model.weapons), selectinload(Model.wargear))
-            .where(Model.name == "Skitarii Ranger")
-        )
-    ).scalar_one()
-    omnispex = ranger.wargear[0]
-    arc_rifle = next(w for w in ranger.weapons if w.name == "Arc rifle")
-    galvanic = next(w for w in ranger.weapons if w.name == "Galvanic rifle")
-    ranger.wargear.remove(omnispex)
-    ranger.weapons.remove(arc_rifle)
-    await session.delete(omnispex)
-    await session.delete(arc_rifle)
-    galvanic.attacks = "3"  # a user edit
-    await session.commit()
-
-    await factions.seed_datasheets(session)
-
-    session.expire_all()
-    ranger = (
-        await session.execute(
-            select(Model)
-            .options(selectinload(Model.weapons), selectinload(Model.wargear))
-            .where(Model.name == "Skitarii Ranger")
-        )
-    ).scalar_one()
-    weapons = {w.name: w for w in ranger.weapons}
-    assert "Arc rifle" in weapons
-    assert len(ranger.weapons) == 6
-    assert weapons["Galvanic rifle"].attacks == "3"
-    assert [g.name for g in ranger.wargear] == ["Omnispex"]
-
-
-async def test_run_all_seeds_tankbustas(session: AsyncSession):
-    await run_all(session)
-
-    models = {
-        m.name: m
-        for m in (
-            await session.execute(
-                select(Model)
-                .options(
-                    selectinload(Model.keywords),
-                    selectinload(Model.faction_abilities),
-                    selectinload(Model.weapons).selectinload(Weapon.abilities),
-                )
-                .join(Faction)
-                .where(Faction.name == "Orks", Model.name.in_(["Tankbusta", "Tankbusta Nob"]))
-            )
-        )
-        .scalars()
-        .all()
-    }
-    assert set(models) == {"Tankbusta", "Tankbusta Nob"}
-    assert models["Tankbusta"].wounds == 2
-    assert models["Tankbusta Nob"].wounds == 3
-    for model in models.values():
-        assert (model.toughness, model.save, model.leadership, model.oc) == (5, 4, 7, 1)
-        assert [a.name for a in model.faction_abilities] == ["Waaagh!"]
-        assert {k.name for k in model.keywords} == {"INFANTRY", "EXPLOSIVES"}
-
-    tankbusta = {w.name: w for w in models["Tankbusta"].weapons}
-    assert set(tankbusta) == {
-        "Busta Rokkit Launcha - Standard",
-        "Busta Rokkit Launcha - Hunter",
-        "Gitstikka",
-    }
-    assert [a.name for a in tankbusta["Busta Rokkit Launcha - Hunter"].abilities] == [
-        "Hunter: Monster/Vehicle"
-    ]
-    assert tankbusta["Busta Rokkit Launcha - Standard"].abilities == []
-
-    nob = {w.name: w for w in models["Tankbusta Nob"].weapons}
-    assert set(nob) == {
-        "Choppa",
-        "Rokkit Pistol",
-        "Smash Hammer - Standard",
-        "Smash Hammer - Hunter",
-    }
-    assert [a.name for a in nob["Rokkit Pistol"].abilities] == ["Close-Quarters"]
-    assert nob["Smash Hammer - Hunter"].strength == 12
-
-
-async def test_run_all_seeds_big_mek_dakkarig(session: AsyncSession):
-    await run_all(session)
-
-    dakkarig = (
-        await session.execute(
-            select(Model)
-            .options(
-                selectinload(Model.keywords),
-                selectinload(Model.faction_abilities),
-                selectinload(Model.weapons).selectinload(Weapon.abilities),
-                selectinload(Model.abilities),
-            )
-            .where(Model.name == "Big Mek Dakkarig")
-        )
-    ).scalar_one()
-    assert [a.name for a in dakkarig.abilities] == ["Even More Dakka"]
-    assert (dakkarig.movement, dakkarig.toughness, dakkarig.save, dakkarig.wounds) == (8, 8, 3, 11)
-    assert (dakkarig.leadership, dakkarig.oc, dakkarig.invulnerable) == (7, 3, 5)
-    assert {k.name for k in dakkarig.keywords} == {"VEHICLE", "BIG MEK", "CHARACTER", "WALKER"}
-    assert [a.name for a in dakkarig.faction_abilities] == ["Waaagh!"]
-
-    weapons = {w.name: w for w in dakkarig.weapons}
-    assert set(weapons) == {"Blitzkannon", "Multi-busta Launcha", "Stompy Feet"}
-    assert {a.name for a in weapons["Blitzkannon"].abilities} == {
-        "Ignores Cover",
-        "Lethal Hits: non-Monster/Vehicle",
-        "Blitz Dem Gitz!",
-    }
-    assert {a.name for a in weapons["Multi-busta Launcha"].abilities} == {
-        "Ignores Cover",
-        "Lethal Hits",
-    }
-    assert weapons["Multi-busta Launcha"].skill == 5
-
-
-async def test_seed_datasheets_adds_missing_abilities_to_existing_model_and_weapons(
-    session: AsyncSession,
-):
-    # A Dakkarig seeded before it had Even More Dakka / Blitz Dem Gitz!.
-    await run_all(session)
-    dakkarig = (
-        await session.execute(
-            select(Model)
-            .options(
-                selectinload(Model.abilities),
-                selectinload(Model.weapons).selectinload(Weapon.abilities),
-            )
-            .where(Model.name == "Big Mek Dakkarig")
-        )
-    ).scalar_one()
-    blitzkannon = next(w for w in dakkarig.weapons if w.name == "Blitzkannon")
-    dakkarig.abilities = []
-    blitzkannon.abilities = [a for a in blitzkannon.abilities if a.name != "Blitz Dem Gitz!"]
-    await session.commit()
-
-    await factions.seed_datasheets(session)
-
-    session.expire_all()
-    dakkarig = (
-        await session.execute(
-            select(Model)
-            .options(
-                selectinload(Model.abilities),
-                selectinload(Model.weapons).selectinload(Weapon.abilities),
-            )
-            .where(Model.name == "Big Mek Dakkarig")
-        )
-    ).scalar_one()
-    blitzkannon = next(w for w in dakkarig.weapons if w.name == "Blitzkannon")
-    assert [a.name for a in dakkarig.abilities] == ["Even More Dakka"]
-    assert "Blitz Dem Gitz!" in {a.name for a in blitzkannon.abilities}
-    assert len(dakkarig.weapons) == 3
-
-
 async def test_datasheet_ability_rules_belong_to_seeded_abilities():
     from app.combat_rules import CONDITIONS, EFFECTS
 
@@ -796,210 +525,6 @@ async def test_datasheet_ability_rules_belong_to_seeded_abilities():
         for rule in rules:
             assert set(rule.conditions) <= set(CONDITIONS)
             assert set(rule.effects) <= set(EFFECTS)
-
-
-async def test_run_all_seeds_fulgurite_electro_priests(session: AsyncSession):
-    await run_all(session)
-
-    priest = (
-        await session.execute(
-            select(Model)
-            .options(
-                selectinload(Model.keywords),
-                selectinload(Model.abilities),
-                selectinload(Model.faction_abilities),
-                selectinload(Model.weapons).selectinload(Weapon.abilities),
-            )
-            .where(Model.name == "Fulgurite Electro-priest")
-        )
-    ).scalar_one()
-    assert (priest.movement, priest.toughness, priest.save, priest.wounds) == (6, 3, 7, 1)
-    assert (priest.leadership, priest.oc) == (7, 1)
-    assert (priest.invulnerable, priest.feel_no_pain) == (5, 5)
-    assert {k.name for k in priest.keywords} == {
-        "INFANTRY",
-        "IMPERIUM",
-        "CULT MECHANICUS",
-        "ELECTRO-PRIESTS",
-        "FULGURITE",
-    }
-    assert [a.name for a in priest.abilities] == ["Electro-infusion"]
-    assert [a.name for a in priest.faction_abilities] == ["Doctrina Imperatives"]
-    [stave] = priest.weapons
-    assert (stave.name, stave.weapon_type, stave.attacks, stave.skill) == (
-        "Electroleech stave",
-        "melee",
-        "2",
-        3,
-    )
-    assert (stave.strength, stave.ap, stave.damage) == (6, -1, "2")
-    assert [a.name for a in stave.abilities] == ["Devastating Wounds"]
-
-
-async def test_seed_datasheets_adds_missing_faction_abilities_to_existing_model(
-    session: AsyncSession,
-):
-    # Electro-priests seeded before they had Doctrina Imperatives.
-    await run_all(session)
-    load = (
-        select(Model)
-        .options(selectinload(Model.faction_abilities))
-        .where(Model.name == "Fulgurite Electro-priest")
-    )
-    priest = (await session.execute(load)).scalar_one()
-    priest.faction_abilities = []
-    await session.commit()
-
-    await factions.seed_datasheets(session)
-
-    session.expire_all()
-    priest = (await session.execute(load)).scalar_one()
-    assert [a.name for a in priest.faction_abilities] == ["Doctrina Imperatives"]
-
-
-async def test_run_all_seeds_tech_priest_dominus(session: AsyncSession):
-    await run_all(session)
-
-    dominus = (
-        await session.execute(
-            select(Model)
-            .options(
-                selectinload(Model.keywords),
-                selectinload(Model.abilities),
-                selectinload(Model.faction_abilities),
-                selectinload(Model.weapons).selectinload(Weapon.abilities),
-            )
-            .where(Model.name == "Tech-priest Dominus")
-        )
-    ).scalar_one()
-    assert (dominus.movement, dominus.toughness, dominus.save, dominus.wounds) == (6, 4, 2, 4)
-    assert (dominus.leadership, dominus.oc, dominus.invulnerable) == (7, 1, 5)
-    assert dominus.is_leader is True
-    assert {k.name for k in dominus.keywords} == {
-        "IMPERIUM",
-        "INFANTRY",
-        "CHARACTER",
-        "CULT MECHANICUS",
-        "TECH-PRIEST",
-        "DOMINUS",
-    }
-    assert {a.name for a in dominus.abilities} == {"Lord of the Machine Cult", "Data-spike"}
-    assert [a.name for a in dominus.faction_abilities] == ["Doctrina Imperatives"]
-
-    weapons = {w.name: w for w in dominus.weapons}
-    assert len(weapons) == 6
-    assert weapons["Eradication ray – focused"].attacks == "D3"
-    assert {a.name for a in weapons["Phosphor serpenta"].abilities} == {"Ignores Cover", "Pistol"}
-    assert [a.name for a in weapons["Volkite blaster"].abilities] == ["Devastating Wounds"]
-    assert weapons["Macrostubber pistol"].abilities == []
-    assert weapons["Omnissian axe"].weapon_type == "melee"
-
-
-async def test_run_all_seeds_skorpius_disintegrator(session: AsyncSession):
-    await run_all(session)
-
-    frame = (
-        await session.execute(
-            select(Model)
-            .options(
-                selectinload(Model.keywords),
-                selectinload(Model.abilities),
-                selectinload(Model.faction_abilities),
-                selectinload(Model.weapons).selectinload(Weapon.abilities),
-            )
-            .where(Model.name == "Skorpius Disintegrator")
-        )
-    ).scalar_one()
-    assert (frame.movement, frame.toughness, frame.save, frame.wounds) == (10, 10, 2, 12)
-    assert (frame.leadership, frame.oc, frame.invulnerable) == (7, 3, None)
-    assert "SKORPIUS DISINTEGRATOR" in {k.name for k in frame.keywords}
-    assert [a.name for a in frame.faction_abilities] == ["Doctrina Imperatives"]
-    assert {a.name for a in frame.abilities} == {"Deadly Demise D3", "Broad Spectrum Data-tether"}
-
-    names = sorted(w.name for w in frame.weapons)
-    assert names.count("Cognis heavy stubber") == 3
-    assert len(names) == 7
-    weapons = {w.name: w for w in frame.weapons}
-    assert weapons["Ferrumite cannon"].damage == "D6+1"
-    assert weapons["Belleros energy cannon"].attacks == "2D6"
-    assert {a.name for a in weapons["Belleros energy cannon"].abilities} == {
-        "Blast",
-        "Indirect Fire",
-        "Blistering Salvoes: Infantry",
-    }
-    assert [a.name for a in weapons["Disruptor missile launcher"].abilities] == ["Twin-linked"]
-
-
-async def test_seed_datasheets_fills_in_missing_copies_of_a_weapon(session: AsyncSession):
-    # A Disintegrator left with one heavy stubber gets the other two back.
-    await run_all(session)
-    load = (
-        select(Model)
-        .options(selectinload(Model.weapons))
-        .where(Model.name == "Skorpius Disintegrator")
-    )
-    frame = (await session.execute(load)).scalar_one()
-    stubbers = [w for w in frame.weapons if w.name == "Cognis heavy stubber"]
-    for extra in stubbers[1:]:
-        frame.weapons.remove(extra)
-        await session.delete(extra)
-    await session.commit()
-
-    await factions.seed_datasheets(session)
-
-    session.expire_all()
-    frame = (await session.execute(load)).scalar_one()
-    assert [w.name for w in frame.weapons].count("Cognis heavy stubber") == 3
-
-
-async def test_run_all_seeds_sicarian_infiltrators_and_princeps(session: AsyncSession):
-    await run_all(session)
-
-    models = {
-        m.name: m
-        for m in (
-            await session.execute(
-                select(Model)
-                .options(
-                    selectinload(Model.keywords),
-                    selectinload(Model.abilities),
-                    selectinload(Model.faction_abilities),
-                    selectinload(Model.weapons).selectinload(Weapon.abilities),
-                )
-                .where(Model.name.in_(["Sicarian Infiltrator", "Sicarian Infiltrator Princeps"]))
-            )
-        )
-        .scalars()
-        .all()
-    }
-    assert set(models) == {"Sicarian Infiltrator", "Sicarian Infiltrator Princeps"}
-    for model in models.values():
-        assert (model.movement, model.toughness, model.save, model.wounds) == (8, 4, 4, 2)
-        assert (model.leadership, model.oc, model.invulnerable) == (7, 1, 5)
-        assert {k.name for k in model.keywords} == {
-            "INFANTRY",
-            "IMPERIUM",
-            "SKITARII",
-            "SICARIAN",
-            "INFILTRATORS",
-        }
-        assert [a.name for a in model.faction_abilities] == ["Doctrina Imperatives"]
-        assert {a.name for a in model.abilities} == {
-            "Infiltrators",
-            "Stealth",
-            "Voices in the Code",
-            "Neurostatic Interference (Aura)",
-        }
-        weapons = {w.name: w for w in model.weapons}
-        assert set(weapons) == {
-            "Flechette blaster pistol",
-            "Stubcarbine pistol",
-            "Power weapon",
-            "Taser goad",
-        }
-        assert [a.name for a in weapons["Taser goad"].abilities] == ["Sustained 2"]
-        assert [a.name for a in weapons["Flechette blaster pistol"].abilities] == ["Pistol"]
-        assert [a.name for a in weapons["Stubcarbine pistol"].abilities] == ["Pistol"]
 
 
 async def test_seed_weapon_abilities_resyncs_heavy_to_the_heavy_effect(session: AsyncSession):
@@ -1035,105 +560,6 @@ async def test_seed_weapon_abilities_resyncs_heavy_to_the_heavy_effect(session: 
     assert [e.keyword for e in heavy.effects] == ["heavy"]
 
 
-async def test_run_all_seeds_skitarii_vanguard(session: AsyncSession):
-    await run_all(session)
-
-    models = {
-        m.name: m
-        for m in (
-            await session.execute(
-                select(Model)
-                .options(
-                    selectinload(Model.keywords),
-                    selectinload(Model.faction_abilities),
-                    selectinload(Model.wargear),
-                    selectinload(Model.weapons).selectinload(Weapon.abilities),
-                )
-                .where(Model.name.in_(["Skitarii Vanguard", "Skitarii Vanguard Alpha"]))
-            )
-        )
-        .scalars()
-        .all()
-    }
-    assert set(models) == {"Skitarii Vanguard", "Skitarii Vanguard Alpha"}
-    for model in models.values():
-        assert (model.movement, model.toughness, model.save, model.wounds) == (6, 3, 4, 1)
-        assert (model.leadership, model.oc, model.invulnerable) == (7, 2, 5)
-        keywords = {k.name for k in model.keywords}
-        assert "VANGUARD" in keywords and "RANGERS" not in keywords
-        assert "BATTLELINE" in keywords
-        assert [a.name for a in model.faction_abilities] == ["Doctrina Imperatives"]
-
-    vanguard = {w.name: w for w in models["Skitarii Vanguard"].weapons}
-    assert set(vanguard) == {
-        "Arc rifle",
-        "Radium carbine",
-        "Plasma caliver – standard",
-        "Plasma caliver – supercharge",
-        "Transuranic arquebus",
-        "Close combat weapon",
-    }
-    carbine = vanguard["Radium carbine"]
-    assert (carbine.range, carbine.attacks, carbine.skill) == (18, "3", 4)
-    assert (carbine.strength, carbine.ap, carbine.damage) == (3, 0, "1")
-    assert [a.name for a in carbine.abilities] == ["Anti-Infantry 4+"]
-    assert [g.name for g in models["Skitarii Vanguard"].wargear] == ["Omnispex"]
-
-    alpha = {w.name for w in models["Skitarii Vanguard Alpha"].weapons}
-    assert alpha == {
-        "Radium carbine",
-        "Close combat weapon",
-        "Alpha combat weapon",
-        "Mechanicus pistol",
-    }
-
-
-async def test_run_all_seeds_belisarius_cawl(session: AsyncSession):
-    await run_all(session)
-
-    cawl = (
-        await session.execute(
-            select(Model)
-            .options(
-                selectinload(Model.keywords),
-                selectinload(Model.faction_abilities),
-                selectinload(Model.weapons).selectinload(Weapon.abilities),
-            )
-            .where(Model.name == "Belisarius Cawl")
-        )
-    ).scalar_one()
-    assert (cawl.movement, cawl.toughness, cawl.save, cawl.wounds) == (8, 8, 2, 10)
-    assert (cawl.leadership, cawl.oc, cawl.invulnerable) == (6, 3, 4)
-    assert {k.name for k in cawl.keywords} == {
-        "MONSTER",
-        "CHARACTER",
-        "MOBILE",
-        "EPIC HERO",
-        "IMPERIUM",
-        "TECH-PRIEST",
-        "CULT MECHANICUS",
-        "BELISARIUS CAWL",
-    }
-    assert [a.name for a in cawl.faction_abilities] == ["Doctrina Imperatives"]
-
-    weapons = {w.name: w for w in cawl.weapons}
-    assert set(weapons) == {
-        "Solar atomiser",
-        "Arc scourge",
-        "Cawl’s Omnissian axe",
-        "Mechadendrite hive",
-    }
-    assert [a.name for a in weapons["Solar atomiser"].abilities] == ["Melta 3"]
-    assert {a.name for a in weapons["Arc scourge"].abilities} == {
-        "Anti-Vehicle 4+",
-        "Devastating Wounds",
-        "Extra Attacks",
-    }
-    assert [a.name for a in weapons["Mechadendrite hive"].abilities] == ["Extra Attacks"]
-    assert weapons["Mechadendrite hive"].attacks == "2D6"
-    assert weapons["Cawl’s Omnissian axe"].abilities == []
-
-
 async def test_datasheet_ability_options_are_well_formed():
     from app.combat_rules import CONDITIONS, EFFECTS
 
@@ -1151,27 +577,6 @@ async def test_datasheet_ability_options_are_well_formed():
         n for options in factions.RULE_OPTIONS.values() for n in options
     ]
     assert len(names) == len(set(names))
-
-
-async def test_belisarius_cawl_has_canticles(session: AsyncSession):
-    await run_all(session)
-    cawl = (
-        await session.execute(
-            select(Model)
-            .options(selectinload(Model.abilities))
-            .where(Model.name == "Belisarius Cawl")
-        )
-    ).scalar_one()
-    assert {a.name for a in cawl.abilities} == {
-        "Canticles of the Omnissiah",
-        "Mechanicus Bodyguard",
-        "Self-repair Mechanisms",
-    }
-    assert set(datasheet_abilities.OPTIONS["Canticles of the Omnissiah"]) == {
-        "Invocation of Machine Vengeance",
-        "Mantra of Discipline",
-        "Shroudpsalm",
-    }
 
 
 async def test_core_stratagems_have_their_keyword_requirements(session: AsyncSession):
@@ -1230,3 +635,296 @@ async def test_core_stratagems_have_their_timings(session: AsyncSession):
     assert rows["Fire Overwatch"] == {("movement", "opponent_turn"), ("charge", "opponent_turn")}
     assert rows["Command Re-roll"] == set()
     assert set(stratagems.TIMINGS) <= set(rows)
+
+
+async def test_seed_missions_without_a_data_file_adds_nothing(session: AsyncSession):
+    from app.models import PrimaryMission, SecondaryMission
+    from app.seeds import missions
+
+    await dispositions.seed(session)
+    await missions.seed(session)
+    assert (await session.execute(select(SecondaryMission))).scalars().all() == []
+    assert (await session.execute(select(PrimaryMission))).scalars().all() == []
+
+
+async def test_seed_missions_from_a_data_file(session: AsyncSession, tmp_path):
+    import json
+
+    from app.models import PrimaryMission, SecondaryMission
+    from app.seeds import missions
+
+    path = tmp_path / "missions.json"
+    path.write_text(
+        json.dumps(
+            {
+                "primaries": [
+                    {
+                        "name": "Battlefield Dominance",
+                        "player_disposition": "Take and Hold",
+                        "opponent_disposition": "Take and Hold",
+                        "description": "Hold things.",
+                    },
+                    {
+                        "name": "Purge and Secure",
+                        "player_disposition": "Take and Hold",
+                        "opponent_disposition": "Reconnaissance",
+                        "description": None,
+                    },
+                ],
+                "secondaries": [
+                    {
+                        "name": "Assassination",
+                        "completes_on": "either",
+                        "fixed_points": 3,
+                        "tactical_points": 5,
+                        "description": "Kill characters.",
+                    }
+                ],
+            }
+        )
+    )
+    await dispositions.seed(session)
+    await missions.seed(session, path)
+    await missions.seed(session, path)  # idempotent
+
+    [secondary] = (await session.execute(select(SecondaryMission))).scalars().all()
+    assert (secondary.name, secondary.completes_on, secondary.fixed_points) == (
+        "Assassination",
+        "either",
+        3,
+    )
+    primaries = (
+        await session.execute(
+            select(PrimaryMission).options(
+                selectinload(PrimaryMission.player_disposition),
+                selectinload(PrimaryMission.opponent_disposition),
+            )
+        )
+    ).scalars().all()
+    assert {
+        (p.name, p.player_disposition.name, p.opponent_disposition.name) for p in primaries
+    } == {
+        ("Battlefield Dominance", "Take and Hold", "Take and Hold"),
+        ("Purge and Secure", "Take and Hold", "Reconnaissance"),
+    }
+
+
+async def test_seed_missions_rejects_an_unknown_disposition(session: AsyncSession, tmp_path):
+    import json
+
+    import pytest
+
+    from app.seeds import missions
+
+    path = tmp_path / "missions.json"
+    path.write_text(
+        json.dumps(
+            {
+                "primaries": [
+                    {"name": "X", "player_disposition": "Nope", "opponent_disposition": "Nope"}
+                ],
+                "secondaries": [],
+            }
+        )
+    )
+    await dispositions.seed(session)
+    with pytest.raises(ValueError, match="unknown disposition"):
+        await missions.seed(session, path)
+
+
+async def test_seed_dispositions_renames_reconnaisance_in_place(session: AsyncSession):
+    old = Disposition(name="Reconnaisance")
+    session.add(old)
+    await session.commit()
+    old_id = old.id
+
+    await dispositions.seed(session)
+
+    rows = (
+        await session.execute(
+            select(Disposition.id, Disposition.name).where(
+                Disposition.name.in_(["Reconnaisance", "Reconnaissance"])
+            )
+        )
+    ).all()
+    assert rows == [(old_id, "Reconnaissance")]
+
+
+# --- datasheets, from app/data/datasheets/<faction>.json ---
+
+# The real local data folder (tests otherwise point seeds at an empty one).
+LOCAL_DATA_DIR = data_files.DATA_DIR
+
+
+def _local_datasheets():
+    folder = LOCAL_DATA_DIR / "datasheets"
+    if not folder.exists():
+        return []
+    return [
+        (faction, datasheet)
+        for faction in factions.FACTIONS
+        if (folder / f"{faction.__name__.rsplit('.', 1)[-1]}.json").exists()
+        for datasheet in _load_from(LOCAL_DATA_DIR, faction)
+    ]
+
+
+def _load_from(folder, faction):
+    original = data_files.DATA_DIR
+    data_files.DATA_DIR = folder
+    try:
+        return datasheet_data.load(faction.__name__.rsplit(".", 1)[-1])
+    finally:
+        data_files.DATA_DIR = original
+
+
+LOCAL_DATASHEETS = _local_datasheets()
+
+
+@pytest.mark.skipif(not LOCAL_DATASHEETS, reason="no local datasheet data (app/data/datasheets)")
+@pytest.mark.parametrize(
+    "faction,datasheet", LOCAL_DATASHEETS, ids=[d.name for _, d in LOCAL_DATASHEETS] or None
+)
+async def test_local_datasheet_references_only_seeded_names(faction, datasheet):
+    # Checks your local data files, if you have any: every datasheet is one of
+    # its faction's units, and every keyword/ability it names gets seeded.
+    assert datasheet.name in faction.units.NAMES
+    weapon_ability_names = {name for name, _, _, _ in weapon_abilities.ENTRIES}
+    wargear_ability_names = {name for name, _, _, _ in wargear_abilities.ENTRIES}
+    datasheet_ability_names = {name for name, _, _, _ in datasheet_abilities.ENTRIES}
+    faction_ability_names = {name for name, _ in faction.abilities.ENTRIES}
+    for spec in datasheet.models:
+        assert set(spec.keywords) <= set(keywords.NAMES)
+        assert set(spec.faction_abilities) <= faction_ability_names
+        assert set(spec.abilities) <= datasheet_ability_names
+        for weapon in spec.weapons:
+            assert set(weapon.abilities) <= weapon_ability_names
+            assert (weapon.range is None) == (weapon.weapon_type == "melee")
+        for gear in spec.wargear:
+            assert set(gear.abilities) <= wargear_ability_names
+
+
+async def test_load_datasheets_without_a_data_file_is_empty():
+    assert datasheet_data.load("adeptus_mechanicus") == []
+
+
+async def test_load_datasheets_from_a_data_file(fixture_game_data):
+    [sheet] = datasheet_data.load("adeptus_mechanicus")
+    assert sheet.name == "Test Squad"
+    trooper, sergeant = sheet.models
+    assert (trooper.name, trooper.toughness, trooper.invulnerable) == ("Test Trooper", 3, 5)
+    assert trooper.keywords == ("INFANTRY", "BATTLELINE")
+    assert [w.name for w in trooper.weapons].count("Test Stubber") == 3
+    assert trooper.weapons[0].abilities == ("Rapid Fire 1", "Heavy")
+    assert trooper.wargear[0].abilities == ("Ignore Cover (Unit)",)
+    # Fields left out of the file take their defaults.
+    assert (sergeant.is_leader, sergeant.invulnerable, sergeant.wargear) == (True, None, ())
+
+
+def _test_squad_query():
+    return (
+        select(Model)
+        .options(
+            selectinload(Model.keywords),
+            selectinload(Model.abilities),
+            selectinload(Model.faction_abilities),
+            selectinload(Model.wargear).selectinload(Wargear.abilities),
+            selectinload(Model.weapons).selectinload(Weapon.abilities),
+        )
+        .where(Model.name.in_(["Test Trooper", "Test Sergeant"]))
+    )
+
+
+async def _test_squad(session: AsyncSession) -> dict:
+    session.expire_all()
+    return {m.name: m for m in (await session.execute(_test_squad_query())).scalars().all()}
+
+
+async def test_run_all_seeds_datasheets_from_data_files(session: AsyncSession, fixture_game_data):
+    await run_all(session)
+
+    models = await _test_squad(session)
+    trooper, sergeant = models["Test Trooper"], models["Test Sergeant"]
+    assert (trooper.movement, trooper.toughness, trooper.save, trooper.wounds) == (6, 3, 4, 1)
+    assert (trooper.leadership, trooper.oc, trooper.invulnerable) == (7, 2, 5)
+    assert {k.name for k in trooper.keywords} == {"INFANTRY", "BATTLELINE"}
+    assert [a.name for a in trooper.faction_abilities] == ["Doctrina Imperatives"]
+    assert [a.name for a in trooper.abilities] == ["Stealth"]
+    weapons = sorted(w.name for w in trooper.weapons)
+    assert weapons == ["Test Blade", "Test Rifle", "Test Stubber", "Test Stubber", "Test Stubber"]
+    rifle = next(w for w in trooper.weapons if w.name == "Test Rifle")
+    assert (rifle.range, rifle.attacks, rifle.ap, rifle.damage) == (24, "2", -1, "D3")
+    assert {a.name for a in rifle.abilities} == {"Rapid Fire 1", "Heavy"}
+    [scope] = trooper.wargear
+    assert [a.name for a in scope.abilities] == ["Ignore Cover (Unit)"]
+    assert sergeant.is_leader is True
+    assert [w.name for w in sergeant.weapons] == ["Test Blade"]
+
+
+async def test_seed_datasheets_is_idempotent(session: AsyncSession, fixture_game_data):
+    await run_all(session)
+    models_before = (await session.execute(select(Model.name))).scalars().all()
+    weapons_before = (await session.execute(select(Weapon.model_id, Weapon.name))).all()
+
+    await factions.seed_datasheets(session)
+
+    assert sorted((await session.execute(select(Model.name))).scalars().all()) == sorted(
+        models_before
+    )
+    assert sorted((await session.execute(select(Weapon.model_id, Weapon.name))).all()) == sorted(
+        weapons_before
+    )
+
+
+async def test_seed_datasheets_rejects_unknown_references(session: AsyncSession, fixture_game_data):
+    # Without keywords/weapon abilities seeded, the datasheet's references
+    # can't be resolved - that's an error rather than a silently bare model.
+    await factions.seed(session)
+    await factions.seed_abilities(session)
+
+    with pytest.raises(ValueError, match="references unknown"):
+        await factions.seed_datasheets(session)
+
+
+async def test_seed_datasheets_fills_in_what_an_existing_model_is_missing(
+    session: AsyncSession, fixture_game_data
+):
+    # A model seeded before its datasheet gained things (or that's had some
+    # removed) gets them back - weapons (counting copies), wargear, abilities,
+    # faction abilities, and abilities on existing weapons - while a user's
+    # edit to an existing weapon is left alone.
+    await run_all(session)
+    trooper = (await _test_squad(session))["Test Trooper"]
+    stubbers = [w for w in trooper.weapons if w.name == "Test Stubber"]
+    blade = next(w for w in trooper.weapons if w.name == "Test Blade")
+    rifle = next(w for w in trooper.weapons if w.name == "Test Rifle")
+    for extra in stubbers[1:] + [blade]:
+        trooper.weapons.remove(extra)
+        await session.delete(extra)
+    scope = trooper.wargear[0]
+    trooper.wargear.remove(scope)
+    await session.delete(scope)
+    trooper.abilities = []
+    trooper.faction_abilities = []
+    rifle.abilities = [a for a in rifle.abilities if a.name != "Heavy"]
+    rifle.attacks = "9"  # a user edit
+    await session.commit()
+
+    await factions.seed_datasheets(session)
+
+    trooper = (await _test_squad(session))["Test Trooper"]
+    names = sorted(w.name for w in trooper.weapons)
+    assert names == ["Test Blade", "Test Rifle", "Test Stubber", "Test Stubber", "Test Stubber"]
+    rifle = next(w for w in trooper.weapons if w.name == "Test Rifle")
+    assert {a.name for a in rifle.abilities} == {"Rapid Fire 1", "Heavy"}
+    assert rifle.attacks == "9"
+    assert [g.name for g in trooper.wargear] == ["Test Scope"]
+    assert [a.name for a in trooper.abilities] == ["Stealth"]
+    assert [a.name for a in trooper.faction_abilities] == ["Doctrina Imperatives"]
+
+
+async def test_canticles_of_the_omnissiah_options():
+    assert set(datasheet_abilities.OPTIONS["Canticles of the Omnissiah"]) == {
+        "Invocation of Machine Vengeance",
+        "Mantra of Discipline",
+        "Shroudpsalm",
+    }

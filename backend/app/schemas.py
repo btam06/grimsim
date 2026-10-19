@@ -404,8 +404,10 @@ class UserOut(UserIn):
 class SecondaryMissionIn(BaseModel):
     name: str
     description: str | None = None
-    completes_on: Literal["your_turn", "opponent_turn"]
-    # VP for completing it in each mode; None means it can't be used in that mode.
+    completes_on: Literal["your_turn", "opponent_turn", "either"]
+    # (Base) VP for completing it in each mode; None means it can't be used in
+    # that mode. Many cards score more or less depending on the outcome, so
+    # the VP can be adjusted when it's achieved in a game.
     fixed_points: int | None = Field(default=None, ge=0)
     tactical_points: int | None = Field(default=None, ge=0)
 
@@ -517,6 +519,11 @@ class GameOut(BaseModel):
 class GameStratagemIn(BaseModel):
     seat: Literal[1, 2]
     stratagem_id: int
+
+
+class GameAchieveIn(BaseModel):
+    # VP to score; defaults to the card's VP for the player's mode.
+    points: int | None = Field(default=None, ge=0)
 
 
 class GameScoreIn(BaseModel):

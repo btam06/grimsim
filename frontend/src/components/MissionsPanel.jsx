@@ -15,6 +15,7 @@ import Select from './Select'
 const COMPLETES_ON = [
   { id: 'your_turn', name: 'Your turn' },
   { id: 'opponent_turn', name: "Opponent's turn" },
+  { id: 'either', name: 'Either turn' },
 ]
 const completesOnLabel = (value) => COMPLETES_ON.find((o) => o.id === value)?.name ?? value
 
@@ -113,7 +114,7 @@ function SecondaryMissions() {
             {m.name} — completes on {completesOnLabel(m.completes_on).toLowerCase()} — Fixed:{' '}
             {pointsLabel(m.fixed_points)}, Tactical: {pointsLabel(m.tactical_points)}
             <DeleteButton onClick={() => handleDelete(m.id)} />
-            {m.description && <p className="hint">{m.description}</p>}
+            {m.description && <p className="hint card-text">{m.description}</p>}
           </li>
         ))}
       </ul>
@@ -222,7 +223,7 @@ function PrimaryMissions() {
             {m.name} — {dispositionName(m.player_disposition_id)} vs{' '}
             {dispositionName(m.opponent_disposition_id)}
             <DeleteButton onClick={() => handleDelete(m.id)} />
-            {m.description && <p className="hint">{m.description}</p>}
+            {m.description && <p className="hint card-text">{m.description}</p>}
           </li>
         ))}
       </ul>

@@ -3,3 +3,8 @@ node_modules/
 frontend/dist/
 __pycache__/
 *.pyc
+
+# Local game data (Games Workshop's datasheets and mission cards) - see
+# backend/app/data/README.md.
+backend/app/data/*
+!backend/app/data/README.md

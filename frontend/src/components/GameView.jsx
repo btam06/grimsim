@@ -14,12 +14,16 @@ import { PHASES } from './StratagemsPanel'
 
 const BATTLE_ROUNDS = 5
 const phaseName = (id) => PHASES.find((p) => p.id === id)?.name ?? id
-const completesOnLabel = (value) => (value === 'your_turn' ? 'your turn' : "opponent's turn")
+const completesOnLabel = (value) =>
+  ({ your_turn: 'your turn', opponent_turn: "opponent's turn", either: 'either turn' })[value] ??
+  value
 
 function PlayerCard({ game, player, onAction }) {
   const [usable, setUsable] = useState([])
   const [stratagemId, setStratagemId] = useState('')
   const [primaryPoints, setPrimaryPoints] = useState('')
+  // VP to score per secondary card; starts at the card's base VP.
+  const [achievePoints, setAchievePoints] = useState({})
   const inProgress = game.status === 'in_progress'
   const isTurn = game.turn_seat === player.seat
 
@@ -59,7 +63,7 @@ function PlayerCard({ game, player, onAction }) {
         {player.disposition_name && <span className="hint"> ({player.disposition_name})</span>}
       </p>
       {player.primary_mission_description && (
-        <p className="hint">{player.primary_mission_description}</p>
+        <p className="hint card-text">{player.primary_mission_description}</p>
       )}
       {inProgress && (
         <div className="inline-controls">
@@ -94,12 +98,23 @@ function PlayerCard({ game, player, onAction }) {
             <strong>{card.name}</strong> — {card.points} VP, completes on{' '}
             {completesOnLabel(card.completes_on)}
             {card.fixed && ' (fixed)'}
-            {card.description && <p className="hint">{card.description}</p>}
+            {card.description && <p className="hint card-text">{card.description}</p>}
             {inProgress && (
               <div className="inline-controls">
+                <input
+                  type="number"
+                  min="0"
+                  value={achievePoints[card.id] ?? card.points}
+                  onChange={(e) => setAchievePoints({ ...achievePoints, [card.id]: e.target.value })}
+                  aria-label={`VP for ${card.name}`}
+                />
                 <button
                   type="button"
-                  onClick={() => onAction(() => achieveSecondary(game.id, card.id))}
+                  onClick={() =>
+                    onAction(() =>
+                      achieveSecondary(game.id, card.id, Number(achievePoints[card.id] ?? card.points))
+                    )
+                  }
                 >
                   Achieved
                 </button>

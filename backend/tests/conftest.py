@@ -1,5 +1,6 @@
 import os
 from collections.abc import AsyncGenerator
+from pathlib import Path
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
@@ -59,3 +60,21 @@ async def faction_id(session: AsyncSession) -> int:
     session.add(faction)
     await session.commit()
     return faction.id
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def no_local_game_data(monkeypatch, tmp_path):
+    # Datasheets and mission cards come from uncommitted local files (see
+    # app/data/README.md); point the seeds at an empty folder so tests don't
+    # depend on whether those files exist.
+    from app.seeds import data_files
+
+    monkeypatch.setattr(data_files, "DATA_DIR", tmp_path / "no-data")
+
+
+@pytest_asyncio.fixture
+async def fixture_game_data(monkeypatch):
+    # A small made-up datasheet ("Test Squad", in tests/fixtures/data) to seed.
+    from app.seeds import data_files
+
+    monkeypatch.setattr(data_files, "DATA_DIR", Path(__file__).parent / "fixtures" / "data")

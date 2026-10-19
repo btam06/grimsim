@@ -13,6 +13,7 @@ from app.models import (
     Stratagem,
 )
 from app.schemas import (
+    GameAchieveIn,
     GameIn,
     GameOut,
     GamePlayerOut,
@@ -223,10 +224,14 @@ def _card(game: Game, card_id: int) -> GameSecondary:
 
 @router.post("/{game_id}/secondaries/{card_id}/achieve", response_model=GameOut)
 async def achieve_secondary(
-    game_id: int, card_id: int, session: AsyncSession = Depends(get_session)
+    game_id: int,
+    card_id: int,
+    payload: GameAchieveIn | None = None,
+    session: AsyncSession = Depends(get_session),
 ):
     game = await _load_game(session, game_id)
-    game_service.achieve_secondary(game, _card(game, card_id))
+    points = payload.points if payload else None
+    game_service.achieve_secondary(game, _card(game, card_id), points)
     return await _commit_and_reload(session, game_id)
 
 

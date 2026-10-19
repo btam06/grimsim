@@ -558,3 +558,38 @@ async def test_concurrent_games_are_independent(client: AsyncClient):
     # Each game's tactical draws are its own.
     assert len(_player(two, 2)["secondaries"]) == 2
     assert _player(one, 2)["secondaries"] == []
+
+
+async def test_either_turn_secondaries_complete_on_any_turn(client: AsyncClient):
+    ids = await _setup(client)
+    either = (
+        await client.post(
+            "/secondary-missions",
+            json={"name": "Either", "completes_on": "either", "fixed_points": 3},
+        )
+    ).json()["id"]
+    picks = ([either, ids["reactive"]], ())
+    game = await _new_game(client, ids, modes=("fixed", "tactical"), fixed=picks, first=1)
+    game_id = game["id"]
+    game = (await client.post(f"/games/{game_id}/start")).json()
+    card = next(c for c in _player(game, 1)["secondaries"] if c["name"] == "Either")
+
+    url = f"/games/{game_id}/secondaries/{card['id']}/achieve"
+    assert (await client.post(url)).status_code == 200  # player 1's own turn
+    await _advance(client, game_id, times=5)
+    game = (await client.post(url)).json()  # and their opponent's
+    assert _player(game, 1)["vp"] == 6
+
+
+async def test_achieving_a_secondary_can_score_a_different_amount(client: AsyncClient):
+    # e.g. a card that scores 2 VP for one objective or 5 for two.
+    ids = await _setup(client)
+    game = await _new_game(client, ids, first=1)
+    game = (await client.post(f"/games/{game['id']}/start")).json()
+    card = _player(game, 1)["secondaries"][0]
+
+    url = f"/games/{game['id']}/secondaries/{card['id']}/achieve"
+    assert (await client.post(url, json={"points": -1})).status_code == 422
+    game = (await client.post(url, json={"points": 8})).json()
+    assert _player(game, 1)["vp"] == 8
+    assert _player(game, 1)["scores"][0]["points"] == 8
