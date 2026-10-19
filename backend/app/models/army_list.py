@@ -5,13 +5,14 @@ from typing import TYPE_CHECKING
 from sqlalchemy import ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.associations import list_detachments
+from app.models.associations import list_detachments, list_owners
 from app.models.base import Base
 
 if TYPE_CHECKING:
     from app.models.detachment import Detachment
     from app.models.faction import Faction
     from app.models.unit import Unit
+    from app.models.user import User
 
 
 class ArmyList(Base):
@@ -25,3 +26,6 @@ class ArmyList(Base):
     faction: Mapped["Faction"] = relationship(back_populates="lists")
     detachments: Mapped[list["Detachment"]] = relationship(secondary=list_detachments)
     units: Mapped[list["Unit"]] = relationship(back_populates="army_list")
+    owner: Mapped["User | None"] = relationship(
+        secondary=list_owners, back_populates="lists", uselist=False
+    )

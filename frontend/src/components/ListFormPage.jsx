@@ -15,6 +15,7 @@ function buildEmptyForm() {
     points_limit: '2000',
     faction_id: '',
     detachment_ids: [],
+    user_id: '',
   }
 }
 
@@ -24,6 +25,7 @@ function formFromList(list) {
     points_limit: String(list.points_limit),
     faction_id: String(list.faction_id),
     detachment_ids: list.detachment_ids,
+    user_id: list.user_id === null ? '' : String(list.user_id),
   }
 }
 
@@ -33,6 +35,7 @@ function toPayload(form) {
     points_limit: Number(form.points_limit),
     faction_id: Number(form.faction_id),
     detachment_ids: form.detachment_ids,
+    user_id: form.user_id === '' ? null : Number(form.user_id),
   }
 }
 
@@ -52,6 +55,7 @@ const UNIT_CATEGORIES = [
 
 function ListFormPage({
   editingList,
+  users,
   factions,
   detachments,
   units,
@@ -173,6 +177,13 @@ function ListFormPage({
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
             required
+          />
+        </Field>
+        <Field label="Owner">
+          <Select
+            options={[{ id: '', name: 'No owner' }, ...users]}
+            value={form.user_id}
+            onChange={(user_id) => setForm({ ...form, user_id })}
           />
         </Field>
         <Field label="Points Limit">

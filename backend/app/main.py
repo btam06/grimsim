@@ -14,11 +14,14 @@ from app.routers import (
     faction_abilities,
     faction_units,
     factions,
+    games,
     keywords,
     lists,
+    missions,
     models,
     stratagems,
     units,
+    users,
     wargear,
     wargear_abilities,
     weapon_abilities,
@@ -50,6 +53,10 @@ app.include_router(wargear.router)
 app.include_router(wargear_abilities.router)
 app.include_router(units.router)
 app.include_router(lists.router)
+app.include_router(users.router)
+app.include_router(missions.secondary_router)
+app.include_router(missions.primary_router)
+app.include_router(games.router)
 app.include_router(weapon_abilities.router)
 app.include_router(datasheet_abilities.router)
 app.include_router(conditions.router)

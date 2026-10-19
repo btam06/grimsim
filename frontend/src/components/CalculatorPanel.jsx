@@ -122,13 +122,23 @@ function CalculatorPanel() {
 
   // Core stratagems are always available; detachment stratagems only when
   // the attacking unit's army list has taken one of their detachments.
+  // ...and only those with no keyword requirements, or whose required
+  // keywords (all of them) some model in the attacking unit has.
   const availableStratagems = useMemo(() => {
     const list = lists.find((l) => l.id === attackingUnit?.list_id)
     const detachmentIds = list?.detachment_ids ?? []
-    return stratagems.filter(
-      (s) => s.is_core || s.detachment_ids.some((id) => detachmentIds.includes(id))
+    const modelKeywordIds = (attackingUnit?.unit_models ?? []).map(
+      (um) => new Set(models.find((m) => m.id === um.model_id)?.keyword_ids ?? [])
     )
-  }, [attackingUnit, lists, stratagems])
+    const someModelQualifies = (s) =>
+      s.keyword_ids.length === 0 ||
+      modelKeywordIds.some((ids) => s.keyword_ids.every((id) => ids.has(id)))
+    return stratagems.filter(
+      (s) =>
+        (s.is_core || s.detachment_ids.some((id) => detachmentIds.includes(id))) &&
+        someModelQualifies(s)
+    )
+  }, [attackingUnit, lists, stratagems, models])
 
   // Stratagems are opt-in, so clear them whenever the attacking unit changes.
   useEffect(() => {

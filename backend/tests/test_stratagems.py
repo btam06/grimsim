@@ -141,3 +141,26 @@ async def test_delete_detachment_unlinks_its_stratagems(client: AsyncClient, fac
     response = await client.delete(f"/detachments/{detachment_a}")
     assert response.status_code == 204
     assert (await client.get("/stratagems")).json()[0]["detachment_ids"] == [detachment_b]
+
+
+async def test_create_stratagem_with_required_keywords(client: AsyncClient):
+    keyword_id = (await client.post("/keywords", json={"name": "CHARACTER"})).json()["id"]
+    response = await client.post(
+        "/stratagems",
+        json={"name": "Epic Challenge", "cp": 1, "is_core": True, "keyword_ids": [keyword_id]},
+    )
+    assert response.status_code == 201
+    assert response.json()["keyword_ids"] == [keyword_id]
+    assert (await client.get("/stratagems")).json()[0]["keyword_ids"] == [keyword_id]
+
+
+async def test_create_stratagem_defaults_to_no_required_keywords(client: AsyncClient):
+    response = await client.post("/stratagems", json={"name": "Any", "cp": 1, "is_core": True})
+    assert response.json()["keyword_ids"] == []
+
+
+async def test_create_stratagem_with_invalid_keyword_id_returns_400(client: AsyncClient):
+    response = await client.post(
+        "/stratagems", json={"name": "Bad", "cp": 1, "is_core": True, "keyword_ids": [9999]}
+    )
+    assert response.status_code == 400

@@ -5,6 +5,7 @@ import {
   listFactionUnits,
   listFactions,
   listKeywords,
+  listUsers,
   listLists,
   listModels,
   listUnits,
@@ -35,6 +36,7 @@ function ListsPanel() {
   const [wargear, setWargear] = useState([])
   const [factionUnits, setFactionUnits] = useState([])
   const [keywords, setKeywords] = useState([])
+  const [users, setUsers] = useState([])
   const [error, setError] = useState(null)
   const [view, setView] = useState('list')
   const [editingList, setEditingList] = useState(null)
@@ -55,6 +57,7 @@ function ListsPanel() {
     listWargear().then(setWargear).catch((err) => setError(err.message))
     listFactionUnits().then(setFactionUnits).catch((err) => setError(err.message))
     listKeywords().then(setKeywords).catch((err) => setError(err.message))
+    listUsers().then(setUsers).catch((err) => setError(err.message))
   }, [])
 
   const keywordIdByName = (name) => keywords.find((k) => k.name === name)?.id
@@ -137,6 +140,7 @@ function ListsPanel() {
     return (
       <ListFormPage
         editingList={editingList}
+        users={users}
         factions={factions}
         detachments={detachments}
         units={units}

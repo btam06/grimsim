@@ -218,10 +218,16 @@ def resolve_combat(
     attacker_rules = [r for r in attacker_rules or [] if r.side == "attacker"]
     defender_rules = [r for r in defender_rules or [] if r.side == "defender"]
 
-    # Stratagems used on the attacking unit target the whole unit, so they're
-    # in play both for the unit-wide check below and for every weapon fired,
-    # the same as wargear abilities.
+    # Stratagems used on the attacking unit. One with keyword requirements
+    # (e.g. Epic Challenge's CHARACTER) only applies to the attacks of models
+    # that have all of them; one without applies to every model, and also to
+    # the unit-wide check below.
     stratagems = list(stratagems or [])
+    unrestricted_stratagems = [s for s in stratagems if not s.keywords]
+
+    def stratagems_for(model: Model) -> list[Stratagem]:
+        model_keywords = {keyword.name for keyword in model.keywords}
+        return [s for s in stratagems if {k.name for k in s.keywords} <= model_keywords]
 
     # Some wargear/datasheet abilities apply to the whole attacking unit rather
     # than just the model carrying them (e.g. "Ignore Cover (Unit)", or a
@@ -245,7 +251,7 @@ def resolve_combat(
         for unit_model in attacker.unit_models
         for gear in unit_model.wargear
         for ability in gear.abilities
-    ] + datasheet_abilities + stratagems + attacker_rules
+    ] + datasheet_abilities + unrestricted_stratagems + attacker_rules
     _apply_triggered_effects(
         all_unit_wide_abilities,
         {
@@ -309,6 +315,7 @@ def resolve_combat(
             wargear_abilities = [
                 ability for gear in unit_model.wargear for ability in gear.abilities
             ]
+            model_stratagems = stratagems_for(unit_model.model)
 
             # Hazardous wounds taken by this model accumulate across every one
             # of its weapons, in case more than one is hazardous - checked
@@ -331,7 +338,7 @@ def resolve_combat(
                             list(weapon.abilities)
                             + wargear_abilities
                             + datasheet_abilities
-                            + stratagems
+                            + model_stratagems
                             + attacker_rules
                             + defender_rules
                         )

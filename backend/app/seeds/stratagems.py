@@ -1,7 +1,9 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Stratagem
+from sqlalchemy.orm import selectinload
+
+from app.models import Keyword, Stratagem, StratagemTiming
 
 # (name, description, cp) - core stratagems, usable by any army regardless of
 # detachment. Descriptive only for now: none of them have conditions/effects
@@ -71,21 +73,79 @@ CORE_ENTRIES = [
 ]
 
 
+# Keywords a model needs (all of them) for these core stratagems to apply to
+# it; any not listed apply to any model.
+REQUIRED_KEYWORDS = {
+    "Epic Challenge": ("CHARACTER",),
+    "Grenade": ("GRENADES",),
+    "Tank Shock": ("VEHICLE",),
+    "Go to Ground": ("INFANTRY",),
+    "Smokescreen": ("SMOKE",),
+}
+
+
+# When each core stratagem can be used in a game, as (phase, whose turn) pairs
+# from the using player's point of view. Not listed means any time (e.g.
+# Command Re-roll).
+TIMINGS = {
+    "Counter-offensive": [("fight", "either")],
+    "Epic Challenge": [("fight", "either")],
+    "Insane Bravery": [("command", "either")],
+    "Grenade": [("shooting", "your_turn")],
+    "Tank Shock": [("charge", "your_turn")],
+    "Rapid Ingress": [("movement", "opponent_turn")],
+    "Fire Overwatch": [("movement", "opponent_turn"), ("charge", "opponent_turn")],
+    "Go to Ground": [("shooting", "opponent_turn")],
+    "Smokescreen": [("shooting", "opponent_turn")],
+    "Heroic Intervention": [("charge", "opponent_turn")],
+}
+
+
 async def seed(session: AsyncSession) -> None:
-    existing = set(
-        (
-            await session.execute(select(Stratagem.name).where(Stratagem.is_core.is_(True)))
+    # Must run after keywords.seed, since requirements are looked up by name.
+    keywords_by_name = {
+        k.name: k for k in (await session.execute(select(Keyword))).scalars().all()
+    }
+    existing = {
+        s.name: s
+        for s in (
+            await session.execute(
+                select(Stratagem)
+                .options(selectinload(Stratagem.keywords), selectinload(Stratagem.timings))
+                .where(Stratagem.is_core.is_(True))
+            )
         )
         .scalars()
         .all()
-    )
+    }
 
-    missing = [
-        Stratagem(name=name, description=description, cp=cp, is_core=True)
-        for name, description, cp in CORE_ENTRIES
-        if name not in existing
-    ]
+    changed = False
+    for name, description, cp in CORE_ENTRIES:
+        required = [
+            keywords_by_name[k] for k in REQUIRED_KEYWORDS.get(name, ()) if k in keywords_by_name
+        ]
+        timings = [StratagemTiming(phase=phase, turn=turn) for phase, turn in TIMINGS.get(name, [])]
+        stratagem = existing.get(name)
+        if stratagem is None:
+            session.add(
+                Stratagem(
+                    name=name,
+                    description=description,
+                    cp=cp,
+                    is_core=True,
+                    keywords=required,
+                    timings=timings,
+                )
+            )
+            changed = True
+            continue
+        # Seeded before core stratagems had keyword requirements/timings.
+        if required and not stratagem.keywords:
+            stratagem.keywords = required
+            changed = True
+        if timings and not stratagem.timings:
+            stratagem.timings = timings
+            changed = True
 
-    if missing:
-        session.add_all(missing)
+    if changed:
         await session.commit()

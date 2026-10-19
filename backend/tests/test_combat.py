@@ -4155,3 +4155,119 @@ async def test_canticle_options_are_validated(client: AsyncClient):
         },
     )
     assert response.status_code == 400
+
+
+# --- stratagem keyword requirements ---
+
+
+def _restricted_stratagem(*keywords):
+    # +1 to hit, but only for models with all of `keywords`.
+    stratagem = Stratagem(name="Restricted", description=None, cp=1, is_core=True)
+    stratagem.conditions = [_condition("always")]
+    stratagem.effects = [_effect("plus_one_to_hit")]
+    stratagem.keywords = [_keyword(k) for k in keywords]
+    return stratagem
+
+
+def _two_model_attack(monkeypatch, stratagem):
+    # A CHARACTER and a trooper, each with a one-attack BS4 gun. Every roll is
+    # a 3: it hits only with +1 to hit, then always wounds and fails its save.
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+    hero_gun = _weapon(name="Hero Gun", attacks="1", skill=4, strength=10, ap=-10, damage="1")
+    hero_gun.id = 1
+    trooper_gun = _weapon(
+        name="Trooper Gun", attacks="1", skill=4, strength=10, ap=-10, damage="1"
+    )
+    trooper_gun.id = 2
+    attacker = _unit(
+        [
+            _unit_model(_model(keywords=[_keyword("CHARACTER")]), [hero_gun]),
+            _unit_model(_model(keywords=[_keyword("INFANTRY")]), [trooper_gun]),
+        ]
+    )
+    defender = _unit([_unit_model(_model(toughness=1, wounds=10, save=7), [])])
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {1, 2},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+        stratagems=[stratagem],
+    )
+    return {wr.name: wr.total_damage for wr in result.weapon_results}
+
+
+def test_restricted_stratagem_only_affects_models_with_its_keywords(monkeypatch):
+    damage = _two_model_attack(monkeypatch, _restricted_stratagem("CHARACTER"))
+    assert damage == {"Hero Gun": 1, "Trooper Gun": 0}
+
+
+def test_unrestricted_stratagem_affects_every_model(monkeypatch):
+    damage = _two_model_attack(monkeypatch, _restricted_stratagem())
+    assert damage == {"Hero Gun": 1, "Trooper Gun": 1}
+
+
+def test_restricted_stratagem_stays_out_of_the_unit_wide_check(monkeypatch):
+    # A CHARACTER-only "ignore cover (unit)" mustn't spread to the whole unit.
+    stratagem = Stratagem(name="Restricted", description=None, cp=1, is_core=True)
+    stratagem.conditions = [_condition("always")]
+    stratagem.effects = [_effect("ignore_cover_unit")]
+    stratagem.keywords = [_keyword("CHARACTER")]
+    rolls = iter([4, 6, 1])  # hit 4 vs BS4: misses only in cover
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=4, strength=10, ap=-10, damage="1", weapon_type="ranged")
+    weapon.id = 1
+    result = combat.resolve_combat(
+        _unit([_unit_model(_model(keywords=[_keyword("INFANTRY")]), [weapon])]),
+        _unit([_unit_model(_model(toughness=1, wounds=10, save=7), [])]),
+        {1},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=True,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+        stratagems=[stratagem],
+    )
+    assert result.total_damage == 0
+
+
+@pytest.mark.parametrize("with_character,status", [(True, 200), (False, 400)])
+async def test_combat_endpoint_requires_a_model_with_the_stratagems_keywords(
+    client: AsyncClient, faction_id: int, with_character, status
+):
+    character = (await client.post("/keywords", json={"name": "CHARACTER"})).json()["id"]
+    stratagem_id = (
+        await client.post(
+            "/stratagems",
+            json={"name": "Epic Challenge", "cp": 1, "is_core": True, "keyword_ids": [character]},
+        )
+    ).json()["id"]
+    model_id = await _create_model(
+        client, faction_id, keyword_ids=[character] if with_character else []
+    )
+    weapon_id = await _create_weapon(client, model_id)
+    attacker = await _create_unit(
+        client, await _create_faction_unit(client, faction_id, "Heroes"), model_id, weapon_id
+    )
+    defender_model = await _create_model(client, faction_id)
+    defender = await _create_unit(
+        client, await _create_faction_unit(client, faction_id, "Targets"), defender_model
+    )
+
+    response = await client.post(
+        "/combat",
+        json={
+            "attacking_unit_id": attacker,
+            "defending_unit_id": defender,
+            "selected_weapon_ids": [weapon_id],
+            "stratagem_ids": [stratagem_id],
+        },
+    )
+    assert response.status_code == status

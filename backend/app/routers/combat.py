@@ -189,6 +189,7 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
                 selectinload(Stratagem.detachments),
                 selectinload(Stratagem.conditions),
                 selectinload(Stratagem.effects),
+                selectinload(Stratagem.keywords),
             )
             .where(Stratagem.id.in_(payload.stratagem_ids))
         )
@@ -202,13 +203,25 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
             {d.id for d in attacker.army_list.detachments} if attacker.army_list else set()
         )
         for stratagem in stratagems:
-            if stratagem.is_core:
-                continue
-            if not {d.id for d in stratagem.detachments} & attacker_detachment_ids:
+            if not stratagem.is_core and not (
+                {d.id for d in stratagem.detachments} & attacker_detachment_ids
+            ):
                 raise HTTPException(
                     status_code=400,
                     detail=f"stratagem '{stratagem.name}' is not available to the attacking "
                     "unit's detachments",
+                )
+            # One with keyword requirements needs a model in the unit that has
+            # all of them (e.g. a CHARACTER for Epic Challenge).
+            required = {k.name for k in stratagem.keywords}
+            if required and not any(
+                required <= {k.name for k in unit_model.model.keywords}
+                for unit_model in attacker.unit_models
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"stratagem '{stratagem.name}' needs a model with "
+                    f"{', '.join(sorted(required))} in the attacking unit",
                 )
 
     _validate_rule_options(payload.attacker_rule_options, "attacker_rule_options")

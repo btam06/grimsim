@@ -6,19 +6,32 @@ import DetachmentsPanel from './components/DetachmentsPanel'
 import FactionAbilitiesPanel from './components/FactionAbilitiesPanel'
 import FactionUnitsPanel from './components/FactionUnitsPanel'
 import FactionsPanel from './components/FactionsPanel'
+import GamesPanel from './components/GamesPanel'
 import KeywordsPanel from './components/KeywordsPanel'
 import ListsPanel from './components/ListsPanel'
+import { PrimaryMissions, SecondaryMissions } from './components/MissionsPanel'
 import ModelsPanel from './components/ModelsPanel'
 import StratagemsPanel from './components/StratagemsPanel'
 import UnitsPanel from './components/UnitsPanel'
+import UsersPanel from './components/UsersPanel'
 import WargearAbilitiesPanel from './components/WargearAbilitiesPanel'
 import WeaponAbilitiesPanel from './components/WeaponAbilitiesPanel'
 import WeaponsPanel from './components/WeaponsPanel'
 import { createDisposition, listDispositions } from './api'
 
 const TAB_GROUPS = {
-  Build: ['Lists'],
-  Data: ['Models', 'Datasheet Abilities', 'Dispositions', 'Factions', 'Detachments', 'Stratagems'],
+  Games: ['Games'],
+  Build: ['Lists', 'Users'],
+  Data: [
+    'Models',
+    'Datasheet Abilities',
+    'Dispositions',
+    'Factions',
+    'Detachments',
+    'Stratagems',
+    'Secondary Missions',
+    'Primary Missions',
+  ],
   Debug: [
     'Weapons',
     'Units',
@@ -84,6 +97,10 @@ function App() {
       )}
 
       {tab === 'Calculator' && <CalculatorPanel />}
+      {tab === 'Games' && <GamesPanel />}
+      {tab === 'Users' && <UsersPanel />}
+      {tab === 'Secondary Missions' && <SecondaryMissions />}
+      {tab === 'Primary Missions' && <PrimaryMissions />}
       {tab === 'Factions' && <FactionsPanel />}
       {tab === 'Faction Abilities' && <FactionAbilitiesPanel />}
       {tab === 'Detachments' && <DetachmentsPanel />}

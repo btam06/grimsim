@@ -1172,3 +1172,61 @@ async def test_belisarius_cawl_has_canticles(session: AsyncSession):
         "Mantra of Discipline",
         "Shroudpsalm",
     }
+
+
+async def test_core_stratagems_have_their_keyword_requirements(session: AsyncSession):
+    await run_all(session)
+    rows = {
+        s.name: {k.name for k in s.keywords}
+        for s in (
+            await session.execute(select(Stratagem).options(selectinload(Stratagem.keywords)))
+        )
+        .scalars()
+        .all()
+    }
+    assert rows["Epic Challenge"] == {"CHARACTER"}
+    assert rows["Grenade"] == {"GRENADES"}
+    assert rows["Tank Shock"] == {"VEHICLE"}
+    assert rows["Go to Ground"] == {"INFANTRY"}
+    assert rows["Smokescreen"] == {"SMOKE"}
+    assert rows["Command Re-roll"] == set()
+    assert set(stratagems.REQUIRED_KEYWORDS) <= set(rows)
+    for required in stratagems.REQUIRED_KEYWORDS.values():
+        assert set(required) <= set(keywords.NAMES)
+
+
+async def test_seed_fills_in_keyword_requirements_on_existing_core_stratagems(
+    session: AsyncSession,
+):
+    # Core stratagems seeded before they had keyword requirements.
+    session.add(Stratagem(name="Grenade", description="old", cp=1, is_core=True))
+    await session.commit()
+
+    await keywords.seed(session)
+    await stratagems.seed(session)
+
+    session.expire_all()
+    grenade = (
+        await session.execute(
+            select(Stratagem)
+            .options(selectinload(Stratagem.keywords))
+            .where(Stratagem.name == "Grenade")
+        )
+    ).scalar_one()
+    assert [k.name for k in grenade.keywords] == ["GRENADES"]
+
+
+async def test_core_stratagems_have_their_timings(session: AsyncSession):
+    await run_all(session)
+    rows = {
+        s.name: {(t.phase, t.turn) for t in s.timings}
+        for s in (
+            await session.execute(select(Stratagem).options(selectinload(Stratagem.timings)))
+        )
+        .scalars()
+        .all()
+    }
+    assert rows["Grenade"] == {("shooting", "your_turn")}
+    assert rows["Fire Overwatch"] == {("movement", "opponent_turn"), ("charge", "opponent_turn")}
+    assert rows["Command Re-roll"] == set()
+    assert set(stratagems.TIMINGS) <= set(rows)

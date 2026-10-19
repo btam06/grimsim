@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db import get_session
-from app.models import ArmyList, Detachment, Unit
+from app.models import ArmyList, Detachment, Unit, User
 from app.schemas import ArmyListIn, ArmyListOut
 
 router = APIRouter(prefix="/lists", tags=["lists"])
@@ -18,7 +18,17 @@ def _to_out(army_list: ArmyList) -> ArmyListOut:
         points_limit=army_list.points_limit,
         faction_id=army_list.faction_id,
         detachment_ids=[d.id for d in army_list.detachments],
+        user_id=army_list.owner.id if army_list.owner else None,
     )
+
+
+async def _build_owner(session: AsyncSession, user_id: int | None) -> User | None:
+    if user_id is None:
+        return None
+    user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=400, detail="invalid user_id")
+    return user
 
 
 async def _build_detachments(
@@ -40,7 +50,9 @@ async def _build_detachments(
 @router.get("", response_model=list[ArmyListOut])
 async def list_lists(session: AsyncSession = Depends(get_session)):
     result = await session.execute(
-        select(ArmyList).options(selectinload(ArmyList.detachments)).order_by(ArmyList.id)
+        select(ArmyList)
+        .options(selectinload(ArmyList.detachments), selectinload(ArmyList.owner))
+        .order_by(ArmyList.id)
     )
     return [_to_out(army_list) for army_list in result.scalars().all()]
 
@@ -48,12 +60,14 @@ async def list_lists(session: AsyncSession = Depends(get_session)):
 @router.post("", response_model=ArmyListOut, status_code=201)
 async def create_list(payload: ArmyListIn, session: AsyncSession = Depends(get_session)):
     detachments = await _build_detachments(session, payload.detachment_ids, payload.faction_id)
+    owner = await _build_owner(session, payload.user_id)
 
     army_list = ArmyList(
         name=payload.name,
         points_limit=payload.points_limit,
         faction_id=payload.faction_id,
         detachments=detachments,
+        owner=owner,
     )
     session.add(army_list)
     try:
@@ -71,7 +85,7 @@ async def update_list(
     army_list = (
         await session.execute(
             select(ArmyList)
-            .options(selectinload(ArmyList.detachments))
+            .options(selectinload(ArmyList.detachments), selectinload(ArmyList.owner))
             .where(ArmyList.id == list_id)
         )
     ).scalar_one_or_none()
@@ -84,6 +98,7 @@ async def update_list(
     army_list.points_limit = payload.points_limit
     army_list.faction_id = payload.faction_id
     army_list.detachments = detachments
+    army_list.owner = await _build_owner(session, payload.user_id)
 
     try:
         await session.commit()
@@ -103,4 +118,10 @@ async def delete_list(list_id: int, session: AsyncSession = Depends(get_session)
 
     await session.execute(update(Unit).where(Unit.list_id == list_id).values(list_id=None))
     await session.delete(army_list)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=400, detail="cannot delete list: it has been used in a game"
+        ) from exc

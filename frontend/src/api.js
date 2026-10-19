@@ -105,3 +105,37 @@ export const attachDatasheetAbility = (modelId, abilityId) =>
   request(`/models/${modelId}/abilities/${abilityId}`, { method: 'PUT' })
 export const detachDatasheetAbility = (modelId, abilityId) =>
   request(`/models/${modelId}/abilities/${abilityId}`, { method: 'DELETE' })
+
+export const listUsers = () => request('/users')
+export const createUser = (payload) =>
+  request('/users', { method: 'POST', body: JSON.stringify(payload) })
+export const deleteUser = (id) => request(`/users/${id}`, { method: 'DELETE' })
+
+export const listSecondaryMissions = () => request('/secondary-missions')
+export const createSecondaryMission = (payload) =>
+  request('/secondary-missions', { method: 'POST', body: JSON.stringify(payload) })
+export const deleteSecondaryMission = (id) =>
+  request(`/secondary-missions/${id}`, { method: 'DELETE' })
+
+export const listPrimaryMissions = () => request('/primary-missions')
+export const createPrimaryMission = (payload) =>
+  request('/primary-missions', { method: 'POST', body: JSON.stringify(payload) })
+export const deletePrimaryMission = (id) =>
+  request(`/primary-missions/${id}`, { method: 'DELETE' })
+
+export const listGames = () => request('/games')
+export const getGame = (id) => request(`/games/${id}`)
+export const createGame = (payload) =>
+  request('/games', { method: 'POST', body: JSON.stringify(payload) })
+export const deleteGame = (id) => request(`/games/${id}`, { method: 'DELETE' })
+export const startGame = (id) => request(`/games/${id}/start`, { method: 'POST' })
+export const advanceGame = (id) => request(`/games/${id}/advance`, { method: 'POST' })
+export const listUsableStratagems = (id, seat) => request(`/games/${id}/stratagems?seat=${seat}`)
+export const playGameStratagem = (id, payload) =>
+  request(`/games/${id}/stratagems`, { method: 'POST', body: JSON.stringify(payload) })
+export const achieveSecondary = (id, cardId) =>
+  request(`/games/${id}/secondaries/${cardId}/achieve`, { method: 'POST' })
+export const discardSecondary = (id, cardId) =>
+  request(`/games/${id}/secondaries/${cardId}/discard`, { method: 'POST' })
+export const scorePrimary = (id, payload) =>
+  request(`/games/${id}/primary-score`, { method: 'POST', body: JSON.stringify(payload) })

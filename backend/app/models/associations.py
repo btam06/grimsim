@@ -127,3 +127,19 @@ model_faction_ability_links = Table(
     Column("model_id", ForeignKey("models.id"), primary_key=True),
     Column("faction_ability_id", ForeignKey("faction_abilities.id"), primary_key=True),
 )
+
+stratagem_keywords = Table(
+    "stratagem_keywords",
+    Base.metadata,
+    Column("stratagem_id", ForeignKey("stratagems.id"), primary_key=True),
+    Column("keyword_id", ForeignKey("keywords.id"), primary_key=True),
+)
+
+# A list's owner (at most one user per list). A link table rather than a
+# column on lists, so existing databases pick it up without a migration.
+list_owners = Table(
+    "list_owners",
+    Base.metadata,
+    Column("list_id", ForeignKey("lists.id"), primary_key=True),
+    Column("user_id", ForeignKey("users.id"), nullable=False),
+)

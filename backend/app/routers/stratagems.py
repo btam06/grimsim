@@ -4,8 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db import get_session
-from app.models import Condition, Detachment, Effect, Stratagem
-from app.schemas import StratagemIn, StratagemOut
+from app.models import Condition, Detachment, Effect, Keyword, Stratagem, StratagemTiming
+from app.schemas import StratagemIn, StratagemOut, StratagemTimingSchema
 
 router = APIRouter(prefix="/stratagems", tags=["stratagems"])
 
@@ -20,6 +20,8 @@ def _to_out(stratagem: Stratagem) -> StratagemOut:
         detachment_ids=[d.id for d in stratagem.detachments],
         condition_ids=[c.id for c in stratagem.conditions],
         effect_ids=[e.id for e in stratagem.effects],
+        keyword_ids=[k.id for k in stratagem.keywords],
+        timings=[StratagemTimingSchema(phase=t.phase, turn=t.turn) for t in stratagem.timings],
     )
 
 
@@ -31,6 +33,8 @@ async def list_stratagems(session: AsyncSession = Depends(get_session)):
             selectinload(Stratagem.detachments),
             selectinload(Stratagem.conditions),
             selectinload(Stratagem.effects),
+            selectinload(Stratagem.keywords),
+            selectinload(Stratagem.timings),
         )
         .order_by(Stratagem.id)
     )
@@ -64,6 +68,13 @@ async def create_stratagem(payload: StratagemIn, session: AsyncSession = Depends
         if len(effects) != len(set(payload.effect_ids)):
             raise HTTPException(status_code=400, detail="one or more effect_ids not found")
 
+    keywords: list[Keyword] = []
+    if payload.keyword_ids:
+        result = await session.execute(select(Keyword).where(Keyword.id.in_(payload.keyword_ids)))
+        keywords = list(result.scalars().all())
+        if len(keywords) != len(set(payload.keyword_ids)):
+            raise HTTPException(status_code=400, detail="one or more keyword_ids not found")
+
     stratagem = Stratagem(
         name=payload.name,
         description=payload.description,
@@ -72,6 +83,8 @@ async def create_stratagem(payload: StratagemIn, session: AsyncSession = Depends
         detachments=detachments,
         conditions=conditions,
         effects=effects,
+        keywords=keywords,
+        timings=[StratagemTiming(phase=t.phase, turn=t.turn) for t in payload.timings],
     )
     session.add(stratagem)
     await session.commit()

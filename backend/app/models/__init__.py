@@ -2,11 +2,13 @@ from app.models.army_list import ArmyList
 from app.models.associations import (
     datasheet_ability_links,
     detachment_dispositions,
+    list_owners,
     model_faction_ability_links,
     model_keyword_links,
     stratagem_conditions,
     stratagem_detachments,
     stratagem_effects,
+    stratagem_keywords,
     unit_model_wargear,
     unit_model_weapons,
     wargear_ability_conditions,
@@ -25,11 +27,14 @@ from app.models.effect import Effect
 from app.models.faction import Faction
 from app.models.faction_ability import FactionAbility
 from app.models.faction_unit import FactionUnit
+from app.models.game import Game, GamePlayer, GameScore, GameSecondary, GameStratagemUse
 from app.models.keyword import Keyword
+from app.models.mission import PrimaryMission, SecondaryMission
 from app.models.model import Model
-from app.models.stratagem import Stratagem
+from app.models.stratagem import Stratagem, StratagemTiming
 from app.models.unit import Unit
 from app.models.unit_model import UnitModel
+from app.models.user import User
 from app.models.wargear import Wargear
 from app.models.wargear_ability import WargearAbility
 from app.models.weapon import Weapon
@@ -55,6 +60,16 @@ __all__ = [
     "Disposition",
     "ArmyList",
     "Stratagem",
+    "StratagemTiming",
+    "User",
+    "Game",
+    "GamePlayer",
+    "GameScore",
+    "GameSecondary",
+    "GameStratagemUse",
+    "PrimaryMission",
+    "SecondaryMission",
+    "list_owners",
     "datasheet_ability_links",
     "unit_model_weapons",
     "unit_model_wargear",
@@ -70,4 +85,5 @@ __all__ = [
     "stratagem_detachments",
     "stratagem_conditions",
     "stratagem_effects",
+    "stratagem_keywords",
 ]

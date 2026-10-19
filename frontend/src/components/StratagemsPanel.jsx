@@ -5,16 +5,37 @@ import {
   listConditions,
   listDetachments,
   listEffects,
+  listKeywords,
   listStratagems,
 } from '../api'
 import Field from './Field'
+import { DeleteButton } from './IconButtons'
 import MultiSelect from './MultiSelect'
+import Select from './Select'
+
+export const PHASES = [
+  { id: 'command', name: 'Command' },
+  { id: 'movement', name: 'Movement' },
+  { id: 'shooting', name: 'Shooting' },
+  { id: 'charge', name: 'Charge' },
+  { id: 'fight', name: 'Fight' },
+]
+const TURNS = [
+  { id: 'your_turn', name: 'Your turn' },
+  { id: 'opponent_turn', name: "Opponent's turn" },
+  { id: 'either', name: 'Either turn' },
+]
+const timingLabel = (t) =>
+  `${PHASES.find((p) => p.id === t.phase)?.name ?? t.phase} (${(
+    TURNS.find((x) => x.id === t.turn)?.name ?? t.turn
+  ).toLowerCase()})`
 
 function StratagemsPanel() {
   const [stratagems, setStratagems] = useState([])
   const [detachments, setDetachments] = useState([])
   const [conditions, setConditions] = useState([])
   const [effects, setEffects] = useState([])
+  const [keywords, setKeywords] = useState([])
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [cp, setCp] = useState('1')
@@ -22,6 +43,11 @@ function StratagemsPanel() {
   const [detachmentIds, setDetachmentIds] = useState([])
   const [conditionIds, setConditionIds] = useState([])
   const [effectIds, setEffectIds] = useState([])
+  const [keywordIds, setKeywordIds] = useState([])
+  // When it can be used in a game; empty means any time.
+  const [timings, setTimings] = useState([])
+  const [timingPhase, setTimingPhase] = useState('command')
+  const [timingTurn, setTimingTurn] = useState('your_turn')
   const [error, setError] = useState(null)
 
   const refresh = () => listStratagems().then(setStratagems).catch((err) => setError(err.message))
@@ -31,11 +57,13 @@ function StratagemsPanel() {
     listDetachments().then(setDetachments).catch((err) => setError(err.message))
     listConditions().then(setConditions).catch((err) => setError(err.message))
     listEffects().then(setEffects).catch((err) => setError(err.message))
+    listKeywords().then(setKeywords).catch((err) => setError(err.message))
   }, [])
 
   const detachmentName = (id) => detachments.find((d) => d.id === id)?.name ?? `#${id}`
   const conditionName = (id) => conditions.find((c) => c.id === id)?.name ?? `#${id}`
   const effectName = (id) => effects.find((e) => e.id === id)?.name ?? `#${id}`
+  const keywordName = (id) => keywords.find((k) => k.id === id)?.name ?? `#${id}`
 
   const toggleId = (list, setList, id) => {
     setList(list.includes(id) ? list.filter((x) => x !== id) : [...list, id])
@@ -57,6 +85,8 @@ function StratagemsPanel() {
         detachment_ids: isCore ? [] : detachmentIds,
         condition_ids: conditionIds,
         effect_ids: effectIds,
+        keyword_ids: keywordIds,
+        timings,
       })
       setName('')
       setDescription('')
@@ -65,6 +95,8 @@ function StratagemsPanel() {
       setDetachmentIds([])
       setConditionIds([])
       setEffectIds([])
+      setKeywordIds([])
+      setTimings([])
       refresh()
     } catch (err) {
       setError(err.message)
@@ -105,6 +137,38 @@ function StratagemsPanel() {
             <MultiSelect options={detachments} value={detachmentIds} onChange={setDetachmentIds} />
           </label>
         )}
+        <label className="field">
+          Required keywords (a model needs all of them; none means any model)
+          <MultiSelect options={keywords} value={keywordIds} onChange={setKeywordIds} />
+        </label>
+        <div className="checkbox-group">
+          Usable in (none means any time)
+          {timings.length > 0 && (
+            <ul>
+              {timings.map((t, i) => (
+                <li key={i}>
+                  {timingLabel(t)}
+                  <DeleteButton onClick={() => setTimings(timings.filter((_, j) => j !== i))} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <Field label="Phase">
+          <Select options={PHASES} value={timingPhase} onChange={setTimingPhase} />
+        </Field>
+        <Field label="Turn">
+          <Select options={TURNS} value={timingTurn} onChange={setTimingTurn} />
+        </Field>
+        <button
+          type="button"
+          onClick={() => {
+            const exists = timings.some((t) => t.phase === timingPhase && t.turn === timingTurn)
+            if (!exists) setTimings([...timings, { phase: timingPhase, turn: timingTurn }])
+          }}
+        >
+          Add timing
+        </button>
         <div className="checkbox-group">
           Conditions
           <div className="checkbox-grid">
@@ -146,6 +210,9 @@ function StratagemsPanel() {
             {s.condition_ids.length > 0 &&
               ` — Conditions: ${s.condition_ids.map(conditionName).join(', ')}`}
             {s.effect_ids.length > 0 && ` — Effects: ${s.effect_ids.map(effectName).join(', ')}`}
+            {s.keyword_ids.length > 0 &&
+              ` — Requires: ${s.keyword_ids.map(keywordName).join(', ')}`}
+            {` — Usable: ${s.timings.length > 0 ? s.timings.map(timingLabel).join(', ') : 'any time'}`}
             <button type="button" onClick={() => handleRemove(s.id)}>
               Remove
             </button>
