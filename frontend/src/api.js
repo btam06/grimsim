@@ -39,6 +39,12 @@ export const createDetachment = (payload) =>
 export const deleteDetachment = (id) => request(`/detachments/${id}`, { method: 'DELETE' })
 
 export const listStratagems = () => request('/stratagems')
+// Stratagems usable on a unit as the 'attacker' or 'defender', in the
+// shooting phase or (in engagement range) the fight phase.
+export const listCalculatorStratagems = (unitId, side, inEngagementRange) =>
+  request(
+    `/combat/stratagems?unit_id=${unitId}&side=${side}&in_engagement_range=${inEngagementRange}`
+  )
 export const createStratagem = (payload) =>
   request('/stratagems', { method: 'POST', body: JSON.stringify(payload) })
 export const deleteStratagem = (id) => request(`/stratagems/${id}`, { method: 'DELETE' })

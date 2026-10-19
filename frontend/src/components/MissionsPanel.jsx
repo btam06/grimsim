@@ -8,6 +8,7 @@ import {
   listPrimaryMissions,
   listSecondaryMissions,
 } from '../api'
+import CardTextAccordion from './CardTextAccordion'
 import Field from './Field'
 import { DeleteButton } from './IconButtons'
 import Select from './Select'
@@ -114,7 +115,7 @@ function SecondaryMissions() {
             {m.name} — completes on {completesOnLabel(m.completes_on).toLowerCase()} — Fixed:{' '}
             {pointsLabel(m.fixed_points)}, Tactical: {pointsLabel(m.tactical_points)}
             <DeleteButton onClick={() => handleDelete(m.id)} />
-            {m.description && <p className="hint card-text">{m.description}</p>}
+            <CardTextAccordion text={m.description} />
           </li>
         ))}
       </ul>

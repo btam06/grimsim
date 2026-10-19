@@ -1,0 +1,63 @@
+{
+  "stratagems": [
+    {
+      "name": "Test Grenade",
+      "description": "Throw a grenade.",
+      "cp": 1,
+      "core": true,
+      "keywords": [
+        "GRENADES"
+      ],
+      "timings": [
+        {
+          "phase": "shooting",
+          "turn": "your_turn"
+        }
+      ]
+    },
+    {
+      "name": "Test Re-roll",
+      "cp": 1,
+      "core": true
+    },
+    {
+      "name": "Test Waaagh Trick",
+      "description": "+1 to hit.",
+      "cp": 2,
+      "detachments": [
+        {
+          "faction": "Orks",
+          "name": "Test Horde"
+        }
+      ],
+      "timings": [
+        {
+          "phase": "fight",
+          "turn": "either"
+        },
+        {
+          "phase": "shooting",
+          "turn": "your_turn"
+        }
+      ],
+      "conditions": [
+        "always"
+      ],
+      "effects": [
+        "plus_one_to_hit"
+      ]
+    },
+    {
+      "name": "Test New Orders",
+      "cp": 1,
+      "core": true,
+      "timings": [
+        {
+          "phase": "command",
+          "turn": "your_turn"
+        }
+      ],
+      "game_action": "replace_secondary"
+    }
+  ]
+}

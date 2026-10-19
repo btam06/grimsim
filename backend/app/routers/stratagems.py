@@ -22,6 +22,7 @@ def _to_out(stratagem: Stratagem) -> StratagemOut:
         effect_ids=[e.id for e in stratagem.effects],
         keyword_ids=[k.id for k in stratagem.keywords],
         timings=[StratagemTimingSchema(phase=t.phase, turn=t.turn) for t in stratagem.timings],
+        game_action=stratagem.game_action,
     )
 
 
@@ -35,6 +36,7 @@ async def list_stratagems(session: AsyncSession = Depends(get_session)):
             selectinload(Stratagem.effects),
             selectinload(Stratagem.keywords),
             selectinload(Stratagem.timings),
+            selectinload(Stratagem.game_action_link),
         )
         .order_by(Stratagem.id)
     )
@@ -86,6 +88,7 @@ async def create_stratagem(payload: StratagemIn, session: AsyncSession = Depends
         keywords=keywords,
         timings=[StratagemTiming(phase=t.phase, turn=t.turn) for t in payload.timings],
     )
+    stratagem.game_action = payload.game_action
     session.add(stratagem)
     await session.commit()
     return _to_out(stratagem)

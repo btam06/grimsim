@@ -31,8 +31,8 @@ On startup the backend creates any missing tables and seeds reference data
 (factions, datasheets, abilities, core stratagems, ...). Seeding only adds what's
 missing, so it's safe to run against an existing database.
 
-Game data (units, detachments, datasheets, mission cards) is seeded from JSON
-files in `backend/app/data/`, which aren't committed - see
+Game data (units, detachments, datasheets, stratagems, mission cards) is
+seeded from JSON files in `backend/app/data/`, which aren't committed - see
 [backend/app/data/README.md](backend/app/data/README.md) for the format.
 
 ## Development

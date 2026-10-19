@@ -153,9 +153,12 @@ def _require_in_progress(game: Game) -> None:
         raise _bad_request("the game isn't in progress")
 
 
-async def _draw_tactical(session: AsyncSession, game: Game, player: GamePlayer) -> None:
-    # A tactical player draws TACTICAL_DRAW new cards, keeping any they still
-    # hold - from the tactical secondaries they haven't drawn yet this game.
+async def _draw_tactical(
+    session: AsyncSession, game: Game, player: GamePlayer, count: int = TACTICAL_DRAW
+) -> None:
+    # A tactical player draws `count` new cards (TACTICAL_DRAW in their command
+    # phase), keeping any they still hold - from the tactical secondaries they
+    # haven't drawn yet this game.
     if player.secondary_mode != "tactical":
         return
     seen = {c.secondary_mission_id for c in player.secondaries}
@@ -168,7 +171,7 @@ async def _draw_tactical(session: AsyncSession, game: Game, player: GamePlayer) 
         ).scalars()
         if m.id not in seen
     ]
-    for _ in range(TACTICAL_DRAW):
+    for _ in range(count):
         if not deck:
             break
         mission = deck.pop(random.randrange(len(deck)))
@@ -238,15 +241,52 @@ def stratagem_unavailable_reason(
             t.phase == game.phase and t.turn in (whose, "either") for t in stratagem.timings
         ):
             return f"it can't be used in the {game.phase} phase of this turn"
+    if any(
+        use.stratagem_id == stratagem.id
+        and use.battle_round == game.battle_round
+        and use.turn_seat == game.turn_seat
+        and use.phase == game.phase
+        for use in player.stratagem_uses
+    ):
+        # Each stratagem can be used once per phase (by each player).
+        return "it has already been used this phase"
     if player.cp < stratagem.cp:
         return "not enough CP"
+    if stratagem.game_action == "replace_secondary" and not replaceable_secondaries(player):
+        return "they have no active tactical Secondary Mission to replace"
     return None
 
 
-def use_stratagem(game: Game, player: GamePlayer, stratagem: Stratagem) -> None:
+def replaceable_secondaries(player: GamePlayer) -> list[GameSecondary]:
+    # The cards New Orders-style stratagems can target: the player's active
+    # tactical (not fixed) Secondary Missions.
+    return [c for c in player.secondaries if c.status == "active" and not c.fixed]
+
+
+async def use_stratagem(
+    session: AsyncSession,
+    game: Game,
+    player: GamePlayer,
+    stratagem: Stratagem,
+    target_secondary_id: int | None = None,
+) -> None:
     reason = stratagem_unavailable_reason(game, player, stratagem)
     if reason is not None:
         raise _bad_request(f"can't use {stratagem.name}: {reason}")
+
+    target = None
+    if stratagem.game_action == "replace_secondary":
+        target = next(
+            (c for c in replaceable_secondaries(player) if c.id == target_secondary_id), None
+        )
+        if target is None:
+            raise _bad_request(
+                f"{stratagem.name} needs one of their active tactical Secondary Missions "
+                "as its target"
+            )
+    elif target_secondary_id is not None:
+        raise _bad_request(f"{stratagem.name} doesn't take a target")
+
     player.cp -= stratagem.cp
     player.stratagem_uses.append(
         GameStratagemUse(
@@ -258,6 +298,10 @@ def use_stratagem(game: Game, player: GamePlayer, stratagem: Stratagem) -> None:
             cp=stratagem.cp,
         )
     )
+    if target is not None:
+        # Discard the target and draw one new card in its place.
+        target.status = "discarded"
+        await _draw_tactical(session, game, player, count=1)
 
 
 def achieve_secondary(game: Game, card: GameSecondary, points: int | None = None) -> None:

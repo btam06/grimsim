@@ -283,6 +283,8 @@ class StratagemIn(BaseModel):
     keyword_ids: list[int] = []
     # When it can be used in a game; empty means any time.
     timings: list[StratagemTimingSchema] = []
+    # What the game tracker does when it's used, besides spending CP.
+    game_action: Literal["replace_secondary"] | None = None
 
     @model_validator(mode="after")
     def check_core_xor_detachments(self):
@@ -306,6 +308,7 @@ class StratagemOut(BaseModel):
     effect_ids: list[int]
     keyword_ids: list[int]
     timings: list[StratagemTimingSchema]
+    game_action: str | None
 
 
 class CombatIn(BaseModel):
@@ -313,9 +316,11 @@ class CombatIn(BaseModel):
     attacking_unit_id: int
     defending_unit_id: int
     selected_weapon_ids: list[int] = []
-    # Stratagems used on the attacking unit for this attack - each must be core
-    # or belong to one of the detachments in the attacking unit's army list.
+    # Stratagems used on the attacking unit, and on the defending unit, for this
+    # attack - each must be usable on that unit, by that side, in this phase
+    # (see GET /combat/stratagems).
     stratagem_ids: list[int] = []
+    defender_stratagem_ids: list[int] = []
     # Whether attacks from weapons with the Precision effect pick off leaders
     # (then supports) first, rather than following normal targeting.
     apply_precision: bool = False
@@ -519,6 +524,9 @@ class GameOut(BaseModel):
 class GameStratagemIn(BaseModel):
     seat: Literal[1, 2]
     stratagem_id: int
+    # For a stratagem whose game action needs one, e.g. New Orders: the
+    # player's Secondary Mission card (game secondary id) it targets.
+    target_secondary_id: int | None = None
 
 
 class GameAchieveIn(BaseModel):

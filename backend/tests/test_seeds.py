@@ -28,7 +28,6 @@ from app.seeds import (
     dispositions,
     effects,
     factions,
-    keywords,
     run_all,
     stratagems,
     wargear_abilities,
@@ -70,27 +69,6 @@ async def test_seed_factions_is_idempotent(session: AsyncSession):
     assert len(names) == len(factions.NAMES)
 
 
-async def test_seed_keywords_has_no_duplicate_names():
-    assert len(keywords.NAMES) == len(set(keywords.NAMES))
-
-
-async def test_seed_keywords_inserts_all_names(session: AsyncSession):
-    await keywords.seed(session)
-
-    result = await session.execute(select(Keyword.name))
-    names = set(result.scalars().all())
-    assert names == set(keywords.NAMES)
-
-
-async def test_seed_keywords_is_idempotent(session: AsyncSession):
-    await keywords.seed(session)
-    await keywords.seed(session)
-
-    result = await session.execute(select(Keyword.name))
-    names = result.scalars().all()
-    assert len(names) == len(keywords.NAMES)
-
-
 async def test_seed_factions_does_not_duplicate_existing(session: AsyncSession, faction_id: int):
     await factions.seed(session)
 
@@ -116,6 +94,10 @@ def _unit_pairs():
         for faction in factions.FACTIONS
         for name in factions.load_units(faction)
     }
+
+
+def _keyword_names():
+    return {name for faction in factions.FACTIONS for name in factions.load_keywords(faction)}
 
 
 def _detachment_pairs():
@@ -172,6 +154,35 @@ async def test_seed_faction_abilities_skips_entries_whose_faction_is_missing(
     await factions.seed_abilities(session)
 
     assert (await session.execute(select(FactionAbility))).scalars().all() == []
+
+
+async def test_seed_keywords_inserts_each_factions_keywords_once(
+    session: AsyncSession, fixture_game_data
+):
+    await factions.seed_keywords(session)
+
+    names = (await session.execute(select(Keyword.name))).scalars().all()
+    # INFANTRY is in both fixture factions' keywords.json, but seeded once.
+    assert sorted(names) == sorted(_keyword_names())
+    assert _keyword_names() == {"BATTLELINE", "CHARACTER", "GRENADES", "INFANTRY"}
+
+
+async def test_seed_keywords_is_idempotent(session: AsyncSession, fixture_game_data):
+    await factions.seed_keywords(session)
+    await factions.seed_keywords(session)
+
+    names = (await session.execute(select(Keyword.name))).scalars().all()
+    assert len(names) == len(_keyword_names())
+
+
+async def test_seed_keywords_keeps_existing(session: AsyncSession, fixture_game_data):
+    session.add_all([Keyword(name="INFANTRY"), Keyword(name="HOMEBREW")])
+    await session.commit()
+
+    await factions.seed_keywords(session)
+
+    names = (await session.execute(select(Keyword.name))).scalars().all()
+    assert sorted(names) == sorted(_keyword_names() | {"HOMEBREW"})
 
 
 async def test_seed_faction_units_inserts_all_names(session: AsyncSession, fixture_game_data):
@@ -445,28 +456,12 @@ async def test_run_all_seeds_everything(session: AsyncSession):
     assert faction_ability_pairs == _ability_pairs()
     assert faction_unit_pairs == _unit_pairs()
     assert detachment_pairs == _detachment_pairs()
-    assert keyword_names == set(keywords.NAMES)
+    assert keyword_names == _keyword_names()
     assert condition_keywords == {keyword for keyword, _, _ in conditions.ENTRIES}
     assert effect_keywords == {keyword for keyword, _, _ in effects.ENTRIES}
     assert weapon_ability_names == {name for name, _, _, _ in weapon_abilities.ENTRIES}
     assert wargear_ability_names == {name for name, _, _, _ in wargear_abilities.ENTRIES}
     assert datasheet_ability_names == {name for name, _, _, _ in datasheet_abilities.ENTRIES}
-
-
-async def test_seed_core_stratagems_inserts_all_entries(session: AsyncSession):
-    await stratagems.seed(session)
-
-    rows = (await session.execute(select(Stratagem))).scalars().all()
-    assert {s.name for s in rows} == {name for name, _, _ in stratagems.CORE_ENTRIES}
-    assert all(s.is_core for s in rows)
-
-
-async def test_seed_core_stratagems_is_idempotent(session: AsyncSession):
-    await stratagems.seed(session)
-    await stratagems.seed(session)
-
-    rows = (await session.execute(select(Stratagem.name))).scalars().all()
-    assert len(rows) == len(stratagems.CORE_ENTRIES)
 
 
 async def test_seed_weapon_abilities_backfills_effects_on_previously_empty_entry(
@@ -592,71 +587,12 @@ async def test_datasheet_ability_options_are_well_formed():
             for rule in option.rules:
                 assert set(rule.conditions) <= set(CONDITIONS)
                 assert set(rule.effects) <= set(EFFECTS)
-            assert set(option.keywords) <= set(keywords.NAMES)
     # Option names are unique across datasheet and faction ability options,
     # since a combat request names them without saying which ability they're from.
     names = [n for options in datasheet_abilities.OPTIONS.values() for n in options] + [
         n for options in factions.RULE_OPTIONS.values() for n in options
     ]
     assert len(names) == len(set(names))
-
-
-async def test_core_stratagems_have_their_keyword_requirements(session: AsyncSession):
-    await run_all(session)
-    rows = {
-        s.name: {k.name for k in s.keywords}
-        for s in (
-            await session.execute(select(Stratagem).options(selectinload(Stratagem.keywords)))
-        )
-        .scalars()
-        .all()
-    }
-    assert rows["Epic Challenge"] == {"CHARACTER"}
-    assert rows["Grenade"] == {"GRENADES"}
-    assert rows["Tank Shock"] == {"VEHICLE"}
-    assert rows["Go to Ground"] == {"INFANTRY"}
-    assert rows["Smokescreen"] == {"SMOKE"}
-    assert rows["Command Re-roll"] == set()
-    assert set(stratagems.REQUIRED_KEYWORDS) <= set(rows)
-    for required in stratagems.REQUIRED_KEYWORDS.values():
-        assert set(required) <= set(keywords.NAMES)
-
-
-async def test_seed_fills_in_keyword_requirements_on_existing_core_stratagems(
-    session: AsyncSession,
-):
-    # Core stratagems seeded before they had keyword requirements.
-    session.add(Stratagem(name="Grenade", description="old", cp=1, is_core=True))
-    await session.commit()
-
-    await keywords.seed(session)
-    await stratagems.seed(session)
-
-    session.expire_all()
-    grenade = (
-        await session.execute(
-            select(Stratagem)
-            .options(selectinload(Stratagem.keywords))
-            .where(Stratagem.name == "Grenade")
-        )
-    ).scalar_one()
-    assert [k.name for k in grenade.keywords] == ["GRENADES"]
-
-
-async def test_core_stratagems_have_their_timings(session: AsyncSession):
-    await run_all(session)
-    rows = {
-        s.name: {(t.phase, t.turn) for t in s.timings}
-        for s in (
-            await session.execute(select(Stratagem).options(selectinload(Stratagem.timings)))
-        )
-        .scalars()
-        .all()
-    }
-    assert rows["Grenade"] == {("shooting", "your_turn")}
-    assert rows["Fire Overwatch"] == {("movement", "opponent_turn"), ("charge", "opponent_turn")}
-    assert rows["Command Re-roll"] == set()
-    assert set(stratagems.TIMINGS) <= set(rows)
 
 
 async def test_seed_missions_without_a_data_file_adds_nothing(session: AsyncSession):
@@ -808,6 +744,36 @@ def _local(load, faction):
         data_files.DATA_DIR = original
 
 
+# Every keyword seeded from the local data, across all factions' keywords.json.
+LOCAL_KEYWORDS = {
+    name for faction in factions.FACTIONS for name in _local(factions.load_keywords, faction)
+}
+
+
+@pytest.mark.skipif(
+    not LOCAL_KEYWORDS, reason="no local keyword data (app/data/factions/*/keywords.json)"
+)
+@pytest.mark.parametrize("faction", factions.FACTIONS, ids=FACTION_IDS)
+async def test_local_keywords_have_no_duplicates(faction):
+    names = _local(factions.load_keywords, faction)
+    assert len(names) == len(set(names))
+
+
+@pytest.mark.skipif(
+    not LOCAL_KEYWORDS, reason="no local keyword data (app/data/factions/*/keywords.json)"
+)
+async def test_local_keywords_include_every_keyword_rule_options_grant():
+    # A rule option granting a keyword (e.g. Mantra of Discipline: BATTLELINE)
+    # should name one that's seeded.
+    granted = {
+        keyword
+        for options in datasheet_abilities.OPTIONS.values()
+        for option in options.values()
+        for keyword in option.keywords
+    }
+    assert granted <= LOCAL_KEYWORDS
+
+
 LOCAL_UNITS = [
     (faction, names)
     for faction in factions.FACTIONS
@@ -825,7 +791,9 @@ async def test_local_units_are_well_formed(faction, names):
     assert len(names) == len(set(names))
 
 
-@pytest.mark.skipif(not LOCAL_DATASHEETS, reason="no local datasheet data (app/data/factions/*/datasheets.json)")
+@pytest.mark.skipif(
+    not LOCAL_DATASHEETS, reason="no local datasheet data (app/data/factions/*/datasheets.json)"
+)
 @pytest.mark.parametrize(
     "faction,datasheet", LOCAL_DATASHEETS, ids=[d.name for _, d in LOCAL_DATASHEETS] or None
 )
@@ -838,7 +806,7 @@ async def test_local_datasheet_references_only_seeded_names(faction, datasheet):
     datasheet_ability_names = {name for name, _, _, _ in datasheet_abilities.ENTRIES}
     faction_ability_names = {name for name, _ in faction.abilities.ENTRIES}
     for spec in datasheet.models:
-        assert set(spec.keywords) <= set(keywords.NAMES)
+        assert set(spec.keywords) <= LOCAL_KEYWORDS
         assert set(spec.faction_abilities) <= faction_ability_names
         assert set(spec.abilities) <= datasheet_ability_names
         for weapon in spec.weapons:
@@ -975,7 +943,6 @@ async def test_canticles_of_the_omnissiah_options():
     }
 
 
-
 async def test_seed_detachments_fills_in_missing_dispositions(
     session: AsyncSession, fixture_game_data
 ):
@@ -1033,7 +1000,9 @@ def _local_detachments():
 LOCAL_DETACHMENTS = [(f, entries) for f, entries in _local_detachments() if entries]
 
 
-@pytest.mark.skipif(not LOCAL_DETACHMENTS, reason="no local detachment data (app/data/factions/*/detachments.json)")
+@pytest.mark.skipif(
+    not LOCAL_DETACHMENTS, reason="no local detachment data (app/data/factions/*/detachments.json)"
+)
 @pytest.mark.parametrize(
     "faction,entries",
     LOCAL_DETACHMENTS,
@@ -1047,3 +1016,136 @@ async def test_local_detachments_are_well_formed(faction, entries):
         assert isinstance(entry["dp"], int)
         assert entry["dispositions"], entry["name"]
         assert set(entry["dispositions"]) <= set(dispositions.NAMES), entry["name"]
+
+
+# --- stratagems, from app/data/stratagems.json ---
+
+
+async def _stratagems(session: AsyncSession) -> dict:
+    session.expire_all()
+    rows = (
+        await session.execute(
+            select(Stratagem).options(
+                selectinload(Stratagem.keywords),
+                selectinload(Stratagem.timings),
+                selectinload(Stratagem.detachments),
+                selectinload(Stratagem.conditions),
+                selectinload(Stratagem.effects),
+                selectinload(Stratagem.game_action_link),
+            )
+        )
+    ).scalars().all()
+    return {s.name: s for s in rows}
+
+
+async def test_seed_stratagems_without_a_data_file_adds_nothing(session: AsyncSession):
+    await run_all(session)
+    assert (await session.execute(select(Stratagem))).scalars().all() == []
+
+
+async def test_seed_stratagems_from_a_data_file(session: AsyncSession, fixture_game_data):
+    await run_all(session)
+    rows = await _stratagems(session)
+    assert set(rows) == {"Test Grenade", "Test Re-roll", "Test Waaagh Trick", "Test New Orders"}
+    assert rows["Test New Orders"].game_action == "replace_secondary"
+    assert rows["Test Grenade"].game_action is None
+
+    grenade = rows["Test Grenade"]
+    assert (grenade.cp, grenade.is_core, grenade.description) == (1, True, "Throw a grenade.")
+    assert [k.name for k in grenade.keywords] == ["GRENADES"]
+    assert [(t.phase, t.turn) for t in grenade.timings] == [("shooting", "your_turn")]
+
+    reroll = rows["Test Re-roll"]
+    assert (reroll.keywords, reroll.timings, reroll.detachments) == ([], [], [])
+
+    trick = rows["Test Waaagh Trick"]
+    assert trick.is_core is False
+    assert [d.name for d in trick.detachments] == ["Test Horde"]
+    assert {(t.phase, t.turn) for t in trick.timings} == {
+        ("fight", "either"),
+        ("shooting", "your_turn"),
+    }
+    assert [c.keyword for c in trick.conditions] == ["always"]
+    assert [e.keyword for e in trick.effects] == ["plus_one_to_hit"]
+
+
+async def test_seed_stratagems_is_idempotent(session: AsyncSession, fixture_game_data):
+    await run_all(session)
+    await stratagems.seed(session)
+    names = (await session.execute(select(Stratagem.name))).scalars().all()
+    assert sorted(names) == ["Test Grenade", "Test New Orders", "Test Re-roll", "Test Waaagh Trick"]
+
+
+async def test_seed_stratagems_fills_in_requirements_and_timings(
+    session: AsyncSession, fixture_game_data
+):
+    # A stratagem seeded before it had keyword requirements and timings.
+    session.add(Stratagem(name="Test Grenade", description="old", cp=1, is_core=True))
+    await session.commit()
+
+    await run_all(session)
+
+    grenade = (await _stratagems(session))["Test Grenade"]
+    assert grenade.description == "old"  # otherwise left alone
+    assert [k.name for k in grenade.keywords] == ["GRENADES"]
+    assert [(t.phase, t.turn) for t in grenade.timings] == [("shooting", "your_turn")]
+
+
+@pytest.mark.parametrize(
+    "entry,message",
+    [
+        ({"name": "Bad", "cp": 1, "core": True, "keywords": ["NOPE"]}, "unknown keyword"),
+        (
+            {
+                "name": "Bad",
+                "cp": 1,
+                "core": True,
+                "timings": [{"phase": "lunch", "turn": "either"}],
+            },
+            "unknown phase",
+        ),
+        ({"name": "Bad", "cp": 1}, "core or belong to a detachment"),
+        ({"name": "Bad", "cp": 1, "core": True, "game_action": "explode"}, "unknown game action"),
+        (
+            {"name": "Bad", "cp": 1, "detachments": [{"faction": "Orks", "name": "Nope"}]},
+            "unknown detachment",
+        ),
+    ],
+)
+async def test_seed_stratagems_rejects_bad_entries(
+    session: AsyncSession, tmp_path, entry, message
+):
+    import json
+
+    path = tmp_path / "stratagems.json"
+    path.write_text(json.dumps({"stratagems": [entry]}))
+    with pytest.raises(ValueError, match=message):
+        await stratagems.seed(session, path)
+
+
+LOCAL_STRATAGEMS = stratagems.load(LOCAL_DATA_DIR / "stratagems.json")
+
+
+@pytest.mark.skipif(
+    not LOCAL_STRATAGEMS, reason="no local stratagem data (app/data/stratagems.json)"
+)
+async def test_local_stratagems_are_well_formed():
+    # Checks your local data file, if you have one.
+    from app.models.game import PHASES
+    from app.models.stratagem import STRATAGEM_GAME_ACTIONS, STRATAGEM_TURNS
+
+    names = [s["name"] for s in LOCAL_STRATAGEMS]
+    assert len(names) == len(set(names))
+    for entry in LOCAL_STRATAGEMS:
+        assert isinstance(entry["cp"], int) and entry["cp"] >= 0, entry["name"]
+        assert entry.get("core", False) != bool(entry.get("detachments")), entry["name"]
+        assert set(entry.get("keywords", [])) <= LOCAL_KEYWORDS, entry["name"]
+        assert entry.get("game_action") in (None, *STRATAGEM_GAME_ACTIONS), entry["name"]
+        for timing in entry.get("timings", []):
+            assert timing["phase"] in PHASES and timing["turn"] in STRATAGEM_TURNS, entry["name"]
+        for detachment in entry.get("detachments", []):
+            faction = next(
+                f for f in factions.FACTIONS if f.info.FACTION_NAME == detachment["faction"]
+            )
+            local = _local(factions.load_detachments, faction)
+            assert detachment["name"] in {d["name"] for d in local}, entry["name"]

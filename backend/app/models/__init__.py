@@ -31,7 +31,7 @@ from app.models.game import Game, GamePlayer, GameScore, GameSecondary, GameStra
 from app.models.keyword import Keyword
 from app.models.mission import PrimaryMission, SecondaryMission
 from app.models.model import Model
-from app.models.stratagem import Stratagem, StratagemTiming
+from app.models.stratagem import Stratagem, StratagemGameAction, StratagemTiming
 from app.models.unit import Unit
 from app.models.unit_model import UnitModel
 from app.models.user import User
@@ -61,6 +61,7 @@ __all__ = [
     "ArmyList",
     "Stratagem",
     "StratagemTiming",
+    "StratagemGameAction",
     "User",
     "Game",
     "GamePlayer",

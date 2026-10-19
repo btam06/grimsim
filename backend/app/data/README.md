@@ -1,10 +1,10 @@
 # Local game data
 
-Game data - detachments, datasheets and mission cards - lives here as JSON.
-This is the standard format for seed data: new game data should be added as
-JSON files here, not as Python seed code. It's Games Workshop's, so it's kept
-local rather than committed (everything in this folder except this README is
-git-ignored). The backend seeds from it on startup, adding anything missing;
+Game data - units, detachments, datasheets, stratagems and mission cards -
+lives here as JSON. This is the standard format for seed data: new game data
+should be added as JSON files here, not as Python seed code. It's Games
+Workshop's, so it's kept local rather than committed (everything in this
+folder except this README is git-ignored). The backend seeds from it on startup, adding anything missing;
 if a file isn't here, that data simply isn't seeded. The Docker build copies
 this folder in, so a local build includes whatever is here.
 
@@ -14,15 +14,28 @@ folder in `app/seeds/factions/` (e.g. `factions/adeptus_mechanicus/`):
 ```
 factions/
   adeptus_mechanicus/
+    keywords.json
     units.json
     detachments.json
     datasheets.json
   orks/
     ...
+stratagems.json
 missions.json
 ```
 
 Any of a faction's files can be left out.
+
+## `factions/<faction>/keywords.json`
+
+The keywords the faction's models and stratagems use. Keywords aren't owned
+by a faction: each one is added if no keyword with that name exists yet, so a
+keyword several factions list (e.g. `INFANTRY`) is seeded once. Every keyword
+a datasheet or stratagem names must be in some faction's `keywords.json`.
+
+```json
+{"faction": "Orks", "keywords": ["BIG MEK", "CHARACTER", "INFANTRY", "VEHICLE"]}
+```
 
 ## `factions/<faction>/units.json`
 
@@ -53,7 +66,8 @@ disposition must be a seeded disposition name.
 Each datasheet's `name` should be one of that faction's units
 (`units.json`).
 Abilities and keywords are referenced by name and must already exist (seeded
-weapon/wargear/datasheet abilities, keywords, and the faction's abilities).
+weapon/wargear/datasheet abilities, keywords from any faction's
+`keywords.json`, and the faction's abilities).
 See `app/seeds/datasheets.py` for every field and its default.
 
 ```json
@@ -86,6 +100,27 @@ See `app/seeds/datasheets.py` for every field and its default.
 ```
 
 Repeat a weapon to give a model several of it (e.g. three heavy stubbers).
+
+## `stratagems.json`
+
+Core stratagems (`"core": true`, usable by any army) and detachment
+stratagems (listed against one or more detachments, by faction and name).
+`keywords` are required keywords (a model needs all of them; none means any
+model). `timings` are when it can be used in a game (none means any time):
+`phase` is `command`, `movement`, `shooting`, `charge` or `fight`, and `turn`
+is `your_turn`, `opponent_turn` or `either`. `conditions`/`effects` are
+condition/effect keywords that apply it in the combat calculator.
+
+```json
+{
+  "stratagems": [
+    {"name": "Grenade", "description": "...", "cp": 1, "core": true,
+     "keywords": ["GRENADES"], "timings": [{"phase": "shooting", "turn": "your_turn"}]},
+    {"name": "...", "cp": 1, "detachments": [{"faction": "Orks", "name": "War Horde"}],
+     "conditions": ["always"], "effects": ["plus_one_to_hit"]}
+  ]
+}
+```
 
 ## `missions.json`
 

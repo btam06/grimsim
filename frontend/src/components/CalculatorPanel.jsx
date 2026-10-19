@@ -1,3 +1,5 @@
+import { faArrowRightArrowLeft } from '@fortawesome/free-solid-svg-icons'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { useEffect, useMemo, useState } from 'react'
 import {
   listDatasheetAbilities,
@@ -6,7 +8,7 @@ import {
   listFactionUnits,
   listLists,
   listModels,
-  listStratagems,
+  listCalculatorStratagems,
   listUnits,
   listWeaponAbilities,
   listWeapons,
@@ -33,6 +35,7 @@ function RuleOptionPicker({ side, abilities, choices, onChange }) {
   return abilities.map((ability) => (
     <div key={ability.key} className="radio-group">
       {side} — {ability.name}
+      {ability.description && <p className="hint">{ability.description}</p>}
       {['', ...ability.rule_options].map((option) => (
         <label key={option || 'none'} className="radio-option">
           <input
@@ -48,12 +51,61 @@ function RuleOptionPicker({ side, abilities, choices, onChange }) {
   ))
 }
 
+// The stratagems usable on a unit as the 'attacker' or 'defender', from the
+// server, for the shooting phase (ranged) or the fight phase (melee).
+// Switching phase or unit drops any selection that's no longer usable.
+function useUsableStratagems(unitId, side, inEngagementRange, setSelected, onError) {
+  const [available, setAvailable] = useState([])
+  useEffect(() => {
+    if (!unitId) {
+      setAvailable([])
+      return
+    }
+    let cancelled = false
+    listCalculatorStratagems(unitId, side, inEngagementRange)
+      .then((stratagems) => {
+        if (cancelled) return
+        setAvailable(stratagems)
+        const ids = new Set(stratagems.map((st) => st.id))
+        setSelected((selected) => selected.filter((id) => ids.has(id)))
+      })
+      .catch((err) => onError(err.message))
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unitId, side, inEngagementRange])
+  return available
+}
+
+function StratagemPicker({ side, stratagems, selectedIds, onChange }) {
+  const toggle = (id) =>
+    onChange(selectedIds.includes(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id])
+  return (
+    <div className="checkbox-group">
+      {side}
+      {stratagems.length === 0 && <p className="hint">None usable in this phase</p>}
+      <div className="checkbox-grid">
+        {stratagems.map((s) => (
+          <label key={s.id} className="checkbox-field" title={s.description ?? ''}>
+            <input
+              type="checkbox"
+              checked={selectedIds.includes(s.id)}
+              onChange={() => toggle(s.id)}
+            />
+            {s.name} ({s.cp} CP{s.is_core ? ', Core' : ''})
+          </label>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function CalculatorPanel() {
   const [units, setUnits] = useState([])
   const [factionUnits, setFactionUnits] = useState([])
   const [weapons, setWeapons] = useState([])
   const [lists, setLists] = useState([])
-  const [stratagems, setStratagems] = useState([])
   const [weaponAbilities, setWeaponAbilities] = useState([])
   const [effects, setEffects] = useState([])
   const [models, setModels] = useState([])
@@ -62,6 +114,9 @@ function CalculatorPanel() {
   // {faction ability id: selected rule option name ('' for none)}, per side.
   const [attackerRuleChoices, setAttackerRuleChoices] = useState({})
   const [defenderRuleChoices, setDefenderRuleChoices] = useState({})
+  // Each side picks a list, then one of that list's units.
+  const [attackingListId, setAttackingListId] = useState('')
+  const [defendingListId, setDefendingListId] = useState('')
   const [attackingUnitId, setAttackingUnitId] = useState('')
   const [defendingUnitId, setDefendingUnitId] = useState('')
   const [inEngagementRange, setInEngagementRange] = useState(false)
@@ -71,6 +126,7 @@ function CalculatorPanel() {
   const [advanced, setAdvanced] = useState(false)
   const [selectedWeaponNames, setSelectedWeaponNames] = useState([])
   const [selectedStratagemIds, setSelectedStratagemIds] = useState([])
+  const [selectedDefenderStratagemIds, setSelectedDefenderStratagemIds] = useState([])
   const [applyPrecision, setApplyPrecision] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
@@ -80,7 +136,6 @@ function CalculatorPanel() {
     listFactionUnits().then(setFactionUnits).catch((err) => setError(err.message))
     listWeapons().then(setWeapons).catch((err) => setError(err.message))
     listLists().then(setLists).catch((err) => setError(err.message))
-    listStratagems().then(setStratagems).catch((err) => setError(err.message))
     listWeaponAbilities().then(setWeaponAbilities).catch((err) => setError(err.message))
     listEffects().then(setEffects).catch((err) => setError(err.message))
     listModels().then(setModels).catch((err) => setError(err.message))
@@ -93,7 +148,24 @@ function CalculatorPanel() {
     return `${name} (unit #${unit.id})`
   }
 
-  const unitOptions = units.map((u) => ({ id: u.id, name: unitLabel(u) }))
+  const unitOptionsFor = (listId) =>
+    units
+      .filter((u) => listId !== '' && u.list_id === Number(listId))
+      .map((u) => ({ id: u.id, name: unitLabel(u) }))
+
+  // Changing a side's list keeps its unit only if that unit is in the new list.
+  const selectList = (listId, unitId, setListId, setUnitId) => {
+    setListId(listId)
+    const unit = units.find((u) => u.id === Number(unitId))
+    if (!unit || unit.list_id !== Number(listId)) setUnitId('')
+  }
+
+  const swapSides = () => {
+    setAttackingListId(defendingListId)
+    setDefendingListId(attackingListId)
+    setAttackingUnitId(defendingUnitId)
+    setDefendingUnitId(attackingUnitId)
+  }
 
   const attackingUnit = units.find((u) => u.id === Number(attackingUnitId))
 
@@ -113,6 +185,24 @@ function CalculatorPanel() {
     return Array.from(groups.entries()).map(([name, ids]) => ({ name, weaponIds: ids }))
   }, [attackingUnit, weapons])
 
+  // Only the weapons usable in the chosen engagement: ranged weapons when
+  // shooting; melee weapons in engagement range, plus Pistols (which can
+  // still shoot there).
+  const visibleWeaponGroups = useMemo(() => {
+    const pistolEffectId = effects.find((e) => e.keyword === 'pistol')?.id
+    const pistolAbilityIds = new Set(
+      weaponAbilities.filter((a) => a.effect_ids.includes(pistolEffectId)).map((a) => a.id)
+    )
+    return weaponGroups
+      .map((g) => {
+        const weapon = weapons.find((w) => w.id === g.weaponIds[0])
+        const isMelee = weapon?.weapon_type === 'melee'
+        const isPistol = !isMelee && weapon?.ability_ids.some((id) => pistolAbilityIds.has(id))
+        return { ...g, isMelee, isPistol }
+      })
+      .filter((g) => (inEngagementRange ? g.isMelee || g.isPistol : !g.isMelee))
+  }, [weaponGroups, weapons, weaponAbilities, effects, inEngagementRange])
+
   // Default every weapon group to selected whenever the attacking unit
   // changes (or its weapons finish loading).
   useEffect(() => {
@@ -120,30 +210,29 @@ function CalculatorPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attackingUnitId, weapons])
 
-  // Core stratagems are always available; detachment stratagems only when
-  // the attacking unit's army list has taken one of their detachments.
-  // ...and only those with no keyword requirements, or whose required
-  // keywords (all of them) some model in the attacking unit has.
-  const availableStratagems = useMemo(() => {
-    const list = lists.find((l) => l.id === attackingUnit?.list_id)
-    const detachmentIds = list?.detachment_ids ?? []
-    const modelKeywordIds = (attackingUnit?.unit_models ?? []).map(
-      (um) => new Set(models.find((m) => m.id === um.model_id)?.keyword_ids ?? [])
-    )
-    const someModelQualifies = (s) =>
-      s.keyword_ids.length === 0 ||
-      modelKeywordIds.some((ids) => s.keyword_ids.every((id) => ids.has(id)))
-    return stratagems.filter(
-      (s) =>
-        (s.is_core || s.detachment_ids.some((id) => detachmentIds.includes(id))) &&
-        someModelQualifies(s)
-    )
-  }, [attackingUnit, lists, stratagems, models])
-
-  // Stratagems are opt-in, so clear them whenever the attacking unit changes.
+  // Stratagems are opt-in, so clear them whenever that side's unit changes.
   useEffect(() => {
     setSelectedStratagemIds([])
   }, [attackingUnitId])
+
+  useEffect(() => {
+    setSelectedDefenderStratagemIds([])
+  }, [defendingUnitId])
+
+  const attackerStratagems = useUsableStratagems(
+    attackingUnitId,
+    'attacker',
+    inEngagementRange,
+    setSelectedStratagemIds,
+    setError
+  )
+  const defenderStratagems = useUsableStratagems(
+    defendingUnitId,
+    'defender',
+    inEngagementRange,
+    setSelectedDefenderStratagemIds,
+    setError
+  )
 
   // Abilities with rule options a unit can pick from, as {key, name,
   // rule_options}:
@@ -179,6 +268,7 @@ function CalculatorPanel() {
         entries.push({
           key: `datasheet-${id}`,
           name: `${ability.name} (${model.name})`,
+          description: ability.description,
           rule_options: ability.rule_options,
         })
       })
@@ -209,23 +299,26 @@ function CalculatorPanel() {
     const precisionAbilityIds = new Set(
       weaponAbilities.filter((a) => a.effect_ids.includes(precisionEffectId)).map((a) => a.id)
     )
-    const weaponHasPrecision = weaponGroups
+    const weaponHasPrecision = visibleWeaponGroups
       .filter((g) => selectedWeaponNames.includes(g.name))
       .flatMap((g) => g.weaponIds)
       .some((id) =>
         weapons.find((w) => w.id === id)?.ability_ids.some((aid) => precisionAbilityIds.has(aid))
       )
-    const stratagemHasPrecision = stratagems.some(
+    const stratagemHasPrecision = attackerStratagems.some(
       (s) => selectedStratagemIds.includes(s.id) && s.effect_ids.includes(precisionEffectId)
     )
     return weaponHasPrecision || stratagemHasPrecision
-  }, [effects, weaponAbilities, weaponGroups, selectedWeaponNames, weapons, stratagems, selectedStratagemIds])
+  }, [
+    effects,
+    weaponAbilities,
+    visibleWeaponGroups,
+    selectedWeaponNames,
+    weapons,
+    attackerStratagems,
+    selectedStratagemIds,
+  ])
 
-  const toggleStratagemId = (id) => {
-    setSelectedStratagemIds((ids) =>
-      ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]
-    )
-  }
 
   const toggleWeaponName = (name) => {
     setSelectedWeaponNames((names) =>
@@ -242,7 +335,7 @@ function CalculatorPanel() {
       return
     }
     try {
-      const selectedWeaponIds = weaponGroups
+      const selectedWeaponIds = visibleWeaponGroups
         .filter((g) => selectedWeaponNames.includes(g.name))
         .flatMap((g) => g.weaponIds)
       const response = await runCombat({
@@ -250,6 +343,7 @@ function CalculatorPanel() {
         defending_unit_id: Number(defendingUnitId),
         selected_weapon_ids: selectedWeaponIds,
         stratagem_ids: selectedStratagemIds,
+        defender_stratagem_ids: selectedDefenderStratagemIds,
         apply_precision: hasPrecision && applyPrecision,
         attacker_rule_options: selectedRuleOptions(attackerRuleAbilities, attackerRuleChoices),
         defender_rule_options: selectedRuleOptions(defenderRuleAbilities, defenderRuleChoices),
@@ -279,73 +373,59 @@ function CalculatorPanel() {
       <h2>Calculator</h2>
       {error && <p className="error">{error}</p>}
       <form onSubmit={handleCalculate}>
-        <Field label="Attacking Unit">
-          <Select
-            options={unitOptions}
-            value={attackingUnitId}
-            onChange={setAttackingUnitId}
-            placeholder="Select attacking unit"
-          />
-        </Field>
-        <Field label="Defending Unit">
-          <Select
-            options={unitOptions}
-            value={defendingUnitId}
-            onChange={setDefendingUnitId}
-            placeholder="Select defending unit"
-          />
-        </Field>
-        {weaponGroups.length > 0 && (
-          <div className="checkbox-group">
-            Weapons to Shoot
-            <div className="checkbox-grid">
-              {weaponGroups.map((g) => (
-                <label key={g.name} className="checkbox-field">
-                  <input
-                    type="checkbox"
-                    checked={selectedWeaponNames.includes(g.name)}
-                    onChange={() => toggleWeaponName(g.name)}
-                  />
-                  {g.name}
-                </label>
-              ))}
-            </div>
-          </div>
-        )}
-        {attackingUnit && availableStratagems.length > 0 && (
-          <div className="checkbox-group">
-            Stratagems
-            <div className="checkbox-grid">
-              {availableStratagems.map((s) => (
-                <label key={s.id} className="checkbox-field" title={s.description ?? ''}>
-                  <input
-                    type="checkbox"
-                    checked={selectedStratagemIds.includes(s.id)}
-                    onChange={() => toggleStratagemId(s.id)}
-                  />
-                  {s.name} ({s.cp} CP{s.is_core ? ', Core' : ''})
-                </label>
-              ))}
-            </div>
-          </div>
-        )}
-        {(attackerRuleAbilities.length > 0 || defenderRuleAbilities.length > 0) && (
-          <fieldset className="form-section">
-            <legend>Faction Rules</legend>
-            <RuleOptionPicker
-              side="Attacker"
-              abilities={attackerRuleAbilities}
-              choices={attackerRuleChoices}
-              onChange={setAttackerRuleChoices}
-            />
-            <RuleOptionPicker
-              side="Defender"
-              abilities={defenderRuleAbilities}
-              choices={defenderRuleChoices}
-              onChange={setDefenderRuleChoices}
-            />
+        <div className="matchup">
+          <fieldset className="form-section matchup-side">
+            <legend>Attacker</legend>
+            <Field label="List">
+              <Select
+                options={lists}
+                value={attackingListId}
+                onChange={(listId) =>
+                  selectList(listId, attackingUnitId, setAttackingListId, setAttackingUnitId)
+                }
+                placeholder="Select attacking list"
+              />
+            </Field>
+            <Field label="Unit">
+              <Select
+                options={unitOptionsFor(attackingListId)}
+                value={attackingUnitId}
+                onChange={setAttackingUnitId}
+                placeholder={attackingListId ? 'Select attacking unit' : 'Select a list first'}
+              />
+            </Field>
           </fieldset>
-        )}
+          <button
+            type="button"
+            className="swap-button"
+            onClick={swapSides}
+            title="Swap attacker and defender"
+            aria-label="Swap attacker and defender"
+          >
+            <FontAwesomeIcon icon={faArrowRightArrowLeft} />
+          </button>
+          <fieldset className="form-section matchup-side">
+            <legend>Defender</legend>
+            <Field label="List">
+              <Select
+                options={lists}
+                value={defendingListId}
+                onChange={(listId) =>
+                  selectList(listId, defendingUnitId, setDefendingListId, setDefendingUnitId)
+                }
+                placeholder="Select defending list"
+              />
+            </Field>
+            <Field label="Unit">
+              <Select
+                options={unitOptionsFor(defendingListId)}
+                value={defendingUnitId}
+                onChange={setDefendingUnitId}
+                placeholder={defendingListId ? 'Select defending unit' : 'Select a list first'}
+              />
+            </Field>
+          </fieldset>
+        </div>
         <fieldset className="form-section">
           <legend>Engagement</legend>
           <div className="radio-group">
@@ -369,6 +449,60 @@ function CalculatorPanel() {
             </label>
           </div>
         </fieldset>
+        {visibleWeaponGroups.length > 0 && (
+          <fieldset className="form-section">
+            <legend>{inEngagementRange ? 'Weapons to Fight With' : 'Weapons to Shoot'}</legend>
+            <div className="checkbox-grid">
+              {visibleWeaponGroups.map((g) => (
+                <label key={g.name} className="checkbox-field">
+                  <input
+                    type="checkbox"
+                    checked={selectedWeaponNames.includes(g.name)}
+                    onChange={() => toggleWeaponName(g.name)}
+                  />
+                  {g.name}
+                  {g.isPistol && ' (Pistol)'}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        )}
+        {(attackingUnit || defendingUnit) && (
+          <fieldset className="form-section">
+            <legend>
+              Stratagems ({inEngagementRange ? 'Fight' : 'Shooting'} Phase)
+            </legend>
+            <StratagemPicker
+              side="Attacker"
+              stratagems={attackerStratagems}
+              selectedIds={selectedStratagemIds}
+              onChange={setSelectedStratagemIds}
+            />
+            <StratagemPicker
+              side="Defender"
+              stratagems={defenderStratagems}
+              selectedIds={selectedDefenderStratagemIds}
+              onChange={setSelectedDefenderStratagemIds}
+            />
+          </fieldset>
+        )}
+        {(attackerRuleAbilities.length > 0 || defenderRuleAbilities.length > 0) && (
+          <fieldset className="form-section">
+            <legend>Faction Rules</legend>
+            <RuleOptionPicker
+              side="Attacker"
+              abilities={attackerRuleAbilities}
+              choices={attackerRuleChoices}
+              onChange={setAttackerRuleChoices}
+            />
+            <RuleOptionPicker
+              side="Defender"
+              abilities={defenderRuleAbilities}
+              choices={defenderRuleChoices}
+              onChange={setDefenderRuleChoices}
+            />
+          </fieldset>
+        )}
         <fieldset className="form-section">
           <legend>Modifiers</legend>
           {!inEngagementRange && (

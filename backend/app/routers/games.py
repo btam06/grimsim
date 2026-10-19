@@ -140,6 +140,7 @@ async def _load_stratagems(session: AsyncSession, ids: list[int] | None = None) 
         selectinload(Stratagem.effects),
         selectinload(Stratagem.keywords),
         selectinload(Stratagem.timings),
+        selectinload(Stratagem.game_action_link),
     )
     if ids is not None:
         query = query.where(Stratagem.id.in_(ids))
@@ -210,7 +211,13 @@ async def use_stratagem(
     stratagems = await _load_stratagems(session, [payload.stratagem_id])
     if not stratagems:
         raise HTTPException(status_code=400, detail="stratagem not found")
-    game_service.use_stratagem(game, game_service.player_at(game, payload.seat), stratagems[0])
+    await game_service.use_stratagem(
+        session,
+        game,
+        game_service.player_at(game, payload.seat),
+        stratagems[0],
+        payload.target_secondary_id,
+    )
     return await _commit_and_reload(session, game_id)
 
 

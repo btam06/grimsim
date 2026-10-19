@@ -105,6 +105,15 @@ def load_units(faction) -> list[str]:
     return json.loads(path.read_text(encoding="utf-8"))["units"]
 
 
+def load_keywords(faction) -> list[str]:
+    # A faction's keyword names, from its keywords.json. None if there's no
+    # file.
+    path = data_files.faction_data_dir(faction_slug(faction)) / "keywords.json"
+    if not path.exists():
+        return []
+    return json.loads(path.read_text(encoding="utf-8"))["keywords"]
+
+
 def load_detachments(faction) -> list[dict]:
     # A faction's detachments, from its detachments.json, as {"name", "dp",
     # "dispositions": [disposition names]} - a detachment can have more than
@@ -171,6 +180,23 @@ async def seed_abilities(session: AsyncSession) -> None:
             missing.append(
                 FactionAbility(name=name, description=description, faction_id=faction_id)
             )
+
+    if missing:
+        session.add_all(missing)
+        await session.commit()
+
+
+async def seed_keywords(session: AsyncSession) -> None:
+    # Keywords aren't owned by a faction - each faction's keywords.json lists
+    # the ones it uses, and any not already seeded (by name) are added, so a
+    # keyword several factions share (e.g. INFANTRY) is added once.
+    existing = set((await session.execute(select(Keyword.name))).scalars().all())
+    missing = []
+    for faction in FACTIONS:
+        for name in load_keywords(faction):
+            if name not in existing:
+                existing.add(name)
+                missing.append(Keyword(name=name))
 
     if missing:
         session.add_all(missing)

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   achieveSecondary,
   advanceGame,
@@ -9,6 +9,7 @@ import {
   startGame,
   playGameStratagem,
 } from '../api'
+import CardTextAccordion from './CardTextAccordion'
 import Select from './Select'
 import { PHASES } from './StratagemsPanel'
 
@@ -18,9 +19,59 @@ const completesOnLabel = (value) =>
   ({ your_turn: 'your turn', opponent_turn: "opponent's turn", either: 'either turn' })[value] ??
   value
 
+// Picks the target Secondary Mission for a stratagem like New Orders (discard
+// it and draw a new one), in a native <dialog> modal.
+function ReplaceSecondaryDialog({ dialogRef, stratagem, cards, onConfirm }) {
+  const [cardId, setCardId] = useState(null)
+
+  const close = () => {
+    setCardId(null)
+    dialogRef.current?.close()
+  }
+
+  return (
+    <dialog ref={dialogRef} className="game-dialog" onClose={() => setCardId(null)}>
+      <form
+        method="dialog"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (cardId === null) return
+          onConfirm(cardId)
+          close()
+        }}
+      >
+        <h3>{stratagem?.name}</h3>
+        <p>Choose a Secondary Mission to discard. You'll draw one new card in its place.</p>
+        <div className="radio-group">
+          {cards.map((card) => (
+            <label key={card.id} className="radio-option">
+              <input
+                type="radio"
+                name="replace-secondary"
+                checked={cardId === card.id}
+                onChange={() => setCardId(card.id)}
+              />
+              {card.name} ({card.points} VP)
+            </label>
+          ))}
+        </div>
+        <div className="inline-controls">
+          <button type="submit" disabled={cardId === null}>
+            Discard and draw
+          </button>
+          <button type="button" onClick={close}>
+            Cancel
+          </button>
+        </div>
+      </form>
+    </dialog>
+  )
+}
+
 function PlayerCard({ game, player, onAction }) {
   const [usable, setUsable] = useState([])
   const [stratagemId, setStratagemId] = useState('')
+  const replaceDialog = useRef(null)
   const [primaryPoints, setPrimaryPoints] = useState('')
   // VP to score per secondary card; starts at the card's base VP.
   const [achievePoints, setAchievePoints] = useState({})
@@ -41,6 +92,16 @@ function PlayerCard({ game, player, onAction }) {
 
   const active = player.secondaries.filter((c) => c.status === 'active')
   const done = player.secondaries.filter((c) => c.status !== 'active')
+  const selectedStratagem = usable.find((s) => String(s.id) === String(stratagemId))
+
+  const spendStratagem = (targetSecondaryId = null) =>
+    onAction(() =>
+      playGameStratagem(game.id, {
+        seat: player.seat,
+        stratagem_id: Number(stratagemId),
+        target_secondary_id: targetSecondaryId,
+      })
+    )
 
   return (
     <div className={`player-card${isTurn ? ' player-card--turn' : ''}`}>
@@ -98,7 +159,7 @@ function PlayerCard({ game, player, onAction }) {
             <strong>{card.name}</strong> — {card.points} VP, completes on{' '}
             {completesOnLabel(card.completes_on)}
             {card.fixed && ' (fixed)'}
-            {card.description && <p className="hint card-text">{card.description}</p>}
+            <CardTextAccordion text={card.description} />
             {inProgress && (
               <div className="inline-controls">
                 <input
@@ -149,14 +210,23 @@ function PlayerCard({ game, player, onAction }) {
           <button
             type="button"
             disabled={!stratagemId}
-            onClick={() =>
-              onAction(() =>
-                playGameStratagem(game.id, { seat: player.seat, stratagem_id: Number(stratagemId) })
-              )
-            }
+            onClick={() => {
+              // Stratagems that replace a secondary need their target picked first.
+              if (selectedStratagem?.game_action === 'replace_secondary') {
+                replaceDialog.current.showModal()
+              } else {
+                spendStratagem()
+              }
+            }}
           >
             Use
           </button>
+          <ReplaceSecondaryDialog
+            dialogRef={replaceDialog}
+            stratagem={selectedStratagem}
+            cards={active.filter((c) => !c.fixed)}
+            onConfirm={spendStratagem}
+          />
         </div>
       ) : (
         <p className="hint">Available once the game starts.</p>

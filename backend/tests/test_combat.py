@@ -1990,13 +1990,12 @@ async def test_combat_endpoint_applies_seeded_anti_infantry_weapon_ability(
 ):
     from app.seeds import conditions as conditions_seed
     from app.seeds import effects as effects_seed
-    from app.seeds import keywords as keywords_seed
     from app.seeds import weapon_abilities as weapon_abilities_seed
 
     await conditions_seed.seed(session)
     await effects_seed.seed(session)
-    await keywords_seed.seed(session)
     await weapon_abilities_seed.seed(session)
+    await client.post("/keywords", json={"name": "INFANTRY"})
 
     monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
 
@@ -4271,3 +4270,133 @@ async def test_combat_endpoint_requires_a_model_with_the_stratagems_keywords(
         },
     )
     assert response.status_code == status
+
+
+# --- attacker and defender stratagems, by phase ---
+
+
+def test_defender_stratagem_modifies_attacks_against_its_unit(monkeypatch):
+    # A defender's -1 to hit: a 4 against skill 4 now misses.
+    stratagem = Stratagem(name="Shroud", description=None, cp=1, is_core=True)
+    stratagem.conditions = [_condition("always")]
+    stratagem.effects = [_effect("minus_one_to_hit")]
+    stratagem.keywords = []
+    rolls = iter([4, 6, 1])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=4, strength=10, ap=-10, damage="1", weapon_type="ranged")
+    result = _fire(
+        weapon, [_model(toughness=1, wounds=10, save=7)], defender_stratagems=[stratagem]
+    )
+    assert result.total_damage == 0
+
+
+async def _timed_stratagem(client: AsyncClient, name: str, *timings) -> int:
+    # A core stratagem usable at the given (phase, turn) timings.
+    response = await client.post(
+        "/stratagems",
+        json={
+            "name": name,
+            "cp": 1,
+            "is_core": True,
+            "timings": [{"phase": phase, "turn": turn} for phase, turn in timings],
+        },
+    )
+    assert response.status_code == 201
+    return response.json()["id"]
+
+
+async def _usable(client, unit_id, side, in_engagement_range=False) -> set[str]:
+    response = await client.get(
+        "/combat/stratagems",
+        params={
+            "unit_id": unit_id,
+            "side": side,
+            "in_engagement_range": str(in_engagement_range).lower(),
+        },
+    )
+    assert response.status_code == 200
+    return {s["name"] for s in response.json()}
+
+
+async def test_calculator_stratagems_split_by_side_and_phase(
+    client: AsyncClient, faction_id: int
+):
+    attacker_id, defender_id, _ = await _combat_units_in_list(client, faction_id, [])
+    await _timed_stratagem(client, "Any Time")
+    await _timed_stratagem(client, "My Shooting", ("shooting", "your_turn"))
+    await _timed_stratagem(client, "Their Shooting", ("shooting", "opponent_turn"))
+    await _timed_stratagem(client, "Either Fight", ("fight", "either"))
+    await _timed_stratagem(client, "My Command", ("command", "your_turn"))
+
+    assert await _usable(client, attacker_id, "attacker") == {"Any Time", "My Shooting"}
+    assert await _usable(client, defender_id, "defender") == {"Any Time", "Their Shooting"}
+    assert await _usable(client, attacker_id, "attacker", True) == {"Any Time", "Either Fight"}
+    assert await _usable(client, defender_id, "defender", True) == {"Any Time", "Either Fight"}
+
+
+async def test_calculator_stratagems_check_detachment_and_keywords(
+    client: AsyncClient, faction_id: int
+):
+    mine = await _create_detachment(client, faction_id, "Mine")
+    other = await _create_detachment(client, faction_id, "Other")
+    attacker_id, _, _ = await _combat_units_in_list(client, faction_id, [mine])
+    await client.post("/stratagems", json={"name": "Own", "cp": 1, "detachment_ids": [mine]})
+    await client.post("/stratagems", json={"name": "Theirs", "cp": 1, "detachment_ids": [other]})
+    keyword_id = (await client.post("/keywords", json={"name": "CHARACTER"})).json()["id"]
+    await client.post(
+        "/stratagems",
+        json={"name": "Heroes Only", "cp": 1, "is_core": True, "keyword_ids": [keyword_id]},
+    )
+
+    assert await _usable(client, attacker_id, "attacker") == {"Own"}
+
+
+async def test_calculator_stratagems_invalid_unit_returns_400(client: AsyncClient):
+    response = await client.get("/combat/stratagems", params={"unit_id": 9999, "side": "attacker"})
+    assert response.status_code == 400
+
+
+async def test_combat_endpoint_accepts_defender_stratagem(client: AsyncClient, faction_id: int):
+    attacker_id, defender_id, weapon_id = await _combat_units_in_list(client, faction_id, [])
+    theirs = await _timed_stratagem(client, "Their Shooting", ("shooting", "opponent_turn"))
+    response = await client.post(
+        "/combat",
+        json={
+            "attacking_unit_id": attacker_id,
+            "defending_unit_id": defender_id,
+            "selected_weapon_ids": [weapon_id],
+            "defender_stratagem_ids": [theirs],
+        },
+    )
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize(
+    "field,timing,in_engagement_range",
+    [
+        # The attacker can't use an opponent's-turn stratagem...
+        ("stratagem_ids", ("shooting", "opponent_turn"), False),
+        # ...the defender can't use a your-turn one...
+        ("defender_stratagem_ids", ("shooting", "your_turn"), False),
+        # ...and neither can use a shooting stratagem in the fight phase.
+        ("stratagem_ids", ("shooting", "either"), True),
+        ("defender_stratagem_ids", ("shooting", "either"), True),
+    ],
+)
+async def test_combat_endpoint_rejects_stratagem_with_wrong_timing(
+    client: AsyncClient, faction_id: int, field, timing, in_engagement_range
+):
+    attacker_id, defender_id, weapon_id = await _combat_units_in_list(client, faction_id, [])
+    stratagem_id = await _timed_stratagem(client, "Mistimed", timing)
+    response = await client.post(
+        "/combat",
+        json={
+            "attacking_unit_id": attacker_id,
+            "defending_unit_id": defender_id,
+            "selected_weapon_ids": [weapon_id],
+            "in_engagement_range": in_engagement_range,
+            field: [stratagem_id],
+        },
+    )
+    assert response.status_code == 400
+    assert "Mistimed" in response.json()["detail"]

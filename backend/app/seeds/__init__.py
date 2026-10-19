@@ -6,7 +6,6 @@ from app.seeds import (
     dispositions,
     effects,
     factions,
-    keywords,
     missions,
     stratagems,
     wargear_abilities,
@@ -14,13 +13,14 @@ from app.seeds import (
 )
 
 # To seed another table on startup: add a module here with a NAMES list and an
-# async def seed(session) function (see dispositions.py / keywords.py), then
+# async def seed(session) function (see dispositions.py), then
 # register its `seed` function below.
 #
 # Everything faction-specific lives in app/seeds/factions/, one folder per
-# faction (info.py, abilities.py, units/, detachments/ - see that package's
-# __init__.py). factions.seed creates the Faction rows from each info.py, and
-# seed_abilities/seed_units/seed_detachments fill in the rest for every
+# faction (info.py, abilities.py - see that package's __init__.py), with its
+# data (keywords, units, detachments, datasheets) in app/data/factions/.
+# factions.seed creates the Faction rows from each info.py, and
+# seed_abilities/seed_keywords/seed_units/seed_detachments fill in the rest for every
 # faction, so they must run after factions.seed (and seed_detachments after
 # dispositions.seed, since it looks dispositions up by name). seed_datasheets
 # creates full models/weapons and must run after keywords, weapon abilities
@@ -33,7 +33,9 @@ from app.seeds import (
 # list of (name, description, condition keywords, effect keywords)), so all
 # three must run after conditions.seed/effects.seed.
 #
-# stratagems.seed populates the core stratagems (usable by any detachment).
+# stratagems.seed loads stratagems (core, and detachment ones) from a local,
+# uncommitted data file if present (see app/seeds/stratagems.py); it must run
+# after keywords, conditions, effects and detachments are seeded.
 #
 # missions.seed loads primary/secondary mission cards from a local, uncommitted
 # data file if present (see app/seeds/missions.py); it must run after
@@ -43,7 +45,7 @@ SEED_FUNCS = [
     missions.seed,
     factions.seed,
     factions.seed_abilities,
-    keywords.seed,
+    factions.seed_keywords,
     conditions.seed,
     effects.seed,
     weapon_abilities.seed,

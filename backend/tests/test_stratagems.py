@@ -164,3 +164,19 @@ async def test_create_stratagem_with_invalid_keyword_id_returns_400(client: Asyn
         "/stratagems", json={"name": "Bad", "cp": 1, "is_core": True, "keyword_ids": [9999]}
     )
     assert response.status_code == 400
+
+
+async def test_create_stratagem_with_a_game_action(client: AsyncClient):
+    response = await client.post(
+        "/stratagems",
+        json={"name": "New Orders", "cp": 1, "is_core": True, "game_action": "replace_secondary"},
+    )
+    assert response.status_code == 201
+    assert response.json()["game_action"] == "replace_secondary"
+    assert (await client.get("/stratagems")).json()[0]["game_action"] == "replace_secondary"
+    plain = await client.post("/stratagems", json={"name": "Plain", "cp": 1, "is_core": True})
+    assert plain.json()["game_action"] is None
+    bad = await client.post(
+        "/stratagems", json={"name": "Bad", "cp": 1, "is_core": True, "game_action": "explode"}
+    )
+    assert bad.status_code == 422

@@ -291,3 +291,98 @@ section form textarea {
 .card-text {
   white-space: pre-line;
 }
+
+/* Material UI accordion holding a card's text: compact, and not picking up
+   the list-item button styles above. */
+.card-accordion.MuiAccordion-root {
+  margin: 0.3rem 0;
+  border: 1px solid #8884;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+}
+
+.card-accordion.MuiAccordion-root::before {
+  display: none;
+}
+
+.card-accordion .MuiAccordionSummary-root {
+  min-height: 0;
+  margin: 0;
+  padding: 0 0.6rem;
+  font-size: 0.85rem;
+}
+
+.card-accordion .MuiAccordionSummary-content {
+  margin: 0.35rem 0;
+}
+
+.card-accordion .MuiAccordionDetails-root {
+  padding: 0 0.6rem 0.6rem;
+  font-size: 0.85rem;
+}
+
+.game-dialog {
+  max-width: min(28rem, calc(100vw - 2rem));
+  padding: 1rem 1.25rem;
+  border: 1px solid #8884;
+  border-radius: 6px;
+  background: Canvas;
+  color: CanvasText;
+}
+
+.game-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.game-dialog h3 {
+  margin-top: 0;
+}
+
+/* Options above the buttons, rather than the side-by-side form layout used
+   elsewhere. */
+section .game-dialog form {
+  display: block;
+}
+
+.game-dialog .radio-group {
+  margin: 0.75rem 0;
+}
+
+/* Calculator: attacker and defender side by side, with the swap button
+   between them; stacked on narrow screens. */
+.matchup {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1 1 100%;
+}
+
+.matchup-side {
+  flex: 1 1 0;
+}
+
+.matchup-side .input-field {
+  flex: 1 1 100%;
+}
+
+.swap-button {
+  flex: 0 0 auto;
+  padding: 0.5rem 0.6rem;
+  cursor: pointer;
+}
+
+@media (max-width: 560px) {
+  .matchup {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .swap-button {
+    align-self: center;
+  }
+
+  .swap-button svg {
+    transform: rotate(90deg);
+  }
+}

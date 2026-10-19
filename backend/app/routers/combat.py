@@ -18,10 +18,12 @@ from app.models import (
     Weapon,
     WeaponAbility,
 )
-from app.schemas import CombatIn, CombatOut, WeaponCombatResultOut
+from app.schemas import CombatIn, CombatOut, StratagemOut, WeaponCombatResultOut
 from app.seeds import datasheet_abilities as datasheet_ability_seeds
 from app.seeds import factions as faction_seeds
+from app.routers.stratagems import _to_out as stratagem_to_out
 from app.services import combat as combat_service
+from app.services import stratagem_availability
 
 router = APIRouter(prefix="/combat", tags=["combat"])
 
@@ -162,6 +164,61 @@ def _datasheet_rules(unit: Unit) -> list[Rule]:
     ]
 
 
+async def _load_stratagems(session: AsyncSession, ids: list[int] | None = None) -> list[Stratagem]:
+    query = select(Stratagem).options(
+        selectinload(Stratagem.detachments),
+        selectinload(Stratagem.conditions),
+        selectinload(Stratagem.effects),
+        selectinload(Stratagem.keywords),
+        selectinload(Stratagem.timings),
+        selectinload(Stratagem.game_action_link),
+    )
+    if ids is not None:
+        query = query.where(Stratagem.id.in_(ids))
+    return list((await session.execute(query.order_by(Stratagem.id))).scalars().all())
+
+
+async def _usable_stratagems(
+    session: AsyncSession,
+    ids: list[int],
+    unit: Unit,
+    side: stratagem_availability.Side,
+    phase: str,
+) -> list[Stratagem]:
+    # The requested stratagems for one side, each checked as usable on that
+    # side's unit in this phase.
+    if not ids:
+        return []
+    stratagems = await _load_stratagems(session, ids)
+    if len(stratagems) != len(set(ids)):
+        raise HTTPException(status_code=400, detail=f"one or more {side} stratagems not found")
+    for stratagem in stratagems:
+        reason = stratagem_availability.unavailable_reason(stratagem, unit, side, phase)
+        if reason is not None:
+            raise HTTPException(status_code=400, detail=f"stratagem '{stratagem.name}' {reason}")
+    return stratagems
+
+
+@router.get("/stratagems", response_model=list[StratagemOut])
+async def available_stratagems(
+    unit_id: int,
+    side: stratagem_availability.Side,
+    in_engagement_range: bool = False,
+    session: AsyncSession = Depends(get_session),
+):
+    # The stratagems usable on a unit as the attacker or the defender, in the
+    # shooting phase (ranged) or the fight phase (in engagement range).
+    unit = await _load_unit(session, unit_id)
+    if unit is None:
+        raise HTTPException(status_code=400, detail="invalid unit_id")
+    phase = stratagem_availability.calculator_phase(in_engagement_range)
+    return [
+        stratagem_to_out(stratagem)
+        for stratagem in await _load_stratagems(session)
+        if stratagem_availability.unavailable_reason(stratagem, unit, side, phase) is None
+    ]
+
+
 @router.post("", response_model=CombatOut)
 async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_session)):
     attacker = await _load_unit(session, payload.attacking_unit_id)
@@ -181,48 +238,13 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
             detail="one or more selected_weapon_ids are not equipped by the attacking unit",
         )
 
-    stratagems: list[Stratagem] = []
-    if payload.stratagem_ids:
-        result = await session.execute(
-            select(Stratagem)
-            .options(
-                selectinload(Stratagem.detachments),
-                selectinload(Stratagem.conditions),
-                selectinload(Stratagem.effects),
-                selectinload(Stratagem.keywords),
-            )
-            .where(Stratagem.id.in_(payload.stratagem_ids))
-        )
-        stratagems = list(result.scalars().all())
-        if len(stratagems) != len(set(payload.stratagem_ids)):
-            raise HTTPException(status_code=400, detail="one or more stratagem_ids not found")
-
-        # A stratagem is usable if it's core, or if it belongs to one of the
-        # detachments the attacking unit's army list has taken.
-        attacker_detachment_ids = (
-            {d.id for d in attacker.army_list.detachments} if attacker.army_list else set()
-        )
-        for stratagem in stratagems:
-            if not stratagem.is_core and not (
-                {d.id for d in stratagem.detachments} & attacker_detachment_ids
-            ):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"stratagem '{stratagem.name}' is not available to the attacking "
-                    "unit's detachments",
-                )
-            # One with keyword requirements needs a model in the unit that has
-            # all of them (e.g. a CHARACTER for Epic Challenge).
-            required = {k.name for k in stratagem.keywords}
-            if required and not any(
-                required <= {k.name for k in unit_model.model.keywords}
-                for unit_model in attacker.unit_models
-            ):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"stratagem '{stratagem.name}' needs a model with "
-                    f"{', '.join(sorted(required))} in the attacking unit",
-                )
+    phase = stratagem_availability.calculator_phase(payload.in_engagement_range)
+    stratagems = await _usable_stratagems(
+        session, payload.stratagem_ids, attacker, "attacker", phase
+    )
+    defender_stratagems = await _usable_stratagems(
+        session, payload.defender_stratagem_ids, defender, "defender", phase
+    )
 
     _validate_rule_options(payload.attacker_rule_options, "attacker_rule_options")
     _validate_rule_options(payload.defender_rule_options, "defender_rule_options")
@@ -249,6 +271,7 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
         moved_less_than_3=payload.moved_less_than_3,
         advanced=payload.advanced,
         stratagems=stratagems,
+        defender_stratagems=defender_stratagems,
         apply_precision=payload.apply_precision,
         attacker_rules=attacker_option_rules + _datasheet_rules(attacker),
         defender_rules=defender_option_rules + _datasheet_rules(defender),

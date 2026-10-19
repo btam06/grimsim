@@ -172,6 +172,7 @@ def resolve_combat(
     moved_less_than_3: bool,
     advanced: bool,
     stratagems: list[Stratagem] | None = None,
+    defender_stratagems: list[Stratagem] | None = None,
     apply_precision: bool = False,
     attacker_rules: list[Rule] | None = None,
     defender_rules: list[Rule] | None = None,
@@ -223,6 +224,9 @@ def resolve_combat(
     # that have all of them; one without applies to every model, and also to
     # the unit-wide check below.
     stratagems = list(stratagems or [])
+    # Stratagems the defender used on its unit: like the defender's rules,
+    # they're in play for every weapon, modifying the attacks against it.
+    defender_stratagems = list(defender_stratagems or [])
     unrestricted_stratagems = [s for s in stratagems if not s.keywords]
 
     def stratagems_for(model: Model) -> list[Stratagem]:
@@ -341,6 +345,7 @@ def resolve_combat(
                             + model_stratagems
                             + attacker_rules
                             + defender_rules
+                            + defender_stratagems
                         )
                     }.values()
                 )

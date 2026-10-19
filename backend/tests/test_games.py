@@ -593,3 +593,121 @@ async def test_achieving_a_secondary_can_score_a_different_amount(client: AsyncC
     game = (await client.post(url, json={"points": 8})).json()
     assert _player(game, 1)["vp"] == 8
     assert _player(game, 1)["scores"][0]["points"] == 8
+
+
+# --- New Orders: discard a secondary and draw a new one ---
+
+
+async def _new_orders_game(client, ids=None, *, modes=("tactical", "tactical"), fixed=((), ())):
+    ids = ids or await _setup(client, tactical_cards=20)
+    ids["new_orders"] = (
+        await client.post(
+            "/stratagems",
+            json={
+                "name": "New Orders",
+                "cp": 1,
+                "is_core": True,
+                "timings": [{"phase": "command", "turn": "your_turn"}],
+                "game_action": "replace_secondary",
+            },
+        )
+    ).json()["id"]
+    game = await _new_game(client, ids, modes=modes, fixed=fixed, first=1)
+    game = (await client.post(f"/games/{game['id']}/start")).json()
+    return ids, game
+
+
+async def test_new_orders_replaces_the_target_secondary(client: AsyncClient):
+    ids, game = await _new_orders_game(client)
+    game_id = game["id"]
+    target, kept = _player(game, 1)["secondaries"]
+    assert "New Orders" in await _usable(client, game_id, 1)
+
+    response = await client.post(
+        f"/games/{game_id}/stratagems",
+        json={"seat": 1, "stratagem_id": ids["new_orders"], "target_secondary_id": target["id"]},
+    )
+    assert response.status_code == 200
+    player = _player(response.json(), 1)
+    assert player["cp"] == 0
+    cards = {c["id"]: c for c in player["secondaries"]}
+    assert cards[target["id"]]["status"] == "discarded"
+    assert cards[kept["id"]]["status"] == "active"
+    active = [c for c in player["secondaries"] if c["status"] == "active"]
+    assert len(active) == 2  # the kept card plus one newly drawn
+    new = next(c for c in active if c["id"] not in (target["id"], kept["id"]))
+    assert new["secondary_mission_id"] not in (
+        target["secondary_mission_id"],
+        kept["secondary_mission_id"],
+    )
+    assert [u["name"] for u in player["stratagem_uses"]] == ["New Orders"]
+
+
+async def test_new_orders_needs_a_valid_target(client: AsyncClient):
+    ids, game = await _new_orders_game(client)
+    game_id = game["id"]
+    opponent_card_ids = [c["id"] for c in _player(game, 2)["secondaries"]]
+
+    async def use(target):
+        return await client.post(
+            f"/games/{game_id}/stratagems",
+            json={"seat": 1, "stratagem_id": ids["new_orders"], "target_secondary_id": target},
+        )
+
+    assert (await use(None)).status_code == 400
+    assert (await use(9999)).status_code == 400
+    if opponent_card_ids:  # the opponent holds no cards yet on turn 1
+        assert (await use(opponent_card_ids[0])).status_code == 400
+    # Nothing was spent on the failed attempts.
+    game = (await client.get(f"/games/{game_id}")).json()
+    assert _player(game, 1)["cp"] == 1
+
+
+async def test_new_orders_isnt_usable_without_a_tactical_secondary(client: AsyncClient):
+    # A fixed player has no tactical cards to replace.
+    ids = await _setup(client, tactical_cards=20)
+    picks = ([ids["tactical"][0], ids["reactive"]], ())
+    _, game = await _new_orders_game(client, ids, modes=("fixed", "tactical"), fixed=picks)
+    assert "New Orders" not in await _usable(client, game["id"], 1)
+
+
+async def test_other_stratagems_dont_take_a_target(client: AsyncClient):
+    ids, game = await _new_orders_game(client)
+    card = _player(game, 1)["secondaries"][0]
+    response = await client.post(
+        f"/games/{game['id']}/stratagems",
+        json={"seat": 1, "stratagem_id": ids["anytime"], "target_secondary_id": card["id"]},
+    )
+    assert response.status_code == 400
+
+
+# --- once per phase ---
+
+
+async def test_a_stratagem_can_be_used_once_per_phase(client: AsyncClient):
+    ids = await _setup(client)
+    game = await _new_game(client, ids, first=1)
+    game_id = game["id"]
+    await client.post(f"/games/{game_id}/start")
+    # On to player 2's command phase, where each player has 2 CP.
+    game = await _advance(client, game_id, times=5)
+    assert (game["turn_seat"], game["phase"]) == (2, "command")
+    assert [_player(game, s)["cp"] for s in (1, 2)] == [2, 2]
+
+    async def use(seat):
+        return await client.post(
+            f"/games/{game_id}/stratagems", json={"seat": seat, "stratagem_id": ids["anytime"]}
+        )
+
+    assert (await use(1)).status_code == 200
+    second = await use(1)
+    assert second.status_code == 400
+    assert "already been used this phase" in second.json()["detail"]
+    assert "Anytime" not in await _usable(client, game_id, 1)
+    # The other player can still use it this phase.
+    assert (await use(2)).status_code == 200
+
+    # In the next phase it's available again.
+    await _advance(client, game_id)
+    assert "Anytime" in await _usable(client, game_id, 1)
+    assert (await use(1)).status_code == 200

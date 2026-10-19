@@ -45,6 +45,19 @@ class Stratagem(Base):
     timings: Mapped[list["StratagemTiming"]] = relationship(
         back_populates="stratagem", cascade="all, delete-orphan", order_by="StratagemTiming.id"
     )
+    game_action_link: Mapped["StratagemGameAction | None"] = relationship(
+        cascade="all, delete-orphan", uselist=False
+    )
+
+    @property
+    def game_action(self) -> str | None:
+        # What the game tracker does when it's used, beyond spending CP (see
+        # STRATAGEM_GAME_ACTIONS), if anything.
+        return self.game_action_link.action if self.game_action_link else None
+
+    @game_action.setter
+    def game_action(self, action: str | None) -> None:
+        self.game_action_link = StratagemGameAction(action=action) if action else None
 
     detachments: Mapped[list["Detachment"]] = relationship(
         secondary=stratagem_detachments, back_populates="stratagems"
@@ -66,3 +79,19 @@ class StratagemTiming(Base):
     turn: Mapped[str] = mapped_column(String(32))
 
     stratagem: Mapped["Stratagem"] = relationship(back_populates="timings")
+
+
+# Things a stratagem can do in a game besides cost CP, carried out by the game
+# tracker when it's used:
+# - "replace_secondary": discard one of the player's active tactical Secondary
+#   Mission cards (the stratagem's target) and draw one new one (New Orders).
+STRATAGEM_GAME_ACTIONS = ("replace_secondary",)
+
+
+class StratagemGameAction(Base):
+    # A stratagem's game action (one at most). Its own table rather than a
+    # column on stratagems, so existing databases pick it up without a migration.
+    __tablename__ = "stratagem_game_actions"
+
+    stratagem_id: Mapped[int] = mapped_column(ForeignKey("stratagems.id"), primary_key=True)
+    action: Mapped[str] = mapped_column(String(64))
