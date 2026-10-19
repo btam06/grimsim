@@ -6,7 +6,7 @@ from typing import Literal
 
 from app.seeds import data_files
 
-# The shape of a datasheet, loaded from app/data/datasheets/<faction>.json
+# The shape of a datasheet, loaded from app/data/factions/<faction>/datasheets.json
 # (see app/data/README.md) and seeded by app.seeds.factions.seed_datasheets.
 # Abilities and keywords are referenced by name and must already be seeded
 # (weapon/wargear/datasheet abilities, keywords, and this faction's faction
@@ -81,10 +81,10 @@ def _model(data: dict) -> ModelSpec:
 
 
 def load(faction_slug: str) -> list[Datasheet]:
-    # A faction's datasheets, from app/data/datasheets/<faction_slug>.json
+    # A faction's datasheets, from app/data/factions/<faction_slug>/datasheets.json
     # (the faction's folder name, e.g. "adeptus_mechanicus"); none if there's
     # no file.
-    path = data_files.data_dir() / "datasheets" / f"{faction_slug}.json"
+    path = data_files.faction_data_dir(faction_slug) / "datasheets.json"
     if not path.exists():
         return []
     data = json.loads(path.read_text(encoding="utf-8"))

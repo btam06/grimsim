@@ -1,16 +1,57 @@
 # Local game data
 
-Datasheets and mission cards are Games Workshop's, so they're kept here as
-local JSON files rather than committed (everything in this folder except this
-README is git-ignored). The backend seeds from them on startup, adding anything
-missing; if a file isn't here, that data simply isn't seeded. The Docker build
-copies this folder in, so a local build includes whatever is here.
+Game data - detachments, datasheets and mission cards - lives here as JSON.
+This is the standard format for seed data: new game data should be added as
+JSON files here, not as Python seed code. It's Games Workshop's, so it's kept
+local rather than committed (everything in this folder except this README is
+git-ignored). The backend seeds from it on startup, adding anything missing;
+if a file isn't here, that data simply isn't seeded. The Docker build copies
+this folder in, so a local build includes whatever is here.
 
-## `datasheets/<faction>.json`
+Each faction's data is in `factions/<faction>/`, named after the faction's
+folder in `app/seeds/factions/` (e.g. `factions/adeptus_mechanicus/`):
 
-One file per faction, named after the faction's folder in
-`app/seeds/factions/` (e.g. `adeptus_mechanicus.json`). Each datasheet's
-`name` should be one of that faction's unit names (`units/__init__.py`).
+```
+factions/
+  adeptus_mechanicus/
+    units.json
+    detachments.json
+    datasheets.json
+  orks/
+    ...
+missions.json
+```
+
+Any of a faction's files can be left out.
+
+## `factions/<faction>/units.json`
+
+The faction's units (by datasheet name). Units without a full datasheet are
+seeded by name only.
+
+```json
+{"faction": "Orks", "units": ["Big Mek Dakkarig", "Tankbustas"]}
+```
+
+## `factions/<faction>/detachments.json`
+
+A detachment can have more than one disposition (it can be either). Each
+disposition must be a seeded disposition name.
+
+```json
+{
+  "faction": "Orks",
+  "detachments": [
+    {"name": "War Horde", "dp": 3, "dispositions": ["Take and Hold", "Purge the Foe"]},
+    {"name": "Madcap Meks", "dp": 1, "dispositions": ["Disruption"]}
+  ]
+}
+```
+
+## `factions/<faction>/datasheets.json`
+
+Each datasheet's `name` should be one of that faction's units
+(`units.json`).
 Abilities and keywords are referenced by name and must already exist (seeded
 weapon/wargear/datasheet abilities, keywords, and the faction's abilities).
 See `app/seeds/datasheets.py` for every field and its default.

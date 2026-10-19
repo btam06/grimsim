@@ -114,15 +114,15 @@ def _unit_pairs():
     return {
         (faction.info.FACTION_NAME, name)
         for faction in factions.FACTIONS
-        for name in faction.units.NAMES
+        for name in factions.load_units(faction)
     }
 
 
 def _detachment_pairs():
     return {
-        (faction.info.FACTION_NAME, name)
+        (faction.info.FACTION_NAME, entry["name"])
         for faction in factions.FACTIONS
-        for name, _, _ in faction.detachments.ENTRIES
+        for entry in factions.load_detachments(faction)
     }
 
 
@@ -142,10 +142,7 @@ async def test_seed_faction_names_come_from_each_faction_info():
 @pytest.mark.parametrize("faction", factions.FACTIONS, ids=FACTION_IDS)
 async def test_seed_faction_folder_has_no_duplicate_names(faction):
     abilities = [name for name, _ in faction.abilities.ENTRIES]
-    detachments = [name for name, _, _ in faction.detachments.ENTRIES]
     assert len(abilities) == len(set(abilities))
-    assert len(faction.units.NAMES) == len(set(faction.units.NAMES))
-    assert len(detachments) == len(set(detachments))
 
 
 @pytest.mark.parametrize("faction", factions.FACTIONS, ids=FACTION_IDS)
@@ -177,60 +174,85 @@ async def test_seed_faction_abilities_skips_entries_whose_faction_is_missing(
     assert (await session.execute(select(FactionAbility))).scalars().all() == []
 
 
-async def test_seed_faction_units_inserts_all_names(session: AsyncSession):
+async def test_seed_faction_units_inserts_all_names(session: AsyncSession, fixture_game_data):
     await factions.seed(session)
     await factions.seed_units(session)
 
-    assert await _pairs(session, FactionUnit) == _unit_pairs()
+    # The same unit name can be in more than one faction's roster.
+    assert await _pairs(session, FactionUnit) == {
+        ("Adeptus Mechanicus", "Test Squad"),
+        ("Adeptus Mechanicus", "Test Walker"),
+        ("Orks", "Test Boyz"),
+        ("Orks", "Test Walker"),
+    }
 
 
-async def test_seed_faction_units_is_idempotent(session: AsyncSession):
+async def test_seed_faction_units_without_a_data_file_adds_nothing(session: AsyncSession):
     await factions.seed(session)
-    await factions.seed_units(session)
-    await factions.seed_units(session)
-
-    names = (await session.execute(select(FactionUnit.name))).scalars().all()
-    assert len(names) == len(_unit_pairs())
-
-
-async def test_seed_faction_units_skips_if_faction_missing(session: AsyncSession):
     await factions.seed_units(session)
 
     assert (await session.execute(select(FactionUnit))).scalars().all() == []
 
 
-async def test_seed_detachments_inserts_all_entries(session: AsyncSession):
+async def test_seed_faction_units_is_idempotent(session: AsyncSession, fixture_game_data):
+    await factions.seed(session)
+    await factions.seed_units(session)
+    await factions.seed_units(session)
+
+    names = (await session.execute(select(FactionUnit.name))).scalars().all()
+    assert len(names) == 4
+
+
+async def test_seed_faction_units_skips_if_faction_missing(
+    session: AsyncSession, fixture_game_data
+):
+    await factions.seed_units(session)
+
+    assert (await session.execute(select(FactionUnit))).scalars().all() == []
+
+
+async def test_seed_detachments_inserts_all_entries(session: AsyncSession, fixture_game_data):
     await dispositions.seed(session)
     await factions.seed(session)
     await factions.seed_detachments(session)
 
-    assert await _pairs(session, Detachment) == _detachment_pairs()
-
-    detachments = (
-        await session.execute(select(Detachment).options(selectinload(Detachment.dispositions)))
-    ).scalars().all()
-    expected = {
-        name: (disposition_name, dp)
-        for faction in factions.FACTIONS
-        for name, disposition_name, dp in faction.detachments.ENTRIES
+    assert await _pairs(session, Detachment) == {("Orks", "Test Horde"), ("Orks", "Test Mob")}
+    detachments = {
+        d.name: d
+        for d in (
+            await session.execute(
+                select(Detachment).options(selectinload(Detachment.dispositions))
+            )
+        )
+        .scalars()
+        .all()
     }
-    for detachment in detachments:
-        disposition_name, dp = expected[detachment.name]
-        assert detachment.dp == dp
-        assert [d.name for d in detachment.dispositions] == [disposition_name]
+    horde = detachments["Test Horde"]
+    assert horde.dp == 3
+    # A detachment can have more than one disposition.
+    assert {d.name for d in horde.dispositions} == {"Take and Hold", "Purge the Foe"}
+    assert [d.name for d in detachments["Test Mob"].dispositions] == ["Disruption"]
 
 
-async def test_seed_detachments_is_idempotent(session: AsyncSession):
+async def test_seed_detachments_without_a_data_file_adds_nothing(session: AsyncSession):
+    await dispositions.seed(session)
+    await factions.seed(session)
+    await factions.seed_detachments(session)
+
+    assert (await session.execute(select(Detachment))).scalars().all() == []
+
+
+async def test_seed_detachments_is_idempotent(session: AsyncSession, fixture_game_data):
     await dispositions.seed(session)
     await factions.seed(session)
     await factions.seed_detachments(session)
     await factions.seed_detachments(session)
 
     names = (await session.execute(select(Detachment.name))).scalars().all()
-    assert len(names) == len(_detachment_pairs())
+    assert sorted(names) == ["Test Horde", "Test Mob"]
 
 
-async def test_seed_detachments_skips_if_faction_missing(session: AsyncSession):
+async def test_seed_detachments_skips_if_faction_missing(session: AsyncSession, fixture_game_data):
     await dispositions.seed(session)
     await factions.seed_detachments(session)
 
@@ -750,20 +772,16 @@ async def test_seed_dispositions_renames_reconnaisance_in_place(session: AsyncSe
     assert rows == [(old_id, "Reconnaissance")]
 
 
-# --- datasheets, from app/data/datasheets/<faction>.json ---
+# --- datasheets, from app/data/factions/<faction>/datasheets.json ---
 
 # The real local data folder (tests otherwise point seeds at an empty one).
 LOCAL_DATA_DIR = data_files.DATA_DIR
 
 
 def _local_datasheets():
-    folder = LOCAL_DATA_DIR / "datasheets"
-    if not folder.exists():
-        return []
     return [
         (faction, datasheet)
         for faction in factions.FACTIONS
-        if (folder / f"{faction.__name__.rsplit('.', 1)[-1]}.json").exists()
         for datasheet in _load_from(LOCAL_DATA_DIR, faction)
     ]
 
@@ -780,14 +798,41 @@ def _load_from(folder, faction):
 LOCAL_DATASHEETS = _local_datasheets()
 
 
-@pytest.mark.skipif(not LOCAL_DATASHEETS, reason="no local datasheet data (app/data/datasheets)")
+def _local(load, faction):
+    # Calls a loader against the real local data folder.
+    original = data_files.DATA_DIR
+    data_files.DATA_DIR = LOCAL_DATA_DIR
+    try:
+        return load(faction)
+    finally:
+        data_files.DATA_DIR = original
+
+
+LOCAL_UNITS = [
+    (faction, names)
+    for faction in factions.FACTIONS
+    if (names := _local(factions.load_units, faction))
+]
+
+
+@pytest.mark.skipif(not LOCAL_UNITS, reason="no local unit data (app/data/factions/*/units.json)")
+@pytest.mark.parametrize(
+    "faction,names", LOCAL_UNITS, ids=[f.info.FACTION_NAME for f, _ in LOCAL_UNITS] or None
+)
+async def test_local_units_are_well_formed(faction, names):
+    # Checks your local data files, if you have any.
+    assert names and all(isinstance(name, str) and name for name in names)
+    assert len(names) == len(set(names))
+
+
+@pytest.mark.skipif(not LOCAL_DATASHEETS, reason="no local datasheet data (app/data/factions/*/datasheets.json)")
 @pytest.mark.parametrize(
     "faction,datasheet", LOCAL_DATASHEETS, ids=[d.name for _, d in LOCAL_DATASHEETS] or None
 )
 async def test_local_datasheet_references_only_seeded_names(faction, datasheet):
     # Checks your local data files, if you have any: every datasheet is one of
     # its faction's units, and every keyword/ability it names gets seeded.
-    assert datasheet.name in faction.units.NAMES
+    assert datasheet.name in _local(factions.load_units, faction)
     weapon_ability_names = {name for name, _, _, _ in weapon_abilities.ENTRIES}
     wargear_ability_names = {name for name, _, _, _ in wargear_abilities.ENTRIES}
     datasheet_ability_names = {name for name, _, _, _ in datasheet_abilities.ENTRIES}
@@ -928,3 +973,77 @@ async def test_canticles_of_the_omnissiah_options():
         "Mantra of Discipline",
         "Shroudpsalm",
     }
+
+
+
+async def test_seed_detachments_fills_in_missing_dispositions(
+    session: AsyncSession, fixture_game_data
+):
+    # A detachment seeded with fewer dispositions than its data now lists
+    # gets the rest; nothing is removed.
+    await dispositions.seed(session)
+    await factions.seed(session)
+    await factions.seed_detachments(session)
+    load = (
+        select(Detachment)
+        .options(selectinload(Detachment.dispositions))
+        .where(Detachment.name == "Test Horde")
+    )
+    horde = (await session.execute(load)).scalar_one()
+    horde.dispositions = [d for d in horde.dispositions if d.name == "Take and Hold"]
+    await session.commit()
+
+    await factions.seed_detachments(session)
+
+    session.expire_all()
+    horde = (await session.execute(load)).scalar_one()
+    assert {d.name for d in horde.dispositions} == {"Take and Hold", "Purge the Foe"}
+
+
+async def test_seed_detachments_rejects_an_unknown_disposition(
+    session: AsyncSession, monkeypatch, tmp_path
+):
+    import json
+
+    (tmp_path / "factions" / "orks").mkdir(parents=True)
+    (tmp_path / "factions" / "orks" / "detachments.json").write_text(
+        json.dumps(
+            {
+                "faction": "Orks",
+                "detachments": [{"name": "Typo Mob", "dp": 1, "dispositions": ["Reconnaisance"]}],
+            }
+        )
+    )
+    monkeypatch.setattr(data_files, "DATA_DIR", tmp_path)
+    await dispositions.seed(session)
+    await factions.seed(session)
+    with pytest.raises(ValueError, match="Typo Mob"):
+        await factions.seed_detachments(session)
+
+
+def _local_detachments():
+    original = data_files.DATA_DIR
+    data_files.DATA_DIR = LOCAL_DATA_DIR
+    try:
+        return [(f, factions.load_detachments(f)) for f in factions.FACTIONS]
+    finally:
+        data_files.DATA_DIR = original
+
+
+LOCAL_DETACHMENTS = [(f, entries) for f, entries in _local_detachments() if entries]
+
+
+@pytest.mark.skipif(not LOCAL_DETACHMENTS, reason="no local detachment data (app/data/factions/*/detachments.json)")
+@pytest.mark.parametrize(
+    "faction,entries",
+    LOCAL_DETACHMENTS,
+    ids=[f.info.FACTION_NAME for f, _ in LOCAL_DETACHMENTS] or None,
+)
+async def test_local_detachments_are_well_formed(faction, entries):
+    # Checks your local data files, if you have any.
+    names = [entry["name"] for entry in entries]
+    assert len(names) == len(set(names))
+    for entry in entries:
+        assert isinstance(entry["dp"], int)
+        assert entry["dispositions"], entry["name"]
+        assert set(entry["dispositions"]) <= set(dispositions.NAMES), entry["name"]

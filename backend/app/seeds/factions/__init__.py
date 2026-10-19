@@ -41,6 +41,9 @@ from app.seeds.factions import (
     tyranids,
     world_eaters,
 )
+import json
+
+from app.seeds import data_files
 from app.seeds import datasheets as datasheet_data
 from app.seeds.lookup import get_dispositions_by_name
 
@@ -50,11 +53,10 @@ from app.seeds.lookup import get_dispositions_by_name
 #                            optional OPTIONS dict of rule options an ability
 #                            grants (e.g. Doctrina Imperatives' Protector and
 #                            Conqueror Imperatives) - see rule_options below
-#   units/__init__.py        NAMES of the faction's units
 #
-# Full datasheets (models, stats, weapons...) aren't in here: they're loaded
-# from app/data/datasheets/<faction folder name>.json - see app/data/README.md.
-#   detachments/__init__.py  ENTRIES of (name, disposition name, dp)
+# Game data - units, detachments and full datasheets - isn't in here: it's
+# loaded from app/data/factions/<faction folder name>/ (units.json,
+# detachments.json, datasheets.json) - see app/data/README.md.
 #
 # To add a faction: copy an existing folder, fill it in, then register it in
 # FACTIONS below. Everything else (the Faction rows themselves, and its
@@ -86,6 +88,31 @@ FACTIONS = [
 ]
 
 NAMES = [faction.info.FACTION_NAME for faction in FACTIONS]
+
+
+def faction_slug(faction) -> str:
+    # A faction's folder name (e.g. "adeptus_mechanicus"), which names its
+    # data files.
+    return faction.__name__.rsplit(".", 1)[-1]
+
+
+def load_units(faction) -> list[str]:
+    # A faction's unit (datasheet) names, from its units.json. None if there's
+    # no file.
+    path = data_files.faction_data_dir(faction_slug(faction)) / "units.json"
+    if not path.exists():
+        return []
+    return json.loads(path.read_text(encoding="utf-8"))["units"]
+
+
+def load_detachments(faction) -> list[dict]:
+    # A faction's detachments, from its detachments.json, as {"name", "dp",
+    # "dispositions": [disposition names]} - a detachment can have more than
+    # one disposition. None if there's no file.
+    path = data_files.faction_data_dir(faction_slug(faction)) / "detachments.json"
+    if not path.exists():
+        return []
+    return json.loads(path.read_text(encoding="utf-8"))["detachments"]
 
 # {(faction name, ability name): {option name: [Rule, ...]}} across every
 # faction's abilities.py OPTIONS.
@@ -164,7 +191,7 @@ async def seed_units(session: AsyncSession) -> None:
         faction_id = faction_ids.get(faction.info.FACTION_NAME)
         if faction_id is None:
             continue  # faction hasn't been seeded yet
-        for name in faction.units.NAMES:
+        for name in load_units(faction):
             if (faction_id, name) not in existing:
                 missing.append(FactionUnit(name=name, faction_id=faction_id))
 
@@ -174,43 +201,56 @@ async def seed_units(session: AsyncSession) -> None:
 
 
 async def seed_detachments(session: AsyncSession) -> None:
-    # Must run after dispositions.seed, since each entry looks its disposition
-    # up by name.
+    # Creates each faction's detachments (see load_detachments), and gives
+    # existing ones any of their dispositions they're missing (additive only).
+    # Must run after dispositions.seed, since dispositions are looked up by
+    # name - an unknown name is an error, not skipped.
     faction_ids = await _faction_ids_by_name(session)
     dispositions_by_name = await get_dispositions_by_name(session)
     existing = {
-        (faction_id, name)
-        for faction_id, name in (
-            await session.execute(select(Detachment.faction_id, Detachment.name))
-        ).all()
+        (detachment.faction_id, detachment.name): detachment
+        for detachment in (
+            await session.execute(
+                select(Detachment).options(selectinload(Detachment.dispositions))
+            )
+        )
+        .scalars()
+        .all()
     }
 
-    missing = []
+    changed = False
     for faction in FACTIONS:
         faction_id = faction_ids.get(faction.info.FACTION_NAME)
         if faction_id is None:
             continue  # faction hasn't been seeded yet
-        for name, disposition_name, dp in faction.detachments.ENTRIES:
-            if (faction_id, name) in existing:
-                continue
-            disposition = dispositions_by_name.get(disposition_name)
-            missing.append(
-                Detachment(
-                    name=name,
-                    faction_id=faction_id,
-                    dp=dp,
-                    dispositions=[disposition] if disposition else [],
-                )
-            )
+        for entry in load_detachments(faction):
+            name, dp, disposition_names = entry["name"], entry["dp"], entry["dispositions"]
+            unknown = [d for d in disposition_names if d not in dispositions_by_name]
+            if unknown:
+                raise ValueError(f"detachment {name!r} references unknown disposition(s) {unknown}")
+            dispositions = [dispositions_by_name[d] for d in disposition_names]
 
-    if missing:
-        session.add_all(missing)
+            detachment = existing.get((faction_id, name))
+            if detachment is None:
+                session.add(
+                    Detachment(
+                        name=name, faction_id=faction_id, dp=dp, dispositions=dispositions
+                    )
+                )
+                changed = True
+                continue
+            for disposition in dispositions:
+                if disposition not in detachment.dispositions:
+                    detachment.dispositions.append(disposition)
+                    changed = True
+
+    if changed:
         await session.commit()
 
 
 async def seed_datasheets(session: AsyncSession) -> None:
     # Creates the models (with stats, keywords, faction/datasheet abilities,
-    # weapons and wargear) in each faction's app/data/datasheets/<faction>.json.
+    # weapons and wargear) in each faction's datasheets.json.
     #
     # For a model that already exists in its faction (by name), only what it's
     # missing (by name) is added: faction/datasheet abilities, weapons,
@@ -288,8 +328,7 @@ async def seed_datasheets(session: AsyncSession) -> None:
         faction_id = faction_ids.get(faction.info.FACTION_NAME)
         if faction_id is None:
             continue  # faction hasn't been seeded yet
-        faction_slug = faction.__name__.rsplit(".", 1)[-1]
-        for datasheet in datasheet_data.load(faction_slug):
+        for datasheet in datasheet_data.load(faction_slug(faction)):
             for spec in datasheet.models:
                 model = existing.get((faction_id, spec.name))
                 if model is not None:

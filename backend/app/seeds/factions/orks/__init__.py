@@ -1,1 +1,1 @@
-from . import abilities, detachments, info, units
+from . import abilities, info
