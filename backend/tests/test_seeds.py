@@ -1086,3 +1086,89 @@ async def test_run_all_seeds_skitarii_vanguard(session: AsyncSession):
         "Alpha combat weapon",
         "Mechanicus pistol",
     }
+
+
+async def test_run_all_seeds_belisarius_cawl(session: AsyncSession):
+    await run_all(session)
+
+    cawl = (
+        await session.execute(
+            select(Model)
+            .options(
+                selectinload(Model.keywords),
+                selectinload(Model.faction_abilities),
+                selectinload(Model.weapons).selectinload(Weapon.abilities),
+            )
+            .where(Model.name == "Belisarius Cawl")
+        )
+    ).scalar_one()
+    assert (cawl.movement, cawl.toughness, cawl.save, cawl.wounds) == (8, 8, 2, 10)
+    assert (cawl.leadership, cawl.oc, cawl.invulnerable) == (6, 3, 4)
+    assert {k.name for k in cawl.keywords} == {
+        "MONSTER",
+        "CHARACTER",
+        "MOBILE",
+        "EPIC HERO",
+        "IMPERIUM",
+        "TECH-PRIEST",
+        "CULT MECHANICUS",
+        "BELISARIUS CAWL",
+    }
+    assert [a.name for a in cawl.faction_abilities] == ["Doctrina Imperatives"]
+
+    weapons = {w.name: w for w in cawl.weapons}
+    assert set(weapons) == {
+        "Solar atomiser",
+        "Arc scourge",
+        "Cawl’s Omnissian axe",
+        "Mechadendrite hive",
+    }
+    assert [a.name for a in weapons["Solar atomiser"].abilities] == ["Melta 3"]
+    assert {a.name for a in weapons["Arc scourge"].abilities} == {
+        "Anti-Vehicle 4+",
+        "Devastating Wounds",
+        "Extra Attacks",
+    }
+    assert [a.name for a in weapons["Mechadendrite hive"].abilities] == ["Extra Attacks"]
+    assert weapons["Mechadendrite hive"].attacks == "2D6"
+    assert weapons["Cawl’s Omnissian axe"].abilities == []
+
+
+async def test_datasheet_ability_options_are_well_formed():
+    from app.combat_rules import CONDITIONS, EFFECTS
+
+    seeded = {name for name, _, _, _ in datasheet_abilities.ENTRIES}
+    assert set(datasheet_abilities.OPTIONS) <= seeded
+    for options in datasheet_abilities.OPTIONS.values():
+        for option in options.values():
+            for rule in option.rules:
+                assert set(rule.conditions) <= set(CONDITIONS)
+                assert set(rule.effects) <= set(EFFECTS)
+            assert set(option.keywords) <= set(keywords.NAMES)
+    # Option names are unique across datasheet and faction ability options,
+    # since a combat request names them without saying which ability they're from.
+    names = [n for options in datasheet_abilities.OPTIONS.values() for n in options] + [
+        n for options in factions.RULE_OPTIONS.values() for n in options
+    ]
+    assert len(names) == len(set(names))
+
+
+async def test_belisarius_cawl_has_canticles(session: AsyncSession):
+    await run_all(session)
+    cawl = (
+        await session.execute(
+            select(Model)
+            .options(selectinload(Model.abilities))
+            .where(Model.name == "Belisarius Cawl")
+        )
+    ).scalar_one()
+    assert {a.name for a in cawl.abilities} == {
+        "Canticles of the Omnissiah",
+        "Mechanicus Bodyguard",
+        "Self-repair Mechanisms",
+    }
+    assert set(datasheet_abilities.OPTIONS["Canticles of the Omnissiah"]) == {
+        "Invocation of Machine Vengeance",
+        "Mantra of Discipline",
+        "Shroudpsalm",
+    }

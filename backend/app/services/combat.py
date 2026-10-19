@@ -176,6 +176,8 @@ def resolve_combat(
     attacker_rules: list[Rule] | None = None,
     defender_rules: list[Rule] | None = None,
     attacker_options: set[str] | None = None,
+    attacker_extra_keywords: set[str] | None = None,
+    defender_extra_keywords: set[str] | None = None,
 ) -> CombatResult:
     # The defending unit is a queue of individual models, each with its own wound pool.
     # Each attack targets whichever model is at the front of the queue; once that
@@ -193,7 +195,7 @@ def resolve_combat(
         keyword.name
         for unit_model in defender.unit_models
         for keyword in unit_model.model.keywords
-    }
+    } | set(defender_extra_keywords or ())
     # The same keywords, but kept per defending model - e.g. to tell a
     # CHARACTER leading a unit apart from a CHARACTER on its own.
     defender_model_keywords = [
@@ -201,11 +203,13 @@ def resolve_combat(
         for unit_model in defender.unit_models
     ]
     # Likewise for the attacking unit - e.g. for "if this unit has BATTLELINE".
+    # Either side can also have keywords granted by a rule option (e.g. Mantra
+    # of Discipline's BATTLELINE).
     attacker_keywords = {
         keyword.name
         for unit_model in attacker.unit_models
         for keyword in unit_model.model.keywords
-    }
+    } | set(attacker_extra_keywords or ())
 
     # Code-defined rules (e.g. an active Doctrina Imperative) from faction
     # abilities: the attacking unit's own "attacker" rules are in play like
@@ -410,6 +414,8 @@ def resolve_combat(
                     pre_weapon_state,
                     pending_attacks,
                 )
+                # Melta: extra damage on every attack this weapon makes.
+                fired["damage_bonus"] = pre_weapon_state.get("melta", 0)
                 if pre_weapon_state.get("blast"):
                     # Blast: +1 attack for every five models in the target unit
                     # (counted when targets are declared, before any attacks
@@ -633,8 +639,9 @@ def resolve_combat(
             if save_passed:
                 continue  # save succeeded - no damage from this attack
 
-            # Damage roll: how many wounds this one failed save inflicts.
-            damage = roll_dice(weapon.damage)
+            # Damage roll: how many wounds this one failed save inflicts, plus any
+            # bonus for the weapon (e.g. Melta within half range).
+            damage = roll_dice(weapon.damage) + fired["damage_bonus"]
 
             # Apply damage a single point at a time, each rolling feel no pain
             # separately, against the one model this attack is allocated to. If

@@ -3944,3 +3944,214 @@ def test_heavy_stacks_with_a_different_plus_one_before_the_cap(monkeypatch):
     # nets +1: BS4 hits on a 3.
     abilities = [_heavy(), _plus_one(), _minus_one()]
     assert _hit_with(monkeypatch, 3, skill=4, abilities=abilities, moved_less_than_3=True)
+
+
+# --- Melta 3 ---
+
+
+@pytest.mark.parametrize("half_range,expected_damage", [(True, 4 + 3), (False, 4)])
+def test_melta_3_adds_three_damage_within_half_range(monkeypatch, half_range, expected_damage):
+    # D6 damage rolls a 4 (the last roll); Melta 3 adds 3 within half range.
+    rolls = iter([6, 6, 1, 4])  # hit, wound, save, damage
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=2, strength=14, ap=-4, damage="D6", weapon_type="ranged")
+    weapon.abilities = [_ability([_condition("within_half_range")], [_effect("melta_3")])]
+
+    result = _fire(weapon, [_model(toughness=1, wounds=20, save=7)], half_range=half_range)
+    assert result.total_damage == expected_damage
+
+
+def test_melta_bonus_applies_to_every_attack_of_the_weapon(monkeypatch):
+    # 2 attacks, each D1 + 3 = 4 damage.
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6 if b == 6 else 1)
+    weapon = _weapon(attacks="2", skill=2, strength=14, ap=-4, damage="1", weapon_type="ranged")
+    weapon.abilities = [_ability([_condition("within_half_range")], [_effect("melta_3")])]
+
+    result = _fire(weapon, [_model(toughness=1, wounds=20, save=7)], half_range=True)
+    assert result.total_damage == 8
+
+
+# --- Belisarius Cawl's Canticles of the Omnissiah (army-wide options) ---
+
+
+def test_extra_keywords_count_for_keyword_conditions(monkeypatch):
+    # Mantra of Discipline makes Cawl BATTLELINE, so Conqueror's AP bonus applies.
+    rolls = iter([6, 6, 3])  # hit, wound, save 3 vs Sv2+ at AP-1 (fails only at AP-2)
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=-1, damage="1", weapon_type="ranged")
+    weapon.id = 1
+    result = combat.resolve_combat(
+        _unit([_unit_model(_model(), [weapon])]),
+        _unit([_unit_model(_model(toughness=1, wounds=10, save=2), [])]),
+        {weapon.id},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+        attacker_rules=CONQUEROR,
+        attacker_extra_keywords={"BATTLELINE"},
+    )
+    assert result.total_damage == 1
+
+
+async def _cawl_army(client: AsyncClient):
+    # An AdMech list with Cawl in one unit and a Ranger in another, plus a
+    # Ranger unit outside the list and an allied (other faction) unit in it.
+    admech = (await client.post("/factions", json={"name": "Adeptus Mechanicus"})).json()["id"]
+    allies = (await client.post("/factions", json={"name": "Imperial Agents"})).json()["id"]
+    canticles = (
+        await client.post("/datasheet-abilities", json={"name": "Canticles of the Omnissiah"})
+    ).json()["id"]
+    doctrina = (
+        await client.post(
+            "/faction-abilities", json={"name": "Doctrina Imperatives", "faction_id": admech}
+        )
+    ).json()["id"]
+    cawl = await _create_model(
+        client, admech, name="Cawl", ability_ids=[canticles], faction_ability_ids=[doctrina]
+    )
+    cawl_gun = await _create_weapon(
+        client, cawl, name="Cawl Gun", skill=4, strength=10, ap=-1, weapon_type="ranged"
+    )
+    ranger = await _create_model(client, admech, name="Ranger", faction_ability_ids=[doctrina])
+    rifle = await _create_weapon(
+        client, ranger, name="Rifle", skill=4, strength=10, ap=-10, weapon_type="ranged"
+    )
+    ranger_gun = await _create_weapon(
+        client, ranger, name="Ranger Gun", skill=4, strength=10, ap=-1, weapon_type="ranged"
+    )
+    agent = await _create_model(client, allies, name="Agent")
+    pistol = await _create_weapon(
+        client, agent, name="Pistol", skill=4, strength=10, ap=-10, weapon_type="ranged"
+    )
+    target = await _create_model(client, admech, name="Target", toughness=1, save=2, wounds=20)
+    list_id = (
+        await client.post(
+            "/lists", json={"name": "Army", "points_limit": 2000, "faction_id": admech}
+        )
+    ).json()["id"]
+
+    async def unit(faction_id, name, model_id, weapon_id, in_list=True):
+        faction_unit = await _create_faction_unit(client, faction_id, name)
+        response = await client.post(
+            "/units",
+            json={
+                "faction_unit_id": faction_unit,
+                "points": 100,
+                "list_id": list_id if in_list else None,
+                "unit_models": [
+                    {"model_id": model_id, "weapon_ids": [weapon_id] if weapon_id else []}
+                ],
+            },
+        )
+        return response.json()["id"]
+
+    return {
+        "cawl": (await unit(admech, "Cawl", cawl, cawl_gun), cawl_gun),
+        "rangers": (await unit(admech, "Rangers", ranger, rifle), rifle),
+        "rangers_ap1": (await unit(admech, "Rangers AP-1", ranger, ranger_gun), ranger_gun),
+        "lone_rangers": (await unit(admech, "Lone Rangers", ranger, rifle, in_list=False), rifle),
+        "agents": (await unit(allies, "Agents", agent, pistol), pistol),
+        "target": (await unit(admech, "Targets", target, None, in_list=False), None),
+        "target_in_list": (await unit(admech, "Listed Targets", target, None), None),
+    }
+
+
+async def _attack(client, attacker, defender, weapon_id, **options):
+    response = await client.post(
+        "/combat",
+        json={
+            "attacking_unit_id": attacker,
+            "defending_unit_id": defender,
+            "selected_weapon_ids": [weapon_id],
+            **options,
+        },
+    )
+    assert response.status_code == 200, response.json()
+    return response.json()
+
+
+@pytest.mark.parametrize(
+    "attacker,rerolls",
+    [
+        ("rangers", True),  # Cawl is elsewhere in its list
+        ("cawl", True),  # Cawl's own unit
+        ("lone_rangers", False),  # not in Cawl's list
+        ("agents", False),  # in the list, but not ADEPTUS MECHANICUS (Cawl's faction)
+    ],
+)
+async def test_machine_vengeance_rerolls_hits_for_friendly_units_in_cawls_list(
+    client: AsyncClient, monkeypatch, attacker, rerolls
+):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 1)  # every hit misses
+    army = await _cawl_army(client)
+    unit_id, weapon_id = army[attacker]
+
+    body = await _attack(
+        client,
+        unit_id,
+        army["target"][0],
+        weapon_id,
+        attacker_rule_options=["Invocation of Machine Vengeance"],
+    )
+    assert (len(body["attack_rerolls"]) == 1) is rerolls
+
+
+async def test_shroudpsalm_gives_the_defending_unit_stealth(client: AsyncClient, monkeypatch):
+    # Hit 4 vs BS4: hits normally, misses with the Benefit of Cover.
+    army = await _cawl_army(client)
+    unit_id, weapon_id = army["lone_rangers"]
+
+    async def damage(options):
+        rolls = iter([4, 6, 1])
+        monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+        body = await _attack(
+            client, unit_id, army["target_in_list"][0], weapon_id, defender_rule_options=options
+        )
+        return body["total_damage"]
+
+    assert await damage([]) == 1
+    assert await damage(["Shroudpsalm"]) == 0
+
+
+@pytest.mark.parametrize(
+    "attacker,mantra,expected_damage",
+    [
+        ("cawl", True, 1),  # Cawl is BATTLELINE: Conqueror's +1 AP applies
+        ("cawl", False, 0),
+        ("rangers_ap1", True, 0),  # Mantra only makes Cawl BATTLELINE, not his army
+    ],
+)
+async def test_mantra_of_discipline_makes_only_cawls_unit_battleline(
+    client: AsyncClient, monkeypatch, attacker, mantra, expected_damage
+):
+    # An AP-1 gun against Sv2+: a save roll of 3 passes, unless Conqueror's
+    # BATTLELINE AP bonus makes it AP-2.
+    army = await _cawl_army(client)
+    unit_id, weapon_id = army[attacker]
+    rolls = iter([6, 6, 3])  # hit, wound, save
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    options = ["Conqueror Imperative"] + (["Mantra of Discipline"] if mantra else [])
+
+    body = await _attack(
+        client, unit_id, army["target"][0], weapon_id, attacker_rule_options=options
+    )
+    assert body["total_damage"] == expected_damage
+
+
+async def test_canticle_options_are_validated(client: AsyncClient):
+    army = await _cawl_army(client)
+    unit_id, weapon_id = army["rangers"]
+    response = await client.post(
+        "/combat",
+        json={
+            "attacking_unit_id": unit_id,
+            "defending_unit_id": army["target"][0],
+            "selected_weapon_ids": [weapon_id],
+            "attacker_rule_options": ["Shroudpsalm", "Mantra of Discipline"],
+        },
+    )
+    assert response.status_code == 400

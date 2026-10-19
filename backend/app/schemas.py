@@ -228,6 +228,10 @@ class DatasheetAbilityOut(BaseModel):
     description: str | None
     condition_ids: list[int]
     effect_ids: list[int]
+    # Names of the selectable rule options this ability grants in combat
+    # (e.g. Canticles of the Omnissiah), defined in
+    # app/seeds/datasheet_abilities.py. Read-only.
+    rule_options: list[str] = []
 
 
 class DispositionIn(BaseModel):

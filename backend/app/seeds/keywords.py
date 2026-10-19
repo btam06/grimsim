@@ -11,6 +11,7 @@ NAMES = [
     "AIRCRAFT",
     "ARMIGER",
     "BATTLELINE",
+    "BELISARIUS CAWL",
     "BIG MEK",
     "CERASTUS",
     "CHARACTER",

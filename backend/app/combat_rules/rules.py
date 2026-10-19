@@ -16,3 +16,16 @@ class Rule:
     conditions: tuple[str, ...]
     effects: tuple[str, ...]
     side: Literal["attacker", "defender"] = "attacker"
+
+
+@dataclass(frozen=True)
+class RuleOption:
+    # One selectable option of a datasheet ability (e.g. one of Belisarius
+    # Cawl's Canticles of the Omnissiah): the rules it grants, any keywords the
+    # model with the ability gains, and how far it reaches.
+    rules: tuple[Rule, ...] = ()
+    keywords: tuple[str, ...] = ()
+    # False: only the unit containing the model with the ability. True: also
+    # every other unit of the same faction in that model's army list (an aura
+    # or army-wide effect - range isn't modelled).
+    army_wide: bool = False

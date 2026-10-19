@@ -6,6 +6,7 @@ from sqlalchemy.orm import selectinload
 from app.db import get_session
 from app.models import Condition, DatasheetAbility, Effect
 from app.schemas import DatasheetAbilityIn, DatasheetAbilityOut
+from app.seeds import datasheet_abilities as datasheet_ability_seeds
 
 router = APIRouter(prefix="/datasheet-abilities", tags=["datasheet-abilities"])
 
@@ -17,6 +18,7 @@ def _to_out(ability: DatasheetAbility) -> DatasheetAbilityOut:
         description=ability.description,
         condition_ids=[c.id for c in ability.conditions],
         effect_ids=[e.id for e in ability.effects],
+        rule_options=list(datasheet_ability_seeds.OPTIONS.get(ability.name, {})),
     )
 
 

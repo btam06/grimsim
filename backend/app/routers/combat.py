@@ -30,6 +30,7 @@ async def _load_unit(session: AsyncSession, unit_id: int) -> Unit | None:
     weapons_loader = selectinload(Unit.unit_models).selectinload(UnitModel.weapons)
     wargear_loader = selectinload(Unit.unit_models).selectinload(UnitModel.wargear)
     model_loader = selectinload(Unit.unit_models).selectinload(UnitModel.model)
+    list_units_loader = selectinload(Unit.army_list).selectinload(ArmyList.units)
     result = await session.execute(
         select(Unit)
         .options(
@@ -54,57 +55,111 @@ async def _load_unit(session: AsyncSession, unit_id: int) -> Unit | None:
             model_loader.selectinload(Model.faction_abilities).selectinload(
                 FactionAbility.faction
             ),
+            selectinload(Unit.faction_unit),
             selectinload(Unit.army_list).selectinload(ArmyList.detachments),
+            # The rest of the army list, for army-wide rule options (e.g. a
+            # Canticle from Belisarius Cawl elsewhere in the list).
+            list_units_loader.selectinload(Unit.faction_unit),
+            list_units_loader.selectinload(Unit.unit_models)
+            .selectinload(UnitModel.model)
+            .selectinload(Model.abilities),
         )
         .where(Unit.id == unit_id)
     )
     return result.scalar_one_or_none()
 
 
+def _option_owner(option_name: str):
+    # The ability an option belongs to - a faction ability's (faction name,
+    # ability name), or a datasheet ability's name - or None if unknown.
+    return faction_seeds.OPTION_OWNERS.get(
+        option_name
+    ) or datasheet_ability_seeds.OPTION_OWNERS.get(option_name)
+
+
 def _validate_rule_options(option_names: list[str], field: str) -> None:
-    unknown = [name for name in option_names if name not in faction_seeds.OPTION_OWNERS]
+    unknown = [name for name in option_names if _option_owner(name) is None]
     if unknown:
         raise HTTPException(
             status_code=400, detail=f"unknown {field}: {', '.join(unknown)}"
         )
-    # Only one option per faction ability can be active at a time (e.g. not
-    # both the Protector and Conqueror Imperatives).
-    owners = [faction_seeds.OPTION_OWNERS[name] for name in set(option_names)]
+    # Only one option per ability can be active at a time (e.g. not both the
+    # Protector and Conqueror Imperatives).
+    owners = [_option_owner(name) for name in set(option_names)]
     if len(owners) != len(set(owners)):
         raise HTTPException(
             status_code=400,
-            detail=f"{field} has more than one option for the same faction ability",
+            detail=f"{field} has more than one option for the same ability",
         )
 
 
-def _active_options(unit: Unit, option_names: list[str]) -> dict[str, list[Rule]]:
-    # {option name: rules} for the selected options this unit actually gains.
-    # A faction ability's options apply to the whole unit if any of its models
-    # has that faction ability; options for abilities it lacks are ignored.
-    held = {
+def _datasheet_ability_names(unit: Unit) -> set[str]:
+    return {
+        ability.name for unit_model in unit.unit_models for ability in unit_model.model.abilities
+    }
+
+
+def _active_options(
+    unit: Unit, option_names: list[str]
+) -> tuple[set[str], list[Rule], set[str]]:
+    # The selected options this unit actually gains, as (option names, their
+    # rules, keywords they grant). Options for abilities it doesn't have
+    # access to are ignored:
+    # - a faction ability's options, if any of the unit's models has it;
+    # - a datasheet ability's options, if any of the unit's models has it;
+    # - a datasheet ability's army-wide options, if a model with it is in
+    #   another unit of the same faction in this unit's army list.
+    active: set[str] = set()
+    rules: list[Rule] = []
+    keywords: set[str] = set()
+
+    held_faction_abilities = {
         (faction_ability.faction.name, faction_ability.name)
         for unit_model in unit.unit_models
         for faction_ability in unit_model.model.faction_abilities
     }
-    return {
-        option_name: rules
-        for faction_name, ability_name in held
-        for option_name, rules in faction_seeds.rule_options(faction_name, ability_name).items()
-        if option_name in option_names
-    }
+    for faction_name, ability_name in held_faction_abilities:
+        for option_name, option_rules in faction_seeds.rule_options(
+            faction_name, ability_name
+        ).items():
+            if option_name in option_names:
+                active.add(option_name)
+                rules.extend(option_rules)
 
+    def take(ability_names: set[str], army_wide_only: bool) -> None:
+        for ability_name in ability_names:
+            for option_name, option in datasheet_ability_seeds.OPTIONS.get(
+                ability_name, {}
+            ).items():
+                if option_name not in option_names or option_name in active:
+                    continue
+                if army_wide_only and not option.army_wide:
+                    continue
+                active.add(option_name)
+                rules.extend(option.rules)
+                if not army_wide_only:
+                    keywords.update(option.keywords)
 
-def _rules(options: dict[str, list[Rule]]) -> list[Rule]:
-    return [rule for rules in options.values() for rule in rules]
+    take(_datasheet_ability_names(unit), army_wide_only=False)
+    if unit.army_list is not None:
+        for other in unit.army_list.units:
+            if other.id == unit.id:
+                continue
+            if other.faction_unit.faction_id != unit.faction_unit.faction_id:
+                continue
+            take(_datasheet_ability_names(other), army_wide_only=True)
+
+    return active, rules, keywords
 
 
 def _datasheet_rules(unit: Unit) -> list[Rule]:
     # Code-defined rules for the datasheet abilities any of the unit's models
     # has (see app/seeds/datasheet_abilities.py RULES), once per ability.
-    names = {
-        ability.name for unit_model in unit.unit_models for ability in unit_model.model.abilities
-    }
-    return [rule for name in names for rule in datasheet_ability_seeds.RULES.get(name, [])]
+    return [
+        rule
+        for name in _datasheet_ability_names(unit)
+        for rule in datasheet_ability_seeds.RULES.get(name, [])
+    ]
 
 
 @router.post("", response_model=CombatOut)
@@ -159,8 +214,12 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
     _validate_rule_options(payload.attacker_rule_options, "attacker_rule_options")
     _validate_rule_options(payload.defender_rule_options, "defender_rule_options")
 
-    attacker_options = _active_options(attacker, payload.attacker_rule_options)
-    defender_options = _active_options(defender, payload.defender_rule_options)
+    attacker_options, attacker_option_rules, attacker_extra_keywords = _active_options(
+        attacker, payload.attacker_rule_options
+    )
+    defender_options, defender_option_rules, defender_extra_keywords = _active_options(
+        defender, payload.defender_rule_options
+    )
 
     visible = True if payload.game_id is None else payload.defender_visible
     in_range = True if payload.game_id is None else payload.defender_in_range
@@ -178,9 +237,11 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
         advanced=payload.advanced,
         stratagems=stratagems,
         apply_precision=payload.apply_precision,
-        attacker_rules=_rules(attacker_options) + _datasheet_rules(attacker),
-        defender_rules=_rules(defender_options) + _datasheet_rules(defender),
-        attacker_options=set(attacker_options),
+        attacker_rules=attacker_option_rules + _datasheet_rules(attacker),
+        defender_rules=defender_option_rules + _datasheet_rules(defender),
+        attacker_options=attacker_options,
+        attacker_extra_keywords=attacker_extra_keywords,
+        defender_extra_keywords=defender_extra_keywords,
     )
 
     return CombatOut(

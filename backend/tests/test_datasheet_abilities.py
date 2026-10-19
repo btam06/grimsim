@@ -117,3 +117,16 @@ async def test_update_datasheet_ability_with_invalid_effect_id_returns_400(clien
         f"/datasheet-abilities/{ability_id}", json={"name": "A", "effect_ids": [9999]}
     )
     assert response.status_code == 400
+
+
+async def test_datasheet_ability_lists_its_rule_options(client: AsyncClient):
+    response = await client.post(
+        "/datasheet-abilities", json={"name": "Canticles of the Omnissiah"}
+    )
+    assert response.json()["rule_options"] == [
+        "Invocation of Machine Vengeance",
+        "Mantra of Discipline",
+        "Shroudpsalm",
+    ]
+    other = await client.post("/datasheet-abilities", json={"name": "Stealth"})
+    assert other.json()["rule_options"] == []

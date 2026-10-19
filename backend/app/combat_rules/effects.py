@@ -44,6 +44,7 @@ DEADLY_DEMISE = "deadly_demise"
 ADD_TWO_EXTRA_HITS = "add_two_extra_hits"
 BENEFIT_OF_COVER = "benefit_of_cover"
 HEAVY = "heavy"
+MELTA_3 = "melta_3"
 
 
 def auto_pass_wound(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
@@ -236,6 +237,12 @@ def heavy(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
     state["heavy"] = True
 
 
+def melta_3(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # This weapon's attacks each inflict 3 extra damage (e.g. Melta 3 within
+    # half range) - read once per weapon, when it fires.
+    state["melta"] = max(state.get("melta", 0), 3)
+
+
 EFFECTS = {
     AUTO_PASS_WOUND: auto_pass_wound,
     ADD_EXTRA_HIT: add_extra_hit,
@@ -267,4 +274,5 @@ EFFECTS = {
     ADD_TWO_EXTRA_HITS: add_two_extra_hits,
     BENEFIT_OF_COVER: benefit_of_cover,
     HEAVY: heavy,
+    MELTA_3: melta_3,
 }

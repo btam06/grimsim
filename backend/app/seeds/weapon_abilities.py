@@ -33,6 +33,7 @@ from app.combat_rules.effects import (
     HAZARDOUS,
     HEAVY,
     IGNORE_COVER,
+    MELTA_3,
     NO_SAVE,
     PISTOL,
     PLUS_ONE_TO_HIT,
@@ -208,6 +209,19 @@ ENTRIES = [
         "Each time an attack is made with this weapon that targets a MONSTER or VEHICLE unit, add 1 to the Hit roll.",
         [TARGET_MONSTER_OR_VEHICLE],
         [PLUS_ONE_TO_HIT],
+    ),
+    (
+        "Melta 3",
+        "When the target is within half range, each attack made with this weapon inflicts 3 extra damage.",
+        [WITHIN_HALF_RANGE],
+        [MELTA_3],
+    ),
+    (
+        # Descriptive only: the calculator already fires every weapon ticked.
+        "Extra Attacks",
+        "This weapon can be used in addition to the bearer's other melee weapons.",
+        [],
+        [],
     ),
 ]
 

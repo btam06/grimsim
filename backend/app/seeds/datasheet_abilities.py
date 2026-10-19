@@ -1,7 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.combat_rules import Rule
+from app.combat_rules import Rule, RuleOption
 from app.combat_rules.conditions import (
     ALWAYS,
     RANGED_ATTACK,
@@ -108,6 +108,30 @@ ENTRIES = [
         [],
         [],
     ),
+    (
+        # Its options are in OPTIONS below.
+        "Canticles of the Omnissiah",
+        "At the start of your Command phase, select one of the abilities in the Canticles of "
+        "the Omnissiah section. Until the start of your next Command phase, this model has that "
+        "ability.",
+        [],
+        [],
+    ),
+    (
+        # Descriptive only: targeting restrictions aren't modelled.
+        "Mechanicus Bodyguard",
+        "While this model is within 3\" of one or more other friendly ADEPTUS MECHANICUS units, "
+        "this model has the Lone Operative ability.",
+        [],
+        [],
+    ),
+    (
+        # Descriptive only: healing between turns is outside the combat engine.
+        "Self-repair Mechanisms",
+        "At the start of your Command phase, this model regains up to D3 lost wounds.",
+        [],
+        [],
+    ),
 ]
 
 # Code-defined rules for abilities above, by name - for rules the
@@ -166,3 +190,34 @@ async def seed(session: AsyncSession) -> None:
             )
         )
     await session.commit()
+
+
+# Selectable options for abilities above: {ability name: {option name:
+# RuleOption}}. Like faction ability options (e.g. Doctrina Imperatives), the
+# active one is chosen per combat. Aura ranges ("within 6\"") aren't modelled:
+# an army-wide option reaches every unit of the same faction in the army list.
+OPTIONS = {
+    "Canticles of the Omnissiah": {
+        # The defending unit is taken to be the Machine Vengeance target, so
+        # friendly units' attacks against it can re-roll the Hit roll.
+        "Invocation of Machine Vengeance": RuleOption(
+            rules=(
+                Rule(conditions=(ALWAYS,), effects=(REROLL_FAILED_HITS,)),
+            ),
+            army_wide=True,
+        ),
+        # This model has BATTLELINE. (Binharic Courage, its OC/Battle-shock
+        # aura, is outside the combat engine.)
+        "Mantra of Discipline": RuleOption(keywords=("BATTLELINE",)),
+        # Friendly units within 6" have Stealth.
+        "Shroudpsalm": RuleOption(rules=tuple(RULES["Stealth"]), army_wide=True),
+    },
+}
+
+# {option name: ability name} - which ability each option belongs to. Option
+# names are unique across every ability (and every faction ability's options).
+OPTION_OWNERS = {
+    option_name: ability_name
+    for ability_name, options in OPTIONS.items()
+    for option_name in options
+}

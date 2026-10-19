@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
+  listDatasheetAbilities,
   listEffects,
   listFactionAbilities,
   listFactionUnits,
@@ -30,15 +31,15 @@ function DiceRolls({ rolls }) {
 // Imperatives), for picking which option is active for one side - or none.
 function RuleOptionPicker({ side, abilities, choices, onChange }) {
   return abilities.map((ability) => (
-    <div key={ability.id} className="radio-group">
+    <div key={ability.key} className="radio-group">
       {side} — {ability.name}
       {['', ...ability.rule_options].map((option) => (
         <label key={option || 'none'} className="radio-option">
           <input
             type="radio"
-            name={`${side}-rule-${ability.id}`}
-            checked={(choices[ability.id] ?? '') === option}
-            onChange={() => onChange({ ...choices, [ability.id]: option })}
+            name={`${side}-rule-${ability.key}`}
+            checked={(choices[ability.key] ?? '') === option}
+            onChange={() => onChange({ ...choices, [ability.key]: option })}
           />
           {option || 'None'}
         </label>
@@ -57,6 +58,7 @@ function CalculatorPanel() {
   const [effects, setEffects] = useState([])
   const [models, setModels] = useState([])
   const [factionAbilities, setFactionAbilities] = useState([])
+  const [datasheetAbilities, setDatasheetAbilities] = useState([])
   // {faction ability id: selected rule option name ('' for none)}, per side.
   const [attackerRuleChoices, setAttackerRuleChoices] = useState({})
   const [defenderRuleChoices, setDefenderRuleChoices] = useState({})
@@ -83,6 +85,7 @@ function CalculatorPanel() {
     listEffects().then(setEffects).catch((err) => setError(err.message))
     listModels().then(setModels).catch((err) => setError(err.message))
     listFactionAbilities().then(setFactionAbilities).catch((err) => setError(err.message))
+    listDatasheetAbilities().then(setDatasheetAbilities).catch((err) => setError(err.message))
   }, [])
 
   const unitLabel = (unit) => {
@@ -132,16 +135,45 @@ function CalculatorPanel() {
     setSelectedStratagemIds([])
   }, [attackingUnitId])
 
-  // Faction abilities with rule options held by any model in a unit - a unit
-  // gains an option if one of its models has the ability.
+  // Abilities with rule options a unit can pick from, as {key, name,
+  // rule_options}:
+  // - faction abilities (e.g. Doctrina Imperatives) any of its models has;
+  // - datasheet abilities (e.g. Belisarius Cawl's Canticles of the Omnissiah)
+  //   any of its models has, or any model in another unit of the same faction
+  //   in its army list has - the server applies only the options that reach
+  //   that far.
   const ruleAbilitiesFor = (unit) => {
     if (!unit) return []
-    const heldIds = new Set(
-      unit.unit_models.flatMap(
-        (um) => models.find((m) => m.id === um.model_id)?.faction_ability_ids ?? []
-      )
-    )
-    return factionAbilities.filter((a) => heldIds.has(a.id) && a.rule_options.length > 0)
+    const modelsIn = (u) =>
+      u.unit_models.map((um) => models.find((m) => m.id === um.model_id)).filter(Boolean)
+    const factionOf = (u) => factionUnits.find((fu) => fu.id === u.faction_unit_id)?.faction_id
+
+    const heldFactionIds = new Set(modelsIn(unit).flatMap((m) => m.faction_ability_ids))
+    const entries = factionAbilities
+      .filter((a) => heldFactionIds.has(a.id) && a.rule_options.length > 0)
+      .map((a) => ({ key: `faction-${a.id}`, name: a.name, rule_options: a.rule_options }))
+
+    const armyUnits =
+      unit.list_id === null
+        ? [unit]
+        : units.filter(
+            (u) =>
+              u.id === unit.id || (u.list_id === unit.list_id && factionOf(u) === factionOf(unit))
+          )
+    const seen = new Set()
+    armyUnits.flatMap(modelsIn).forEach((model) => {
+      model.ability_ids.forEach((id) => {
+        const ability = datasheetAbilities.find((a) => a.id === id)
+        if (!ability || ability.rule_options.length === 0 || seen.has(id)) return
+        seen.add(id)
+        entries.push({
+          key: `datasheet-${id}`,
+          name: `${ability.name} (${model.name})`,
+          rule_options: ability.rule_options,
+        })
+      })
+    })
+    return entries
   }
   const defendingUnit = units.find((u) => u.id === Number(defendingUnitId))
   const attackerRuleAbilities = ruleAbilitiesFor(attackingUnit)
@@ -157,7 +189,7 @@ function CalculatorPanel() {
 
   // Only send choices for abilities the unit currently has.
   const selectedRuleOptions = (abilities, choices) =>
-    abilities.map((a) => choices[a.id]).filter(Boolean)
+    abilities.map((a) => choices[a.key]).filter(Boolean)
 
   // Precision is only worth offering when something about to attack has the
   // precision effect - a selected weapon's ability, or a selected stratagem.

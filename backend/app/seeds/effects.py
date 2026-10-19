@@ -22,6 +22,7 @@ from app.combat_rules.effects import (
     IGNORE_COVER_UNIT,
     IMPROVE_AP,
     INVULNERABLE_5,
+    MELTA_3,
     MINUS_ONE_TO_HIT,
     MINUS_ONE_TO_WOUND,
     NO_SAVE,
@@ -187,6 +188,11 @@ ENTRIES = [
         HEAVY,
         "Heavy",
         "+1 to hit for this attack's weapon. Counts once, however many sources grant Heavy.",
+    ),
+    (
+        MELTA_3,
+        "Melta 3",
+        "Each attack this weapon makes inflicts 3 extra damage.",
     ),
 ]
 

@@ -1,4 +1,5 @@
 from . import (
+    belisarius_cawl,
     fulgurite_electro_priests,
     sicarian_infiltrators,
     skitarii_rangers,
@@ -47,6 +48,7 @@ NAMES = [
 # Full datasheets (models, stats, weapons) for units above - see
 # app/seeds/datasheets.py. Units without one are seeded by name only.
 DATASHEETS = [
+    belisarius_cawl,
     fulgurite_electro_priests,
     sicarian_infiltrators,
     skitarii_rangers,
