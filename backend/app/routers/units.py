@@ -17,6 +17,7 @@ from app.models import (
 from app.routers.enhancements import used_in_list
 from app.schemas import UnitIn, UnitModelIn, UnitModelOut, UnitOut
 from app.services import enhancements as enhancement_rules
+from app.services import list_building
 
 router = APIRouter(prefix="/units", tags=["units"])
 
@@ -106,6 +107,7 @@ async def _apply_enhancements(
     unit_models: list[UnitModel],
     models: list[Model],
     unit_id: int | None,
+    context: list_building.ListContext | None,
 ) -> Enhancement | None:
     # Puts each model's enhancement on its unit model, and returns the unit's
     # upgrade - checking that the unit is in a list that has taken their
@@ -151,6 +153,8 @@ async def _apply_enhancements(
             continue
         enhancement = enhancements[entry.enhancement_id]
         reason = enhancement_rules.model_unavailable_reason(enhancement, model, detachment_ids)
+        if reason is None and not list_building.can_take_enhancements(context, model):
+            reason = "can't be given to a model included under an ally rule"
         if reason:
             raise HTTPException(
                 status_code=400,
@@ -165,6 +169,32 @@ async def _apply_enhancements(
     if reason:
         raise HTTPException(status_code=400, detail=f"'{upgrade.name}' {reason}")
     return upgrade
+
+
+async def _list_context(
+    session: AsyncSession, list_id: int | None, unit_id: int | None
+) -> list_building.ListContext | None:
+    if list_id is None:
+        return None
+    context = await list_building.load_list_context(session, list_id, unit_id)
+    if context is None:
+        raise HTTPException(status_code=400, detail="invalid list_id")
+    return context
+
+
+def _check_list_building(
+    context: list_building.ListContext | None,
+    faction_unit: FactionUnit,
+    points: int,
+    models: list[Model],
+) -> None:
+    # A unit in a list must be from the list's faction, or included under an
+    # ally rule (within any points cap).
+    if context is None:
+        return
+    reason = list_building.unit_unavailable_reason(context, faction_unit, points, models)
+    if reason:
+        raise HTTPException(status_code=400, detail=reason)
 
 
 @router.get("", response_model=list[UnitOut])
@@ -190,15 +220,11 @@ async def create_unit(payload: UnitIn, session: AsyncSession = Depends(get_sessi
     if faction_unit is None:
         raise HTTPException(status_code=400, detail="invalid faction_unit_id")
 
-    if payload.list_id is not None:
-        army_list = (
-            await session.execute(select(ArmyList).where(ArmyList.id == payload.list_id))
-        ).scalar_one_or_none()
-        if army_list is None:
-            raise HTTPException(status_code=400, detail="invalid list_id")
+    context = await _list_context(session, payload.list_id, None)
 
     unit_models, models = await _build_unit_models(session, payload.unit_models)
-    upgrade = await _apply_enhancements(session, payload, unit_models, models, None)
+    _check_list_building(context, faction_unit, payload.points, models)
+    upgrade = await _apply_enhancements(session, payload, unit_models, models, None, context)
     unit = Unit(
         faction_unit_id=payload.faction_unit_id,
         points=payload.points,
@@ -231,15 +257,13 @@ async def update_unit(
     if faction_unit is None:
         raise HTTPException(status_code=400, detail="invalid faction_unit_id")
 
-    if payload.list_id is not None:
-        army_list = (
-            await session.execute(select(ArmyList).where(ArmyList.id == payload.list_id))
-        ).scalar_one_or_none()
-        if army_list is None:
-            raise HTTPException(status_code=400, detail="invalid list_id")
+    context = await _list_context(session, payload.list_id, unit_id)
 
     new_unit_models, models = await _build_unit_models(session, payload.unit_models)
-    upgrade = await _apply_enhancements(session, payload, new_unit_models, models, unit_id)
+    _check_list_building(context, faction_unit, payload.points, models)
+    upgrade = await _apply_enhancements(
+        session, payload, new_unit_models, models, unit_id, context
+    )
 
     unit.faction_unit_id = payload.faction_unit_id
     unit.points = payload.points

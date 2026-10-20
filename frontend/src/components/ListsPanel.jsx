@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   deleteList,
   listDetachments,
+  listEligible,
   listEnhancements,
   listFactionUnits,
   listFactions,
@@ -17,14 +18,6 @@ import ConfirmDialog from './ConfirmDialog'
 import ListFormPage from './ListFormPage'
 import ListsListPage from './ListsListPage'
 import UnitFormPage from './UnitFormPage'
-
-// Allied-unit rules: if every model already in the list has IMPERIUM, units
-// and models from these other Imperium-aligned factions become addable too,
-// as long as they carry one of the listed keywords.
-const ALLIED_FACTION_RULES = [
-  { factionName: 'Imperial Agents', keywordNames: ['RETINUE', 'CHARACTER', 'REQUISITIONED'] },
-  { factionName: 'Imperial Knights', keywordNames: ['TITANIC', 'ARMIGER'] },
-]
 
 function ListsPanel() {
   const [lists, setLists] = useState([])
@@ -66,41 +59,20 @@ function ListsPanel() {
     listUsers().then(setUsers).catch((err) => setError(err.message))
   }, [])
 
-  const keywordIdByName = (name) => keywords.find((k) => k.name === name)?.id
-  const factionIdByName = (name) => factions.find((f) => f.name === name)?.id
-  const modelHasKeyword = (model, name) => model.keyword_ids.includes(keywordIdByName(name))
-
-  // Every model belonging to any unit already saved into the list currently
-  // being edited - used to check the IMPERIUM-wide precondition below.
-  const unitsInEditingList = editingList
-    ? units.filter((u) => u.list_id === editingList.id)
-    : []
-  const modelIdsInEditingList = new Set(
-    unitsInEditingList.flatMap((u) => u.unit_models.map((um) => um.model_id))
+  // The faction units and models a unit in the list being edited can use -
+  // its faction's, plus any its ally rules let in (e.g. Agents of the
+  // Imperium) - from the server, refreshed whenever the unit form opens.
+  const [eligible, setEligible] = useState({ faction_unit_ids: [], model_ids: [] })
+  useEffect(() => {
+    if (view !== 'unit-form' || !editingList) return
+    listEligible(editingList.id)
+      .then(setEligible)
+      .catch((err) => setError(err.message))
+  }, [view, editingList])
+  const eligibleFactionUnitsForList = factionUnits.filter((fu) =>
+    eligible.faction_unit_ids.includes(fu.id)
   )
-  const modelsInEditingList = models.filter((m) => modelIdsInEditingList.has(m.id))
-  // Require at least one model - an empty list hasn't earned the allied
-  // picks yet, even though `[].every(...)` would otherwise vacuously pass.
-  const everyModelHasImperium =
-    modelsInEditingList.length > 0 &&
-    modelsInEditingList.every((m) => modelHasKeyword(m, 'IMPERIUM'))
-
-  const alliedFactionIds = everyModelHasImperium
-    ? ALLIED_FACTION_RULES.map((rule) => factionIdByName(rule.factionName))
-    : []
-
-  const eligibleFactionUnitsForList = factionUnits.filter(
-    (fu) => fu.faction_id === editingList?.faction_id || alliedFactionIds.includes(fu.faction_id)
-  )
-
-  const eligibleModelsForList = models.filter((m) => {
-    if (m.faction_id === editingList?.faction_id) return true
-    if (!everyModelHasImperium) return false
-    const rule = ALLIED_FACTION_RULES.find(
-      (r) => factionIdByName(r.factionName) === m.faction_id
-    )
-    return rule ? rule.keywordNames.some((name) => modelHasKeyword(m, name)) : false
-  })
+  const eligibleModelsForList = models.filter((m) => eligible.model_ids.includes(m.id))
 
   const goToList = () => {
     setView('list')

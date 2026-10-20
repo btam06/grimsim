@@ -13,8 +13,11 @@ from app.combat_rules.conditions import (
     CRITICAL_HIT,
     CRITICAL_HIT_NOT_MONSTER_OR_VEHICLE,
     CRITICAL_WOUND,
+    ATTACKER_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE,
     ATTACKER_IS_BATTLELINE,
+    ATTACKER_NEAR_ADMECH_BATTLELINE,
     MELEE_ATTACK_AGAINST_BATTLELINE,
+    MELEE_VS_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE,
     MOVED_LESS_THAN_3,
     PRE_WEAPON_NOT_MONSTER_OR_VEHICLE,
     RANGED_ATTACK,
@@ -145,6 +148,23 @@ ENTRIES = [
         RANGED_ATTACK,
         "Ranged Attack",
         "A ranged attack, checked before its hit roll.",
+    ),
+    (
+        ATTACKER_NEAR_ADMECH_BATTLELINE,
+        "Attacker Near AdMech Battleline",
+        "The attacking unit is within 6\" of a friendly ADEPTUS MECHANICUS BATTLELINE unit.",
+    ),
+    (
+        ATTACKER_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE,
+        "Attacker Battleline or Near AdMech Battleline",
+        "The attacking unit is BATTLELINE, or within 6\" of a friendly ADEPTUS MECHANICUS "
+        "BATTLELINE unit.",
+    ),
+    (
+        MELEE_VS_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE,
+        "Melee Attack vs Battleline or Near AdMech Battleline",
+        "A melee attack against a unit that is BATTLELINE, or within 6\" of a friendly "
+        "ADEPTUS MECHANICUS BATTLELINE unit.",
     ),
 ]
 

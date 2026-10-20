@@ -4,8 +4,12 @@ from sqlalchemy.orm import selectinload
 
 from app.combat_rules import Rule
 from app.models import (
+    BaseSize,
     DatasheetAbility,
     Detachment,
+    DetachmentRule,
+    DetachmentRuleDatasheetAbility,
+    DetachmentRuleWeaponAbility,
     Enhancement,
     Faction,
     FactionAbility,
@@ -18,9 +22,10 @@ from app.models import (
     WeaponAbility,
 )
 from app.seeds.factions import (
+    adepta_sororitas,
     adeptus_custodes,
     adeptus_mechanicus,
-    adeptus_sororitas,
+    adeptus_titanicus,
     aeldari,
     astra_militarum,
     chaos_daemons,
@@ -69,9 +74,10 @@ from app.seeds.lookup import get_dispositions_by_name
 # FACTIONS below. Everything else (the Faction rows themselves, and its
 # abilities/units/detachments) is seeded from these files.
 FACTIONS = [
-    adeptus_sororitas,
+    adepta_sororitas,
     adeptus_custodes,
     adeptus_mechanicus,
+    adeptus_titanicus,
     astra_militarum,
     grey_knights,
     imperial_agents,
@@ -95,6 +101,9 @@ FACTIONS = [
 ]
 
 NAMES = [faction.info.FACTION_NAME for faction in FACTIONS]
+
+# Every faction's army-building ally rules (see app/list_rules.py).
+ALLY_RULES = [rule for faction in FACTIONS for rule in getattr(faction.info, "ALLY_RULES", [])]
 
 
 def faction_slug(faction) -> str:
@@ -290,6 +299,85 @@ async def seed_detachments(session: AsyncSession) -> None:
         await session.commit()
 
 
+async def seed_detachment_rules(session: AsyncSession) -> None:
+    # Adds each detachment's rules (the "rules" of its entry in
+    # detachments.json) that it doesn't have yet, by name - existing ones are
+    # left alone. Must run after seed_detachments, seed_keywords and the
+    # weapon/datasheet ability seeds; an unknown keyword or ability is an
+    # error, not skipped.
+    faction_ids = await _faction_ids_by_name(session)
+    keywords = {k.name: k for k in (await session.execute(select(Keyword))).scalars().all()}
+    weapon_abilities = {
+        a.name: a for a in (await session.execute(select(WeaponAbility))).scalars().all()
+    }
+    datasheet_abilities = {
+        a.name: a for a in (await session.execute(select(DatasheetAbility))).scalars().all()
+    }
+    detachments = {
+        (d.faction_id, d.name): d.id
+        for d in (await session.execute(select(Detachment))).scalars().all()
+    }
+    existing = {
+        (r.detachment_id, r.name)
+        for r in (await session.execute(select(DetachmentRule))).scalars().all()
+    }
+
+    def lookup(table: dict, key: str, kind: str, rule: str):
+        if key not in table:
+            raise ValueError(f"detachment rule {rule!r} references unknown {kind} {key!r}")
+        return table[key]
+
+    changed = False
+    for faction in FACTIONS:
+        faction_id = faction_ids.get(faction.info.FACTION_NAME)
+        if faction_id is None:
+            continue  # faction hasn't been seeded yet
+        for detachment_entry in load_detachments(faction):
+            detachment_id = detachments.get((faction_id, detachment_entry["name"]))
+            if detachment_id is None:
+                continue  # detachment hasn't been seeded yet
+            for entry in detachment_entry.get("rules", []):
+                name = entry["name"]
+                options = [
+                    [lookup(keywords, k, "keyword", name) for k in option]
+                    for option in entry.get("keyword_options", [])
+                ]
+                if any(not option for option in options):
+                    raise ValueError(f"detachment rule {name!r} has an empty keyword option")
+                weapon_grants = [
+                    DetachmentRuleWeaponAbility(
+                        weapon_ability=lookup(weapon_abilities, g["name"], "weapon ability", name),
+                        weapon_type=g.get("weapon_type"),
+                    )
+                    for g in entry.get("weapon_abilities", [])
+                ]
+                datasheet_grants = [
+                    DetachmentRuleDatasheetAbility(
+                        datasheet_ability=lookup(
+                            datasheet_abilities, ability, "datasheet ability", name
+                        )
+                    )
+                    for ability in entry.get("datasheet_abilities", [])
+                ]
+                if (detachment_id, name) in existing:
+                    continue
+                existing.add((detachment_id, name))
+                session.add(
+                    DetachmentRule(
+                        detachment_id=detachment_id,
+                        name=name,
+                        description=entry.get("description"),
+                        keyword_options=options,
+                        weapon_ability_grants=weapon_grants,
+                        datasheet_ability_grants=datasheet_grants,
+                    )
+                )
+                changed = True
+
+    if changed:
+        await session.commit()
+
+
 async def seed_enhancements(session: AsyncSession) -> None:
     # Adds each faction's enhancements and upgrades (see load_enhancements)
     # that its detachments don't have yet, by name. An existing one that
@@ -402,7 +490,8 @@ async def seed_datasheets(session: AsyncSession) -> None:
     #
     # For a model that already exists in its faction (by name), only what it's
     # missing (by name) is added: faction/datasheet abilities, weapons,
-    # wargear, and abilities on same-named weapons. Nothing existing is changed
+    # wargear, abilities on same-named weapons, and its base size if it has
+    # none. Nothing existing is changed
     # or removed, so additions to a datasheet reach previously seeded models
     # without overwriting edits. (Stats and keywords aren't synced.)
     #
@@ -411,6 +500,7 @@ async def seed_datasheets(session: AsyncSession) -> None:
     # that isn't found is an error, not skipped.
     faction_ids = await _faction_ids_by_name(session)
     keywords = {k.name: k for k in (await session.execute(select(Keyword))).scalars().all()}
+    base_sizes = {b.name: b for b in (await session.execute(select(BaseSize))).scalars().all()}
     weapon_abilities = {
         a.name: a for a in (await session.execute(select(WeaponAbility))).scalars().all()
     }
@@ -480,6 +570,11 @@ async def seed_datasheets(session: AsyncSession) -> None:
             for spec in datasheet.models:
                 model = existing.get((faction_id, spec.name))
                 if model is not None:
+                    if spec.base_size and not model.base_size:
+                        model.base_size = lookup(
+                            base_sizes, spec.base_size, "base size", datasheet.name
+                        )
+                        changed = True
                     faction_ability_names = {a.name for a in model.faction_abilities}
                     for name in spec.faction_abilities:
                         if name not in faction_ability_names:
@@ -548,6 +643,11 @@ async def seed_datasheets(session: AsyncSession) -> None:
                         feel_no_pain=spec.feel_no_pain,
                         is_support=spec.is_support,
                         is_leader=spec.is_leader,
+                        base_size=(
+                            lookup(base_sizes, spec.base_size, "base size", datasheet.name)
+                            if spec.base_size
+                            else None
+                        ),
                         keywords=[
                             lookup(keywords, name, "keyword", datasheet.name)
                             for name in spec.keywords

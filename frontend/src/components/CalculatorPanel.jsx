@@ -9,6 +9,7 @@ import {
   listLists,
   listModels,
   listCalculatorStratagems,
+  listRelevantPositions,
   listUnits,
   listWeaponAbilities,
   listWeapons,
@@ -78,6 +79,48 @@ function useUsableStratagems(unitId, side, inEngagementRange, setSelected, onErr
   return available
 }
 
+// The positions worth asking about for a unit as the 'attacker' or 'defender'
+// - only those its rules read - from the server. Changing the unit clears
+// the ones ticked.
+function useRelevantPositions(unitId, side, setSelected, onError) {
+  const [available, setAvailable] = useState([])
+  useEffect(() => {
+    setSelected([])
+    if (!unitId) {
+      setAvailable([])
+      return
+    }
+    let cancelled = false
+    listRelevantPositions(unitId, side)
+      .then((positions) => !cancelled && setAvailable(positions))
+      .catch((err) => onError(err.message))
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unitId, side])
+  return available
+}
+
+function PositionPicker({ side, positions, selectedIds, onChange }) {
+  return positions.map((p) => (
+    <label key={p.id} className="checkbox-field">
+      <input
+        type="checkbox"
+        checked={selectedIds.includes(p.id)}
+        onChange={() =>
+          onChange(
+            selectedIds.includes(p.id)
+              ? selectedIds.filter((id) => id !== p.id)
+              : [...selectedIds, p.id]
+          )
+        }
+      />
+      {side} — {p.label}
+    </label>
+  ))
+}
+
 function StratagemPicker({ side, stratagems, selectedIds, onChange }) {
   const toggle = (id) =>
     onChange(selectedIds.includes(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id])
@@ -127,6 +170,8 @@ function CalculatorPanel() {
   const [selectedWeaponNames, setSelectedWeaponNames] = useState([])
   const [selectedStratagemIds, setSelectedStratagemIds] = useState([])
   const [selectedDefenderStratagemIds, setSelectedDefenderStratagemIds] = useState([])
+  const [attackerPositionIds, setAttackerPositionIds] = useState([])
+  const [defenderPositionIds, setDefenderPositionIds] = useState([])
   const [applyPrecision, setApplyPrecision] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
@@ -224,6 +269,18 @@ function CalculatorPanel() {
     'attacker',
     inEngagementRange,
     setSelectedStratagemIds,
+    setError
+  )
+  const attackerPositions = useRelevantPositions(
+    attackingUnitId,
+    'attacker',
+    setAttackerPositionIds,
+    setError
+  )
+  const defenderPositions = useRelevantPositions(
+    defendingUnitId,
+    'defender',
+    setDefenderPositionIds,
     setError
   )
   const defenderStratagems = useUsableStratagems(
@@ -344,6 +401,8 @@ function CalculatorPanel() {
         selected_weapon_ids: selectedWeaponIds,
         stratagem_ids: selectedStratagemIds,
         defender_stratagem_ids: selectedDefenderStratagemIds,
+        attacker_positions: attackerPositionIds,
+        defender_positions: defenderPositionIds,
         apply_precision: hasPrecision && applyPrecision,
         attacker_rule_options: selectedRuleOptions(attackerRuleAbilities, attackerRuleChoices),
         defender_rule_options: selectedRuleOptions(defenderRuleAbilities, defenderRuleChoices),
@@ -503,26 +562,49 @@ function CalculatorPanel() {
             />
           </fieldset>
         )}
+        {(!inEngagementRange ||
+          attackerPositions.length > 0 ||
+          defenderPositions.length > 0) && (
+          <fieldset className="form-section">
+            <legend>Positioning</legend>
+            {!inEngagementRange && (
+              <>
+                <label className="checkbox-field">
+                  <input
+                    type="checkbox"
+                    checked={inCover}
+                    onChange={(e) => setInCover(e.target.checked)}
+                  />
+                  Defender in cover (-1 to hit for ranged attacks)
+                </label>
+                <label className="checkbox-field">
+                  <input
+                    type="checkbox"
+                    checked={halfRange}
+                    onChange={(e) => setHalfRange(e.target.checked)}
+                  />
+                  Shooting model is within half range
+                </label>
+              </>
+            )}
+            <PositionPicker
+              side="Attacker"
+              positions={attackerPositions}
+              selectedIds={attackerPositionIds}
+              onChange={setAttackerPositionIds}
+            />
+            <PositionPicker
+              side="Defender"
+              positions={defenderPositions}
+              selectedIds={defenderPositionIds}
+              onChange={setDefenderPositionIds}
+            />
+          </fieldset>
+        )}
         <fieldset className="form-section">
           <legend>Modifiers</legend>
           {!inEngagementRange && (
             <>
-              <label className="checkbox-field">
-                <input
-                  type="checkbox"
-                  checked={inCover}
-                  onChange={(e) => setInCover(e.target.checked)}
-                />
-                Defender in cover (+1 to hit for ranged attacks)
-              </label>
-              <label className="checkbox-field">
-                <input
-                  type="checkbox"
-                  checked={halfRange}
-                  onChange={(e) => setHalfRange(e.target.checked)}
-                />
-                Shooting model is within half range
-              </label>
               <label className="checkbox-field">
                 <input
                   type="checkbox"

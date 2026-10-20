@@ -46,6 +46,7 @@ class ModelSpec:
     feel_no_pain: int | None = None
     is_support: bool = False
     is_leader: bool = False
+    base_size: str | None = None  # a BaseSize name, e.g. "32mm" or "105 x 70mm"
     keywords: tuple[str, ...] = ()  # Keyword names
     faction_abilities: tuple[str, ...] = ()  # FactionAbility names in this faction
     abilities: tuple[str, ...] = ()  # DatasheetAbility names

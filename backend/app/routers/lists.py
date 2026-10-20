@@ -5,8 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db import get_session
-from app.models import ArmyList, Detachment, Unit, User
-from app.schemas import ArmyListIn, ArmyListOut
+from app.models import ArmyList, Detachment, FactionUnit, Model, Unit, User
+from app.schemas import ArmyListIn, ArmyListOut, ListEligibleOut
+from app.services import list_building
 
 router = APIRouter(prefix="/lists", tags=["lists"])
 
@@ -55,6 +56,37 @@ async def list_lists(session: AsyncSession = Depends(get_session)):
         .order_by(ArmyList.id)
     )
     return [_to_out(army_list) for army_list in result.scalars().all()]
+
+
+@router.get("/{list_id}/eligible", response_model=ListEligibleOut)
+async def eligible_for_list(list_id: int, session: AsyncSession = Depends(get_session)):
+    # The faction units and models a unit in this list can use (see
+    # app/list_rules.py for ally rules, e.g. Agents of the Imperium).
+    context = await list_building.load_list_context(session, list_id, None)
+    if context is None:
+        raise HTTPException(status_code=404, detail="list not found")
+    rules = list_building.active_rules(context.faction)
+    faction_units = (await session.execute(select(FactionUnit))).scalars().all()
+    models = (
+        await session.execute(select(Model).options(selectinload(Model.keywords)))
+    ).scalars().all()
+    return ListEligibleOut(
+        faction_unit_ids=sorted(
+            fu.id
+            for fu in faction_units
+            if list_building.faction_allowed(
+                context.faction_names[fu.faction_id], context.faction, rules
+            )
+        ),
+        model_ids=sorted(
+            m.id
+            for m in models
+            if list_building.model_unavailable_reason(
+                m, context.faction_names[m.faction_id], context.faction, rules
+            )
+            is None
+        ),
+    )
 
 
 @router.post("", response_model=ArmyListOut, status_code=201)

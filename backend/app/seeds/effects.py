@@ -7,6 +7,7 @@ from app.combat_rules.effects import (
     ADD_SIX_ATTACKS,
     ADD_TWO_EXTRA_HITS,
     ADD_THREE_ATTACKS,
+    ADD_TWO_ATTACKS,
     ASSAULT,
     AUTO_PASS_WOUND,
     BENEFIT_OF_COVER,
@@ -34,6 +35,7 @@ from app.combat_rules.effects import (
     PLUS_ONE_TO_HIT,
     PRECISION,
     REROLL_FAILED_HITS,
+    REROLL_HIT_ONES,
     REROLL_FAILED_WOUNDS,
 )
 from app.models import Effect
@@ -170,6 +172,16 @@ ENTRIES = [
         ADD_THREE_ATTACKS,
         "Add Three Attacks",
         "Adds three additional attacks to this weapon, each with its own hit roll.",
+    ),
+    (
+        ADD_TWO_ATTACKS,
+        "Add Two Attacks",
+        "Adds two additional attacks to this weapon, each with its own hit roll.",
+    ),
+    (
+        REROLL_HIT_ONES,
+        "Re-roll Hit Rolls of 1",
+        "A Hit roll of 1 for this attack can be re-rolled.",
     ),
     (
         BLAST,

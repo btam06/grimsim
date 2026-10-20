@@ -26,6 +26,7 @@ from app.schemas import (
     EnhancementWeaponAbilitySchema,
 )
 from app.services import enhancements as enhancement_rules
+from app.services import list_building
 
 router = APIRouter(prefix="/enhancements", tags=["enhancements"])
 
@@ -127,6 +128,9 @@ async def available_enhancements(
     # have already taken.
     detachment_ids = await _list_detachment_ids(session, list_id)
     model = (await _load_models(session, [model_id]))[model_id]
+    context = await list_building.load_list_context(session, list_id, unit_id)
+    if not list_building.can_take_enhancements(context, model):
+        return []  # e.g. a HARLEQUINS model in a Drukhari list
     used = await used_in_list(session, list_id, unit_id)
     return [
         _to_out(e)

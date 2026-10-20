@@ -37,10 +37,19 @@ export const listDetachments = () => request('/detachments')
 export const createDetachment = (payload) =>
   request('/detachments', { method: 'POST', body: JSON.stringify(payload) })
 export const deleteDetachment = (id) => request(`/detachments/${id}`, { method: 'DELETE' })
+export const listDetachmentRules = () => request('/detachment-rules')
+export const createDetachmentRule = (payload) =>
+  request('/detachment-rules', { method: 'POST', body: JSON.stringify(payload) })
+export const deleteDetachmentRule = (id) =>
+  request(`/detachment-rules/${id}`, { method: 'DELETE' })
 
 export const listStratagems = () => request('/stratagems')
 // Stratagems usable on a unit as the 'attacker' or 'defender', in the
 // shooting phase or (in engagement range) the fight phase.
+// Positions worth asking about for a unit as the 'attacker' or 'defender'
+// (e.g. within 6" of a friendly ADEPTUS MECHANICUS BATTLELINE unit).
+export const listRelevantPositions = (unitId, side) =>
+  request(`/combat/positions?unit_id=${unitId}&side=${side}`)
 export const listCalculatorStratagems = (unitId, side, inEngagementRange) =>
   request(
     `/combat/stratagems?unit_id=${unitId}&side=${side}&in_engagement_range=${inEngagementRange}`
@@ -69,6 +78,9 @@ export const listAvailableUpgrades = (listId, modelIds, unitId) =>
   )
 
 export const listLists = () => request('/lists')
+export const listBaseSizes = () => request('/base-sizes')
+// The faction units and models a unit in this list can use.
+export const listEligible = (listId) => request(`/lists/${listId}/eligible`)
 export const createList = (payload) =>
   request('/lists', { method: 'POST', body: JSON.stringify(payload) })
 export const updateList = (id, payload) =>

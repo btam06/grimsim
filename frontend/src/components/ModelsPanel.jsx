@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
+  listBaseSizes,
   listConditions,
   listDatasheetAbilities,
   listEffects,
@@ -25,6 +26,7 @@ function ModelsPanel() {
   const [factions, setFactions] = useState([])
   const [abilities, setAbilities] = useState([])
   const [keywords, setKeywords] = useState([])
+  const [baseSizes, setBaseSizes] = useState([])
   const [factionAbilities, setFactionAbilities] = useState([])
   const [weaponAbilities, setWeaponAbilities] = useState([])
   const [wargearAbilities, setWargearAbilities] = useState([])
@@ -63,6 +65,9 @@ function ModelsPanel() {
       .catch((err) => setError(err.message))
     listKeywords()
       .then(setKeywords)
+      .catch((err) => setError(err.message))
+    listBaseSizes()
+      .then(setBaseSizes)
       .catch((err) => setError(err.message))
     listFactionAbilities()
       .then(setFactionAbilities)
@@ -160,6 +165,7 @@ function ModelsPanel() {
         factions={factions}
         abilities={abilities}
         keywords={keywords}
+        baseSizes={baseSizes}
         factionAbilities={factionAbilities}
         weapons={weapons}
         wargear={wargear}
@@ -206,6 +212,7 @@ function ModelsPanel() {
       onFactionFilterChange={setFactionFilter}
       abilities={abilities}
       keywords={keywords}
+      baseSizes={baseSizes}
       factionAbilities={factionAbilities}
       weapons={weapons}
       wargear={wargear}

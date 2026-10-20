@@ -362,3 +362,40 @@ async def test_attach_datasheet_ability_unknown_ids_return_404(client: AsyncClie
     assert (await client.put(f"/models/9999/abilities/{ability_id}")).status_code == 404
     assert (await client.put(f"/models/{model_id}/abilities/9999")).status_code == 404
     assert (await client.delete(f"/models/9999/abilities/{ability_id}")).status_code == 404
+
+
+async def test_model_base_size(client: AsyncClient, faction_id: int):
+    oval = (await client.post("/base-sizes", json={"name": "105 x 70mm"})).json()["id"]
+    round_ = (await client.post("/base-sizes", json={"name": "32mm"})).json()["id"]
+    response = await client.post("/models", json=_model_payload(faction_id, base_size_id=oval))
+    assert response.status_code == 201
+    model = response.json()
+    assert model["base_size_id"] == oval
+    listed = next(m for m in (await client.get("/models")).json() if m["id"] == model["id"])
+    assert listed["base_size_id"] == oval
+
+    updated = await client.put(
+        f"/models/{model['id']}", json=_model_payload(faction_id, base_size_id=round_)
+    )
+    assert updated.json()["base_size_id"] == round_
+    cleared = await client.put(f"/models/{model['id']}", json=_model_payload(faction_id))
+    assert cleared.json()["base_size_id"] is None
+
+
+async def test_model_base_size_defaults_to_none(client: AsyncClient, faction_id: int):
+    response = await client.post("/models", json=_model_payload(faction_id))
+    assert response.json()["base_size_id"] is None
+
+
+async def test_model_with_invalid_base_size_returns_400(client: AsyncClient, faction_id: int):
+    response = await client.post("/models", json=_model_payload(faction_id, base_size_id=9999))
+    assert response.status_code == 400
+
+
+async def test_create_and_list_base_sizes(client: AsyncClient):
+    response = await client.post("/base-sizes", json={"name": " 40mm "})
+    assert response.status_code == 201
+    assert response.json()["name"] == "40mm"
+    assert [b["name"] for b in (await client.get("/base-sizes")).json()] == ["40mm"]
+    assert (await client.post("/base-sizes", json={"name": "40mm"})).status_code == 400
+    assert (await client.post("/base-sizes", json={"name": ""})).status_code == 422

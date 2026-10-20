@@ -13,9 +13,16 @@
           "leadership": 7,
           "oc": 2,
           "invulnerable": 5,
-          "keywords": ["INFANTRY", "BATTLELINE"],
-          "faction_abilities": ["Doctrina Imperatives"],
-          "abilities": ["Stealth"],
+          "keywords": [
+            "INFANTRY",
+            "BATTLELINE"
+          ],
+          "faction_abilities": [
+            "Doctrina Imperatives"
+          ],
+          "abilities": [
+            "Stealth"
+          ],
           "weapons": [
             {
               "name": "Test Rifle",
@@ -26,7 +33,10 @@
               "strength": 4,
               "ap": -1,
               "damage": "D3",
-              "abilities": ["Rapid Fire 1", "Heavy"]
+              "abilities": [
+                "Rapid Fire 1",
+                "Heavy"
+              ]
             },
             {
               "name": "Test Stubber",
@@ -72,9 +82,12 @@
             {
               "name": "Test Scope",
               "description": "Ignores cover.",
-              "abilities": ["Ignore Cover (Unit)"]
+              "abilities": [
+                "Ignore Cover (Unit)"
+              ]
             }
-          ]
+          ],
+          "base_size": "32mm"
         },
         {
           "name": "Test Sergeant",
@@ -85,7 +98,10 @@
           "leadership": 7,
           "oc": 2,
           "is_leader": true,
-          "keywords": ["INFANTRY", "CHARACTER"],
+          "keywords": [
+            "INFANTRY",
+            "CHARACTER"
+          ],
           "weapons": [
             {
               "name": "Test Blade",

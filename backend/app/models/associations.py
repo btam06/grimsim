@@ -185,3 +185,11 @@ unit_upgrades = Table(
     Column("unit_id", ForeignKey("units.id"), primary_key=True),
     Column("enhancement_id", ForeignKey("enhancements.id")),
 )
+
+# The base size a model is on (at most one per model).
+model_base_sizes = Table(
+    "model_base_sizes",
+    Base.metadata,
+    Column("model_id", ForeignKey("models.id"), primary_key=True),
+    Column("base_size_id", ForeignKey("base_sizes.id")),
+)

@@ -26,6 +26,7 @@ function buildEmptyForm() {
     feel_no_pain: '',
     is_support: false,
     is_leader: false,
+    base_size_id: '',
     ability_ids: [],
     keyword_ids: [],
     faction_ability_ids: [],
@@ -46,6 +47,7 @@ function formFromModel(model) {
     feel_no_pain: model.feel_no_pain === null ? '' : String(model.feel_no_pain),
     is_support: model.is_support,
     is_leader: model.is_leader,
+    base_size_id: model.base_size_id === null ? '' : String(model.base_size_id),
     ability_ids: model.ability_ids,
     keyword_ids: model.keyword_ids,
     faction_ability_ids: model.faction_ability_ids,
@@ -66,6 +68,7 @@ function toPayload(form) {
     feel_no_pain: form.feel_no_pain === '' ? null : Number(form.feel_no_pain),
     is_support: form.is_support,
     is_leader: form.is_leader,
+    base_size_id: form.base_size_id === '' ? null : Number(form.base_size_id),
     ability_ids: form.ability_ids,
     keyword_ids: form.keyword_ids,
     faction_ability_ids: form.faction_ability_ids,
@@ -77,6 +80,7 @@ function ModelFormPage({
   factions,
   abilities,
   keywords,
+  baseSizes,
   factionAbilities,
   weapons,
   wargear,
@@ -241,6 +245,13 @@ function ModelFormPage({
         </Field>
         <Field label="Feel No Pain (optional)">
           <input type="number" value={form.feel_no_pain} onChange={handleChange('feel_no_pain')} />
+        </Field>
+        <Field label="Base size">
+          <Select
+            options={[{ id: '', name: 'Not set' }, ...baseSizes]}
+            value={form.base_size_id}
+            onChange={(base_size_id) => setForm({ ...form, base_size_id })}
+          />
         </Field>
         <label className="checkbox-field">
           <input

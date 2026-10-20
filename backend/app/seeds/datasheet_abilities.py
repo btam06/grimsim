@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.combat_rules import Rule, RuleOption
 from app.combat_rules.conditions import (
     ALWAYS,
+    ATTACKER_NEAR_ADMECH_BATTLELINE,
     RANGED_ATTACK,
     RILED_UP_RANGED_CRITICAL_HIT,
     TARGET_ELECTRO_PRIESTS_LED_BY_CHARACTER,
@@ -19,6 +20,7 @@ from app.combat_rules.effects import (
     FEEL_NO_PAIN_5,
     MINUS_ONE_TO_WOUND,
     REROLL_FAILED_HITS,
+    REROLL_HIT_ONES,
 )
 from app.models import Condition, DatasheetAbility, Effect
 
@@ -69,6 +71,15 @@ ENTRIES = [
         "suffers D3 mortal wounds.",
         [ALWAYS],
         [DEADLY_DEMISE],
+    ),
+    (
+        # Re-rolling every failed Hit roll near a BATTLELINE unit is in RULES.
+        "Breaching Command",
+        "Each time a model in this unit makes an attack, re-roll a Hit roll of 1. While this "
+        "unit is within 6\" of one or more friendly ADEPTUS MECHANICUS BATTLELINE units, you "
+        "can re-roll the Hit roll instead.",
+        [ALWAYS],
+        [REROLL_HIT_ONES],
     ),
     (
         # Only whether it explodes is resolved, not the mortal wound.
@@ -176,6 +187,11 @@ RULES = {
     ],
     "Stealth": [
         Rule(conditions=(RANGED_ATTACK,), effects=(BENEFIT_OF_COVER,), side="defender"),
+    ],
+    # While within 6" of a friendly ADEPTUS MECHANICUS BATTLELINE unit (from
+    # the calculator's Positioning section): re-roll the Hit roll, not just a 1.
+    "Breaching Command": [
+        Rule(conditions=(ATTACKER_NEAR_ADMECH_BATTLELINE,), effects=(REROLL_FAILED_HITS,)),
     ],
 }
 

@@ -6,7 +6,8 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from app.combat_rules import CONDITIONS, EFFECTS, Rule
-from app.models import Model, Stratagem, Unit, WargearAbility, WeaponAbility
+from app.models import DetachmentRule, Model, Stratagem, Unit, WargearAbility, WeaponAbility
+from app.services import detachment_rules as detachment_rule_service
 from app.services import enhancements as enhancement_rules
 
 _DICE_PATTERN = re.compile(
@@ -180,6 +181,9 @@ def resolve_combat(
     attacker_options: set[str] | None = None,
     attacker_extra_keywords: set[str] | None = None,
     defender_extra_keywords: set[str] | None = None,
+    attacker_detachment_rules: list[DetachmentRule] | None = None,
+    attacker_positions: set[str] | None = None,
+    defender_positions: set[str] | None = None,
 ) -> CombatResult:
     # The defending unit is a queue of individual models, each with its own wound pool.
     # Each attack targets whichever model is at the front of the queue; once that
@@ -244,7 +248,8 @@ def resolve_combat(
     # Datasheet abilities belong to the unit, so (unlike wargear) they're also
     # in play for every weapon any of its models fires - e.g. "this unit's
     # ranged attacks have [SUSTAINED HITS 1]".
-    # Enhancements and upgrades can grant the unit more. (Abilities with
+    # Enhancements, upgrades and the rules of the attacking list's detachments
+    # can grant the unit more. (Abilities with
     # code-defined rules, like Stealth giving the benefit of cover when the
     # unit is the target, come in through attacker_rules/defender_rules.)
     datasheet_abilities = [
@@ -252,9 +257,20 @@ def resolve_combat(
         for unit_model in attacker.unit_models
         for ability in unit_model.model.abilities
     ] + enhancement_rules.granted_datasheet_abilities(attacker)
+    attacker_detachment_rules = list(attacker_detachment_rules or [])
+    datasheet_abilities += detachment_rule_service.granted_datasheet_abilities(
+        attacker_detachment_rules, attacker
+    )
+    detachment_weapon_abilities = detachment_rule_service.granted_weapon_abilities(
+        attacker_detachment_rules, attacker
+    )
     # Names of the faction-ability rule options active for the attacking unit
     # (e.g. "Riled Up"), for conditions like "if this unit is riled up".
     attacker_options = set(attacker_options or ())
+    # Where each unit is that the calculator can't work out itself (see
+    # app/combat_rules/positions.py), e.g. within 6" of a BATTLELINE unit.
+    attacker_positions = set(attacker_positions or ())
+    defender_positions = set(defender_positions or ())
     all_unit_wide_abilities = [
         ability
         for unit_model in attacker.unit_models
@@ -269,6 +285,8 @@ def resolve_combat(
             "attacker_keywords": attacker_keywords,
             "attacker_options": attacker_options,
             "defender_model_keywords": defender_model_keywords,
+            "attacker_positions": attacker_positions,
+            "defender_positions": defender_positions,
         },
         unit_wide_state,
         deque(),
@@ -325,11 +343,12 @@ def resolve_combat(
                 ability for gear in unit_model.wargear for ability in gear.abilities
             ]
             model_stratagems = stratagems_for(unit_model.model)
-            # Weapon abilities this model's weapons gain from enhancements and
-            # upgrades (e.g. [SUSTAINED HITS 1] on ranged weapons), each
-            # limited to a weapon type or not.
-            granted_weapon_abilities = enhancement_rules.granted_weapon_abilities(
-                attacker, unit_model
+            # Weapon abilities this model's weapons gain from enhancements,
+            # upgrades and detachment rules (e.g. [SUSTAINED HITS 1] on ranged
+            # weapons), each limited to a weapon type or not.
+            granted_weapon_abilities = (
+                enhancement_rules.granted_weapon_abilities(attacker, unit_model)
+                + detachment_weapon_abilities
             )
 
             # Hazardous wounds taken by this model accumulate across every one
@@ -373,6 +392,8 @@ def resolve_combat(
                     "attacker_keywords": attacker_keywords,
                     "attacker_options": attacker_options,
                     "defender_model_keywords": defender_model_keywords,
+                    "attacker_positions": attacker_positions,
+                    "defender_positions": defender_positions,
                 }
 
                 # Weapon eligibility: a static, no-dice-rolled check of this
@@ -551,11 +572,13 @@ def resolve_combat(
                 abilities, {"step": "hit", "roll": hit_roll, **weapon_context}, attack, spawned
             )
             if not hits(hit_roll) and (
-                attack.get("reroll_failed_hits") or unit_rerolls_failed_hits
+                attack.get("reroll_failed_hits")
+                or unit_rerolls_failed_hits
+                or (hit_roll == 1 and attack.get("reroll_hit_ones"))
             ):
-                # Re-roll a failed hit once, replacing the original result -
-                # hit-step triggers (e.g. Sustained Hits) are re-checked against
-                # the new roll too.
+                # Re-roll a failed hit (or just a 1) once, replacing the
+                # original result - hit-step triggers (e.g. Sustained Hits)
+                # are re-checked against the new roll too.
                 hit_roll = random.randint(1, 6)
                 result.attack_rerolls.append(hit_roll)
                 weapon_result.attack_rerolls.append(hit_roll)

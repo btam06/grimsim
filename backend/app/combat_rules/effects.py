@@ -40,6 +40,8 @@ PLUS_ONE_TO_WOUND = "plus_one_to_wound"
 FEEL_NO_PAIN_5 = "feel_no_pain_5"
 FEEL_NO_PAIN_4 = "feel_no_pain_4"
 ADD_THREE_ATTACKS = "add_three_attacks"
+ADD_TWO_ATTACKS = "add_two_attacks"
+REROLL_HIT_ONES = "reroll_hit_ones"
 BLAST = "blast"
 REROLL_FAILED_WOUNDS = "reroll_failed_wounds"
 DEADLY_DEMISE = "deadly_demise"
@@ -210,6 +212,19 @@ def add_three_attacks(state: dict[str, Any], pending: deque[dict[str, Any]]) -> 
         pending.append({"auto_hit": False})
 
 
+def add_two_attacks(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # Queues two additional attacks for this weapon, each with its own hit
+    # roll (e.g. Rapid Fire 2 within half range).
+    for _ in range(2):
+        pending.append({"auto_hit": False})
+
+
+def reroll_hit_ones(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # A Hit roll of 1 for this attack can be re-rolled (any failed Hit roll,
+    # with reroll_failed_hits).
+    state["reroll_hit_ones"] = True
+
+
 def blast(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
     # Marks this weapon as Blast - the engine adds 1 attack for every five
     # models in the target unit when the weapon fires.
@@ -284,6 +299,8 @@ EFFECTS = {
     FEEL_NO_PAIN_5: feel_no_pain_5,
     FEEL_NO_PAIN_4: feel_no_pain_4,
     ADD_THREE_ATTACKS: add_three_attacks,
+    ADD_TWO_ATTACKS: add_two_attacks,
+    REROLL_HIT_ONES: reroll_hit_ones,
     BLAST: blast,
     REROLL_FAILED_WOUNDS: reroll_failed_wounds,
     DEADLY_DEMISE: deadly_demise,

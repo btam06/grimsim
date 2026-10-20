@@ -7,12 +7,14 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.associations import (
     datasheet_ability_links,
+    model_base_sizes,
     model_faction_ability_links,
     model_keyword_links,
 )
 from app.models.base import Base
 
 if TYPE_CHECKING:
+    from app.models.base_size import BaseSize
     from app.models.datasheet_ability import DatasheetAbility
     from app.models.faction import Faction
     from app.models.faction_ability import FactionAbility
@@ -56,3 +58,7 @@ class Model(Base):
         secondary=model_faction_ability_links, back_populates="models"
     )
     unit_models: Mapped[list["UnitModel"]] = relationship(back_populates="model")
+    # The base it's on, if entered (see BaseSize).
+    base_size: Mapped["BaseSize | None"] = relationship(
+        secondary=model_base_sizes, uselist=False, lazy="selectin"
+    )

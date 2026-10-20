@@ -1,6 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.seeds import (
+    base_sizes,
     conditions,
     datasheet_abilities,
     dispositions,
@@ -23,9 +24,10 @@ from app.seeds import (
 # seed_abilities/seed_keywords/seed_units/seed_detachments fill in the rest for every
 # faction, so they must run after factions.seed (and seed_detachments after
 # dispositions.seed, since it looks dispositions up by name; seed_enhancements
-# after seed_detachments and seed_keywords). seed_datasheets
-# creates full models/weapons and must run after keywords, weapon abilities
-# and faction abilities, all of which it references by name.
+# and seed_detachment_rules after seed_detachments, seed_keywords and the
+# ability seeds). seed_datasheets
+# creates full models/weapons and must run after keywords, weapon abilities,
+# faction abilities and base sizes, all of which it references by name.
 #
 # conditions.seed/effects.seed populate the hardcoded condition/effect catalog
 # (see app/combat_rules/) that WeaponAbility/WargearAbility/DatasheetAbility
@@ -43,6 +45,7 @@ from app.seeds import (
 # dispositions.seed.
 SEED_FUNCS = [
     dispositions.seed,
+    base_sizes.seed,
     missions.seed,
     factions.seed,
     factions.seed_abilities,
@@ -55,6 +58,7 @@ SEED_FUNCS = [
     factions.seed_units,
     factions.seed_detachments,
     factions.seed_enhancements,
+    factions.seed_detachment_rules,
     factions.seed_datasheets,
     stratagems.seed,
 ]

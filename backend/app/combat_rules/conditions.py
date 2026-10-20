@@ -34,6 +34,14 @@ TARGET_LED_BY_CHARACTER = "target_led_by_character"
 TARGET_INFANTRY = "target_infantry"
 RANGED_ATTACK = "ranged_attack"
 TARGET_ELECTRO_PRIESTS_LED_BY_CHARACTER = "target_electro_priests_led_by_character"
+ATTACKER_NEAR_ADMECH_BATTLELINE = "attacker_near_admech_battleline"
+ATTACKER_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE = "attacker_battleline_or_near_admech_battleline"
+MELEE_VS_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE = "melee_vs_battleline_or_near_admech_battleline"
+
+# Positions a unit can be in that the calculator can't work out for itself,
+# so the user says (see app/combat_rules/positions.py); conditions read them
+# from the context's attacker_positions/defender_positions.
+NEAR_ADMECH_BATTLELINE = "near_admech_battleline"
 
 # Name of the Orks Waaagh! rule option that riles a unit up (see
 # app/seeds/factions/orks/abilities.py), for "if this unit is riled up".
@@ -167,6 +175,31 @@ def attacker_is_battleline(context: dict) -> bool:
     return "BATTLELINE" in context.get("attacker_keywords", set())
 
 
+def attacker_near_admech_battleline(context: dict) -> bool:
+    # True at every step while the attacking unit is within 6" of a friendly
+    # ADEPTUS MECHANICUS BATTLELINE unit (e.g. Breaching Command's re-rolls).
+    return NEAR_ADMECH_BATTLELINE in context.get("attacker_positions", set())
+
+
+def attacker_battleline_or_near_admech_battleline(context: dict) -> bool:
+    # As attacker_is_battleline, or while the attacking unit is within 6" of a
+    # friendly ADEPTUS MECHANICUS BATTLELINE unit (Conqueror Imperative).
+    return attacker_is_battleline(context) or attacker_near_admech_battleline(context)
+
+
+def melee_vs_battleline_or_near_admech_battleline(context: dict) -> bool:
+    # As melee_attack_against_battleline, or against a defending unit within
+    # 6" of a friendly ADEPTUS MECHANICUS BATTLELINE unit (Protector Imperative).
+    return (
+        context.get("step") == "pre_hit"
+        and not context.get("is_ranged", True)
+        and (
+            "BATTLELINE" in context.get("defender_keywords", set())
+            or NEAR_ADMECH_BATTLELINE in context.get("defender_positions", set())
+        )
+    )
+
+
 def target_not_monster_or_vehicle(context: dict) -> bool:
     # The opposite of target_monster_or_vehicle, at every step - e.g. for a
     # HUNTER: MONSTER/VEHICLE profile that can't attack anything else.
@@ -257,4 +290,7 @@ CONDITIONS = {
     TARGET_INFANTRY: target_infantry,
     RANGED_ATTACK: ranged_attack,
     TARGET_ELECTRO_PRIESTS_LED_BY_CHARACTER: target_electro_priests_led_by_character,
+    ATTACKER_NEAR_ADMECH_BATTLELINE: attacker_near_admech_battleline,
+    ATTACKER_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE: attacker_battleline_or_near_admech_battleline,
+    MELEE_VS_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE: melee_vs_battleline_or_near_admech_battleline,
 }

@@ -52,6 +52,17 @@ class KeywordOut(KeywordIn):
     id: int
 
 
+class BaseSizeIn(BaseModel):
+    # As written on datasheets, e.g. "32mm", "105 x 70mm" or "Use model".
+    name: str = Field(min_length=1, max_length=64)
+
+
+class BaseSizeOut(BaseSizeIn):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+
+
 class ModelIn(BaseModel):
     name: str
     faction_id: int
@@ -65,6 +76,8 @@ class ModelIn(BaseModel):
     feel_no_pain: int | None = None
     is_support: bool = False
     is_leader: bool = False
+    # One of the base sizes (GET /base-sizes); None if not entered.
+    base_size_id: int | None = None
     ability_ids: list[int] = []
     wargear_ids: list[int] = []
     keyword_ids: list[int] = []
@@ -85,6 +98,7 @@ class ModelOut(BaseModel):
     feel_no_pain: int | None
     is_support: bool
     is_leader: bool
+    base_size_id: int | None
     ability_ids: list[int]
     wargear_ids: list[int]
     keyword_ids: list[int]
@@ -188,6 +202,32 @@ class EnhancementWeaponAbilitySchema(BaseModel):
 class EnhancementDatasheetAbilitySchema(BaseModel):
     datasheet_ability_id: int
     scope: EnhancementScope
+
+
+class DetachmentRuleWeaponAbilitySchema(BaseModel):
+    weapon_ability_id: int
+    weapon_type: Literal["ranged", "melee"] | None = None
+
+
+class DetachmentRuleIn(BaseModel):
+    detachment_id: int
+    name: str
+    description: str | None = None
+    # Alternative keyword sets; a unit is reached if every model in it has all
+    # of one of them. Empty means every unit.
+    keyword_option_ids: list[list[int]] = []
+    weapon_abilities: list[DetachmentRuleWeaponAbilitySchema] = []
+    datasheet_ability_ids: list[int] = []
+
+
+class DetachmentRuleOut(BaseModel):
+    id: int
+    detachment_id: int
+    name: str
+    description: str | None
+    keyword_option_ids: list[list[int]]
+    weapon_abilities: list[DetachmentRuleWeaponAbilitySchema]
+    datasheet_ability_ids: list[int]
 
 
 class EnhancementIn(BaseModel):
@@ -385,6 +425,11 @@ class StratagemOut(BaseModel):
     combat_side: str | None
 
 
+class PositionOut(BaseModel):
+    id: str
+    label: str
+
+
 class CombatIn(BaseModel):
     game_id: int | None = None
     attacking_unit_id: int
@@ -395,6 +440,10 @@ class CombatIn(BaseModel):
     # (see GET /combat/stratagems).
     stratagem_ids: list[int] = []
     defender_stratagem_ids: list[int] = []
+    # Where each unit is, for rules the calculator can't measure (see GET
+    # /combat/positions), e.g. ["near_admech_battleline"].
+    attacker_positions: list[str] = []
+    defender_positions: list[str] = []
     # Whether attacks from weapons with the Precision effect pick off leaders
     # (then supports) first, rather than following normal targeting.
     apply_precision: bool = False
@@ -458,6 +507,13 @@ class ArmyListIn(BaseModel):
     detachment_ids: list[int] = []
     # The user who owns the list, if any.
     user_id: int | None = None
+
+
+class ListEligibleOut(BaseModel):
+    # What a unit in this list can be made of: faction units and models from
+    # the list's faction, plus any its ally rules let in.
+    faction_unit_ids: list[int]
+    model_ids: list[int]
 
 
 class ArmyListOut(BaseModel):

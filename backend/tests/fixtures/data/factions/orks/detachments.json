@@ -7,6 +7,26 @@
       "dispositions": [
         "Take and Hold",
         "Purge the Foe"
+      ],
+      "rules": [
+        {
+          "name": "Test Sneaky Gits",
+          "description": "INFANTRY units have Stealth.",
+          "keyword_options": [
+            [
+              "INFANTRY"
+            ]
+          ],
+          "datasheet_abilities": [
+            "Stealth"
+          ],
+          "weapon_abilities": [
+            {
+              "name": "Sustained 1",
+              "weapon_type": "ranged"
+            }
+          ]
+        }
       ]
     },
     {

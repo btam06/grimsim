@@ -5,6 +5,7 @@ from app.models.associations import (
     enhancement_excluded_keywords,
     enhancement_keywords,
     list_owners,
+    model_base_sizes,
     model_faction_ability_links,
     model_keyword_links,
     stratagem_conditions,
@@ -24,9 +25,16 @@ from app.models.associations import (
     weapon_ability_links,
 )
 from app.models.base import Base
+from app.models.base_size import BaseSize
 from app.models.condition import Condition
 from app.models.datasheet_ability import DatasheetAbility
 from app.models.detachment import Detachment
+from app.models.detachment_rule import (
+    DetachmentRule,
+    DetachmentRuleDatasheetAbility,
+    DetachmentRuleKeywordOption,
+    DetachmentRuleWeaponAbility,
+)
 from app.models.disposition import Disposition
 from app.models.effect import Effect
 from app.models.enhancement import (
@@ -64,6 +72,7 @@ __all__ = [
     "Weapon",
     "Wargear",
     "Model",
+    "BaseSize",
     "Keyword",
     "DatasheetAbility",
     "WeaponAbility",
@@ -73,6 +82,10 @@ __all__ = [
     "Unit",
     "UnitModel",
     "Detachment",
+    "DetachmentRule",
+    "DetachmentRuleKeywordOption",
+    "DetachmentRuleWeaponAbility",
+    "DetachmentRuleDatasheetAbility",
     "Enhancement",
     "EnhancementWeaponAbility",
     "EnhancementDatasheetAbility",
@@ -113,4 +126,5 @@ __all__ = [
     "enhancement_excluded_keywords",
     "unit_model_enhancements",
     "unit_upgrades",
+    "model_base_sizes",
 ]

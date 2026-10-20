@@ -4,7 +4,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
-from app.models import Keyword, StratagemKeywordOption
+from app.models import DetachmentRuleKeywordOption, Keyword, StratagemKeywordOption
 from app.models.associations import (
     enhancement_excluded_keywords,
     enhancement_keywords,
@@ -52,8 +52,7 @@ async def delete_keyword(keyword_id: int, session: AsyncSession = Depends(get_se
         enhancement_excluded_keywords,
     ):
         await session.execute(delete(table).where(table.c.keyword_id == keyword_id))
-    await session.execute(
-        delete(StratagemKeywordOption).where(StratagemKeywordOption.keyword_id == keyword_id)
-    )
+    for option in (StratagemKeywordOption, DetachmentRuleKeywordOption):
+        await session.execute(delete(option).where(option.keyword_id == keyword_id))
     await session.delete(keyword)
     await session.commit()

@@ -9,6 +9,7 @@ function ModelsListPage({
   onFactionFilterChange,
   abilities,
   keywords,
+  baseSizes,
   factionAbilities,
   weapons,
   wargear,
@@ -17,6 +18,7 @@ function ModelsListPage({
   onAddNew,
 }) {
   const abilityName = (id) => abilities.find((a) => a.id === id)?.name ?? `#${id}`
+  const baseSizeName = (id) => baseSizes.find((b) => b.id === id)?.name ?? `#${id}`
   const keywordName = (id) => keywords.find((k) => k.id === id)?.name ?? `#${id}`
   const factionAbilityName = (id) => factionAbilities.find((a) => a.id === id)?.name ?? `#${id}`
   const wargearName = (id) => wargear.find((g) => g.id === id)?.name ?? `#${id}`
@@ -46,6 +48,7 @@ function ModelsListPage({
               {m.leadership}+
               {m.invulnerable ? ` Inv${m.invulnerable}+` : ''}
               {m.feel_no_pain ? ` FNP${m.feel_no_pain}+` : ''}
+              {m.base_size_id !== null && ` — Base: ${baseSizeName(m.base_size_id)}`}
               {m.is_support ? ' [Support]' : ''}
               {m.is_leader ? ' [Leader]' : ''}
               {m.keyword_ids.length > 0 &&

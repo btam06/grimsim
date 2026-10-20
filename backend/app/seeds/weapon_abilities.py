@@ -26,6 +26,7 @@ from app.combat_rules.effects import (
     ADD_SIX_ATTACKS,
     ADD_TWO_EXTRA_HITS,
     ADD_THREE_ATTACKS,
+    ADD_TWO_ATTACKS,
     ASSAULT,
     AUTO_PASS_WOUND,
     BLAST,
@@ -178,6 +179,12 @@ ENTRIES = [
         "If this weapon targets a unit (excluding MONSTER/VEHICLE units), it has +6 A.",
         [PRE_WEAPON_NOT_MONSTER_OR_VEHICLE],
         [ADD_SIX_ATTACKS],
+    ),
+    (
+        "Rapid Fire 2",
+        "When the shooting model is within half range, this weapon makes 2 additional attacks.",
+        [WITHIN_HALF_RANGE],
+        [ADD_TWO_ATTACKS],
     ),
     (
         "Rapid Fire 3",

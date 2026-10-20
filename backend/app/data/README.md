@@ -62,6 +62,25 @@ disposition must be a seeded disposition name.
 }
 ```
 
+A detachment can also have `rules`. In combat, a rule grants abilities to
+the units of a list that has taken the detachment: those whose every model has
+all the keywords of one of its `keyword_options` (a set of keywords - their
+order doesn't matter; leave it out for every unit). It grants
+`datasheet_abilities` (by name, e.g. `Stealth`) and `weapon_abilities` (by
+name, optionally only on `"ranged"` or `"melee"` weapons).
+
+```json
+{
+  "name": "Skitarii Hunter Cohort", "dp": 2, "dispositions": ["Reconnaissance"],
+  "rules": [
+    {"name": "Stealth Optimisation", "description": "...",
+     "keyword_options": [["SKITARII", "INFANTRY"], ["SKITARII", "MOUNTED"],
+                         ["IRONSTRIDER BALLISTARII"]],
+     "datasheet_abilities": ["Stealth"]}
+  ]
+}
+```
+
 ## `factions/<faction>/enhancements.json`
 
 The faction's enhancements and upgrades, each naming its `detachment` (one of
@@ -103,6 +122,9 @@ Abilities and keywords are referenced by name and must already exist (seeded
 weapon/wargear/datasheet abilities, keywords from any faction's
 `keywords.json`, and the faction's abilities).
 See `app/seeds/datasheets.py` for every field and its default.
+`base_size` must be one of the seeded base sizes (`app/seeds/base_sizes.py`,
+e.g. `"32mm"`, `"105 x 70mm"`, `"Use model"`); it's filled in on an existing
+model that doesn't have one yet.
 
 ```json
 {
@@ -114,7 +136,7 @@ See `app/seeds/datasheets.py` for every field and its default.
         {
           "name": "Skitarii Ranger",
           "movement": 6, "toughness": 3, "save": 4, "wounds": 1,
-          "leadership": 7, "oc": 2, "invulnerable": 5,
+          "leadership": 7, "oc": 2, "invulnerable": 5, "base_size": "28.5mm",
           "keywords": ["INFANTRY", "BATTLELINE"],
           "faction_abilities": ["Doctrina Imperatives"],
           "abilities": [],

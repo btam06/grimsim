@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db import get_session
-from app.models import DatasheetAbility, FactionAbility, Keyword, Model, Wargear
+from app.models import BaseSize, DatasheetAbility, FactionAbility, Keyword, Model, Wargear
 from app.schemas import ModelIn, ModelOut
 
 router = APIRouter(prefix="/models", tags=["models"])
@@ -32,11 +32,21 @@ def _to_out(
         feel_no_pain=model.feel_no_pain,
         is_support=model.is_support,
         is_leader=model.is_leader,
+        base_size_id=model.base_size.id if model.base_size else None,
         ability_ids=ability_ids,
         wargear_ids=wargear_ids,
         keyword_ids=keyword_ids,
         faction_ability_ids=faction_ability_ids,
     )
+
+
+async def _base_size(session: AsyncSession, base_size_id: int | None) -> BaseSize | None:
+    if base_size_id is None:
+        return None
+    base_size = await session.get(BaseSize, base_size_id)
+    if base_size is None:
+        raise HTTPException(status_code=400, detail="invalid base_size_id")
+    return base_size
 
 
 async def _build_keywords(session: AsyncSession, keyword_ids: list[int]) -> list[Keyword]:
@@ -103,8 +113,15 @@ async def create_model(payload: ModelIn, session: AsyncSession = Depends(get_ses
 
     model = Model(
         **payload.model_dump(
-            exclude={"ability_ids", "wargear_ids", "keyword_ids", "faction_ability_ids"}
+            exclude={
+                "ability_ids",
+                "wargear_ids",
+                "keyword_ids",
+                "faction_ability_ids",
+                "base_size_id",
+            }
         ),
+        base_size=await _base_size(session, payload.base_size_id),
         abilities=abilities,
         keywords=keywords,
         faction_abilities=faction_abilities,
@@ -177,6 +194,7 @@ async def update_model(
     model.feel_no_pain = payload.feel_no_pain
     model.is_support = payload.is_support
     model.is_leader = payload.is_leader
+    model.base_size = await _base_size(session, payload.base_size_id)
     model.abilities = abilities
     model.keywords = keywords
     model.faction_abilities = faction_abilities

@@ -5,9 +5,11 @@ from fastapi import FastAPI
 from app.db import async_session, engine
 from app.models import Base
 from app.routers import (
+    base_sizes,
     combat,
     conditions,
     datasheet_abilities,
+    detachment_rules,
     detachments,
     dispositions,
     effects,
@@ -46,10 +48,12 @@ app.include_router(faction_units.router)
 app.include_router(faction_abilities.router)
 app.include_router(dispositions.router)
 app.include_router(detachments.router)
+app.include_router(detachment_rules.router)
 app.include_router(stratagems.router)
 app.include_router(enhancements.router)
 app.include_router(keywords.router)
 app.include_router(models.router)
+app.include_router(base_sizes.router)
 app.include_router(weapons.router)
 app.include_router(wargear.router)
 app.include_router(wargear_abilities.router)

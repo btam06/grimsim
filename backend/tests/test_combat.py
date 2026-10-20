@@ -19,6 +19,7 @@ from app.models import (
     WeaponAbility,
 )
 from app.seeds import datasheet_abilities as datasheet_ability_seeds
+from app.seeds import weapon_abilities as weapon_ability_seeds
 from app.seeds.factions.adeptus_mechanicus import abilities as admech_abilities
 from app.seeds.factions.orks import abilities as orks_abilities
 from app.services import combat
@@ -4011,9 +4012,12 @@ def test_extra_keywords_count_for_keyword_conditions(monkeypatch):
 
 async def _cawl_army(client: AsyncClient):
     # An AdMech list with Cawl in one unit and a Ranger in another, plus a
-    # Ranger unit outside the list and an allied (other faction) unit in it.
+    # Ranger unit outside the list and an allied (other faction) unit in it -
+    # an Imperial Agents CHARACTER, allowed because every model is IMPERIUM.
     admech = (await client.post("/factions", json={"name": "Adeptus Mechanicus"})).json()["id"]
     allies = (await client.post("/factions", json={"name": "Imperial Agents"})).json()["id"]
+    imperium = (await client.post("/keywords", json={"name": "IMPERIUM"})).json()["id"]
+    character = (await client.post("/keywords", json={"name": "CHARACTER"})).json()["id"]
     canticles = (
         await client.post("/datasheet-abilities", json={"name": "Canticles of the Omnissiah"})
     ).json()["id"]
@@ -4023,23 +4027,32 @@ async def _cawl_army(client: AsyncClient):
         )
     ).json()["id"]
     cawl = await _create_model(
-        client, admech, name="Cawl", ability_ids=[canticles], faction_ability_ids=[doctrina]
+        client,
+        admech,
+        name="Cawl",
+        ability_ids=[canticles],
+        faction_ability_ids=[doctrina],
+        keyword_ids=[imperium],
     )
     cawl_gun = await _create_weapon(
         client, cawl, name="Cawl Gun", skill=4, strength=10, ap=-1, weapon_type="ranged"
     )
-    ranger = await _create_model(client, admech, name="Ranger", faction_ability_ids=[doctrina])
+    ranger = await _create_model(
+        client, admech, name="Ranger", faction_ability_ids=[doctrina], keyword_ids=[imperium]
+    )
     rifle = await _create_weapon(
         client, ranger, name="Rifle", skill=4, strength=10, ap=-10, weapon_type="ranged"
     )
     ranger_gun = await _create_weapon(
         client, ranger, name="Ranger Gun", skill=4, strength=10, ap=-1, weapon_type="ranged"
     )
-    agent = await _create_model(client, allies, name="Agent")
+    agent = await _create_model(client, allies, name="Agent", keyword_ids=[imperium, character])
     pistol = await _create_weapon(
         client, agent, name="Pistol", skill=4, strength=10, ap=-10, weapon_type="ranged"
     )
-    target = await _create_model(client, admech, name="Target", toughness=1, save=2, wounds=20)
+    target = await _create_model(
+        client, admech, name="Target", toughness=1, save=2, wounds=20, keyword_ids=[imperium]
+    )
     list_id = (
         await client.post(
             "/lists", json={"name": "Army", "points_limit": 2000, "faction_id": admech}
@@ -4059,6 +4072,7 @@ async def _cawl_army(client: AsyncClient):
                 ],
             },
         )
+        assert response.status_code == 201, response.text
         return response.json()["id"]
 
     return {
@@ -4776,3 +4790,213 @@ def test_elevated_strider_can_shoot_after_advancing(monkeypatch):
 
     assert shots([]) == []
     assert shots([ability]) == [6]
+
+
+# --- Breaching Command: re-roll Hit rolls of 1 (or all of them near BATTLELINE) ---
+
+
+def _breaching_shot(monkeypatch, rolls, **flags):
+    # One BS4 attack that always wounds and gets through once it hits, from a
+    # unit with Breaching Command.
+    entry = next(e for e in datasheet_ability_seeds.ENTRIES if e[0] == "Breaching Command")
+    ability = _datasheet_ability(
+        [_condition(c) for c in entry[2]], [_effect(e) for e in entry[3]]
+    )
+    rolls = iter(rolls)
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 6))
+    weapon = _weapon(attacks="1", skill=4, strength=10, ap=-10, weapon_type="ranged")
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(abilities=[ability]), [weapon])])
+    defender = _unit([_unit_model(_model(toughness=1, wounds=10, save=7), [])])
+    return combat.resolve_combat(
+        attacker,
+        defender,
+        {1},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+        **flags,
+    )
+
+
+def test_breaching_command_rerolls_a_hit_roll_of_1(monkeypatch):
+    result = _breaching_shot(monkeypatch, [1, 4, 6, 1])  # hit 1, re-roll 4, wound, save
+    assert (result.attack_rerolls, result.total_damage) == ([4], 1)
+
+
+def test_breaching_command_does_not_reroll_other_misses(monkeypatch):
+    result = _breaching_shot(monkeypatch, [2, 4])
+    assert (result.attack_rerolls, result.total_damage) == ([], 0)
+
+
+@pytest.mark.parametrize("near,rerolls", [(True, [4]), (False, [])])
+def test_breaching_command_near_battleline_rerolls_any_miss(monkeypatch, near, rerolls):
+    # The datasheet's code rule reads the unit's position.
+    result = _breaching_shot(
+        monkeypatch,
+        [2, 4, 6, 1],
+        attacker_rules=list(datasheet_ability_seeds.RULES["Breaching Command"]),
+        attacker_positions={"near_admech_battleline"} if near else set(),
+    )
+    assert result.attack_rerolls == rerolls
+
+
+# --- Positioning: within 6" of a friendly ADEPTUS MECHANICUS BATTLELINE unit ---
+
+
+@pytest.mark.parametrize(
+    "keywords,positions,ap_improved",
+    [
+        ((), set(), False),
+        (("BATTLELINE",), set(), True),
+        ((), {"near_admech_battleline"}, True),
+    ],
+)
+def test_conqueror_imperative_counts_battleline_or_near_it(
+    monkeypatch, keywords, positions, ap_improved
+):
+    # AP0 against a 4+ save: a 4 saves unless AP is improved to -1.
+    rolls = iter([6, 6, 4])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    conqueror = admech_abilities.OPTIONS["Doctrina Imperatives"]["Conqueror Imperative"]
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=0, weapon_type="melee", range=None)
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(keywords=[_keyword(k) for k in keywords]), [weapon])])
+    defender = _unit([_unit_model(_model(toughness=1, wounds=10, save=4), [])])
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {1},
+        in_engagement_range=True,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+        attacker_rules=list(conqueror),
+        attacker_positions=positions,
+    )
+    assert result.total_damage == (1 if ap_improved else 0)
+
+
+@pytest.mark.parametrize(
+    "keywords,positions,minus_one",
+    [
+        ((), set(), False),
+        (("BATTLELINE",), set(), True),
+        ((), {"near_admech_battleline"}, True),
+    ],
+)
+def test_protector_imperative_counts_battleline_or_near_it(
+    monkeypatch, keywords, positions, minus_one
+):
+    # A melee 3 against WS3 hits, unless it's at -1 to hit.
+    rolls = iter([3, 6, 1])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    protector = admech_abilities.OPTIONS["Doctrina Imperatives"]["Protector Imperative"]
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, weapon_type="melee", range=None)
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    defender = _unit(
+        [
+            _unit_model(
+                _model(toughness=1, wounds=10, save=7, keywords=[_keyword(k) for k in keywords]),
+                [],
+            )
+        ]
+    )
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {1},
+        in_engagement_range=True,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+        defender_rules=list(protector),
+        defender_positions=positions,
+    )
+    assert result.total_damage == (0 if minus_one else 1)
+
+
+async def test_combat_endpoint_rejects_unknown_positions(client: AsyncClient, faction_id: int):
+    attacker_id, defender_id, weapon_id = await _combat_units_in_list(client, faction_id, [])
+    response = await client.post(
+        "/combat",
+        json={
+            "attacking_unit_id": attacker_id,
+            "defending_unit_id": defender_id,
+            "selected_weapon_ids": [weapon_id],
+            "attacker_positions": ["on_a_hill"],
+        },
+    )
+    assert response.status_code == 400
+    assert "on_a_hill" in response.json()["detail"]
+
+
+async def test_positions_are_asked_about_only_for_units_whose_rules_use_them(
+    client: AsyncClient, session
+):
+    # Doctrina Imperatives reads it on both sides (Conqueror attacking,
+    # Protector defending); Breaching Command only when attacking; a unit with
+    # neither never.
+    from app.seeds import conditions as conditions_seed
+    from app.seeds import datasheet_abilities as datasheet_abilities_seed
+    from app.seeds import effects as effects_seed
+    from app.seeds import factions as factions_seed
+
+    await factions_seed.seed(session)
+    await factions_seed.seed_abilities(session)
+    await conditions_seed.seed(session)
+    await effects_seed.seed(session)
+    await datasheet_abilities_seed.seed(session)
+    admech = next(
+        f["id"] for f in (await client.get("/factions")).json() if f["name"] == "Adeptus Mechanicus"
+    )
+    doctrina = next(
+        a["id"]
+        for a in (await client.get("/faction-abilities")).json()
+        if a["name"] == "Doctrina Imperatives"
+    )
+    breaching = next(
+        a["id"]
+        for a in (await client.get("/datasheet-abilities")).json()
+        if a["name"] == "Breaching Command"
+    )
+    faction_unit = await _create_faction_unit(client, admech, "Units")
+
+    async def positions(side, **model):
+        model_id = await _create_model(client, admech, **model)
+        unit_id = await _create_unit(client, faction_unit, model_id)
+        response = await client.get(
+            "/combat/positions", params={"unit_id": unit_id, "side": side}
+        )
+        assert response.status_code == 200
+        return [p["id"] for p in response.json()]
+
+    near = ["near_admech_battleline"]
+    assert await positions("attacker", faction_ability_ids=[doctrina]) == near
+    assert await positions("defender", faction_ability_ids=[doctrina]) == near
+    assert await positions("attacker", ability_ids=[breaching]) == near
+    assert await positions("defender", ability_ids=[breaching]) == []
+    assert await positions("attacker") == []
+
+
+def test_rapid_fire_2_adds_two_attacks_within_half_range(monkeypatch):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    entry = next(e for e in weapon_ability_seeds.ENTRIES if e[0] == "Rapid Fire 2")
+    weapon = _weapon(attacks="2", skill=4, strength=10, ap=-10, weapon_type="ranged")
+    weapon.abilities = [
+        _ability([_condition(c) for c in entry[2]], [_effect(e) for e in entry[3]])
+    ]
+    target = [_model(toughness=1, wounds=20, save=7)]
+    assert len(_fire(weapon, target, half_range=True).attack_rolls) == 4
+    assert len(_fire(weapon, target).attack_rolls) == 2
