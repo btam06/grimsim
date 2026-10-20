@@ -1,0 +1,34 @@
+{
+  "faction": "Orks",
+  "enhancements": [
+    {
+      "name": "Test Kustom Job",
+      "detachment": "Test Horde",
+      "description": "A shiny gun.",
+      "points": 20,
+      "kind": "enhancement",
+      "weapon_abilities": [
+        {
+          "name": "Sustained 1",
+          "weapon_type": "ranged",
+          "scope": "led_unit"
+        }
+      ],
+      "datasheet_abilities": [
+        {
+          "name": "Stealth",
+          "scope": "bearer"
+        }
+      ]
+    },
+    {
+      "name": "Test Boarding Gear",
+      "detachment": "Test Horde",
+      "points": 10,
+      "kind": "upgrade",
+      "keywords": [
+        "INFANTRY"
+      ]
+    }
+  ]
+}

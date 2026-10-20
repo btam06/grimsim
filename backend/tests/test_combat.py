@@ -5,6 +5,9 @@ from app.models import (
     Condition,
     DatasheetAbility,
     Effect,
+    Enhancement,
+    EnhancementDatasheetAbility,
+    EnhancementWeaponAbility,
     Keyword,
     Model,
     Stratagem,
@@ -3700,14 +3703,24 @@ def test_stealth_does_not_affect_melee_attacks(monkeypatch):
     assert _stealth_shot(monkeypatch, weapon_type="melee", defender_rules=STEALTH) == 1
 
 
-def test_stealth_cover_does_not_stack_with_being_in_cover(monkeypatch):
-    # Hit 4 vs skill 3: still hits with one +1 (cover), would miss at +2.
-    rolls = iter([4, 6, 1])
+@pytest.mark.parametrize(
+    "flags,hits",
+    [
+        # +1 to hit and one -1 for cover: a 3 hits against skill 3.
+        ({"in_cover": True}, 1),
+        ({"defender_rules": STEALTH}, 1),
+        # Stealth while in cover is still one -1, not two (which the +1/-1 cap
+        # alone wouldn't show: +1 -2 caps to -1, and a 3 would miss).
+        ({"in_cover": True, "defender_rules": STEALTH}, 1),
+    ],
+)
+def test_stealth_cover_does_not_stack_with_being_in_cover(monkeypatch, flags, hits):
+    rolls = iter([3, 6, 1])  # hit, wound, save
     monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, damage="1", weapon_type="ranged")
+    weapon.abilities = [_plus_one()]
 
-    result = _doctrina_combat(weapon, defender_rules=STEALTH, in_cover=True)
-    assert result.total_damage == 1
+    assert _doctrina_combat(weapon, **flags).total_damage == hits
 
 
 def test_ignores_cover_ignores_stealth(monkeypatch):
@@ -4400,3 +4413,366 @@ async def test_combat_endpoint_rejects_stratagem_with_wrong_timing(
     )
     assert response.status_code == 400
     assert "Mistimed" in response.json()["detail"]
+
+
+def _bulwark_defence(monkeypatch, save_roll, invulnerable=None):
+    # AP-4 against a 3+ save, with a defender stratagem giving a 4+ invulnerable.
+    stratagem = Stratagem(name="Bulwark", description=None, cp=2, is_core=True)
+    stratagem.conditions = [_condition("always")]
+    stratagem.effects = [_effect("invulnerable_4")]
+    stratagem.keywords = []
+    rolls = iter([6, 6, save_roll])  # hit, wound, save
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=-4, weapon_type="ranged")
+    defender = _model(toughness=1, wounds=10, save=3, invulnerable=invulnerable)
+    return _fire(weapon, [defender], defender_stratagems=[stratagem]).total_damage
+
+
+def test_defender_stratagem_gives_4_plus_invulnerable_save(monkeypatch):
+    assert _bulwark_defence(monkeypatch, 4) == 0
+    assert _bulwark_defence(monkeypatch, 3) == 1
+
+
+def test_4_plus_invulnerable_keeps_a_better_existing_one(monkeypatch):
+    assert _bulwark_defence(monkeypatch, 3, invulnerable=3) == 0
+
+
+async def test_calculator_stratagems_respect_combat_side(client: AsyncClient, faction_id: int):
+    # A Fight-phase stratagem usable in either turn, but only on the unit being
+    # attacked (e.g. Baleful Halo), or only on the attacking unit.
+    attacker_id, defender_id, weapon_id = await _combat_units_in_list(client, faction_id, [])
+    for name, side in [("Halo", "defender"), ("Strike", "attacker"), ("Anyone", None)]:
+        response = await client.post(
+            "/stratagems",
+            json={
+                "name": name,
+                "cp": 1,
+                "is_core": True,
+                "timings": [{"phase": "fight", "turn": "either"}],
+                "combat_side": side,
+            },
+        )
+        assert response.status_code == 201
+
+    assert await _usable(client, attacker_id, "attacker", True) == {"Strike", "Anyone"}
+    assert await _usable(client, defender_id, "defender", True) == {"Halo", "Anyone"}
+
+    halo_id = next(s["id"] for s in (await client.get("/stratagems")).json() if s["name"] == "Halo")
+    response = await client.post(
+        "/combat",
+        json={
+            "attacking_unit_id": attacker_id,
+            "defending_unit_id": defender_id,
+            "selected_weapon_ids": [weapon_id],
+            "in_engagement_range": True,
+            "stratagem_ids": [halo_id],
+        },
+    )
+    assert response.status_code == 400
+    assert "only used by the defender" in response.json()["detail"]
+
+
+# --- stratagem keyword exclusions ---
+
+
+def test_excluded_keyword_stratagem_skips_models_with_it(monkeypatch):
+    stratagem = _restricted_stratagem()
+    stratagem.excluded_keywords = [_keyword("CHARACTER")]
+    damage = _two_model_attack(monkeypatch, stratagem)
+    assert damage == {"Hero Gun": 0, "Trooper Gun": 1}
+
+
+async def test_calculator_stratagems_respect_excluded_keywords(
+    client: AsyncClient, faction_id: int
+):
+    # The test units' models have no keywords - excluding VEHICLE leaves them
+    # eligible, excluding a keyword they have doesn't.
+    attacker_id, _, weapon_id = await _combat_units_in_list(client, faction_id, [])
+    vehicle = (await client.post("/keywords", json={"name": "VEHICLE"})).json()["id"]
+    await client.post(
+        "/stratagems",
+        json={"name": "Not Vehicles", "cp": 1, "is_core": True, "excluded_keyword_ids": [vehicle]},
+    )
+    assert await _usable(client, attacker_id, "attacker") == {"Not Vehicles"}
+
+    unit = next(u for u in (await client.get("/units")).json() if u["id"] == attacker_id)
+    model_id = unit["unit_models"][0]["model_id"]
+    model = next(m for m in (await client.get("/models")).json() if m["id"] == model_id)
+    model["keyword_ids"] = [vehicle]
+    assert (await client.put(f"/models/{model_id}", json=model)).status_code == 200
+    assert await _usable(client, attacker_id, "attacker") == set()
+
+
+# --- abilities granted by enhancements and upgrades ---
+
+
+def _plus_one_grant(scope, weapon_type=None):
+    return EnhancementWeaponAbility(
+        weapon_ability=_plus_one(), weapon_type=weapon_type, scope=scope
+    )
+
+
+def _enhancement(kind="enhancement", weapon_grants=(), datasheet_grants=()):
+    enhancement = Enhancement(name="Relic", points=10, kind=kind, detachment_id=1)
+    enhancement.weapon_ability_grants = list(weapon_grants)
+    enhancement.datasheet_ability_grants = list(datasheet_grants)
+    return enhancement
+
+
+def _enhanced_attack(monkeypatch, enhancement=None, upgrade=None, with_trooper=True):
+    # A CHARACTER (carrying `enhancement`) with a gun and a blade, and maybe a
+    # trooper with a gun. Every roll is a 3 against BS/WS 4: an attack only
+    # hits with +1 to hit, then always wounds and gets through.
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+    stats = dict(attacks="1", skill=4, strength=10, ap=-10, damage="1")
+    hero_gun = _weapon(name="Hero Gun", weapon_type="ranged", **stats)
+    hero_gun.id = 1
+    trooper_gun = _weapon(name="Trooper Gun", weapon_type="ranged", **stats)
+    trooper_gun.id = 2
+    hero = _unit_model(_model(keywords=[_keyword("CHARACTER")]), [hero_gun])
+    hero.enhancement = enhancement
+    unit_models = [hero]
+    if with_trooper:
+        unit_models.append(
+            _unit_model(_model(keywords=[_keyword("INFANTRY")]), [trooper_gun])
+        )
+    attacker = _unit(unit_models)
+    attacker.upgrade = upgrade
+    defender = _unit([_unit_model(_model(toughness=1, wounds=10, save=7), [])])
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {1, 2},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+    )
+    return {wr.name: wr.total_damage for wr in result.weapon_results}
+
+
+def test_bearer_grant_only_reaches_the_bearers_weapons(monkeypatch):
+    relic = _enhancement(weapon_grants=[_plus_one_grant("bearer", "ranged")])
+    assert _enhanced_attack(monkeypatch, relic) == {"Hero Gun": 1, "Trooper Gun": 0}
+
+
+def test_grant_limited_to_another_weapon_type_does_nothing(monkeypatch):
+    relic = _enhancement(weapon_grants=[_plus_one_grant("bearer", "melee")])
+    assert _enhanced_attack(monkeypatch, relic) == {"Hero Gun": 0, "Trooper Gun": 0}
+
+
+def test_led_unit_grant_reaches_every_model_while_leading(monkeypatch):
+    relic = _enhancement(weapon_grants=[_plus_one_grant("led_unit", "ranged")])
+    assert _enhanced_attack(monkeypatch, relic) == {"Hero Gun": 1, "Trooper Gun": 1}
+
+
+def test_led_unit_grant_does_nothing_without_a_unit_to_lead(monkeypatch):
+    relic = _enhancement(weapon_grants=[_plus_one_grant("led_unit")])
+    assert _enhanced_attack(monkeypatch, relic, with_trooper=False) == {"Hero Gun": 0}
+
+
+def test_upgrade_grant_reaches_every_model(monkeypatch):
+    upgrade = _enhancement("upgrade", weapon_grants=[_plus_one_grant("unit")])
+    assert _enhanced_attack(monkeypatch, upgrade=upgrade) == {"Hero Gun": 1, "Trooper Gun": 1}
+
+
+def test_granted_datasheet_ability_applies_to_the_unit(monkeypatch):
+    ability = _datasheet_ability([_condition("always")], [_effect("plus_one_to_hit")])
+    relic = _enhancement(
+        datasheet_grants=[EnhancementDatasheetAbility(datasheet_ability=ability, scope="bearer")]
+    )
+    assert _enhanced_attack(monkeypatch, relic) == {"Hero Gun": 1, "Trooper Gun": 1}
+
+
+async def test_combat_endpoint_applies_enhancement_granted_stealth(
+    client: AsyncClient, faction_id: int, session, monkeypatch
+):
+    # Malphonic Susurrus-style: a CHARACTER leading a unit gives it Stealth -
+    # the benefit of cover, so ranged attacks against it get -1 to hit, unless
+    # they ignore cover. Every roll is a 4 against BS4.
+    from app.seeds import conditions as conditions_seed
+    from app.seeds import datasheet_abilities as datasheet_abilities_seed
+    from app.seeds import effects as effects_seed
+    from app.seeds import weapon_abilities as weapon_abilities_seed
+
+    await conditions_seed.seed(session)
+    await effects_seed.seed(session)
+    await datasheet_abilities_seed.seed(session)
+    await weapon_abilities_seed.seed(session)
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 4)
+
+    stealth_id = next(
+        a["id"]
+        for a in (await client.get("/datasheet-abilities")).json()
+        if a["name"] == "Stealth"
+    )
+    character = (await client.post("/keywords", json={"name": "CHARACTER"})).json()["id"]
+    detachment = (
+        await client.post("/detachments", json={"name": "D", "faction_id": faction_id, "dp": 1})
+    ).json()["id"]
+    relic = await client.post(
+        "/enhancements",
+        json={
+            "name": "Susurrus",
+            "points": 20,
+            "kind": "enhancement",
+            "detachment_id": detachment,
+            "datasheet_abilities": [{"datasheet_ability_id": stealth_id, "scope": "led_unit"}],
+        },
+    )
+    assert relic.status_code == 201, relic.text
+    list_id = (
+        await client.post(
+            "/lists",
+            json={
+                "name": "L",
+                "points_limit": 1000,
+                "faction_id": faction_id,
+                "detachment_ids": [detachment],
+            },
+        )
+    ).json()["id"]
+    leader = await _create_model(client, faction_id, keyword_ids=[character])
+    trooper = await _create_model(client, faction_id, toughness=1, wounds=5, save=7)
+    defender_fu = await _create_faction_unit(client, faction_id, "Defenders")
+    defender = await client.post(
+        "/units",
+        json={
+            "faction_unit_id": defender_fu,
+            "points": 100,
+            "list_id": list_id,
+            "unit_models": [
+                {"model_id": leader, "enhancement_id": relic.json()["id"]},
+                {"model_id": trooper},
+            ],
+        },
+    )
+    assert defender.status_code == 201, defender.text
+
+    ignores_cover = next(
+        a["id"]
+        for a in (await client.get("/weapon-abilities")).json()
+        if a["name"] == "Ignores Cover"
+    )
+    attacker_fu = await _create_faction_unit(client, faction_id, "Attackers")
+
+    async def damage(ability_ids):
+        attacker_model = await _create_model(client, faction_id)
+        weapon_id = await _create_weapon(
+            client,
+            attacker_model,
+            skill=4,
+            strength=10,
+            ap=-10,
+            weapon_type="ranged",
+            ability_ids=ability_ids,
+        )
+        attacker_id = await _create_unit(client, attacker_fu, attacker_model, weapon_id)
+        response = await client.post(
+            "/combat",
+            json={
+                "attacking_unit_id": attacker_id,
+                "defending_unit_id": defender.json()["id"],
+                "selected_weapon_ids": [weapon_id],
+            },
+        )
+        assert response.status_code == 200, response.text
+        return response.json()["total_damage"]
+
+    assert await damage([]) == 0  # a 4 misses at -1 to hit
+    assert await damage([ignores_cover]) == 1  # Ignores Cover negates Stealth
+
+
+# --- +1 to wound ---
+
+
+@pytest.mark.parametrize(
+    "effects,wound_roll,wounds",
+    [
+        ([], 3, 0),  # S4 vs T4 needs a 4
+        (["plus_one_to_wound"], 3, 1),
+        (["plus_one_to_wound", "minus_one_to_wound"], 3, 0),  # they cancel out
+        (["plus_one_to_wound", "minus_one_to_wound"], 4, 1),
+        (["plus_one_to_wound"], 1, 0),  # an unmodified 1 always fails
+    ],
+)
+def test_plus_one_to_wound(monkeypatch, effects, wound_roll, wounds):
+    rolls = iter([6, wound_roll, 1])  # hit, wound, save
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=4, ap=-10, damage="1", weapon_type="ranged")
+    weapon.abilities = [_ability([_condition("always")], [_effect(e)]) for e in effects]
+    result = _fire(weapon, [_model(toughness=4, wounds=10, save=7)])
+    assert result.total_damage == wounds
+
+
+# --- stratagem keyword options ("one X or Y unit") ---
+
+
+def test_keyword_option_stratagem_applies_to_models_matching_any_option(monkeypatch):
+    stratagem = _restricted_stratagem()
+    stratagem.keyword_options = [[_keyword("PTERAXII")], [_keyword("CHARACTER")]]
+    assert _two_model_attack(monkeypatch, stratagem) == {"Hero Gun": 1, "Trooper Gun": 0}
+
+
+def test_keyword_option_needs_every_keyword_in_it(monkeypatch):
+    stratagem = _restricted_stratagem()
+    stratagem.keyword_options = [[_keyword("CHARACTER"), _keyword("MOUNTED")]]
+    assert _two_model_attack(monkeypatch, stratagem) == {"Hero Gun": 0, "Trooper Gun": 0}
+
+
+async def test_calculator_stratagems_respect_keyword_options(client: AsyncClient, faction_id: int):
+    attacker_id, _, _ = await _combat_units_in_list(client, faction_id, [])
+    sicarian = (await client.post("/keywords", json={"name": "SICARIAN"})).json()["id"]
+    mounted = (await client.post("/keywords", json={"name": "MOUNTED"})).json()["id"]
+    response = await client.post(
+        "/stratagems",
+        json={
+            "name": "Bionic",
+            "cp": 1,
+            "is_core": True,
+            "keyword_option_ids": [[sicarian], [mounted]],
+        },
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["keyword_option_ids"] == [[sicarian], [mounted]]
+    assert await _usable(client, attacker_id, "attacker") == set()
+
+    unit = next(u for u in (await client.get("/units")).json() if u["id"] == attacker_id)
+    model_id = unit["unit_models"][0]["model_id"]
+    model = next(m for m in (await client.get("/models")).json() if m["id"] == model_id)
+    model["keyword_ids"] = [mounted]
+    assert (await client.put(f"/models/{model_id}", json=model)).status_code == 200
+    assert await _usable(client, attacker_id, "attacker") == {"Bionic"}
+
+
+def test_elevated_strider_can_shoot_after_advancing(monkeypatch):
+    # Modelled as [ASSAULT] on every weapon, from the datasheet ability.
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    strider = next(e for e in datasheet_ability_seeds.ENTRIES if e[0] == "Elevated Strider")
+    ability = _datasheet_ability(
+        [_condition(c) for c in strider[2]], [_effect(e) for e in strider[3]]
+    )
+    weapon = _weapon(attacks="1", skill=4, strength=10, ap=-10, weapon_type="ranged")
+    weapon.id = 1
+
+    def shots(abilities):
+        attacker = _unit([_unit_model(_model(abilities=abilities), [weapon])])
+        defender = _unit([_unit_model(_model(toughness=1, wounds=10, save=7), [])])
+        return combat.resolve_combat(
+            attacker,
+            defender,
+            {1},
+            in_engagement_range=False,
+            visible=True,
+            in_range=True,
+            in_cover=False,
+            half_range=False,
+            moved_less_than_3=False,
+            advanced=True,
+        ).attack_rolls
+
+    assert shots([]) == []
+    assert shots([ability]) == [6]

@@ -135,6 +135,15 @@ stratagem_keywords = Table(
     Column("keyword_id", ForeignKey("keywords.id"), primary_key=True),
 )
 
+# Keywords that stop a stratagem applying to a model (e.g. VEHICLE for Baleful
+# Halo's "excluding VEHICLE units").
+stratagem_excluded_keywords = Table(
+    "stratagem_excluded_keywords",
+    Base.metadata,
+    Column("stratagem_id", ForeignKey("stratagems.id"), primary_key=True),
+    Column("keyword_id", ForeignKey("keywords.id"), primary_key=True),
+)
+
 # A list's owner (at most one user per list). A link table rather than a
 # column on lists, so existing databases pick it up without a migration.
 list_owners = Table(
@@ -142,4 +151,37 @@ list_owners = Table(
     Base.metadata,
     Column("list_id", ForeignKey("lists.id"), primary_key=True),
     Column("user_id", ForeignKey("users.id"), nullable=False),
+)
+
+# Keywords an enhancement or upgrade needs (all of them) on the model carrying
+# it (enhancements) or every model in the unit (upgrades), and keywords that
+# rule it out (any one of them).
+enhancement_keywords = Table(
+    "enhancement_keywords",
+    Base.metadata,
+    Column("enhancement_id", ForeignKey("enhancements.id"), primary_key=True),
+    Column("keyword_id", ForeignKey("keywords.id"), primary_key=True),
+)
+
+enhancement_excluded_keywords = Table(
+    "enhancement_excluded_keywords",
+    Base.metadata,
+    Column("enhancement_id", ForeignKey("enhancements.id"), primary_key=True),
+    Column("keyword_id", ForeignKey("keywords.id"), primary_key=True),
+)
+
+# The enhancement a model in a unit carries (at most one per model).
+unit_model_enhancements = Table(
+    "unit_model_enhancements",
+    Base.metadata,
+    Column("unit_model_id", ForeignKey("unit_models.id"), primary_key=True),
+    Column("enhancement_id", ForeignKey("enhancements.id")),
+)
+
+# The upgrade a unit has (at most one per unit).
+unit_upgrades = Table(
+    "unit_upgrades",
+    Base.metadata,
+    Column("unit_id", ForeignKey("units.id"), primary_key=True),
+    Column("enhancement_id", ForeignKey("enhancements.id")),
 )

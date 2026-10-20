@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   deleteList,
   listDetachments,
+  listEnhancements,
   listFactionUnits,
   listFactions,
   listKeywords,
@@ -12,6 +13,7 @@ import {
   listWargear,
   listWeapons,
 } from '../api'
+import ConfirmDialog from './ConfirmDialog'
 import ListFormPage from './ListFormPage'
 import ListsListPage from './ListsListPage'
 import UnitFormPage from './UnitFormPage'
@@ -34,6 +36,7 @@ function ListsPanel() {
   const [models, setModels] = useState([])
   const [weapons, setWeapons] = useState([])
   const [wargear, setWargear] = useState([])
+  const [enhancements, setEnhancements] = useState([])
   const [factionUnits, setFactionUnits] = useState([])
   const [keywords, setKeywords] = useState([])
   const [users, setUsers] = useState([])
@@ -41,6 +44,8 @@ function ListsPanel() {
   const [view, setView] = useState('list')
   const [editingList, setEditingList] = useState(null)
   const [editingUnit, setEditingUnit] = useState(null)
+  // The list waiting on delete confirmation, if any.
+  const [pendingDelete, setPendingDelete] = useState(null)
 
   const refreshLists = () => listLists().then(setLists).catch((err) => setError(err.message))
   const refreshUnits = () => listUnits().then(setUnits).catch((err) => setError(err.message))
@@ -55,6 +60,7 @@ function ListsPanel() {
     listModels().then(setModels).catch((err) => setError(err.message))
     listWeapons().then(setWeapons).catch((err) => setError(err.message))
     listWargear().then(setWargear).catch((err) => setError(err.message))
+    listEnhancements().then(setEnhancements).catch((err) => setError(err.message))
     listFactionUnits().then(setFactionUnits).catch((err) => setError(err.message))
     listKeywords().then(setKeywords).catch((err) => setError(err.message))
     listUsers().then(setUsers).catch((err) => setError(err.message))
@@ -111,6 +117,7 @@ function ListsPanel() {
 
   const handleDeleteList = async (id) => {
     setError(null)
+    setPendingDelete(null)
     try {
       await deleteList(id)
       refreshLists()
@@ -149,6 +156,7 @@ function ListsPanel() {
         weapons={weapons}
         wargear={wargear}
         factionUnits={factionUnits}
+        enhancements={enhancements}
         onSaved={goToList}
         onCancel={goToList}
         onUnitsChanged={refreshUnits}
@@ -165,23 +173,35 @@ function ListsPanel() {
   }
 
   return (
-    <ListsListPage
-      lists={lists}
-      factions={factions}
-      factionFilter={factionFilter}
-      onFactionFilterChange={setFactionFilter}
-      detachments={detachments}
-      error={error}
-      onEdit={(list) => {
-        setEditingList(list)
-        setView('list-form')
-      }}
-      onAddNew={() => {
-        setEditingList(null)
-        setView('list-form')
-      }}
-      onDelete={handleDeleteList}
-    />
+    <>
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="Delete list?"
+        message={
+          pendingDelete &&
+          `"${pendingDelete.name}" will be deleted. This can't be undone.`
+        }
+        onConfirm={() => handleDeleteList(pendingDelete.id)}
+        onCancel={() => setPendingDelete(null)}
+      />
+      <ListsListPage
+        lists={lists}
+        factions={factions}
+        factionFilter={factionFilter}
+        onFactionFilterChange={setFactionFilter}
+        detachments={detachments}
+        error={error}
+        onEdit={(list) => {
+          setEditingList(list)
+          setView('list-form')
+        }}
+        onAddNew={() => {
+          setEditingList(null)
+          setView('list-form')
+        }}
+        onDelete={(id) => setPendingDelete(lists.find((l) => l.id === id))}
+      />
+    </>
   )
 }
 

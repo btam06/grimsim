@@ -8,6 +8,9 @@ from app.combat_rules import Rule
 from app.models import (
     ArmyList,
     DatasheetAbility,
+    Enhancement,
+    EnhancementDatasheetAbility,
+    EnhancementWeaponAbility,
     FactionAbility,
     Model,
     Stratagem,
@@ -23,6 +26,7 @@ from app.seeds import datasheet_abilities as datasheet_ability_seeds
 from app.seeds import factions as faction_seeds
 from app.routers.stratagems import _to_out as stratagem_to_out
 from app.services import combat as combat_service
+from app.services import enhancements as enhancement_rules
 from app.services import stratagem_availability
 
 router = APIRouter(prefix="/combat", tags=["combat"])
@@ -33,6 +37,29 @@ async def _load_unit(session: AsyncSession, unit_id: int) -> Unit | None:
     wargear_loader = selectinload(Unit.unit_models).selectinload(UnitModel.wargear)
     model_loader = selectinload(Unit.unit_models).selectinload(UnitModel.model)
     list_units_loader = selectinload(Unit.army_list).selectinload(ArmyList.units)
+    # Enhancements (on models) and upgrades (on the unit), with the abilities
+    # they grant and those abilities' conditions/effects.
+    enhancement_loaders = [
+        loader
+        for enhancements in (
+            selectinload(Unit.unit_models).selectinload(UnitModel.enhancement),
+            selectinload(Unit.upgrade),
+        )
+        for loader in (
+            enhancements.selectinload(Enhancement.weapon_ability_grants)
+            .selectinload(EnhancementWeaponAbility.weapon_ability)
+            .selectinload(WeaponAbility.conditions),
+            enhancements.selectinload(Enhancement.weapon_ability_grants)
+            .selectinload(EnhancementWeaponAbility.weapon_ability)
+            .selectinload(WeaponAbility.effects),
+            enhancements.selectinload(Enhancement.datasheet_ability_grants)
+            .selectinload(EnhancementDatasheetAbility.datasheet_ability)
+            .selectinload(DatasheetAbility.conditions),
+            enhancements.selectinload(Enhancement.datasheet_ability_grants)
+            .selectinload(EnhancementDatasheetAbility.datasheet_ability)
+            .selectinload(DatasheetAbility.effects),
+        )
+    ]
     result = await session.execute(
         select(Unit)
         .options(
@@ -65,6 +92,12 @@ async def _load_unit(session: AsyncSession, unit_id: int) -> Unit | None:
             list_units_loader.selectinload(Unit.unit_models)
             .selectinload(UnitModel.model)
             .selectinload(Model.abilities),
+            # ...and their models' keywords, to tell whether a model carrying
+            # an enhancement there is leading its unit.
+            list_units_loader.selectinload(Unit.unit_models)
+            .selectinload(UnitModel.model)
+            .selectinload(Model.keywords),
+            *enhancement_loaders,
         )
         .where(Unit.id == unit_id)
     )
@@ -96,9 +129,11 @@ def _validate_rule_options(option_names: list[str], field: str) -> None:
 
 
 def _datasheet_ability_names(unit: Unit) -> set[str]:
+    # The unit's models' datasheet abilities, and any its enhancements or
+    # upgrade grant it.
     return {
         ability.name for unit_model in unit.unit_models for ability in unit_model.model.abilities
-    }
+    } | {ability.name for ability in enhancement_rules.granted_datasheet_abilities(unit)}
 
 
 def _active_options(

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { deleteGame, listGames } from '../api'
+import ConfirmDialog from './ConfirmDialog'
 import GameView from './GameView'
 import { DeleteButton } from './IconButtons'
 import NewGamePage from './NewGamePage'
@@ -15,6 +16,8 @@ function GamesPanel() {
   const [view, setView] = useState('list')
   const [openGameId, setOpenGameId] = useState(null)
   const [error, setError] = useState(null)
+  // The game waiting on delete confirmation, if any.
+  const [pendingDelete, setPendingDelete] = useState(null)
 
   const refresh = () => listGames().then(setGames).catch((err) => setError(err.message))
 
@@ -45,6 +48,7 @@ function GamesPanel() {
 
   const handleDelete = async (id) => {
     setError(null)
+    setPendingDelete(null)
     try {
       await deleteGame(id)
       refresh()
@@ -53,9 +57,20 @@ function GamesPanel() {
     }
   }
 
+  const matchup = (game) => game.players.map((p) => p.user_name).join(' vs ')
+
   return (
     <section>
       <h2>Games</h2>
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="Delete game?"
+        message={
+          pendingDelete && `${matchup(pendingDelete)} will be deleted. This can't be undone.`
+        }
+        onConfirm={() => handleDelete(pendingDelete.id)}
+        onCancel={() => setPendingDelete(null)}
+      />
       {error && <p className="error">{error}</p>}
       <button type="button" onClick={() => setView('new')}>
         + New Game
@@ -74,7 +89,7 @@ function GamesPanel() {
             >
               Open
             </button>
-            <DeleteButton onClick={() => handleDelete(g.id)} />
+            <DeleteButton onClick={() => setPendingDelete(g)} />
           </li>
         ))}
       </ul>

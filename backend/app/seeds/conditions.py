@@ -8,6 +8,7 @@ from app.combat_rules.conditions import (
     ANTI_INFANTRY_4,
     ANTI_VEHICLE_2,
     ANTI_VEHICLE_3,
+    ANTI_MONSTER_4,
     ANTI_VEHICLE_4,
     CRITICAL_HIT,
     CRITICAL_HIT_NOT_MONSTER_OR_VEHICLE,
@@ -64,6 +65,11 @@ ENTRIES = [
         ANTI_VEHICLE_4,
         "Anti-Vehicle 4+",
         "The wound roll was a 4+ against a defending unit that contains a VEHICLE model.",
+    ),
+    (
+        ANTI_MONSTER_4,
+        "Anti-Monster 4+",
+        "The wound roll was a 4+ against a defending unit that contains a MONSTER model.",
     ),
     (
         WITHIN_HALF_RANGE,

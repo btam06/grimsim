@@ -1,16 +1,24 @@
-import { useState } from 'react'
-import { createUnit, updateUnit } from '../api'
+import { useEffect, useState } from 'react'
+import {
+  createUnit,
+  listAvailableEnhancements,
+  listAvailableUpgrades,
+  listEnhancements,
+  updateUnit,
+} from '../api'
 import Field from './Field'
 import MultiSelect from './MultiSelect'
 import Select from './Select'
 
-const EMPTY_SLOT = { model_id: '', weapon_ids: [], wargear_ids: [] }
+// enhancement_id: '' for none, else the id as a string (as Select uses).
+const EMPTY_SLOT = { model_id: '', weapon_ids: [], wargear_ids: [], enhancement_id: '' }
 
 function slotsFromUnit(unit) {
   return unit.unit_models.map((um) => ({
     model_id: String(um.model_id),
     weapon_ids: um.weapon_ids,
     wargear_ids: um.wargear_ids,
+    enhancement_id: um.enhancement_id === null ? '' : String(um.enhancement_id),
   }))
 }
 
@@ -45,11 +53,76 @@ function UnitFormPage({
   const [slot, setSlot] = useState(EMPTY_SLOT)
   const [quantity, setQuantity] = useState('1')
   const [slots, setSlots] = useState(editingUnit ? slotsFromUnit(editingUnit) : [])
+  const [upgradeId, setUpgradeId] = useState(
+    editingUnit?.upgrade_id ? String(editingUnit.upgrade_id) : ''
+  )
+  // Every enhancement (for names), and the ones the server says the model
+  // being added could carry / this unit could take in its list.
+  const [enhancements, setEnhancements] = useState([])
+  const [slotEnhancements, setSlotEnhancements] = useState([])
+  const [upgrades, setUpgrades] = useState([])
   const [error, setError] = useState(null)
+  const unitId = editingUnit?.id
+
+  useEffect(() => {
+    listEnhancements().then(setEnhancements).catch((err) => setError(err.message))
+  }, [])
+
+  // Enhancements are only offered when adding a model, and only ones it can
+  // carry (a CHARACTER, from the list's detachments, not taken elsewhere).
+  useEffect(() => {
+    if (!listId || !slot.model_id) {
+      setSlotEnhancements([])
+      return
+    }
+    let cancelled = false
+    listAvailableEnhancements(listId, slot.model_id, unitId)
+      .then((available) => !cancelled && setSlotEnhancements(available))
+      .catch((err) => setError(err.message))
+    return () => {
+      cancelled = true
+    }
+  }, [listId, slot.model_id, unitId])
+
+  // Upgrades depend on every model in the unit, so re-check them as models
+  // are added or removed, dropping the chosen one if it no longer applies.
+  const slotModelIds = slots.map((s) => s.model_id).join(',')
+  useEffect(() => {
+    if (!listId || slots.length === 0) {
+      setUpgrades([])
+      setUpgradeId('')
+      return
+    }
+    let cancelled = false
+    listAvailableUpgrades(
+      listId,
+      slots.map((s) => s.model_id),
+      unitId
+    )
+      .then((available) => {
+        if (cancelled) return
+        setUpgrades(available)
+        setUpgradeId((id) => (available.some((u) => String(u.id) === id) ? id : ''))
+      })
+      .catch((err) => setError(err.message))
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listId, slotModelIds, unitId])
 
   const modelName = (id) => models.find((m) => m.id === id)?.name ?? `#${id}`
   const weaponName = (id) => weapons.find((w) => w.id === id)?.name ?? `#${id}`
   const wargearName = (id) => wargear.find((g) => g.id === id)?.name ?? `#${id}`
+  const enhancementLabel = (id) => {
+    const enhancement = enhancements.find((e) => String(e.id) === id)
+    return enhancement ? `${enhancement.name} (+${enhancement.points} pts)` : `#${id}`
+  }
+  // An enhancement can only be carried once, so leave out ones already on a
+  // model in this unit.
+  const enhancementOptionsForSlot = slotEnhancements
+    .filter((e) => !slots.some((s) => s.enhancement_id === String(e.id)))
+    .map((e) => ({ id: e.id, name: `${e.name} (+${e.points} pts)` }))
 
   const weaponOptionsForSlot = weapons.filter((w) => String(w.model_id) === slot.model_id)
   const wargearOptionsForSlot = wargear.filter((g) => String(g.model_id) === slot.model_id)
@@ -57,10 +130,13 @@ function UnitFormPage({
 
   const addSlot = () => {
     if (!slot.model_id) return
-    const count = Math.max(1, Number(quantity) || 1)
+    // A model with an enhancement is added on its own.
+    const count = slot.enhancement_id ? 1 : Math.max(1, Number(quantity) || 1)
     setSlots([...slots, ...Array.from({ length: count }, () => slot)])
     // Keep the model/weapons/wargear selected, so adding more of the same (or
-    // a variation on it) doesn't mean re-picking everything.
+    // a variation on it) doesn't mean re-picking everything - but not the
+    // enhancement, which can only be carried once.
+    setSlot({ ...slot, enhancement_id: '' })
     setQuantity('1')
   }
 
@@ -68,7 +144,12 @@ function UnitFormPage({
 
   const selectModel = (model_id) => {
     const modelWeapons = weapons.filter((w) => String(w.model_id) === model_id)
-    setSlot({ model_id, weapon_ids: requiredWeaponIds(modelWeapons), wargear_ids: [] })
+    setSlot({
+      model_id,
+      weapon_ids: requiredWeaponIds(modelWeapons),
+      wargear_ids: [],
+      enhancement_id: '',
+    })
   }
 
   const toggleSlotWeapon = (weaponId) => {
@@ -97,7 +178,9 @@ function UnitFormPage({
           model_id: Number(s.model_id),
           weapon_ids: s.weapon_ids,
           wargear_ids: s.wargear_ids,
+          enhancement_id: s.enhancement_id ? Number(s.enhancement_id) : null,
         })),
+        upgrade_id: upgradeId ? Number(upgradeId) : null,
       }
       if (editingUnit) {
         await updateUnit(editingUnit.id, payload)
@@ -126,6 +209,18 @@ function UnitFormPage({
         <Field label="Points">
           <input type="number" value={points} onChange={(e) => setPoints(e.target.value)} required />
         </Field>
+        {upgrades.length > 0 && (
+          <Field label="Upgrade">
+            <Select
+              options={[
+                { id: '', name: 'None' },
+                ...upgrades.map((u) => ({ id: u.id, name: `${u.name} (+${u.points} pts)` })),
+              ]}
+              value={upgradeId}
+              onChange={setUpgradeId}
+            />
+          </Field>
+        )}
 
         {slots.length > 0 && (
           <ul>
@@ -134,6 +229,7 @@ function UnitFormPage({
                 {modelName(Number(s.model_id))}
                 {s.weapon_ids.length > 0 && ` — ${s.weapon_ids.map(weaponName).join(', ')}`}
                 {s.wargear_ids.length > 0 && ` — ${s.wargear_ids.map(wargearName).join(', ')}`}
+                {s.enhancement_id && ` — Enhancement: ${enhancementLabel(s.enhancement_id)}`}
                 <button type="button" onClick={() => removeSlot(i)}>
                   Remove
                 </button>
@@ -177,8 +273,23 @@ function UnitFormPage({
             onChange={(wargear_ids) => setSlot({ ...slot, wargear_ids })}
           />
         </label>
+        {enhancementOptionsForSlot.length > 0 && (
+          <Field label="Enhancement">
+            <Select
+              options={[{ id: '', name: 'None' }, ...enhancementOptionsForSlot]}
+              value={slot.enhancement_id}
+              onChange={(enhancement_id) => setSlot({ ...slot, enhancement_id })}
+            />
+          </Field>
+        )}
         <Field label="Quantity">
-          <input type="number" min="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
+          <input
+            type="number"
+            min="1"
+            value={slot.enhancement_id ? '1' : quantity}
+            disabled={Boolean(slot.enhancement_id)}
+            onChange={(e) => setQuantity(e.target.value)}
+          />
         </Field>
         <button type="button" disabled={!slot.model_id} onClick={addSlot}>
           Add Model to Unit

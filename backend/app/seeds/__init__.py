@@ -22,7 +22,8 @@ from app.seeds import (
 # factions.seed creates the Faction rows from each info.py, and
 # seed_abilities/seed_keywords/seed_units/seed_detachments fill in the rest for every
 # faction, so they must run after factions.seed (and seed_detachments after
-# dispositions.seed, since it looks dispositions up by name). seed_datasheets
+# dispositions.seed, since it looks dispositions up by name; seed_enhancements
+# after seed_detachments and seed_keywords). seed_datasheets
 # creates full models/weapons and must run after keywords, weapon abilities
 # and faction abilities, all of which it references by name.
 #
@@ -53,6 +54,7 @@ SEED_FUNCS = [
     datasheet_abilities.seed,
     factions.seed_units,
     factions.seed_detachments,
+    factions.seed_enhancements,
     factions.seed_datasheets,
     stratagems.seed,
 ]

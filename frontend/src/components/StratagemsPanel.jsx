@@ -25,6 +25,12 @@ const TURNS = [
   { id: 'opponent_turn', name: "Opponent's turn" },
   { id: 'either', name: 'Either turn' },
 ]
+// Which unit in a combat a stratagem is used on ('' means either).
+const COMBAT_SIDES = [
+  { id: '', name: 'Either unit' },
+  { id: 'attacker', name: 'The attacking unit' },
+  { id: 'defender', name: 'The unit being attacked' },
+]
 const timingLabel = (t) =>
   `${PHASES.find((p) => p.id === t.phase)?.name ?? t.phase} (${(
     TURNS.find((x) => x.id === t.turn)?.name ?? t.turn
@@ -44,10 +50,16 @@ function StratagemsPanel() {
   const [conditionIds, setConditionIds] = useState([])
   const [effectIds, setEffectIds] = useState([])
   const [keywordIds, setKeywordIds] = useState([])
+  const [excludedKeywordIds, setExcludedKeywordIds] = useState([])
+  // Alternative keyword sets ("one SICARIAN or SKITARII MOUNTED unit"), and
+  // the one being put together.
+  const [keywordOptions, setKeywordOptions] = useState([])
+  const [optionDraft, setOptionDraft] = useState([])
   // When it can be used in a game; empty means any time.
   const [timings, setTimings] = useState([])
   const [timingPhase, setTimingPhase] = useState('command')
   const [timingTurn, setTimingTurn] = useState('your_turn')
+  const [combatSide, setCombatSide] = useState('')
   const [error, setError] = useState(null)
 
   const refresh = () => listStratagems().then(setStratagems).catch((err) => setError(err.message))
@@ -64,6 +76,10 @@ function StratagemsPanel() {
   const conditionName = (id) => conditions.find((c) => c.id === id)?.name ?? `#${id}`
   const effectName = (id) => effects.find((e) => e.id === id)?.name ?? `#${id}`
   const keywordName = (id) => keywords.find((k) => k.id === id)?.name ?? `#${id}`
+  // e.g. "SICARIAN or SKITARII + MOUNTED" - each option's keywords are a
+  // set, so they're sorted by name.
+  const optionLabel = (option) => option.map(keywordName).sort().join(' + ')
+  const optionsLabel = (options) => options.map(optionLabel).join(' or ')
 
   const toggleId = (list, setList, id) => {
     setList(list.includes(id) ? list.filter((x) => x !== id) : [...list, id])
@@ -86,7 +102,10 @@ function StratagemsPanel() {
         condition_ids: conditionIds,
         effect_ids: effectIds,
         keyword_ids: keywordIds,
+        excluded_keyword_ids: excludedKeywordIds,
+        keyword_option_ids: keywordOptions,
         timings,
+        combat_side: combatSide || null,
       })
       setName('')
       setDescription('')
@@ -96,7 +115,11 @@ function StratagemsPanel() {
       setConditionIds([])
       setEffectIds([])
       setKeywordIds([])
+      setExcludedKeywordIds([])
+      setKeywordOptions([])
+      setOptionDraft([])
       setTimings([])
+      setCombatSide('')
       refresh()
     } catch (err) {
       setError(err.message)
@@ -142,6 +165,43 @@ function StratagemsPanel() {
           <MultiSelect options={keywords} value={keywordIds} onChange={setKeywordIds} />
         </label>
         <div className="checkbox-group">
+          Keyword options (a model needs all of one of them; none means no options)
+          {keywordOptions.length > 0 && (
+            <ul>
+              {keywordOptions.map((option, i) => (
+                <li key={i}>
+                  {optionLabel(option)}
+                  <DeleteButton
+                    onClick={() => setKeywordOptions(keywordOptions.filter((_, j) => j !== i))}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <label className="field">
+          Option keywords
+          <MultiSelect options={keywords} value={optionDraft} onChange={setOptionDraft} />
+        </label>
+        <button
+          type="button"
+          disabled={optionDraft.length === 0}
+          onClick={() => {
+            setKeywordOptions([...keywordOptions, optionDraft])
+            setOptionDraft([])
+          }}
+        >
+          Add keyword option
+        </button>
+        <label className="field">
+          Excluded keywords (a model with any of them can't be targeted)
+          <MultiSelect
+            options={keywords}
+            value={excludedKeywordIds}
+            onChange={setExcludedKeywordIds}
+          />
+        </label>
+        <div className="checkbox-group">
           Usable in (none means any time)
           {timings.length > 0 && (
             <ul>
@@ -169,6 +229,9 @@ function StratagemsPanel() {
         >
           Add timing
         </button>
+        <Field label="Used on (in combat)">
+          <Select options={COMBAT_SIDES} value={combatSide} onChange={setCombatSide} />
+        </Field>
         <div className="checkbox-group">
           Conditions
           <div className="checkbox-grid">
@@ -212,7 +275,13 @@ function StratagemsPanel() {
             {s.effect_ids.length > 0 && ` — Effects: ${s.effect_ids.map(effectName).join(', ')}`}
             {s.keyword_ids.length > 0 &&
               ` — Requires: ${s.keyword_ids.map(keywordName).join(', ')}`}
+            {s.keyword_option_ids.length > 0 &&
+              ` — Requires one of: ${optionsLabel(s.keyword_option_ids)}`}
+            {s.excluded_keyword_ids.length > 0 &&
+              ` — Excludes: ${s.excluded_keyword_ids.map(keywordName).join(', ')}`}
             {` — Usable: ${s.timings.length > 0 ? s.timings.map(timingLabel).join(', ') : 'any time'}`}
+            {s.combat_side &&
+              ` — Used on: ${COMBAT_SIDES.find((c) => c.id === s.combat_side).name.toLowerCase()}`}
             <button type="button" onClick={() => handleRemove(s.id)}>
               Remove
             </button>

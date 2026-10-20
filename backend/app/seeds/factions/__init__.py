@@ -6,6 +6,7 @@ from app.combat_rules import Rule
 from app.models import (
     DatasheetAbility,
     Detachment,
+    Enhancement,
     Faction,
     FactionAbility,
     FactionUnit,
@@ -43,6 +44,12 @@ from app.seeds.factions import (
 )
 import json
 
+from app.models.enhancement import (
+    ENHANCEMENT_KINDS,
+    KIND_SCOPES,
+    EnhancementDatasheetAbility,
+    EnhancementWeaponAbility,
+)
 from app.seeds import data_files
 from app.seeds import datasheets as datasheet_data
 from app.seeds.lookup import get_dispositions_by_name
@@ -112,6 +119,15 @@ def load_keywords(faction) -> list[str]:
     if not path.exists():
         return []
     return json.loads(path.read_text(encoding="utf-8"))["keywords"]
+
+
+def load_enhancements(faction) -> list[dict]:
+    # A faction's enhancements and upgrades, from its enhancements.json, each
+    # naming the detachment it's from. None if there's no file.
+    path = data_files.faction_data_dir(faction_slug(faction)) / "enhancements.json"
+    if not path.exists():
+        return []
+    return json.loads(path.read_text(encoding="utf-8"))["enhancements"]
 
 
 def load_detachments(faction) -> list[dict]:
@@ -269,6 +285,112 @@ async def seed_detachments(session: AsyncSession) -> None:
                 if disposition not in detachment.dispositions:
                     detachment.dispositions.append(disposition)
                     changed = True
+
+    if changed:
+        await session.commit()
+
+
+async def seed_enhancements(session: AsyncSession) -> None:
+    # Adds each faction's enhancements and upgrades (see load_enhancements)
+    # that its detachments don't have yet, by name. An existing one that
+    # grants no abilities yet gets the ones listed; nothing else is changed.
+    # Must run after seed_detachments, seed_keywords and the weapon/datasheet
+    # ability seeds; an unknown detachment, kind, keyword, ability or scope is
+    # an error, not skipped.
+    faction_ids = await _faction_ids_by_name(session)
+    keywords = {k.name: k for k in (await session.execute(select(Keyword))).scalars().all()}
+    detachments = {
+        (d.faction_id, d.name): d.id
+        for d in (await session.execute(select(Detachment))).scalars().all()
+    }
+    weapon_abilities = {
+        a.name: a for a in (await session.execute(select(WeaponAbility))).scalars().all()
+    }
+    datasheet_abilities = {
+        a.name: a for a in (await session.execute(select(DatasheetAbility))).scalars().all()
+    }
+    existing = {
+        (e.detachment_id, e.name): e
+        for e in (await session.execute(select(Enhancement))).scalars().all()
+    }
+
+    def lookup(table: dict, key: str, kind: str, enhancement: str):
+        if key not in table:
+            raise ValueError(f"enhancement {enhancement!r} references unknown {kind} {key!r}")
+        return table[key]
+
+    def lookup_keyword(name: str, enhancement: str) -> Keyword:
+        return lookup(keywords, name, "keyword", enhancement)
+
+    def grants(entry: dict) -> tuple[list, list]:
+        name = entry["name"]
+        allowed = KIND_SCOPES[entry["kind"]]
+        for grant in entry.get("weapon_abilities", []) + entry.get("datasheet_abilities", []):
+            if grant["scope"] not in allowed:
+                raise ValueError(
+                    f"enhancement {name!r} has scope {grant['scope']!r}; "
+                    f"an {entry['kind']} can use {', '.join(allowed)}"
+                )
+        weapon = [
+            EnhancementWeaponAbility(
+                weapon_ability=lookup(weapon_abilities, g["name"], "weapon ability", name),
+                weapon_type=g.get("weapon_type"),
+                scope=g["scope"],
+            )
+            for g in entry.get("weapon_abilities", [])
+        ]
+        datasheet = [
+            EnhancementDatasheetAbility(
+                datasheet_ability=lookup(
+                    datasheet_abilities, g["name"], "datasheet ability", name
+                ),
+                scope=g["scope"],
+            )
+            for g in entry.get("datasheet_abilities", [])
+        ]
+        return weapon, datasheet
+
+    changed = False
+    for faction in FACTIONS:
+        faction_id = faction_ids.get(faction.info.FACTION_NAME)
+        if faction_id is None:
+            continue  # faction hasn't been seeded yet
+        for entry in load_enhancements(faction):
+            name = entry["name"]
+            detachment_id = detachments.get((faction_id, entry["detachment"]))
+            if detachment_id is None:
+                raise ValueError(
+                    f"enhancement {name!r} references unknown detachment {entry['detachment']!r}"
+                )
+            if entry["kind"] not in ENHANCEMENT_KINDS:
+                raise ValueError(f"enhancement {name!r} has unknown kind {entry['kind']!r}")
+            required = [lookup_keyword(k, name) for k in entry.get("keywords", [])]
+            excluded = [lookup_keyword(k, name) for k in entry.get("excluded_keywords", [])]
+            weapon_grants, datasheet_grants = grants(entry)
+            enhancement = existing.get((detachment_id, name))
+            if enhancement is not None:
+                grants_nothing = not (
+                    enhancement.weapon_ability_grants or enhancement.datasheet_ability_grants
+                )
+                if grants_nothing:
+                    enhancement.weapon_ability_grants = weapon_grants
+                    enhancement.datasheet_ability_grants = datasheet_grants
+                    changed = True
+                continue
+            enhancement = Enhancement(
+                name=name,
+                description=entry.get("description"),
+                points=entry["points"],
+                kind=entry["kind"],
+                detachment_id=detachment_id,
+                keywords=required,
+                excluded_keywords=excluded,
+                weapon_ability_grants=weapon_grants,
+                datasheet_ability_grants=datasheet_grants,
+            )
+            existing[(detachment_id, name)] = enhancement
+            session.add(enhancement)
+            changed = True
 
     if changed:
         await session.commit()

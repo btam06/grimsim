@@ -1,7 +1,20 @@
 {
   "faction": "Orks",
   "detachments": [
-    {"name": "Test Horde", "dp": 3, "dispositions": ["Take and Hold", "Purge the Foe"]},
-    {"name": "Test Mob", "dp": 1, "dispositions": ["Disruption"]}
+    {
+      "name": "Test Horde",
+      "dp": 3,
+      "dispositions": [
+        "Take and Hold",
+        "Purge the Foe"
+      ]
+    },
+    {
+      "name": "Test Mob",
+      "dp": 1,
+      "dispositions": [
+        "Disruption"
+      ]
+    }
   ]
 }

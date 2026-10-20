@@ -1,10 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
-from app.models import Keyword
+from app.models import Keyword, StratagemKeywordOption
+from app.models.associations import (
+    enhancement_excluded_keywords,
+    enhancement_keywords,
+    stratagem_excluded_keywords,
+    stratagem_keywords,
+)
 from app.schemas import KeywordIn, KeywordOut
 
 router = APIRouter(prefix="/keywords", tags=["keywords"])
@@ -38,5 +44,16 @@ async def delete_keyword(keyword_id: int, session: AsyncSession = Depends(get_se
 
     # Many-to-many with models: deleting a keyword just unlinks it from any
     # models that had it, rather than being blocked - models keep existing.
+    # Likewise for stratagems and enhancements that require or exclude it.
+    for table in (
+        stratagem_keywords,
+        stratagem_excluded_keywords,
+        enhancement_keywords,
+        enhancement_excluded_keywords,
+    ):
+        await session.execute(delete(table).where(table.c.keyword_id == keyword_id))
+    await session.execute(
+        delete(StratagemKeywordOption).where(StratagemKeywordOption.keyword_id == keyword_id)
+    )
     await session.delete(keyword)
     await session.commit()

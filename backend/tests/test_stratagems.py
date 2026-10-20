@@ -1,3 +1,4 @@
+import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -180,3 +181,108 @@ async def test_create_stratagem_with_a_game_action(client: AsyncClient):
         "/stratagems", json={"name": "Bad", "cp": 1, "is_core": True, "game_action": "explode"}
     )
     assert bad.status_code == 422
+
+
+async def test_create_stratagem_with_a_combat_side(client: AsyncClient):
+    response = await client.post(
+        "/stratagems",
+        json={"name": "Bulwark", "cp": 2, "is_core": True, "combat_side": "defender"},
+    )
+    assert response.status_code == 201
+    assert response.json()["combat_side"] == "defender"
+    assert (await client.get("/stratagems")).json()[0]["combat_side"] == "defender"
+    plain = await client.post("/stratagems", json={"name": "Plain", "cp": 1, "is_core": True})
+    assert plain.json()["combat_side"] is None
+    bad = await client.post(
+        "/stratagems", json={"name": "Bad", "cp": 1, "is_core": True, "combat_side": "both"}
+    )
+    assert bad.status_code == 422
+
+
+async def test_create_stratagem_with_excluded_keywords(client: AsyncClient):
+    keyword_id = (await client.post("/keywords", json={"name": "VEHICLE"})).json()["id"]
+    response = await client.post(
+        "/stratagems",
+        json={"name": "Halo", "cp": 2, "is_core": True, "excluded_keyword_ids": [keyword_id]},
+    )
+    assert response.status_code == 201
+    assert response.json()["excluded_keyword_ids"] == [keyword_id]
+    assert response.json()["keyword_ids"] == []
+    assert (await client.get("/stratagems")).json()[0]["excluded_keyword_ids"] == [keyword_id]
+
+
+async def test_create_stratagem_with_invalid_excluded_keyword_id_returns_400(client: AsyncClient):
+    response = await client.post(
+        "/stratagems",
+        json={"name": "Bad", "cp": 1, "is_core": True, "excluded_keyword_ids": [9999]},
+    )
+    assert response.status_code == 400
+
+
+async def test_create_stratagem_requiring_and_excluding_a_keyword_returns_400(
+    client: AsyncClient,
+):
+    keyword_id = (await client.post("/keywords", json={"name": "VEHICLE"})).json()["id"]
+    response = await client.post(
+        "/stratagems",
+        json={
+            "name": "Bad",
+            "cp": 1,
+            "is_core": True,
+            "keyword_ids": [keyword_id],
+            "excluded_keyword_ids": [keyword_id],
+        },
+    )
+    assert response.status_code == 400
+
+
+async def test_delete_keyword_unlinks_it_from_stratagems(client: AsyncClient):
+    required = (await client.post("/keywords", json={"name": "CHARACTER"})).json()["id"]
+    excluded = (await client.post("/keywords", json={"name": "VEHICLE"})).json()["id"]
+    await client.post(
+        "/stratagems",
+        json={
+            "name": "Halo",
+            "cp": 1,
+            "is_core": True,
+            "keyword_ids": [required],
+            "excluded_keyword_ids": [excluded],
+        },
+    )
+    assert (await client.delete(f"/keywords/{required}")).status_code == 204
+    assert (await client.delete(f"/keywords/{excluded}")).status_code == 204
+    stratagem = (await client.get("/stratagems")).json()[0]
+    assert (stratagem["keyword_ids"], stratagem["excluded_keyword_ids"]) == ([], [])
+
+
+async def test_create_stratagem_with_keyword_options(client: AsyncClient):
+    a = (await client.post("/keywords", json={"name": "SKITARII"})).json()["id"]
+    b = (await client.post("/keywords", json={"name": "INFANTRY"})).json()["id"]
+    c = (await client.post("/keywords", json={"name": "SICARIAN"})).json()["id"]
+    response = await client.post(
+        "/stratagems",
+        json={"name": "Withdraw", "cp": 1, "is_core": True, "keyword_option_ids": [[c], [a, b]]},
+    )
+    assert response.status_code == 201, response.text
+    # Options keep their order; the keywords within one are a set.
+    for stratagem in (response.json(), (await client.get("/stratagems")).json()[0]):
+        assert [set(o) for o in stratagem["keyword_option_ids"]] == [{c}, {a, b}]
+
+
+@pytest.mark.parametrize("options", [[[]], [[9999]]])
+async def test_create_stratagem_with_bad_keyword_options_returns_400(client: AsyncClient, options):
+    response = await client.post(
+        "/stratagems",
+        json={"name": "Bad", "cp": 1, "is_core": True, "keyword_option_ids": options},
+    )
+    assert response.status_code == 400
+
+
+async def test_delete_keyword_removes_it_from_keyword_options(client: AsyncClient):
+    keyword = (await client.post("/keywords", json={"name": "SICARIAN"})).json()["id"]
+    await client.post(
+        "/stratagems",
+        json={"name": "Bionic", "cp": 1, "is_core": True, "keyword_option_ids": [[keyword]]},
+    )
+    assert (await client.delete(f"/keywords/{keyword}")).status_code == 204
+    assert (await client.get("/stratagems")).json()[0]["keyword_option_ids"] == []

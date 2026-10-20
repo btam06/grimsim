@@ -21,10 +21,12 @@ from app.combat_rules.effects import (
     IGNORE_COVER,
     IGNORE_COVER_UNIT,
     IMPROVE_AP,
+    INVULNERABLE_4,
     INVULNERABLE_5,
     MELTA_3,
     MINUS_ONE_TO_HIT,
     MINUS_ONE_TO_WOUND,
+    PLUS_ONE_TO_WOUND,
     NO_SAVE,
     PISTOL,
     PLUS_ONE_SKILL_MELEE,
@@ -130,6 +132,11 @@ ENTRIES = [
         "The targeted model has a 5+ invulnerable save against this attack (a better one is kept).",
     ),
     (
+        INVULNERABLE_4,
+        "4+ Invulnerable Save",
+        "The targeted model has a 4+ invulnerable save against this attack (a better one is kept).",
+    ),
+    (
         CANNOT_ATTACK,
         "Cannot Attack",
         "This weapon can't be used against the current target.",
@@ -143,6 +150,11 @@ ENTRIES = [
         MINUS_ONE_TO_WOUND,
         "-1 to Wound",
         "This attack's wound roll needs 1 more to succeed (an unmodified 6 still wounds).",
+    ),
+    (
+        PLUS_ONE_TO_WOUND,
+        "+1 to Wound",
+        "This attack's wound roll needs 1 less to succeed (cancelled by a -1 to wound).",
     ),
     (
         FEEL_NO_PAIN_5,

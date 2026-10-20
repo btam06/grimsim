@@ -32,9 +32,11 @@ PRECISION = "precision"
 MINUS_ONE_TO_HIT = "minus_one_to_hit"
 IMPROVE_AP = "improve_ap"
 INVULNERABLE_5 = "invulnerable_5"
+INVULNERABLE_4 = "invulnerable_4"
 CANNOT_ATTACK = "cannot_attack"
 ADD_SIX_ATTACKS = "add_six_attacks"
 MINUS_ONE_TO_WOUND = "minus_one_to_wound"
+PLUS_ONE_TO_WOUND = "plus_one_to_wound"
 FEEL_NO_PAIN_5 = "feel_no_pain_5"
 FEEL_NO_PAIN_4 = "feel_no_pain_4"
 ADD_THREE_ATTACKS = "add_three_attacks"
@@ -159,6 +161,12 @@ def invulnerable_5(state: dict[str, Any], pending: deque[dict[str, Any]]) -> Non
     state["invulnerable_save"] = min(state.get("invulnerable_save", 7), 5)
 
 
+def invulnerable_4(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # The model this attack targets has a 4+ invulnerable save against it
+    # (e.g. Bulwark Imperative). If it already has a better one, that's kept.
+    state["invulnerable_save"] = min(state.get("invulnerable_save", 7), 4)
+
+
 def cannot_attack(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
     # This weapon can't be used against the current target at all (e.g. a
     # HUNTER profile against a unit without the keywords it hunts).
@@ -176,6 +184,12 @@ def minus_one_to_wound(state: dict[str, Any], pending: deque[dict[str, Any]]) ->
     # This attack's wound roll needs 1 more to succeed (an unmodified 6 still
     # always wounds).
     state["minus_one_to_wound"] = True
+
+
+def plus_one_to_wound(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # This attack's wound roll needs 1 less to succeed - cancelled out by a -1
+    # to wound (an unmodified 1 still always fails).
+    state["plus_one_to_wound"] = True
 
 
 def feel_no_pain_5(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
@@ -262,9 +276,11 @@ EFFECTS = {
     MINUS_ONE_TO_HIT: minus_one_to_hit,
     IMPROVE_AP: improve_ap,
     INVULNERABLE_5: invulnerable_5,
+    INVULNERABLE_4: invulnerable_4,
     CANNOT_ATTACK: cannot_attack,
     ADD_SIX_ATTACKS: add_six_attacks,
     MINUS_ONE_TO_WOUND: minus_one_to_wound,
+    PLUS_ONE_TO_WOUND: plus_one_to_wound,
     FEEL_NO_PAIN_5: feel_no_pain_5,
     FEEL_NO_PAIN_4: feel_no_pain_4,
     ADD_THREE_ATTACKS: add_three_attacks,

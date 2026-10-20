@@ -49,6 +49,25 @@ export const createStratagem = (payload) =>
   request('/stratagems', { method: 'POST', body: JSON.stringify(payload) })
 export const deleteStratagem = (id) => request(`/stratagems/${id}`, { method: 'DELETE' })
 
+export const listEnhancements = () => request('/enhancements')
+export const createEnhancement = (payload) =>
+  request('/enhancements', { method: 'POST', body: JSON.stringify(payload) })
+export const deleteEnhancement = (id) => request(`/enhancements/${id}`, { method: 'DELETE' })
+// Enhancements a model could carry in a unit of a list (unitId: the unit
+// being edited, if any - its own enhancements still count as available).
+export const listAvailableEnhancements = (listId, modelId, unitId) =>
+  request(
+    `/enhancements/available?list_id=${listId}&model_id=${modelId}` +
+      (unitId ? `&unit_id=${unitId}` : '')
+  )
+// Upgrades a unit made of these models (one id per model) could take.
+export const listAvailableUpgrades = (listId, modelIds, unitId) =>
+  request(
+    `/enhancements/available-upgrades?list_id=${listId}` +
+      modelIds.map((id) => `&model_ids=${id}`).join('') +
+      (unitId ? `&unit_id=${unitId}` : '')
+  )
+
 export const listLists = () => request('/lists')
 export const createList = (payload) =>
   request('/lists', { method: 'POST', body: JSON.stringify(payload) })

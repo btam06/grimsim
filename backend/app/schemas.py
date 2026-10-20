@@ -143,6 +143,9 @@ class UnitModelIn(BaseModel):
     model_id: int
     weapon_ids: list[int] = []
     wargear_ids: list[int] = []
+    # An enhancement this model carries (a CHARACTER from a list that has
+    # taken the enhancement's detachment).
+    enhancement_id: int | None = None
 
 
 class UnitModelOut(BaseModel):
@@ -150,6 +153,7 @@ class UnitModelOut(BaseModel):
     model_id: int
     weapon_ids: list[int]
     wargear_ids: list[int]
+    enhancement_id: int | None
 
 
 class UnitIn(BaseModel):
@@ -157,6 +161,8 @@ class UnitIn(BaseModel):
     points: int
     list_id: int | None = None
     unit_models: list[UnitModelIn] = []
+    # An upgrade the whole unit takes (from a detachment its list has taken).
+    upgrade_id: int | None = None
 
 
 class UnitOut(BaseModel):
@@ -165,6 +171,63 @@ class UnitOut(BaseModel):
     points: int
     list_id: int | None
     unit_models: list[UnitModelOut]
+    upgrade_id: int | None
+
+
+EnhancementScope = Literal["bearer", "led_unit", "unit"]
+
+
+class EnhancementWeaponAbilitySchema(BaseModel):
+    # A weapon ability an enhancement/upgrade grants - to every weapon, or only
+    # "ranged" or "melee" ones - and who it reaches (see ENHANCEMENT_SCOPES).
+    weapon_ability_id: int
+    weapon_type: Literal["ranged", "melee"] | None = None
+    scope: EnhancementScope
+
+
+class EnhancementDatasheetAbilitySchema(BaseModel):
+    datasheet_ability_id: int
+    scope: EnhancementScope
+
+
+class EnhancementIn(BaseModel):
+    name: str
+    description: str | None = None
+    points: int = Field(ge=0)
+    kind: Literal["enhancement", "upgrade"]
+    detachment_id: int
+    # Keywords needed (all of them) on the model carrying an enhancement, or
+    # on every model in a unit taking an upgrade; empty means none.
+    keyword_ids: list[int] = []
+    # Keywords that rule it out (any one of them); empty means none.
+    excluded_keyword_ids: list[int] = []
+    # Abilities it grants in combat. An enhancement's reach the bearer or the
+    # unit it leads; an upgrade's, the unit.
+    weapon_abilities: list[EnhancementWeaponAbilitySchema] = []
+    datasheet_abilities: list[EnhancementDatasheetAbilitySchema] = []
+
+    @model_validator(mode="after")
+    def check_scopes(self):
+        allowed = {"enhancement": ("bearer", "led_unit"), "upgrade": ("unit",)}[self.kind]
+        for grant in [*self.weapon_abilities, *self.datasheet_abilities]:
+            if grant.scope not in allowed:
+                raise ValueError(
+                    f"an {self.kind}'s abilities must have scope {' or '.join(allowed)}"
+                )
+        return self
+
+
+class EnhancementOut(BaseModel):
+    id: int
+    name: str
+    description: str | None
+    points: int
+    kind: str
+    detachment_id: int
+    keyword_ids: list[int]
+    excluded_keyword_ids: list[int]
+    weapon_abilities: list[EnhancementWeaponAbilitySchema]
+    datasheet_abilities: list[EnhancementDatasheetAbilitySchema]
 
 
 class ConditionOut(BaseModel):
@@ -281,10 +344,18 @@ class StratagemIn(BaseModel):
     # Keywords a model must have (all of them) for the stratagem to apply to
     # it; empty means any model.
     keyword_ids: list[int] = []
+    # Keywords that stop it applying to a model (any one of them); empty
+    # means nothing is excluded.
+    excluded_keyword_ids: list[int] = []
+    # Alternative keyword sets, one of which a model must have all of (e.g.
+    # [[SICARIAN], [SKITARII, MOUNTED]]); empty means no alternatives.
+    keyword_option_ids: list[list[int]] = []
     # When it can be used in a game; empty means any time.
     timings: list[StratagemTimingSchema] = []
     # What the game tracker does when it's used, besides spending CP.
     game_action: Literal["replace_secondary"] | None = None
+    # Which unit in a combat it's used on; None means either.
+    combat_side: Literal["attacker", "defender"] | None = None
 
     @model_validator(mode="after")
     def check_core_xor_detachments(self):
@@ -307,8 +378,11 @@ class StratagemOut(BaseModel):
     condition_ids: list[int]
     effect_ids: list[int]
     keyword_ids: list[int]
+    excluded_keyword_ids: list[int]
+    keyword_option_ids: list[list[int]]
     timings: list[StratagemTimingSchema]
     game_action: str | None
+    combat_side: str | None
 
 
 class CombatIn(BaseModel):

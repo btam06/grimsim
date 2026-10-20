@@ -17,6 +17,7 @@ factions/
     keywords.json
     units.json
     detachments.json
+    enhancements.json
     datasheets.json
   orks/
     ...
@@ -60,6 +61,39 @@ disposition must be a seeded disposition name.
   ]
 }
 ```
+
+## `factions/<faction>/enhancements.json`
+
+The faction's enhancements and upgrades, each naming its `detachment` (one of
+the faction's detachments). An `enhancement` is carried by one CHARACTER model
+(not an EPIC HERO); an `upgrade` is taken by a whole unit. `keywords` are
+needed (all of them) on the model carrying an enhancement, or on every model in
+a unit taking an upgrade; any one of the `excluded_keywords` rules it out. Both
+are optional. Each can be taken once per army list, and only by a list that
+has the detachment.
+
+```json
+{
+  "faction": "Adeptus Mechanicus",
+  "enhancements": [
+    {"name": "Peerless Eradicator", "detachment": "Rad-Zone Corps", "kind": "enhancement",
+     "points": 20, "keywords": ["ADEPTUS MECHANICUS"], "description": "...",
+     "weapon_abilities": [{"name": "Sustained 1", "weapon_type": "ranged", "scope": "led_unit"}]},
+    {"name": "Example Upgrade", "detachment": "Rad-Zone Corps", "kind": "upgrade",
+     "points": 10, "keywords": ["SKITARII"], "excluded_keywords": ["VEHICLE"]}
+  ]
+}
+```
+
+What they do in combat is given as abilities they grant, by name:
+`weapon_abilities` (seeded weapon abilities, optionally only on `"ranged"` or
+`"melee"` weapons) and `datasheet_abilities` (seeded datasheet abilities, e.g.
+`Stealth`). Each has a `scope` - who it reaches:
+
+- `"bearer"`: the model carrying an enhancement;
+- `"led_unit"`: every model in the bearer's unit, while it's leading one (it's
+  a CHARACTER in a unit with non-CHARACTER models);
+- `"unit"`: every model in the unit - the only scope an upgrade can use.
 
 ## `factions/<faction>/datasheets.json`
 

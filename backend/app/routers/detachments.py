@@ -5,8 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db import get_session
-from app.models import Detachment, Disposition
+from app.models import Detachment, Disposition, Enhancement
 from app.schemas import DetachmentIn, DetachmentOut
+from app.services.enhancements import delete_enhancements
 
 router = APIRouter(prefix="/detachments", tags=["detachments"])
 
@@ -66,6 +67,13 @@ async def delete_detachment(detachment_id: int, session: AsyncSession = Depends(
     if detachment is None:
         raise HTTPException(status_code=404, detail="detachment not found")
 
+    # Its enhancements go with it (rolled back too if the delete is refused).
+    enhancement_ids = (
+        await session.execute(
+            select(Enhancement.id).where(Enhancement.detachment_id == detachment_id)
+        )
+    ).scalars().all()
+    await delete_enhancements(session, list(enhancement_ids))
     await session.delete(detachment)
     try:
         await session.commit()

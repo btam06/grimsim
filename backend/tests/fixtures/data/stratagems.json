@@ -18,7 +18,16 @@
     {
       "name": "Test Re-roll",
       "cp": 1,
-      "core": true
+      "core": true,
+      "keyword_options": [
+        [
+          "GRENADES"
+        ],
+        [
+          "INFANTRY",
+          "CHARACTER"
+        ]
+      ]
     },
     {
       "name": "Test Waaagh Trick",
@@ -45,6 +54,10 @@
       ],
       "effects": [
         "plus_one_to_hit"
+      ],
+      "combat_side": "attacker",
+      "excluded_keywords": [
+        "CHARACTER"
       ]
     },
     {

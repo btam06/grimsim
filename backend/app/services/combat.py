@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 from app.combat_rules import CONDITIONS, EFFECTS, Rule
 from app.models import Model, Stratagem, Unit, WargearAbility, WeaponAbility
+from app.services import enhancements as enhancement_rules
 
 _DICE_PATTERN = re.compile(
     r"^(?:(?P<flat>[0-9]+)|(?P<count>[0-9]*)D(?P<die>[36])(?:\+(?P<plus>[0-9]+))?)$"
@@ -220,18 +221,19 @@ def resolve_combat(
     defender_rules = [r for r in defender_rules or [] if r.side == "defender"]
 
     # Stratagems used on the attacking unit. One with keyword requirements
-    # (e.g. Epic Challenge's CHARACTER) only applies to the attacks of models
-    # that have all of them; one without applies to every model, and also to
+    # (e.g. Epic Challenge's CHARACTER) or exclusions only applies to the
+    # attacks of models that have all the required keywords and none of the
+    # excluded ones; one without either applies to every model, and also to
     # the unit-wide check below.
     stratagems = list(stratagems or [])
     # Stratagems the defender used on its unit: like the defender's rules,
     # they're in play for every weapon, modifying the attacks against it.
     defender_stratagems = list(defender_stratagems or [])
-    unrestricted_stratagems = [s for s in stratagems if not s.keywords]
+    unrestricted_stratagems = [s for s in stratagems if s.is_unrestricted]
 
     def stratagems_for(model: Model) -> list[Stratagem]:
         model_keywords = {keyword.name for keyword in model.keywords}
-        return [s for s in stratagems if {k.name for k in s.keywords} <= model_keywords]
+        return [s for s in stratagems if s.applies_to(model_keywords)]
 
     # Some wargear/datasheet abilities apply to the whole attacking unit rather
     # than just the model carrying them (e.g. "Ignore Cover (Unit)", or a
@@ -242,11 +244,14 @@ def resolve_combat(
     # Datasheet abilities belong to the unit, so (unlike wargear) they're also
     # in play for every weapon any of its models fires - e.g. "this unit's
     # ranged attacks have [SUSTAINED HITS 1]".
+    # Enhancements and upgrades can grant the unit more. (Abilities with
+    # code-defined rules, like Stealth giving the benefit of cover when the
+    # unit is the target, come in through attacker_rules/defender_rules.)
     datasheet_abilities = [
         ability
         for unit_model in attacker.unit_models
         for ability in unit_model.model.abilities
-    ]
+    ] + enhancement_rules.granted_datasheet_abilities(attacker)
     # Names of the faction-ability rule options active for the attacking unit
     # (e.g. "Riled Up"), for conditions like "if this unit is riled up".
     attacker_options = set(attacker_options or ())
@@ -320,6 +325,12 @@ def resolve_combat(
                 ability for gear in unit_model.wargear for ability in gear.abilities
             ]
             model_stratagems = stratagems_for(unit_model.model)
+            # Weapon abilities this model's weapons gain from enhancements and
+            # upgrades (e.g. [SUSTAINED HITS 1] on ranged weapons), each
+            # limited to a weapon type or not.
+            granted_weapon_abilities = enhancement_rules.granted_weapon_abilities(
+                attacker, unit_model
+            )
 
             # Hazardous wounds taken by this model accumulate across every one
             # of its weapons, in case more than one is hazardous - checked
@@ -332,6 +343,7 @@ def resolve_combat(
                     continue
 
                 is_ranged = weapon.weapon_type != "melee"
+                weapon_type = "ranged" if is_ranged else "melee"
                 # Each distinct ability once - e.g. a datasheet ability every model
                 # in the unit has is still one rule - so effects that count their
                 # sources (like +1 to hit) aren't multiplied by model count.
@@ -340,6 +352,11 @@ def resolve_combat(
                         id(ability): ability
                         for ability in (
                             list(weapon.abilities)
+                            + [
+                                ability
+                                for ability, only in granted_weapon_abilities
+                                if only in (None, weapon_type)
+                            ]
                             + wargear_abilities
                             + datasheet_abilities
                             + model_stratagems
@@ -601,8 +618,13 @@ def resolve_combat(
                         wound_passed = True
                     else:
                         # An unmodified 6 always wounds and a 1 always fails,
-                        # whatever the modifiers.
-                        needed = threshold + (1 if attack.get("minus_one_to_wound") else 0)
+                        # whatever the modifiers. A +1 and a -1 to wound
+                        # cancel out.
+                        needed = (
+                            threshold
+                            + (1 if attack.get("minus_one_to_wound") else 0)
+                            - (1 if attack.get("plus_one_to_wound") else 0)
+                        )
                         wound_passed = wound_roll != 1 and (
                             wound_roll == 6 or wound_roll >= needed
                         )

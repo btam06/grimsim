@@ -21,9 +21,21 @@ def _to_out(stratagem: Stratagem) -> StratagemOut:
         condition_ids=[c.id for c in stratagem.conditions],
         effect_ids=[e.id for e in stratagem.effects],
         keyword_ids=[k.id for k in stratagem.keywords],
+        excluded_keyword_ids=[k.id for k in stratagem.excluded_keywords],
+        keyword_option_ids=[[k.id for k in option] for option in stratagem.keyword_options],
         timings=[StratagemTimingSchema(phase=t.phase, turn=t.turn) for t in stratagem.timings],
         game_action=stratagem.game_action,
+        combat_side=stratagem.combat_side,
     )
+
+
+async def _load_keywords(session: AsyncSession, ids: list[int], field: str) -> list[Keyword]:
+    if not ids:
+        return []
+    keywords = list((await session.execute(select(Keyword).where(Keyword.id.in_(ids)))).scalars())
+    if len(keywords) != len(set(ids)):
+        raise HTTPException(status_code=400, detail=f"one or more {field} not found")
+    return keywords
 
 
 @router.get("", response_model=list[StratagemOut])
@@ -70,12 +82,24 @@ async def create_stratagem(payload: StratagemIn, session: AsyncSession = Depends
         if len(effects) != len(set(payload.effect_ids)):
             raise HTTPException(status_code=400, detail="one or more effect_ids not found")
 
-    keywords: list[Keyword] = []
-    if payload.keyword_ids:
-        result = await session.execute(select(Keyword).where(Keyword.id.in_(payload.keyword_ids)))
-        keywords = list(result.scalars().all())
-        if len(keywords) != len(set(payload.keyword_ids)):
-            raise HTTPException(status_code=400, detail="one or more keyword_ids not found")
+    keywords = await _load_keywords(session, payload.keyword_ids, "keyword_ids")
+    excluded_keywords = await _load_keywords(
+        session, payload.excluded_keyword_ids, "excluded_keyword_ids"
+    )
+    if set(payload.keyword_ids) & set(payload.excluded_keyword_ids):
+        raise HTTPException(
+            status_code=400, detail="a keyword can't be both required and excluded"
+        )
+    if any(not option for option in payload.keyword_option_ids):
+        raise HTTPException(status_code=400, detail="a keyword option can't be empty")
+    option_keywords = {
+        k.id: k
+        for k in await _load_keywords(
+            session,
+            list({i for option in payload.keyword_option_ids for i in option}),
+            "keyword_option_ids",
+        )
+    }
 
     stratagem = Stratagem(
         name=payload.name,
@@ -86,9 +110,15 @@ async def create_stratagem(payload: StratagemIn, session: AsyncSession = Depends
         conditions=conditions,
         effects=effects,
         keywords=keywords,
+        excluded_keywords=excluded_keywords,
+        keyword_options=[
+            [option_keywords[i] for i in dict.fromkeys(option)]
+            for option in payload.keyword_option_ids
+        ],
         timings=[StratagemTiming(phase=t.phase, turn=t.turn) for t in payload.timings],
     )
     stratagem.game_action = payload.game_action
+    stratagem.combat_side = payload.combat_side
     session.add(stratagem)
     await session.commit()
     return _to_out(stratagem)

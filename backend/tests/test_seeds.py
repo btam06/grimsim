@@ -1018,6 +1018,45 @@ async def test_local_detachments_are_well_formed(faction, entries):
         assert set(entry["dispositions"]) <= set(dispositions.NAMES), entry["name"]
 
 
+LOCAL_ENHANCEMENTS = [
+    (f, entries)
+    for f in factions.FACTIONS
+    if (entries := _local(factions.load_enhancements, f))
+]
+
+
+@pytest.mark.skipif(
+    not LOCAL_ENHANCEMENTS,
+    reason="no local enhancement data (app/data/factions/*/enhancements.json)",
+)
+@pytest.mark.parametrize(
+    "faction,entries",
+    LOCAL_ENHANCEMENTS,
+    ids=[f.__name__.rsplit(".", 1)[-1] for f, _ in LOCAL_ENHANCEMENTS] or None,
+)
+async def test_local_enhancements_are_well_formed(faction, entries):
+    # Checks your local data files, if you have any.
+    detachments = {d["name"] for d in _local(factions.load_detachments, faction)}
+    weapon_ability_names = {name for name, _, _, _ in weapon_abilities.ENTRIES}
+    datasheet_ability_names = {name for name, _, _, _ in datasheet_abilities.ENTRIES}
+    names = [(e["detachment"], e["name"]) for e in entries]
+    assert len(names) == len(set(names))
+    for entry in entries:
+        assert entry["detachment"] in detachments, entry["name"]
+        assert entry["kind"] in ("enhancement", "upgrade"), entry["name"]
+        assert isinstance(entry["points"], int) and entry["points"] >= 0, entry["name"]
+        keywords = entry.get("keywords", []) + entry.get("excluded_keywords", [])
+        assert set(keywords) <= LOCAL_KEYWORDS, entry["name"]
+        scopes = {"enhancement": {"bearer", "led_unit"}, "upgrade": {"unit"}}[entry["kind"]]
+        for grant in entry.get("weapon_abilities", []):
+            assert grant["name"] in weapon_ability_names, entry["name"]
+            assert grant.get("weapon_type") in (None, "ranged", "melee"), entry["name"]
+            assert grant["scope"] in scopes, entry["name"]
+        for grant in entry.get("datasheet_abilities", []):
+            assert grant["name"] in datasheet_ability_names, entry["name"]
+            assert grant["scope"] in scopes, entry["name"]
+
+
 # --- stratagems, from app/data/stratagems.json ---
 
 
@@ -1049,6 +1088,14 @@ async def test_seed_stratagems_from_a_data_file(session: AsyncSession, fixture_g
     assert set(rows) == {"Test Grenade", "Test Re-roll", "Test Waaagh Trick", "Test New Orders"}
     assert rows["Test New Orders"].game_action == "replace_secondary"
     assert rows["Test Grenade"].game_action is None
+    assert rows["Test Waaagh Trick"].combat_side == "attacker"
+    assert [k.name for k in rows["Test Waaagh Trick"].excluded_keywords] == ["CHARACTER"]
+    assert rows["Test Grenade"].excluded_keywords == []
+    assert [{k.name for k in o} for o in rows["Test Re-roll"].keyword_options] == [
+        {"GRENADES"},
+        {"INFANTRY", "CHARACTER"},
+    ]
+    assert rows["Test Grenade"].combat_side is None
 
     grenade = rows["Test Grenade"]
     assert (grenade.cp, grenade.is_core, grenade.description) == (1, True, "Throw a grenade.")
@@ -1106,6 +1153,7 @@ async def test_seed_stratagems_fills_in_requirements_and_timings(
         ),
         ({"name": "Bad", "cp": 1}, "core or belong to a detachment"),
         ({"name": "Bad", "cp": 1, "core": True, "game_action": "explode"}, "unknown game action"),
+        ({"name": "Bad", "cp": 1, "core": True, "combat_side": "both"}, "unknown combat side"),
         (
             {"name": "Bad", "cp": 1, "detachments": [{"faction": "Orks", "name": "Nope"}]},
             "unknown detachment",
@@ -1140,7 +1188,11 @@ async def test_local_stratagems_are_well_formed():
         assert isinstance(entry["cp"], int) and entry["cp"] >= 0, entry["name"]
         assert entry.get("core", False) != bool(entry.get("detachments")), entry["name"]
         assert set(entry.get("keywords", [])) <= LOCAL_KEYWORDS, entry["name"]
+        assert set(entry.get("excluded_keywords", [])) <= LOCAL_KEYWORDS, entry["name"]
+        for option in entry.get("keyword_options", []):
+            assert option and set(option) <= LOCAL_KEYWORDS, entry["name"]
         assert entry.get("game_action") in (None, *STRATAGEM_GAME_ACTIONS), entry["name"]
+        assert entry.get("combat_side") in (None, "attacker", "defender"), entry["name"]
         for timing in entry.get("timings", []):
             assert timing["phase"] in PHASES and timing["turn"] in STRATAGEM_TURNS, entry["name"]
         for detachment in entry.get("detachments", []):

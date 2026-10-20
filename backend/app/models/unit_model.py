@@ -5,10 +5,15 @@ from typing import TYPE_CHECKING
 from sqlalchemy import ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.associations import unit_model_wargear, unit_model_weapons
+from app.models.associations import (
+    unit_model_enhancements,
+    unit_model_wargear,
+    unit_model_weapons,
+)
 from app.models.base import Base
 
 if TYPE_CHECKING:
+    from app.models.enhancement import Enhancement
     from app.models.model import Model
     from app.models.unit import Unit
     from app.models.wargear import Wargear
@@ -27,3 +32,7 @@ class UnitModel(Base):
     model: Mapped["Model"] = relationship(back_populates="unit_models")
     weapons: Mapped[list["Weapon"]] = relationship(secondary=unit_model_weapons)
     wargear: Mapped[list["Wargear"]] = relationship(secondary=unit_model_wargear)
+    # The enhancement this model carries, if any (a CHARACTER only).
+    enhancement: Mapped["Enhancement | None"] = relationship(
+        secondary=unit_model_enhancements, uselist=False, lazy="selectin"
+    )

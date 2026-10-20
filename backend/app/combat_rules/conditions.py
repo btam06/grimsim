@@ -18,6 +18,7 @@ ANTI_INFANTRY_4 = "anti_infantry_4"
 ANTI_VEHICLE_2 = "anti_vehicle_2"
 ANTI_VEHICLE_3 = "anti_vehicle_3"
 ANTI_VEHICLE_4 = "anti_vehicle_4"
+ANTI_MONSTER_4 = "anti_monster_4"
 WITHIN_HALF_RANGE = "within_half_range"
 MOVED_LESS_THAN_3 = "moved_less_than_3"
 TARGET_MONSTER_OR_VEHICLE = "target_monster_or_vehicle"
@@ -112,6 +113,16 @@ def anti_vehicle_4(context: dict) -> bool:
         context.get("step") == "wound"
         and context.get("roll", 0) >= 4
         and "VEHICLE" in context.get("defender_keywords", set())
+    )
+
+
+def anti_monster_4(context: dict) -> bool:
+    # True at the wound step if the wound roll was a 4+ against a defending
+    # unit that contains a MONSTER model (e.g. for "Anti-Monster 4+").
+    return (
+        context.get("step") == "wound"
+        and context.get("roll", 0) >= 4
+        and "MONSTER" in context.get("defender_keywords", set())
     )
 
 
@@ -230,6 +241,7 @@ CONDITIONS = {
     ANTI_VEHICLE_2: anti_vehicle_2,
     ANTI_VEHICLE_3: anti_vehicle_3,
     ANTI_VEHICLE_4: anti_vehicle_4,
+    ANTI_MONSTER_4: anti_monster_4,
     WITHIN_HALF_RANGE: within_half_range,
     MOVED_LESS_THAN_3: moved_less_than_3,
     TARGET_MONSTER_OR_VEHICLE: target_monster_or_vehicle,

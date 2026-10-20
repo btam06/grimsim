@@ -5,9 +5,11 @@ from typing import TYPE_CHECKING
 from sqlalchemy import ForeignKey, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.models.associations import unit_upgrades
 from app.models.base import Base
 
 if TYPE_CHECKING:
+    from app.models.enhancement import Enhancement
     from app.models.army_list import ArmyList
     from app.models.faction_unit import FactionUnit
     from app.models.unit_model import UnitModel
@@ -25,4 +27,8 @@ class Unit(Base):
     army_list: Mapped["ArmyList | None"] = relationship(back_populates="units")
     unit_models: Mapped[list["UnitModel"]] = relationship(
         back_populates="unit", cascade="all, delete-orphan"
+    )
+    # The unit's upgrade, if any.
+    upgrade: Mapped["Enhancement | None"] = relationship(
+        secondary=unit_upgrades, uselist=False, lazy="selectin"
     )

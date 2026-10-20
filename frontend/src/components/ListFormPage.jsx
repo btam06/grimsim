@@ -64,6 +64,7 @@ function ListFormPage({
   weapons,
   wargear,
   factionUnits,
+  enhancements,
   onSaved,
   onCancel,
   onUnitsChanged,
@@ -103,6 +104,10 @@ function ListFormPage({
   const weaponName = (id) => weapons.find((w) => w.id === id)?.name ?? `#${id}`
   const wargearName = (id) => wargear.find((g) => g.id === id)?.name ?? `#${id}`
   const factionUnitName = (id) => factionUnits.find((fu) => fu.id === id)?.name ?? `#${id}`
+  const enhancementLabel = (id) => {
+    const enhancement = enhancements.find((e) => e.id === id)
+    return enhancement ? `${enhancement.name} (+${enhancement.points} pts)` : `#${id}`
+  }
 
   const handleFactionChange = (faction_id) => {
     setForm({ ...form, faction_id, detachment_ids: [] })
@@ -150,6 +155,7 @@ function ListFormPage({
           weapon_ids: m.weapon_ids,
           wargear_ids: m.wargear_ids,
         })),
+        // Enhancements and upgrades are once per list, so the copy has none.
       })
       onUnitsChanged()
     } catch (err) {
@@ -238,6 +244,7 @@ function ListFormPage({
                 {group.units.map((u) => (
                   <li key={u.id}>
                     {factionUnitName(u.faction_unit_id)} — {u.points}pts
+                    {u.upgrade_id !== null && ` — Upgrade: ${enhancementLabel(u.upgrade_id)}`}
                     {u.unit_models.length > 0 && (
                       <ul>
                         {u.unit_models.map((m) => (
@@ -247,6 +254,8 @@ function ListFormPage({
                               ` — Weapons: ${m.weapon_ids.map(weaponName).join(', ')}`}
                             {m.wargear_ids.length > 0 &&
                               ` — Wargear: ${m.wargear_ids.map(wargearName).join(', ')}`}
+                            {m.enhancement_id !== null &&
+                              ` — Enhancement: ${enhancementLabel(m.enhancement_id)}`}
                           </li>
                         ))}
                       </ul>

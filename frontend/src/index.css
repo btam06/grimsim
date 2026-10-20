@@ -322,7 +322,7 @@ section form textarea {
   font-size: 0.85rem;
 }
 
-.game-dialog {
+.app-dialog {
   max-width: min(28rem, calc(100vw - 2rem));
   padding: 1rem 1.25rem;
   border: 1px solid #8884;
@@ -331,21 +331,21 @@ section form textarea {
   color: CanvasText;
 }
 
-.game-dialog::backdrop {
+.app-dialog::backdrop {
   background: rgba(0, 0, 0, 0.5);
 }
 
-.game-dialog h3 {
+.app-dialog h3 {
   margin-top: 0;
 }
 
 /* Options above the buttons, rather than the side-by-side form layout used
    elsewhere. */
-section .game-dialog form {
+section .app-dialog form {
   display: block;
 }
 
-.game-dialog .radio-group {
+.app-dialog .radio-group {
   margin: 0.75rem 0;
 }
 

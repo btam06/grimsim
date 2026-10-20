@@ -11,6 +11,7 @@ from app.combat_rules.conditions import (
     TARGET_LED_BY_CHARACTER,
 )
 from app.combat_rules.effects import (
+    ASSAULT,
     ADD_EXTRA_HIT,
     BENEFIT_OF_COVER,
     DEADLY_DEMISE,
@@ -68,6 +69,23 @@ ENTRIES = [
         "suffers D3 mortal wounds.",
         [ALWAYS],
         [DEADLY_DEMISE],
+    ),
+    (
+        # Only whether it explodes is resolved, not the mortal wound.
+        "Deadly Demise 1",
+        "When this model is destroyed, roll one D6. On a 6, each unit within 6\" of it "
+        "suffers 1 mortal wound.",
+        [ALWAYS],
+        [DEADLY_DEMISE],
+    ),
+    (
+        # Shooting after Advancing is modelled as every weapon having
+        # [ASSAULT]; Falling Back and Desperate Escape aren't modelled.
+        "Elevated Strider",
+        "This unit is eligible to shoot in a turn in which it Fell Back or Advanced, and you "
+        "can re-roll Desperate Escape tests taken for models in this unit.",
+        [ALWAYS],
+        [ASSAULT],
     ),
     (
         # Descriptive only: gaining CP is outside the combat engine.

@@ -30,7 +30,7 @@ function ReplaceSecondaryDialog({ dialogRef, stratagem, cards, onConfirm }) {
   }
 
   return (
-    <dialog ref={dialogRef} className="game-dialog" onClose={() => setCardId(null)}>
+    <dialog ref={dialogRef} className="app-dialog" onClose={() => setCardId(null)}>
       <form
         method="dialog"
         onSubmit={(e) => {

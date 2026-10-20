@@ -3,6 +3,7 @@ import AbilityPanel from './components/AbilityPanel'
 import CalculatorPanel from './components/CalculatorPanel'
 import DatasheetAbilitiesPanel from './components/DatasheetAbilitiesPanel'
 import DetachmentsPanel from './components/DetachmentsPanel'
+import EnhancementsPanel from './components/EnhancementsPanel'
 import FactionAbilitiesPanel from './components/FactionAbilitiesPanel'
 import FactionUnitsPanel from './components/FactionUnitsPanel'
 import FactionsPanel from './components/FactionsPanel'
@@ -29,6 +30,7 @@ const TAB_GROUPS = {
     'Factions',
     'Detachments',
     'Stratagems',
+    'Enhancements',
     'Secondary Missions',
     'Primary Missions',
   ],
@@ -105,6 +107,7 @@ function App() {
       {tab === 'Faction Abilities' && <FactionAbilitiesPanel />}
       {tab === 'Detachments' && <DetachmentsPanel />}
       {tab === 'Stratagems' && <StratagemsPanel />}
+      {tab === 'Enhancements' && <EnhancementsPanel />}
       {tab === 'Models' && <ModelsPanel />}
       {tab === 'Keywords' && <KeywordsPanel />}
       {tab === 'Weapons' && <WeaponsPanel />}
