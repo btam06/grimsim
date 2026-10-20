@@ -60,11 +60,15 @@ from app.seeds import datasheets as datasheet_data
 from app.seeds.lookup import get_dispositions_by_name
 
 # One folder per faction, each with:
-#   info.py                  FACTION_NAME
+#   info.py                  FACTION_NAME, and optional ALLY_RULES
 #   abilities.py             ENTRIES of (ability name, description), plus an
 #                            optional OPTIONS dict of rule options an ability
 #                            grants (e.g. Doctrina Imperatives' Protector and
 #                            Conqueror Imperatives) - see rule_options below
+#   datasheet_abilities.py   optional: the faction's datasheet abilities, in the
+#                            shape of the core ones in
+#                            app/seeds/datasheet_abilities.py, which combines
+#                            them
 #
 # Game data - units, detachments and full datasheets - isn't in here: it's
 # loaded from app/data/factions/<faction folder name>/ (units.json,
@@ -168,6 +172,31 @@ OPTION_OWNERS: dict[str, tuple[str, str]] = {
 def rule_options(faction_name: str, ability_name: str) -> dict[str, list[Rule]]:
     # The selectable rule options a faction ability grants, if any.
     return RULE_OPTIONS.get((faction_name, ability_name), {})
+
+
+def option_descriptions(faction_name: str, ability_name: str) -> dict[str, str]:
+    # What each of a faction ability's options does in the calculator: its
+    # rules' descriptions, together.
+    return {
+        option: " ".join(rule.description for rule in rules if rule.description)
+        for option, rules in rule_options(faction_name, ability_name).items()
+        if any(rule.description for rule in rules)
+    }
+
+
+# {(faction name, ability name): note} across every faction's abilities.py
+# CALCULATOR_NOTES - how the calculator handles an ability, where that needs
+# saying.
+CALCULATOR_NOTES: dict[tuple[str, str], str] = {
+    (faction.info.FACTION_NAME, ability_name): note
+    for faction in FACTIONS
+    for ability_name, note in getattr(faction.abilities, "CALCULATOR_NOTES", {}).items()
+}
+
+
+def calculator_notes(faction_name: str, ability_name: str) -> list[str]:
+    note = CALCULATOR_NOTES.get((faction_name, ability_name))
+    return [note] if note else []
 
 
 async def _faction_ids_by_name(session: AsyncSession) -> dict[str, int]:

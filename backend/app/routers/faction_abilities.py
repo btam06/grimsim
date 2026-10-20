@@ -19,6 +19,10 @@ def _to_out(faction_ability: FactionAbility, faction_name: str) -> FactionAbilit
         description=faction_ability.description,
         faction_id=faction_ability.faction_id,
         rule_options=list(faction_seeds.rule_options(faction_name, faction_ability.name)),
+        rule_option_descriptions=faction_seeds.option_descriptions(
+            faction_name, faction_ability.name
+        ),
+        calculator_notes=faction_seeds.calculator_notes(faction_name, faction_ability.name),
     )
 
 

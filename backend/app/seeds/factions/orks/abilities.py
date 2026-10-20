@@ -15,17 +15,31 @@ ENTRIES = [
 ]
 
 # Rule options for abilities above: {ability name: {option name: [Rule, ...]}}
-# (see app/seeds/factions/__init__.py).
-#
-# Not modelled: re-rolling advance rolls, charging after advancing, and the
-# once-per-battle War Cry - movement/turn-sequence rules outside combat.
+# (see app/seeds/factions/__init__.py). Each rule's description says what it
+# does in the calculator.
 OPTIONS = {
     WAAAGH: {
         RILED_UP: [
-            # This unit has a 5+ invulnerable save.
-            Rule(conditions=(ALWAYS,), effects=(INVULNERABLE_5,), side="defender"),
-            # This unit's ranged attacks have [ASSAULT].
-            Rule(conditions=(ALWAYS,), effects=(ASSAULT,)),
+            Rule(
+                conditions=(ALWAYS,),
+                effects=(INVULNERABLE_5,),
+                side="defender",
+                description="This unit has a 5+ invulnerable save.",
+            ),
+            Rule(
+                conditions=(ALWAYS,),
+                effects=(ASSAULT,),
+                description="This unit's ranged attacks have [ASSAULT].",
+            ),
         ],
     },
+}
+
+# How the calculator handles abilities above, where that needs saying:
+# {ability name: note}.
+CALCULATOR_NOTES = {
+    WAAAGH: (
+        "Re-rolling Advance rolls, charging after Advancing and the once-per-battle War Cry "
+        "are outside the calculator - pick Riled Up when the unit is riled up."
+    ),
 }

@@ -16,6 +16,8 @@ class Rule:
     conditions: tuple[str, ...]
     effects: tuple[str, ...]
     side: Literal["attacker", "defender"] = "attacker"
+    # How the calculator applies it, in plain words - shown with the ability.
+    description: str | None = None
 
 
 @dataclass(frozen=True)
@@ -29,3 +31,5 @@ class RuleOption:
     # every other unit of the same faction in that model's army list (an aura
     # or army-wide effect - range isn't modelled).
     army_wide: bool = False
+    # What picking it does in the calculator - shown with the option.
+    description: str | None = None

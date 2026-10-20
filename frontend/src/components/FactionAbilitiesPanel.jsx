@@ -77,6 +77,23 @@ function FactionAbilitiesPanel() {
             <button type="button" onClick={() => handleRemove(fa.id)}>
               Remove
             </button>
+            {fa.calculator_notes.map((note) => (
+              <p key={note} className="hint">
+                Calculator: {note}
+              </p>
+            ))}
+            {fa.rule_options.length > 0 && (
+              <ul>
+                {fa.rule_options.map((option) => (
+                  <li key={option}>
+                    Option: {option}
+                    {fa.rule_option_descriptions[option] && (
+                      <p className="hint">{fa.rule_option_descriptions[option]}</p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
           </li>
         ))}
       </ul>

@@ -40,6 +40,10 @@ class FactionAbilityOut(FactionAbilityIn):
     # (e.g. Doctrina Imperatives' Protector/Conqueror Imperatives), defined in
     # the faction's app/seeds/factions/<faction>/abilities.py. Read-only.
     rule_options: list[str] = []
+    # What each option does in the calculator: {option name: description}.
+    rule_option_descriptions: dict[str, str] = {}
+    # How the calculator handles the ability, where that needs saying.
+    calculator_notes: list[str] = []
 
 
 class KeywordIn(BaseModel):
@@ -335,6 +339,10 @@ class DatasheetAbilityOut(BaseModel):
     # (e.g. Canticles of the Omnissiah), defined in
     # app/seeds/datasheet_abilities.py. Read-only.
     rule_options: list[str] = []
+    # What each option does in the calculator: {option name: description}.
+    rule_option_descriptions: dict[str, str] = {}
+    # How the calculator handles the ability, where that needs saying.
+    calculator_notes: list[str] = []
 
 
 class DispositionIn(BaseModel):

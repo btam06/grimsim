@@ -130,3 +130,21 @@ async def test_datasheet_ability_lists_its_rule_options(client: AsyncClient):
     ]
     other = await client.post("/datasheet-abilities", json={"name": "Stealth"})
     assert other.json()["rule_options"] == []
+
+
+async def test_datasheet_abilities_show_calculator_notes_and_option_descriptions(
+    client: AsyncClient, session: AsyncSession
+):
+    from app.seeds import datasheet_abilities as seeds
+
+    # Without conditions/effects seeded, only abilities needing none are
+    # created - including these.
+    await seeds.seed(session)
+    abilities = {a["name"]: a for a in (await client.get("/datasheet-abilities")).json()}
+
+    infiltrators = abilities["Infiltrators"]["calculator_notes"]
+    assert infiltrators == ["Descriptive only: a deployment rule."]
+    assert "in cover" in abilities["Stealth"]["calculator_notes"][0]
+    canticles = abilities["Canticles of the Omnissiah"]
+    assert set(canticles["rule_option_descriptions"]) == set(canticles["rule_options"])
+    assert "BATTLELINE" in canticles["rule_option_descriptions"]["Mantra of Discipline"]

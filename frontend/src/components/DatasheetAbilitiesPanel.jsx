@@ -75,6 +75,23 @@ function DatasheetAbilitiesPanel() {
               ` — Conditions: ${item.condition_ids.map(conditionName).join(', ')}`}
             {item.effect_ids.length > 0 &&
               ` — Effects: ${item.effect_ids.map(effectName).join(', ')}`}
+            {item.calculator_notes.map((note) => (
+              <p key={note} className="hint">
+                Calculator: {note}
+              </p>
+            ))}
+            {item.rule_options.length > 0 && (
+              <ul>
+                {item.rule_options.map((option) => (
+                  <li key={option}>
+                    Option: {option}
+                    {item.rule_option_descriptions[option] && (
+                      <p className="hint">{item.rule_option_descriptions[option]}</p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
           </li>
         ))}
       </ul>

@@ -46,6 +46,9 @@ function RuleOptionPicker({ side, abilities, choices, onChange }) {
             onChange={() => onChange({ ...choices, [ability.key]: option })}
           />
           {option || 'None'}
+          {ability.option_descriptions?.[option] && (
+            <span className="hint"> — {ability.option_descriptions[option]}</span>
+          )}
         </label>
       ))}
     </div>
@@ -307,7 +310,12 @@ function CalculatorPanel() {
     const heldFactionIds = new Set(modelsIn(unit).flatMap((m) => m.faction_ability_ids))
     const entries = factionAbilities
       .filter((a) => heldFactionIds.has(a.id) && a.rule_options.length > 0)
-      .map((a) => ({ key: `faction-${a.id}`, name: a.name, rule_options: a.rule_options }))
+      .map((a) => ({
+        key: `faction-${a.id}`,
+        name: a.name,
+        rule_options: a.rule_options,
+        option_descriptions: a.rule_option_descriptions,
+      }))
 
     const armyUnits =
       unit.list_id === null
@@ -327,6 +335,7 @@ function CalculatorPanel() {
           name: `${ability.name} (${model.name})`,
           description: ability.description,
           rule_options: ability.rule_options,
+          option_descriptions: ability.rule_option_descriptions,
         })
       })
     })

@@ -19,6 +19,12 @@ def _to_out(ability: DatasheetAbility) -> DatasheetAbilityOut:
         condition_ids=[c.id for c in ability.conditions],
         effect_ids=[e.id for e in ability.effects],
         rule_options=list(datasheet_ability_seeds.OPTIONS.get(ability.name, {})),
+        rule_option_descriptions={
+            name: option.description
+            for name, option in datasheet_ability_seeds.OPTIONS.get(ability.name, {}).items()
+            if option.description
+        },
+        calculator_notes=datasheet_ability_seeds.calculator_notes(ability.name),
     )
 
 

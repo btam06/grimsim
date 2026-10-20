@@ -1274,3 +1274,46 @@ async def test_local_stratagems_are_well_formed():
             )
             local = _local(factions.load_detachments, faction)
             assert detachment["name"] in {d["name"] for d in local}, entry["name"]
+
+
+def test_datasheet_ability_notes_and_options_describe_real_abilities():
+    seeded = {name for name, _, _, _ in datasheet_abilities.ENTRIES}
+    assert set(datasheet_abilities.CALCULATOR_NOTES) <= seeded
+    # Every option says what it does in the calculator.
+    for options in datasheet_abilities.OPTIONS.values():
+        for name, option in options.items():
+            assert option.description, name
+
+
+def test_faction_ability_options_say_what_they_do():
+    # Every rule in a faction ability's options says what it does in the
+    # calculator, and notes belong to real abilities.
+    for (faction_name, ability_name), options in factions.RULE_OPTIONS.items():
+        for option, rules in options.items():
+            assert all(rule.description for rule in rules), (faction_name, option)
+    seeded = _ability_pairs()
+    assert set(factions.CALCULATOR_NOTES) <= seeded
+
+
+def test_core_datasheet_abilities_are_the_shared_ones():
+    # Faction-specific abilities live in their faction's folder.
+    assert {name for name, _, _, _ in datasheet_abilities.CORE_ENTRIES} == {
+        "Reroll Failed Hits",
+        "Deadly Demise D3",
+        "Deadly Demise 1",
+        "Stealth",
+        "Infiltrators",
+    }
+
+
+def test_faction_datasheet_abilities_are_combined_with_the_core_ones():
+    from app.seeds.factions.adeptus_mechanicus import datasheet_abilities as admech
+    from app.seeds.factions.orks import datasheet_abilities as orks
+
+    combined = {name for name, _, _, _ in datasheet_abilities.ENTRIES}
+    for module in (admech, orks):
+        assert {name for name, _, _, _ in module.ENTRIES} <= combined
+    assert len(datasheet_abilities.ENTRIES) == len(combined)  # no name twice
+    assert "Canticles of the Omnissiah" in datasheet_abilities.OPTIONS
+    assert datasheet_abilities.OPTION_OWNERS["Shroudpsalm"] == "Canticles of the Omnissiah"
+    assert "Breaching Command" in datasheet_abilities.RULES

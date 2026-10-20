@@ -1,4 +1,5 @@
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def test_create_and_list_faction_ability(client: AsyncClient, faction_id: int):
@@ -93,3 +94,22 @@ async def test_waaagh_lists_riled_up_rule_option(client: AsyncClient):
         "/faction-abilities", json={"name": "Waaagh!", "faction_id": faction_id}
     )
     assert response.json()["rule_options"] == ["Riled Up"]
+
+
+async def test_faction_abilities_show_option_descriptions_and_notes(
+    client: AsyncClient, session: AsyncSession
+):
+    from app.seeds import factions
+
+    await factions.seed(session)
+    await factions.seed_abilities(session)
+    abilities = {a["name"]: a for a in (await client.get("/faction-abilities")).json()}
+
+    doctrina = abilities["Doctrina Imperatives"]
+    assert set(doctrina["rule_option_descriptions"]) == {
+        "Protector Imperative",
+        "Conqueror Imperative",
+    }
+    assert "[HEAVY]" in doctrina["rule_option_descriptions"]["Protector Imperative"]
+    assert doctrina["calculator_notes"] == []
+    assert "War Cry" in abilities["Waaagh!"]["calculator_notes"][0]
