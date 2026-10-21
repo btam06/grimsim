@@ -29,6 +29,7 @@ function DetachmentsPanel() {
   const [factionId, setFactionId] = useState('')
   const [dp, setDp] = useState('')
   const [dispositionIds, setDispositionIds] = useState([])
+  const [uniqueTag, setUniqueTag] = useState('')
   const [error, setError] = useState(null)
 
   const refresh = () => listDetachments().then(setDetachments).catch((err) => setError(err.message))
@@ -96,11 +97,13 @@ function DetachmentsPanel() {
         faction_id: Number(factionId),
         dp: Number(dp),
         disposition_ids: dispositionIds,
+        unique_tag: uniqueTag.trim() || null,
       })
       setName('')
       setFactionId('')
       setDp('')
       setDispositionIds([])
+      setUniqueTag('')
       refresh()
     } catch (err) {
       setError(err.message)
@@ -140,6 +143,13 @@ function DetachmentsPanel() {
             onChange={setDispositionIds}
           />
         </label>
+        <Field label="Unique tag">
+          <input
+            value={uniqueTag}
+            onChange={(e) => setUniqueTag(e.target.value)}
+            placeholder="e.g. DYNASTY"
+          />
+        </Field>
         <button type="submit">Add Detachment</button>
       </form>
       <ul>
@@ -148,6 +158,7 @@ function DetachmentsPanel() {
             {d.name} ({factionName(d.faction_id)}) — DP {d.dp}
             {d.disposition_ids.length > 0 &&
               ` — ${d.disposition_ids.map(dispositionName).join(', ')}`}
+            {d.unique_tag && ` — Unique: ${d.unique_tag}`}
             <button type="button" onClick={() => handleRemove(d.id)}>
               Remove
             </button>

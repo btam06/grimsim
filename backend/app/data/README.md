@@ -62,6 +62,9 @@ disposition must be a seeded disposition name.
 }
 ```
 
+A detachment can have a `unique_tag` (e.g. `"DYNASTY"`): a list can't take two
+detachments with the same tag.
+
 A detachment can also have `rules`. In combat, a rule grants abilities to
 the units of a list that has taken the detachment: those whose every model has
 all the keywords of one of its `keyword_options` (a set of keywords - their

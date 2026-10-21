@@ -29,7 +29,7 @@ from app.models.base import Base
 from app.models.base_size import BaseSize
 from app.models.condition import Condition
 from app.models.datasheet_ability import DatasheetAbility
-from app.models.detachment import Detachment
+from app.models.detachment import Detachment, DetachmentUniqueTag
 from app.models.detachment_rule import (
     DetachmentRule,
     DetachmentRuleDatasheetAbility,
@@ -93,6 +93,7 @@ __all__ = [
     "DetachmentRule",
     "DetachmentRuleKeywordOption",
     "DetachmentRulePerModel",
+    "DetachmentUniqueTag",
     "DetachmentRuleWeaponAbility",
     "DetachmentRuleDatasheetAbility",
     "Enhancement",

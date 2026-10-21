@@ -411,6 +411,8 @@ class DetachmentIn(BaseModel):
     faction_id: int
     dp: int
     disposition_ids: list[int] = []
+    # e.g. "DYNASTY" - a list can't take two detachments with the same tag.
+    unique_tag: str | None = Field(default=None, max_length=50)
 
 
 class DetachmentOut(BaseModel):
@@ -419,6 +421,7 @@ class DetachmentOut(BaseModel):
     faction_id: int
     dp: int
     disposition_ids: list[int]
+    unique_tag: str | None = None
 
 
 PhaseName = Literal["command", "movement", "shooting", "charge", "fight"]

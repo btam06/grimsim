@@ -20,6 +20,7 @@ def _to_out(detachment: Detachment, disposition_ids: list[int]) -> DetachmentOut
         faction_id=detachment.faction_id,
         dp=detachment.dp,
         disposition_ids=disposition_ids,
+        unique_tag=detachment.unique_tag,
     )
 
 
@@ -51,6 +52,7 @@ async def create_detachment(payload: DetachmentIn, session: AsyncSession = Depen
         dp=payload.dp,
         dispositions=dispositions,
     )
+    detachment.unique_tag = payload.unique_tag or None
     session.add(detachment)
     try:
         await session.commit()

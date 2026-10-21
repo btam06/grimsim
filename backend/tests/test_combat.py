@@ -4960,6 +4960,10 @@ async def test_positions_are_asked_about_only_for_units_whose_rules_use_them(
     # attacker whether it Remained Stationary.
     assert "in_range_of_objective" in await positions("defender")
     assert "remained_stationary" in await positions("attacker")
+    # ...and whether it's below its Starting Strength or Below Half-strength.
+    assert "below_starting_strength" in await positions("defender")
+    assert "below_half_strength" in await positions("defender")
+    assert "below_half_strength" not in await positions("attacker")
 
 
 def test_rapid_fire_2_adds_two_attacks_within_half_range(monkeypatch):
@@ -5682,3 +5686,459 @@ def test_crusaders_duty_gives_plus_one_to_hit_on_ranged_attacks(monkeypatch):
     target = [_model(toughness=1, wounds=10, save=7)]
     assert _fire(weapon, target, attacker_rules=list(option.rules)).total_damage == 1
     assert option.army_wide
+
+
+# --- Necrons (critical hits on 5+, -1 Damage, +2 Strength, ignoring penalties) ---
+
+
+def _scripted(monkeypatch, rolls):
+    rolls = iter(rolls)
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+
+
+def test_critical_hit_on_5_triggers_sustained_hits_and_always_hits(monkeypatch):
+    # Hit roll 5 at BS6: a critical hit, so it hits and Sustained Hits adds one.
+    _scripted(monkeypatch, [5, 6, 6, 1, 1])
+    weapon = _weapon(attacks="1", skill=6, strength=10, ap=-10, weapon_type="ranged")
+    weapon.abilities = [_ability([_condition("critical_hit")], [_effect("add_extra_hit")])]
+    result = _fire(
+        weapon,
+        [_model(toughness=1, wounds=10, save=7)],
+        attacker_rules=[Rule(conditions=("always",), effects=("critical_hit_5",))],
+    )
+    assert len(result.wound_rolls) == 2
+
+
+def test_critical_hit_on_5_is_off_by_default(monkeypatch):
+    _scripted(monkeypatch, [5])
+    weapon = _weapon(attacks="1", skill=6, strength=10, ap=-10, weapon_type="ranged")
+    weapon.abilities = [_ability([_condition("critical_hit")], [_effect("add_extra_hit")])]
+    assert _fire(weapon, [_model(toughness=1, wounds=10, save=7)]).wound_rolls == []
+
+
+@pytest.mark.parametrize("damage,expected", [("3", 2), ("1", 1)])
+def test_minus_one_damage_has_a_minimum_of_1(monkeypatch, damage, expected):
+    _scripted(monkeypatch, [6, 6, 1])
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=0, damage=damage, weapon_type="ranged")
+    result = _fire(
+        weapon,
+        [_model(toughness=1, wounds=10, save=7)],
+        defender_rules=[
+            Rule(conditions=("always",), effects=("minus_one_damage",), side="defender")
+        ],
+    )
+    assert result.total_damage == expected
+
+
+@pytest.mark.parametrize("effects,expected", [((), 0), (("plus_two_strength",), 1)])
+def test_plus_two_strength(monkeypatch, effects, expected):
+    # S4 vs T6 wounds on a 5+; at S6 a 4 wounds.
+    _scripted(monkeypatch, [6, 4, 1])
+    weapon = _weapon(attacks="1", skill=3, strength=4, ap=0, weapon_type="ranged")
+    rules = [Rule(conditions=("always",), effects=effects)] if effects else []
+    result = _fire(weapon, [_model(toughness=6, wounds=10, save=7)], attacker_rules=rules)
+    assert result.total_damage == expected
+
+
+def test_ignore_hit_penalties_ignores_cover_and_minus_one_to_hit(monkeypatch):
+    # A 3 at BS3, in cover and at -1 to hit: it misses, unless penalties are ignored.
+    minus_one = Rule(conditions=("always",), effects=("minus_one_to_hit",), side="defender")
+    ignore = Rule(conditions=("always",), effects=("ignore_hit_penalties",))
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=0, weapon_type="ranged")
+    target = [_model(toughness=1, wounds=10, save=7)]
+    _scripted(monkeypatch, [3, 6, 1])
+    assert _fire(weapon, target, in_cover=True, defender_rules=[minus_one]).total_damage == 0
+    _scripted(monkeypatch, [3, 6, 1])
+    assert (
+        _fire(
+            weapon, target, in_cover=True, defender_rules=[minus_one], attacker_rules=[ignore]
+        ).total_damage
+        == 1
+    )
+
+
+def test_ignore_wound_penalties_ignores_minus_one_to_wound(monkeypatch):
+    # S4 vs T4 wounds on a 4+, 5+ at -1 to wound.
+    minus_one = Rule(conditions=("always",), effects=("minus_one_to_wound",), side="defender")
+    ignore = Rule(conditions=("always",), effects=("ignore_wound_penalties",))
+    weapon = _weapon(attacks="1", skill=3, strength=4, ap=0, weapon_type="ranged")
+    target = [_model(toughness=4, wounds=10, save=7)]
+    _scripted(monkeypatch, [6, 4, 1])
+    assert _fire(weapon, target, defender_rules=[minus_one]).total_damage == 0
+    _scripted(monkeypatch, [6, 4, 1])
+    assert (
+        _fire(weapon, target, defender_rules=[minus_one], attacker_rules=[ignore]).total_damage
+        == 1
+    )
+
+
+@pytest.mark.parametrize("strength,expected", [(5, 0), (4, 1)])
+def test_unyielding_forms_only_when_strength_exceeds_toughness(monkeypatch, strength, expected):
+    # Wound roll 4 vs T4: S4 wounds on a 4+; S5 on a 3+, but 4+ at -1.
+    # (S5 at -1 still wounds on a 4 - so roll a 3.)
+    roll = 3 if strength == 5 else 4
+    _scripted(monkeypatch, [6, roll, 1])
+    rule = Rule(
+        conditions=("strength_exceeds_toughness",), effects=("minus_one_to_wound",), side="defender"
+    )
+    weapon = _weapon(attacks="1", skill=3, strength=strength, ap=0, weapon_type="ranged")
+    result = _fire(weapon, [_model(toughness=4, wounds=10, save=7)], defender_rules=[rule])
+    assert result.total_damage == expected
+
+
+def _fire_led(weapon, defender_models, led: bool, **flags):
+    # As _fire, from a unit of a trooper (with the weapon) and, if led, a
+    # CHARACTER leading it.
+    weapon.id = 1
+    models = [_unit_model(_model(), [weapon])]
+    if led:
+        models.append(_unit_model(_model(keywords=[_keyword("CHARACTER")]), []))
+    attacker = _unit(models)
+    defender = _unit([_unit_model(m, []) for m in defender_models])
+    options = dict(
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+    )
+    options.update(flags)
+    return combat.resolve_combat(attacker, defender, {weapon.id}, **options)
+
+
+@pytest.mark.parametrize("led,expected", [(True, 1), (False, 0)])
+def test_command_protocols_plus_one_to_hit_while_led(monkeypatch, led, expected):
+    from app.seeds.factions.necrons import datasheet_abilities as necrons
+
+    _scripted(monkeypatch, [2, 6, 1])  # a 2 misses at BS3, hits at +1
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=0, weapon_type="ranged")
+    result = _fire_led(
+        weapon,
+        [_model(toughness=1, wounds=10, save=7)],
+        led,
+        attacker_rules=list(necrons.RULES["Command Protocols"]),
+    )
+    assert result.total_damage == expected
+
+
+@pytest.mark.parametrize("half_range,expected", [(True, 1), (False, 0)])
+def test_conquering_tyrant_rerolls_hit_ones_within_half_range(monkeypatch, half_range, expected):
+    _scripted(monkeypatch, [1, 6, 6, 1])
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=0, weapon_type="ranged")
+    result = _fire(
+        weapon,
+        [_model(toughness=1, wounds=10, save=7)],
+        half_range=half_range,
+        attacker_rules=[Rule(conditions=("half_range_attack",), effects=("reroll_hit_ones",))],
+    )
+    assert result.total_damage == expected
+
+
+@pytest.mark.parametrize(
+    "positions,expected",
+    [({"below_half_strength"}, 1), ({"below_starting_strength"}, 0), (set(), 0)],
+)
+def test_spoor_of_frailty_wound_bonus_needs_below_half_strength(
+    monkeypatch, positions, expected
+):
+    from app.seeds import stratagems as stratagem_seeds
+
+    # S4 vs T4: a 3 wounds only at +1.
+    _scripted(monkeypatch, [6, 3, 1])
+    weapon = _weapon(attacks="1", skill=3, strength=4, ap=0, weapon_type="ranged")
+    result = _fire(
+        weapon,
+        [_model(toughness=4, wounds=10, save=7)],
+        attacker_rules=stratagem_seeds.rules("The Spoor of Frailty"),
+        defender_positions=positions,
+    )
+    assert result.total_damage == expected
+
+
+def test_below_half_strength_also_counts_as_below_starting_strength():
+    from app.combat_rules.conditions import CONDITIONS
+
+    check = CONDITIONS["defender_below_starting_strength"]
+    assert check({"defender_positions": {"below_half_strength"}})
+    assert check({"defender_positions": {"below_starting_strength"}})
+    assert not check({"defender_positions": set()})
+
+
+@pytest.mark.parametrize(
+    "keywords,positions,expected",
+    [
+        (["NECRONS"], {"cold_fervour_triggered"}, True),
+        (["NECRONS"], set(), False),
+        (["NECRONS", "DESTROYER CULT"], {"cold_fervour_triggered"}, False),
+        (["NECRONS", "MONSTER"], {"cold_fervour_triggered"}, False),
+    ],
+)
+def test_cold_fervour_spread_excludes_destroyer_cult_and_monsters(keywords, positions, expected):
+    from app.combat_rules.conditions import CONDITIONS
+
+    context = {"attacker_model_keywords": set(keywords), "attacker_positions": positions}
+    assert CONDITIONS["cold_fervour_spread"](context) is expected
+
+
+def test_enaegic_dermal_bond_protects_only_character_models(monkeypatch):
+    from app.seeds.factions.necrons import datasheet_abilities as necrons
+
+    # Every roll a 4: hits, wounds, fails a 7+ save - and passes a 4+ FNP.
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 4)
+    weapon = _weapon(attacks="2", skill=3, strength=10, ap=0, weapon_type="ranged")
+    rules = list(necrons.RULES["Enaegic Dermal Bond"])
+    trooper = _fire(weapon, [_model(toughness=1, wounds=10, save=7)], defender_rules=rules)
+    character = _fire(
+        weapon,
+        [_model(toughness=1, wounds=10, save=7, keywords=[_keyword("CHARACTER")])],
+        defender_rules=rules,
+    )
+    assert trooper.total_damage == 2
+    assert character.total_damage == 0
+
+
+@pytest.mark.parametrize("name,expected", [("Tesla Sphere", 1), ("Particle Beam", 0)])
+def test_cosmic_storm_improves_ap_of_tesla_sphere_weapons_only(monkeypatch, name, expected):
+    # A 4+ save against AP-1 needs a 5; at AP-2 a 5 fails.
+    _scripted(monkeypatch, [6, 6, 5])
+    weapon = _weapon(name=name, attacks="1", skill=3, strength=10, ap=-1, weapon_type="ranged")
+    result = _fire(
+        weapon,
+        [_model(toughness=1, wounds=10, save=4)],
+        attacker_rules=[Rule(conditions=("tesla_sphere_weapon",), effects=("improve_ap",))],
+    )
+    assert result.total_damage == expected
+
+
+@pytest.mark.parametrize("positions,expected", [({"target_unravelling"}, 1), (set(), 0)])
+def test_cosmic_distortion_improves_ap_against_unravelling_targets(
+    monkeypatch, positions, expected
+):
+    from app.seeds.factions.necrons import datasheet_abilities as necrons
+
+    _scripted(monkeypatch, [6, 6, 3])  # a 3+ save at AP0 holds; at AP-1 a 3 fails
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=0, weapon_type="ranged")
+    result = _fire(
+        weapon,
+        [_model(toughness=1, wounds=10, save=3)],
+        attacker_rules=list(necrons.RULES["Cosmic Distortion"]),
+        attacker_positions=positions,
+    )
+    assert result.total_damage == expected
+
+
+@pytest.mark.parametrize(
+    "weapon_type,positions,expected",
+    [("ranged", {"set_up_this_turn"}, 1), ("ranged", set(), 0), ("melee", {"set_up_this_turn"}, 0)],
+)
+def test_transdimensional_deployment_plus_one_to_hit_after_arriving(
+    monkeypatch, weapon_type, positions, expected
+):
+    from app.seeds.factions.necrons import datasheet_abilities as necrons
+
+    _scripted(monkeypatch, [2, 6, 1])  # a 2 misses at BS3, hits at +1
+    weapon = _weapon(
+        attacks="1", skill=3, strength=10, ap=0, weapon_type=weapon_type,
+        range=None if weapon_type == "melee" else 24,
+    )
+    result = _fire(
+        weapon,
+        [_model(toughness=1, wounds=10, save=7)],
+        in_engagement_range=weapon_type == "melee",
+        attacker_rules=list(necrons.RULES["Transdimensional Deployment"]),
+        attacker_positions=positions,
+    )
+    assert result.total_damage == expected
+
+
+def test_necrodermis_subtracts_one_damage(monkeypatch):
+    from app.seeds.factions.necrons import datasheet_abilities as necrons
+
+    _scripted(monkeypatch, [6, 6, 1])
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=0, damage="3", weapon_type="ranged")
+    result = _fire(
+        weapon,
+        [_model(toughness=1, wounds=10, save=7)],
+        defender_rules=list(necrons.RULES["Necrodermis"]),
+    )
+    assert result.total_damage == 2
+
+
+@pytest.mark.parametrize("led,expected_wound_rolls", [(True, 2), (False, 0)])
+def test_lokhust_lord_destroyer_cult_critical_hits_on_5_while_leading(
+    monkeypatch, led, expected_wound_rolls
+):
+    from app.seeds.factions.necrons import datasheet_abilities as necrons
+
+    # A 5 at BS6 only hits as a critical hit - then Sustained Hits adds one.
+    _scripted(monkeypatch, [5, 6, 6, 1, 1])
+    weapon = _weapon(attacks="1", skill=6, strength=10, ap=0, weapon_type="ranged")
+    weapon.abilities = [_ability([_condition("critical_hit")], [_effect("add_extra_hit")])]
+    result = _fire_led(
+        weapon,
+        [_model(toughness=1, wounds=10, save=7)],
+        led,
+        attacker_rules=list(necrons.RULES["Destroyer Cult"]),
+    )
+    assert len(result.wound_rolls) == expected_wound_rolls
+
+
+@pytest.mark.parametrize(
+    "keywords,positions,expected",
+    [
+        (["CHARACTER"], {"below_half_strength"}, 1),
+        (["CHARACTER"], set(), 0),
+        ([], {"below_half_strength"}, 0),
+    ],
+)
+def test_driven_by_hatred_rerolls_for_the_character_against_below_half_strength(
+    monkeypatch, keywords, positions, expected
+):
+    from app.seeds.factions.necrons import datasheet_abilities as necrons
+
+    _scripted(monkeypatch, [2, 6, 6, 1])  # a 2 misses at BS3; the re-roll hits
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=0, weapon_type="ranged")
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(keywords=[_keyword(k) for k in keywords]), [weapon])])
+    defender = _unit([_unit_model(_model(toughness=1, wounds=10, save=7), [])])
+    result = combat.resolve_combat(
+        attacker, defender, {1},
+        in_engagement_range=False, visible=True, in_range=True, in_cover=False,
+        half_range=False, moved_less_than_3=False, advanced=False,
+        attacker_rules=list(necrons.RULES["Driven by Hatred"]),
+        defender_positions=positions,
+    )
+    assert result.total_damage == expected
+
+
+@pytest.mark.parametrize(
+    "rolls,positions,expected",
+    [
+        ([1, 6, 6, 1], {"targeting_closest_eligible"}, 1),  # a 1 is re-rolled
+        ([2, 6, 6, 1], {"targeting_closest_eligible"}, 0),  # a 2 isn't
+        ([1, 6, 6, 1], set(), 0),
+    ],
+)
+def test_hard_wired_for_destruction_rerolls_hit_ones_against_the_closest_target(
+    monkeypatch, rolls, positions, expected
+):
+    from app.seeds.factions.necrons import datasheet_abilities as necrons
+
+    _scripted(monkeypatch, rolls)
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=0, weapon_type="ranged")
+    result = _fire(
+        weapon,
+        [_model(toughness=1, wounds=10, save=7)],
+        attacker_rules=list(necrons.RULES["Hard-wired for Destruction"]),
+        attacker_positions=positions,
+    )
+    assert result.total_damage == expected
+
+
+def test_hard_wired_for_destruction_rerolls_any_miss_against_a_target_on_an_objective(
+    monkeypatch,
+):
+    from app.seeds.factions.necrons import datasheet_abilities as necrons
+
+    _scripted(monkeypatch, [2, 6, 6, 1])
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=0, weapon_type="ranged")
+    result = _fire(
+        weapon,
+        [_model(toughness=1, wounds=10, save=7)],
+        attacker_rules=list(necrons.RULES["Hard-wired for Destruction"]),
+        attacker_positions={"targeting_closest_eligible"},
+        defender_positions={"in_range_of_objective"},
+    )
+    assert result.total_damage == 1
+
+
+@pytest.mark.parametrize(
+    "keywords,positions,expected",
+    [
+        (["DESTROYER CULT"], set(), True),
+        ([], {"targeting_closest_eligible"}, True),
+        ([], set(), False),
+        (["DESTROYER CULT", "MONSTER"], set(), False),
+    ],
+)
+def test_infectious_murder_madness_sustained_hits(keywords, positions, expected):
+    from app.combat_rules.conditions import CONDITIONS
+
+    context = {
+        "step": "hit",
+        "roll": 6,
+        "attacker_model_keywords": set(keywords),
+        "attacker_positions": positions,
+    }
+    assert CONDITIONS["murder_madness_critical_hit"](context) is expected
+
+
+def test_nullstone_field_gives_feel_no_pain_against_mortal_wounds(monkeypatch):
+    from app.seeds.factions.necrons import datasheet_abilities as necrons
+
+    option = necrons.OPTIONS["Nullstone Field Generator (Aura)"]["Nullstone Field"]
+    assert option.army_wide
+    # Devastating Wounds: a 6 to wound allows no save - then a 5 passes FNP 5+.
+    rolls = iter([6, 6, 5])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=0, weapon_type="ranged")
+    weapon.abilities = [_ability([_condition("critical_wound")], [_effect("no_save")])]
+    result = _fire(
+        weapon, [_model(toughness=1, wounds=10, save=2)], defender_rules=list(option.rules)
+    )
+    assert result.total_damage == 0
+
+
+def _listed_unit(unit_id, faction_id, models):
+    from app.models import FactionUnit
+
+    unit = _unit([_unit_model(m, []) for m in models])
+    unit.id = unit_id
+    unit.faction_unit = FactionUnit(name="Unit", faction_id=faction_id)
+    return unit
+
+
+def test_prophet_of_destruction_reaches_other_units_in_the_army_list():
+    from app.models import ArmyList, DatasheetAbility
+    from app.routers.combat import _army_rules
+
+    prophet = DatasheetAbility(name="Prophet of Destruction", description=None)
+    ammentar = _listed_unit(1, 1, [_model(abilities=[prophet])])
+    destroyers = _listed_unit(2, 1, [_model()])
+    other_faction = _listed_unit(3, 2, [_model()])
+    army_list = ArmyList(name="List", faction_id=1, points_limit=2000)
+    army_list.units = [ammentar, destroyers, other_faction]
+    for unit in army_list.units:
+        unit.army_list = army_list
+
+    assert [r.conditions for r in _army_rules(destroyers)] == [("prophet_of_destruction_target",)]
+    assert _army_rules(ammentar) == []  # "one other friendly DESTROYER CULT unit"
+    assert _army_rules(other_faction) == []
+
+
+@pytest.mark.parametrize(
+    "keywords,positions,expected",
+    [
+        (["DESTROYER CULT"], {"near_prophet_of_destruction"}, 1),
+        (["DESTROYER CULT"], set(), 0),
+        ([], {"near_prophet_of_destruction"}, 0),
+    ],
+)
+def test_prophet_of_destruction_rerolls_wound_ones(monkeypatch, keywords, positions, expected):
+    from app.seeds.factions.necrons import datasheet_abilities as necrons
+
+    _scripted(monkeypatch, [6, 1, 6, 1])  # a wound roll of 1, re-rolled to a 6
+    weapon = _weapon(attacks="1", skill=3, strength=4, ap=0, weapon_type="ranged")
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(keywords=[_keyword(k) for k in keywords]), [weapon])])
+    defender = _unit([_unit_model(_model(toughness=4, wounds=10, save=7), [])])
+    result = combat.resolve_combat(
+        attacker, defender, {1},
+        in_engagement_range=False, visible=True, in_range=True, in_cover=False,
+        half_range=False, moved_less_than_3=False, advanced=False,
+        attacker_rules=list(necrons.ARMY_RULES["Prophet of Destruction"]),
+        attacker_positions=positions,
+    )
+    assert result.total_damage == expected

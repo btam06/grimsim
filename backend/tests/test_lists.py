@@ -214,3 +214,33 @@ async def test_delete_list_unassigns_units(client: AsyncClient, faction_id: int)
 async def test_delete_nonexistent_list_returns_404(client: AsyncClient):
     response = await client.delete("/lists/9999")
     assert response.status_code == 404
+
+
+async def _create_tagged_detachment(client: AsyncClient, faction_id: int, name: str, tag):
+    response = await client.post(
+        "/detachments",
+        json={"name": name, "faction_id": faction_id, "dp": 1, "unique_tag": tag},
+    )
+    assert response.status_code == 201
+    assert response.json()["unique_tag"] == tag
+    return response.json()["id"]
+
+
+async def test_list_cannot_take_two_detachments_with_the_same_unique_tag(
+    client: AsyncClient, faction_id: int
+):
+    first = await _create_tagged_detachment(client, faction_id, "Awakened", "DYNASTY")
+    second = await _create_tagged_detachment(client, faction_id, "Hand", "DYNASTY")
+    other = await _create_tagged_detachment(client, faction_id, "Crypt", "HYPERCRYPT")
+    untagged = await _create_tagged_detachment(client, faction_id, "Plain", None)
+
+    response = await client.post(
+        "/lists", json=_list_payload(faction_id, first, detachment_ids=[first, second])
+    )
+    assert response.status_code == 400
+    assert "DYNASTY" in response.json()["detail"]
+
+    response = await client.post(
+        "/lists", json=_list_payload(faction_id, first, detachment_ids=[first, other, untagged])
+    )
+    assert response.status_code == 201

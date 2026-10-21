@@ -1,4 +1,8 @@
 from app.combat_rules.conditions import (
+    BELOW_HALF_STRENGTH,
+    BELOW_STARTING_STRENGTH,
+    DEFENDER_BELOW_HALF_STRENGTH,
+    DEFENDER_BELOW_STARTING_STRENGTH,
     DEFENDER_IN_RANGE_OF_OBJECTIVE,
     IN_RANGE_OF_OBJECTIVE,
     REMAINED_STATIONARY,
@@ -10,6 +14,26 @@ from app.seeds.factions.adeptus_mechanicus.conditions import (
     MELEE_VS_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE,
     NEAR_ADMECH_BATTLELINE,
 )
+from app.seeds.factions.necrons.conditions import (
+    ATTACKER_IN_POWER_MATRIX,
+    ATTACKER_SET_UP_THIS_TURN,
+    COLD_FERVOUR_SPREAD,
+    COLD_FERVOUR_TRIGGERED,
+    RANGED_ATTACK_SET_UP_THIS_TURN,
+    TARGET_IS_UNRAVELLING,
+    TARGET_UNRAVELLING,
+    DESTROYER_CULT_RANGED_VS_CLOSEST,
+    MURDER_MADNESS_CRITICAL_HIT,
+    NEAR_PROPHET_OF_DESTRUCTION,
+    PROPHET_OF_DESTRUCTION_TARGET,
+    RANGED_VS_CLOSEST,
+    RANGED_VS_CLOSEST_ON_OBJECTIVE,
+    SET_UP_THIS_TURN,
+    TARGET_IS_WORTHY_FOE,
+    TARGETING_CLOSEST_ELIGIBLE,
+    WITHIN_POWER_MATRIX,
+    WORTHY_FOES_TARGET,
+)
 
 # Positions the calculator asks about, since it can't measure the table:
 # {position: label}. A combat request lists each side's positions.
@@ -17,6 +41,17 @@ POSITIONS = {
     NEAR_ADMECH_BATTLELINE: 'Within 6" of a friendly ADEPTUS MECHANICUS BATTLELINE unit',
     IN_RANGE_OF_OBJECTIVE: "Within range of an objective marker",
     REMAINED_STATIONARY: "Remained Stationary this turn",
+    BELOW_STARTING_STRENGTH: "Below Starting Strength",
+    BELOW_HALF_STRENGTH: "Below Half-strength",
+    SET_UP_THIS_TURN: "Set up on the battlefield this turn",
+    WITHIN_POWER_MATRIX: "Wholly within the army's Power Matrix",
+    TARGETING_CLOSEST_ELIGIBLE: "Targeting the closest eligible target",
+    WORTHY_FOES_TARGET: "Targeting the unit selected for Worthy Foes",
+    COLD_FERVOUR_TRIGGERED: "A DESTROYER CULT unit triggered Cold Fervour this turn",
+    TARGET_UNRAVELLING: "Target is unravelling (within a NECRONS MONSTER's Distortion Fields)",
+    NEAR_PROPHET_OF_DESTRUCTION: (
+        'Within 9" of Nekrosor Ammentar after it destroyed a unit this phase'
+    ),
 }
 
 # The conditions that read each position, by the side whose position it is -
@@ -32,10 +67,42 @@ POSITION_CONDITIONS = {
     },
     IN_RANGE_OF_OBJECTIVE: {"attacker": set(), "defender": {DEFENDER_IN_RANGE_OF_OBJECTIVE}},
     REMAINED_STATIONARY: {"attacker": {STATIONARY_RANGED_CRITICAL_HIT}, "defender": set()},
+    BELOW_STARTING_STRENGTH: {"attacker": set(), "defender": {DEFENDER_BELOW_STARTING_STRENGTH}},
+    BELOW_HALF_STRENGTH: {
+        "attacker": set(),
+        "defender": {DEFENDER_BELOW_STARTING_STRENGTH, DEFENDER_BELOW_HALF_STRENGTH},
+    },
+    SET_UP_THIS_TURN: {
+        "attacker": {ATTACKER_SET_UP_THIS_TURN, RANGED_ATTACK_SET_UP_THIS_TURN},
+        "defender": set(),
+    },
+    WITHIN_POWER_MATRIX: {"attacker": {ATTACKER_IN_POWER_MATRIX}, "defender": set()},
+    TARGETING_CLOSEST_ELIGIBLE: {
+        "attacker": {
+            DESTROYER_CULT_RANGED_VS_CLOSEST,
+            RANGED_VS_CLOSEST,
+            RANGED_VS_CLOSEST_ON_OBJECTIVE,
+            MURDER_MADNESS_CRITICAL_HIT,
+        },
+        "defender": set(),
+    },
+    WORTHY_FOES_TARGET: {"attacker": {TARGET_IS_WORTHY_FOE}, "defender": set()},
+    COLD_FERVOUR_TRIGGERED: {"attacker": {COLD_FERVOUR_SPREAD}, "defender": set()},
+    TARGET_UNRAVELLING: {"attacker": {TARGET_IS_UNRAVELLING}, "defender": set()},
+    NEAR_PROPHET_OF_DESTRUCTION: {
+        "attacker": {PROPHET_OF_DESTRUCTION_TARGET},
+        "defender": set(),
+    },
 }
 
 # Positions asked about for every unit on a side, whatever its rules - board
 # state as general as cover (e.g. stratagems like Scriptural Prognosis read
 # whether the defender is on an objective; Remaining Stationary also counts
-# as moving less than 3" for [HEAVY]): {position: sides}.
-ALWAYS_ASKED = {IN_RANGE_OF_OBJECTIVE: {"defender"}, REMAINED_STATIONARY: {"attacker"}}
+# as moving less than 3" for [HEAVY]; stratagems like The Spoor of Frailty
+# read whether the target is below strength): {position: sides}.
+ALWAYS_ASKED = {
+    IN_RANGE_OF_OBJECTIVE: {"defender"},
+    REMAINED_STATIONARY: {"attacker"},
+    BELOW_STARTING_STRENGTH: {"defender"},
+    BELOW_HALF_STRENGTH: {"defender"},
+}

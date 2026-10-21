@@ -37,6 +37,14 @@ TARGET_HAS_CHARACTER = "target_has_character"
 TARGET_LED_BY_CHARACTER = "target_led_by_character"
 TARGET_INFANTRY = "target_infantry"
 RANGED_ATTACK = "ranged_attack"
+MELEE_ATTACK = "melee_attack"
+HALF_RANGE_ATTACK = "half_range_attack"
+ATTACKER_LED_BY_CHARACTER = "attacker_led_by_character"
+TARGET_MODEL_CHARACTER = "target_model_character"
+STRENGTH_EXCEEDS_TOUGHNESS = "strength_exceeds_toughness"
+ANTI_INFANTRY_5 = "anti_infantry_5"
+DEFENDER_BELOW_STARTING_STRENGTH = "defender_below_starting_strength"
+DEFENDER_BELOW_HALF_STRENGTH = "defender_below_half_strength"
 
 # Positions a unit can be in that the calculator can't work out for itself,
 # so the user says (see app/combat_rules/positions.py); conditions read them
@@ -44,6 +52,8 @@ RANGED_ATTACK = "ranged_attack"
 IN_RANGE_OF_OBJECTIVE = "in_range_of_objective"
 REMAINED_STATIONARY = "remained_stationary"
 DEFENDER_IN_RANGE_OF_OBJECTIVE = "defender_in_range_of_objective"
+BELOW_STARTING_STRENGTH = "below_starting_strength"
+BELOW_HALF_STRENGTH = "below_half_strength"
 
 PRE_WEAPON = "pre_weapon"
 CHARGED = "charged"
@@ -54,8 +64,12 @@ RILED_UP = "Riled Up"
 
 
 def critical_hit(context: dict) -> bool:
-    # True when the roll just made was a hit roll, and it came up a natural 6.
-    return context.get("step") == "hit" and context.get("roll") == 6
+    # True when the roll just made was a hit roll, and it came up a natural 6
+    # (or 5+, for an attack that scores Critical Hits on a 5+ - see
+    # critical_hit_5 in effects.py).
+    return context.get("step") == "hit" and context.get("roll", 0) >= context.get(
+        "critical_hit_on", 6
+    )
 
 
 def critical_wound(context: dict) -> bool:
@@ -95,6 +109,15 @@ def anti_infantry_4(context: dict) -> bool:
     return (
         context.get("step") == "wound"
         and context.get("roll", 0) >= 4
+        and "INFANTRY" in context.get("defender_keywords", set())
+    )
+
+
+def anti_infantry_5(context: dict) -> bool:
+    # As anti_infantry_4, for a wound roll of 5+ (e.g. "Anti-Infantry 5+").
+    return (
+        context.get("step") == "wound"
+        and context.get("roll", 0) >= 5
         and "INFANTRY" in context.get("defender_keywords", set())
     )
 
@@ -271,6 +294,20 @@ def target_led_by_character(context: dict) -> bool:
 
 
 
+def attacker_led_by_character(context: dict) -> bool:
+    # As target_led_by_character, for the attacking unit - e.g. "while a
+    # CHARACTER model is leading this unit, add 1 to the Hit roll".
+    per_model = context.get("attacker_unit_model_keywords", [])
+    return any("CHARACTER" in keywords for keywords in per_model) and any(
+        "CHARACTER" not in keywords for keywords in per_model
+    )
+
+
+def target_model_character(context: dict) -> bool:
+    # A defending CHARACTER model (checked per model) - e.g. an enhancement's
+    # Feel No Pain for its bearer alone, rather than the unit it's leading.
+    return "CHARACTER" in context.get("target_model_keywords", set())
+
 
 def target_infantry(context: dict) -> bool:
     # True at every step when the defending unit contains an INFANTRY model -
@@ -283,6 +320,42 @@ def ranged_attack(context: dict) -> bool:
     # True at the pre-hit check of a ranged attack - e.g. Stealth's -1 to hit
     # for ranged attacks targeting the unit.
     return context.get("step") == "pre_hit" and context.get("is_ranged", False)
+
+
+def melee_attack(context: dict) -> bool:
+    # As ranged_attack, for a melee attack - e.g. "each time a melee attack
+    # targets this unit, subtract 1 from the Hit roll".
+    return context.get("step") == "pre_hit" and not context.get("is_ranged", True)
+
+
+def half_range_attack(context: dict) -> bool:
+    # True at the pre-hit check of an attack whose target is within half range
+    # - e.g. "each time a model makes an attack that targets a unit within half
+    # range, re-roll a Hit roll of 1". (within_half_range is the once-per-weapon
+    # check, for abilities that add attacks.)
+    return context.get("step") == "pre_hit" and context.get("half_range", False)
+
+
+def strength_exceeds_toughness(context: dict) -> bool:
+    # True at the wound step when the attack's Strength is greater than the
+    # Toughness of the model it's against - e.g. Unyielding Forms' -1 to wound.
+    return (
+        context.get("step") == "wound"
+        and context.get("strength", 0) > context.get("toughness", 0)
+    )
+
+
+def defender_below_starting_strength(context: dict) -> bool:
+    # True at every step while the defending unit is below its Starting
+    # Strength (ticked under the calculator's Positioning) - Below
+    # Half-strength counts too.
+    positions = context.get("defender_positions", set())
+    return BELOW_STARTING_STRENGTH in positions or BELOW_HALF_STRENGTH in positions
+
+
+def defender_below_half_strength(context: dict) -> bool:
+    # As defender_below_starting_strength, for Below Half-strength.
+    return BELOW_HALF_STRENGTH in context.get("defender_positions", set())
 
 
 CORE_CONDITIONS = {
@@ -315,6 +388,14 @@ CORE_CONDITIONS = {
     ANTI_FLY_2: anti_fly_2,
     RANGED_CRITICAL_HIT: ranged_critical_hit,
     STATIONARY_RANGED_CRITICAL_HIT: stationary_ranged_critical_hit,
+    MELEE_ATTACK: melee_attack,
+    HALF_RANGE_ATTACK: half_range_attack,
+    ATTACKER_LED_BY_CHARACTER: attacker_led_by_character,
+    TARGET_MODEL_CHARACTER: target_model_character,
+    STRENGTH_EXCEEDS_TOUGHNESS: strength_exceeds_toughness,
+    ANTI_INFANTRY_5: anti_infantry_5,
+    DEFENDER_BELOW_STARTING_STRENGTH: defender_below_starting_strength,
+    DEFENDER_BELOW_HALF_STRENGTH: defender_below_half_strength,
 }
 
 

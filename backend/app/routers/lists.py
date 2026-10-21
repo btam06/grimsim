@@ -45,6 +45,15 @@ async def _build_detachments(
         raise HTTPException(
             status_code=400, detail="detachment does not belong to the selected faction"
         )
+    # Detachments sharing a unique tag (e.g. two DYNASTY detachments) can't be
+    # taken together.
+    tags = [d.unique_tag for d in detachments if d.unique_tag]
+    clashing = sorted({tag for tag in tags if tags.count(tag) > 1})
+    if clashing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"only one {', '.join(clashing)} detachment can be taken",
+        )
     return detachments
 
 

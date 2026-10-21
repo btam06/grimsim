@@ -285,7 +285,8 @@ async def seed_units(session: AsyncSession) -> None:
 
 async def seed_detachments(session: AsyncSession) -> None:
     # Creates each faction's detachments (see load_detachments), and gives
-    # existing ones any of their dispositions they're missing (additive only).
+    # existing ones any of their dispositions they're missing, and their unique
+    # tag if they have none (additive only).
     # Must run after dispositions.seed, since dispositions are looked up by
     # name - an unknown name is an error, not skipped.
     faction_ids = await _faction_ids_by_name(session)
@@ -315,13 +316,16 @@ async def seed_detachments(session: AsyncSession) -> None:
 
             detachment = existing.get((faction_id, name))
             if detachment is None:
-                session.add(
-                    Detachment(
-                        name=name, faction_id=faction_id, dp=dp, dispositions=dispositions
-                    )
+                detachment = Detachment(
+                    name=name, faction_id=faction_id, dp=dp, dispositions=dispositions
                 )
+                detachment.unique_tag = entry.get("unique_tag")
+                session.add(detachment)
                 changed = True
                 continue
+            if entry.get("unique_tag") and not detachment.unique_tag:
+                detachment.unique_tag = entry["unique_tag"]
+                changed = True
             for disposition in dispositions:
                 if disposition not in detachment.dispositions:
                     detachment.dispositions.append(disposition)

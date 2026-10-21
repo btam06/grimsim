@@ -230,6 +230,12 @@ def resolve_combat(
         for unit_model in attacker.unit_models
         for keyword in enhancement_rules.model_keywords(attacker, unit_model)
     } | set(attacker_extra_keywords or ())
+    # ...and per attacking model, e.g. for "while a CHARACTER model is leading
+    # this unit".
+    attacker_unit_model_keywords = [
+        frozenset(enhancement_rules.model_keywords(attacker, unit_model))
+        for unit_model in attacker.unit_models
+    ]
 
     # Code-defined rules (e.g. an active Doctrina Imperative) from faction
     # abilities: the attacking unit's own "attacker" rules are in play like
@@ -326,6 +332,7 @@ def resolve_combat(
             "step": "unit_wide",
             "defender_keywords": defender_keywords,
             "attacker_keywords": attacker_keywords,
+            "attacker_unit_model_keywords": attacker_unit_model_keywords,
             "attacker_options": attacker_options,
             "defender_model_keywords": defender_model_keywords,
             "attacker_positions": attacker_positions,
@@ -511,8 +518,11 @@ def resolve_combat(
                 # Shared by every step's context for this weapon.
                 weapon_context = {
                     "is_ranged": is_ranged,
+                    # e.g. for "your unit's Tesla Sphere weapons".
+                    "weapon_name": weapon.name,
                     "defender_keywords": defender_keywords,
                     "attacker_keywords": attacker_keywords,
+                    "attacker_unit_model_keywords": attacker_unit_model_keywords,
                     "attacker_options": attacker_options,
                     "defender_model_keywords": defender_model_keywords,
                     "attacker_positions": attacker_positions,
@@ -664,7 +674,12 @@ def resolve_combat(
             # roll's threshold is set.
             _apply_triggered_effects(
                 abilities,
-                {"step": "pre_hit", "moved_less_than_3": moved_less_than_3, **weapon_context},
+                {
+                    "step": "pre_hit",
+                    "moved_less_than_3": moved_less_than_3,
+                    "half_range": half_range,
+                    **weapon_context,
+                },
                 attack,
                 spawned,
             )
@@ -672,7 +687,12 @@ def resolve_combat(
             # is capped at +1/-1 - so +2 and -1 is still +1. A ranged attack
             # against a target in cover counts as a -1, unless this attack (or
             # the whole unit) ignores cover.
-            hit_modifier = attack.get("plus_one_to_hit", 0) - attack.get("minus_one_to_hit", 0)
+            # An attack that ignores penalties to its Hit roll (e.g. Molecular
+            # Targeting) keeps only the bonuses.
+            ignore_penalties = attack.get("ignore_hit_penalties", False)
+            hit_modifier = attack.get("plus_one_to_hit", 0) - (
+                0 if ignore_penalties else attack.get("minus_one_to_hit", 0)
+            )
             # [HEAVY] is one +1, however many sources grant it.
             if attack.get("heavy"):
                 hit_modifier += 1
@@ -680,6 +700,7 @@ def resolve_combat(
                 (in_cover or attack.get("benefit_of_cover"))
                 and is_ranged
                 and not attack.get("ignore_cover")
+                and not ignore_penalties
             ):
                 hit_modifier -= 1
             hit_modifier = max(-1, min(1, hit_modifier))
@@ -694,17 +715,22 @@ def resolve_combat(
             if not is_ranged and attack.get("plus_one_skill_melee"):
                 effective_skill -= 1
 
+            # The unmodified roll that scores a Critical Hit: a 6, or lower for
+            # some attacks (e.g. Enslaved Artifice's 5+).
+            critical_hit_on = attack.get("critical_hit_on", 6)
+            hit_context = {"critical_hit_on": critical_hit_on, **weapon_context}
+
             def hits(roll: int) -> bool:
-                # An unmodified 6 always hits and a 1 always fails, whatever the
+                # A Critical Hit always hits and a 1 always fails, whatever the
                 # modifiers.
-                return roll != 1 and (roll == 6 or roll >= effective_skill)
+                return roll != 1 and (roll >= critical_hit_on or roll >= effective_skill)
 
             # Hit roll: succeeds (hits) on a roll equal to or greater than skill.
             hit_roll = random.randint(1, 6)
             result.attack_rolls.append(hit_roll)
             weapon_result.attack_rolls.append(hit_roll)
             _apply_triggered_effects(
-                abilities, {"step": "hit", "roll": hit_roll, **weapon_context}, attack, spawned
+                abilities, {"step": "hit", "roll": hit_roll, **hit_context}, attack, spawned
             )
             if not hits(hit_roll) and (
                 attack.get("reroll_failed_hits")
@@ -718,7 +744,7 @@ def resolve_combat(
                 result.attack_rerolls.append(hit_roll)
                 weapon_result.attack_rerolls.append(hit_roll)
                 _apply_triggered_effects(
-                    abilities, {"step": "hit", "roll": hit_roll, **weapon_context}, attack, spawned
+                    abilities, {"step": "hit", "roll": hit_roll, **hit_context}, attack, spawned
                 )
             queue.extend((extra, fired) for extra in spawned)
             if hits(hit_roll):
@@ -735,8 +761,16 @@ def resolve_combat(
             abilities = fired["abilities"]
             weapon_context = fired["context"]
             weapon_result = fired["result"]
-            strength = weapon.strength + (1 if attack.get("plus_one_strength") else 0)
-            threshold = wound_threshold(strength, target_for(fired).toughness)
+            strength = (
+                weapon.strength
+                + (1 if attack.get("plus_one_strength") else 0)
+                + (2 if attack.get("plus_two_strength") else 0)
+            )
+            toughness = target_for(fired).toughness
+            threshold = wound_threshold(strength, toughness)
+            # The wound step's checks can compare the two (e.g. "if the
+            # Strength of that attack is greater than the Toughness").
+            wound_context = {"strength": strength, "toughness": toughness, **weapon_context}
 
             if attack.get("auto_pass_wound"):
                 wound_passed = True
@@ -761,7 +795,7 @@ def resolve_combat(
                         weapon_result.wound_rolls.append(wound_roll)
                     _apply_triggered_effects(
                         abilities,
-                        {"step": "wound", "roll": wound_roll, **weapon_context},
+                        {"step": "wound", "roll": wound_roll, **wound_context},
                         attack,
                         deque(),
                     )
@@ -775,7 +809,7 @@ def resolve_combat(
                         # Wounds), same as an actual natural 6 would.
                         _apply_triggered_effects(
                             abilities,
-                            {"step": "wound", "roll": 6, **weapon_context},
+                            {"step": "wound", "roll": 6, **wound_context},
                             attack,
                             deque(),
                         )
@@ -784,9 +818,16 @@ def resolve_combat(
                         # An unmodified 6 always wounds and a 1 always fails,
                         # whatever the modifiers. A +1 and a -1 to wound
                         # cancel out.
+                        # (An attack that ignores penalties to its Wound roll,
+                        # e.g. Molecular Targeting, ignores a -1.)
                         needed = (
                             threshold
-                            + (1 if attack.get("minus_one_to_wound") else 0)
+                            + (
+                                1
+                                if attack.get("minus_one_to_wound")
+                                and not attack.get("ignore_wound_penalties")
+                                else 0
+                            )
                             - (1 if attack.get("plus_one_to_wound") else 0)
                         )
                         wound_passed = wound_roll != 1 and (
@@ -858,6 +899,9 @@ def resolve_combat(
                 + fired["damage_bonus"]
                 + (1 if attack.get("plus_one_damage") else 0)
             )
+            # e.g. Nanoassembly Protocols: -1 Damage, to a minimum of 1.
+            if attack.get("minus_one_damage"):
+                damage = max(1, damage - 1)
 
             # Apply damage a single point at a time, each rolling feel no pain
             # separately, against the one model this attack is allocated to. If

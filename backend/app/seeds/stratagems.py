@@ -28,6 +28,22 @@ from app.seeds import data_files
 # be entered on the Stratagems tab instead.
 
 
+def rules(stratagem_name: str) -> list:
+    # Code-defined rules for a stratagem (see e.g.
+    # app/seeds/factions/necrons/stratagem_rules.py), across every faction's
+    # stratagem_rules.py. Read at call time, since the factions package imports
+    # the combat rules those files use.
+    from app.seeds.factions import FACTIONS
+
+    return [
+        rule
+        for faction in FACTIONS
+        for rule in getattr(getattr(faction, "stratagem_rules", None), "RULES", {}).get(
+            stratagem_name, []
+        )
+    ]
+
+
 def load(path: Path | None = None) -> list[dict]:
     path = path or data_files.data_dir() / "stratagems.json"
     if not path.exists():

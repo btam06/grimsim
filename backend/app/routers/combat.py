@@ -29,6 +29,7 @@ from app.models import (
 from app.schemas import CombatIn, CombatOut, PositionOut, StratagemOut, WeaponCombatResultOut
 from app.seeds import datasheet_abilities as datasheet_ability_seeds
 from app.seeds import factions as faction_seeds
+from app.seeds import stratagems as stratagem_seeds
 from app.routers.stratagems import _to_out as stratagem_to_out
 from app.services import combat as combat_service
 from app.services import detachment_rules as detachment_rule_service
@@ -209,7 +210,27 @@ def _datasheet_rules(unit: Unit, detachment_rules: list[DetachmentRule]) -> list
         ability.name
         for ability in detachment_rule_service.granted_datasheet_abilities(detachment_rules, unit)
     }
-    return [rule for name in names for rule in datasheet_ability_seeds.RULES.get(name, [])]
+    return [
+        rule for name in names for rule in datasheet_ability_seeds.RULES.get(name, [])
+    ] + _army_rules(unit)
+
+
+def _army_rules(unit: Unit) -> list[Rule]:
+    # Rules the other units of the same faction in the unit's army list give it
+    # through their datasheet abilities (see ARMY_RULES in
+    # app/seeds/datasheet_abilities.py - e.g. Prophet of Destruction), once per
+    # ability.
+    if unit.army_list is None:
+        return []
+    names = {
+        ability.name
+        for other in unit.army_list.units
+        if other.id != unit.id
+        and other.faction_unit.faction_id == unit.faction_unit.faction_id
+        for unit_model in other.unit_models
+        for ability in unit_model.model.abilities
+    }
+    return [rule for name in names for rule in datasheet_ability_seeds.ARMY_RULES.get(name, [])]
 
 
 async def _detachment_rules(session: AsyncSession, unit: Unit) -> list[DetachmentRule]:
@@ -293,21 +314,38 @@ async def available_stratagems(
     ]
 
 
-def _possible_rules(unit: Unit) -> list[Rule]:
+def _stratagem_rules(stratagems: list[Stratagem], side: str) -> list[Rule]:
+    # The code-defined rules of the stratagems used on one side's unit (e.g. a
+    # Necrons stratagem's "if a CHARACTER is leading your unit" tier) that
+    # apply to that side.
+    return [
+        rule
+        for stratagem in stratagems
+        for rule in stratagem_seeds.rules(stratagem.name)
+        if rule.side == side
+    ]
+
+
+def _possible_rules(unit: Unit, detachment_rules: list[DetachmentRule]) -> list[Rule]:
     # Every code-defined rule the unit could have in play: its datasheet
-    # abilities' rules, and all the options of its faction and datasheet
-    # abilities (whichever is picked) - plus its datasheet abilities' own
-    # conditions, as attacker rules.
+    # abilities' rules (including those its enhancements and detachment rules
+    # grant), and all the options of its faction and datasheet abilities
+    # (whichever is picked) - plus those datasheet abilities' own conditions,
+    # as attacker rules.
     all_options = list(faction_seeds.OPTION_OWNERS) + [
         name for options in datasheet_ability_seeds.OPTIONS.values() for name in options
     ]
     _, option_rules, _ = _active_options(unit, all_options)
+    abilities = (
+        [ability for unit_model in unit.unit_models for ability in unit_model.model.abilities]
+        + enhancement_rules.granted_datasheet_abilities(unit)
+        + detachment_rule_service.granted_datasheet_abilities(detachment_rules, unit)
+    )
     ability_rules = [
         Rule(conditions=tuple(c.keyword for c in ability.conditions), effects=())
-        for unit_model in unit.unit_models
-        for ability in unit_model.model.abilities
+        for ability in abilities
     ]
-    return option_rules + _datasheet_rules(unit, []) + ability_rules
+    return option_rules + _datasheet_rules(unit, detachment_rules) + ability_rules
 
 
 @router.get("/positions", response_model=list[PositionOut])
@@ -325,7 +363,7 @@ async def relevant_positions(
         raise HTTPException(status_code=400, detail="invalid unit_id")
     conditions = {
         condition
-        for rule in _possible_rules(unit)
+        for rule in _possible_rules(unit, await _detachment_rules(session, unit))
         if rule.side == side
         for condition in rule.conditions
     }
@@ -411,9 +449,11 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
         defender_stratagems=defender_stratagems,
         apply_precision=payload.apply_precision,
         attacker_rules=attacker_option_rules
-        + _datasheet_rules(attacker, attacker_detachment_rules),
+        + _datasheet_rules(attacker, attacker_detachment_rules)
+        + _stratagem_rules(stratagems, "attacker"),
         defender_rules=defender_option_rules
-        + _datasheet_rules(defender, defender_detachment_rules),
+        + _datasheet_rules(defender, defender_detachment_rules)
+        + _stratagem_rules(defender_stratagems, "defender"),
         attacker_options=attacker_options,
         attacker_extra_keywords=attacker_extra_keywords,
         defender_extra_keywords=defender_extra_keywords,

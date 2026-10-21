@@ -7,6 +7,7 @@ from app.combat_rules.conditions import (
     ANTI_INFANTRY_2,
     ANTI_INFANTRY_3,
     ANTI_INFANTRY_4,
+    ANTI_INFANTRY_5,
     ANTI_MONSTER_4,
     ANTI_VEHICLE_2,
     ANTI_VEHICLE_3,
@@ -99,6 +100,12 @@ ENTRIES = [
         "Anti-Infantry 4+",
         "Against a defending unit that contains an INFANTRY model, a wound roll of 4+ is a critical wound.",
         [ANTI_INFANTRY_4],
+        [FORCE_CRITICAL_WOUND],
+    ),
+    (
+        "Anti-Infantry 5+",
+        "Against a defending unit that contains an INFANTRY model, a wound roll of 5+ is a critical wound.",
+        [ANTI_INFANTRY_5],
         [FORCE_CRITICAL_WOUND],
     ),
     (

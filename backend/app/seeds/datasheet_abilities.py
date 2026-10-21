@@ -57,6 +57,23 @@ CORE_ENTRIES = [
         [],
         [],
     ),
+    (
+        "Fights First",
+        "Units with this ability that are eligible to fight do so in the Fights First step, "
+        "provided every model in the unit has this ability.",
+        [],
+        [],
+    ),
+    (
+        "Deep Strike",
+        "During the Declare Battle Formations step, if every model in this unit has this "
+        "ability, you can set it up in Reserves instead of setting it up on the battlefield. "
+        "If you do, in the Reinforcements step of one of your Movement phases you can set up "
+        "this unit anywhere on the battlefield that is more than 9\" horizontally away from "
+        "all enemy models.",
+        [],
+        [],
+    ),
 ]
 
 # How the calculator handles core abilities where that isn't obvious from
@@ -67,6 +84,8 @@ CORE_CALCULATOR_NOTES = {
     "Deadly Demise 1": "Only whether it explodes is resolved, not the mortal wound.",
     "Deadly Demise D6": "Only whether it explodes is resolved, not the D6 mortal wounds.",
     "Infiltrators": "Descriptive only: a deployment rule.",
+    "Deep Strike": "Descriptive only: a deployment rule.",
+    "Fights First": "Descriptive only: fight order isn't modelled.",
 }
 
 # Code-defined rules for core abilities, by name - for rules the
@@ -95,7 +114,7 @@ def calculator_notes(name: str) -> list[str]:
     # and its rules' descriptions.
     combined = _combine()
     note = combined["CALCULATOR_NOTES"].get(name)
-    rules = combined["RULES"].get(name, [])
+    rules = combined["RULES"].get(name, []) + combined["ARMY_RULES"].get(name, [])
     return ([note] if note else []) + [rule.description for rule in rules if rule.description]
 
 
@@ -146,7 +165,7 @@ CORE_OPTIONS: dict = {}
 # rather than at import, since faction files import this one (e.g. for
 # CORE_RULES["Stealth"]).
 
-COMBINED = ("ENTRIES", "CALCULATOR_NOTES", "RULES", "OPTIONS", "OPTION_OWNERS")
+COMBINED = ("ENTRIES", "CALCULATOR_NOTES", "RULES", "ARMY_RULES", "OPTIONS", "OPTION_OWNERS")
 _combined: dict | None = None
 
 
@@ -161,6 +180,7 @@ def _combine() -> dict:
                 "CALCULATOR_NOTES": CORE_CALCULATOR_NOTES,
                 "RULES": CORE_RULES,
                 "OPTIONS": CORE_OPTIONS,
+                "ARMY_RULES": {},
             }
         ] + [
             {
@@ -170,6 +190,7 @@ def _combine() -> dict:
                     ("CALCULATOR_NOTES", {}),
                     ("RULES", {}),
                     ("OPTIONS", {}),
+                    ("ARMY_RULES", {}),
                 )
             }
             for faction in FACTIONS
@@ -188,6 +209,9 @@ def _combine() -> dict:
             },
             "RULES": {k: v for source in sources for k, v in source["RULES"].items()},
             "OPTIONS": options,
+            # Rules an ability gives the *other* units of its faction in the
+            # same army list (e.g. Prophet of Destruction), by ability name.
+            "ARMY_RULES": {k: v for source in sources for k, v in source["ARMY_RULES"].items()},
             # {option name: ability name}. Option names are unique across every
             # ability (and every faction ability's options).
             "OPTION_OWNERS": {

@@ -61,6 +61,11 @@ ADD_TWO_EXTRA_HITS = "add_two_extra_hits"
 BENEFIT_OF_COVER = "benefit_of_cover"
 HEAVY = "heavy"
 MELTA_3 = "melta_3"
+CRITICAL_HIT_5 = "critical_hit_5"
+MINUS_ONE_DAMAGE = "minus_one_damage"
+PLUS_TWO_STRENGTH = "plus_two_strength"
+IGNORE_HIT_PENALTIES = "ignore_hit_penalties"
+IGNORE_WOUND_PENALTIES = "ignore_wound_penalties"
 
 
 def auto_pass_wound(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
@@ -345,6 +350,34 @@ def add_d6_plus_3_attacks(state: dict[str, Any], pending: deque[dict[str, Any]])
         pending.append({"auto_hit": False})
 
 
+def critical_hit_5(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # An unmodified Hit roll of 5+ scores a Critical Hit for this attack (so it
+    # always hits, and Sustained/Lethal Hits trigger on it).
+    state["critical_hit_on"] = min(state.get("critical_hit_on", 6), 5)
+
+
+def minus_one_damage(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # Subtract 1 from this attack's Damage (to a minimum of 1) - e.g. a
+    # defensive rule on the model it's allocated to.
+    state["minus_one_damage"] = True
+
+
+def plus_two_strength(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # Add 2 to the weapon's Strength for this attack.
+    state["plus_two_strength"] = True
+
+
+def ignore_hit_penalties(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # This attack ignores modifiers that make its Hit roll worse (e.g. -1 to
+    # hit, or the target being in cover); bonuses still count.
+    state["ignore_hit_penalties"] = True
+
+
+def ignore_wound_penalties(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # As ignore_hit_penalties, for the Wound roll (e.g. -1 to wound).
+    state["ignore_wound_penalties"] = True
+
+
 EFFECTS = {
     AUTO_PASS_WOUND: auto_pass_wound,
     ADD_EXTRA_HIT: add_extra_hit,
@@ -392,6 +425,11 @@ EFFECTS = {
     BENEFIT_OF_COVER: benefit_of_cover,
     HEAVY: heavy,
     MELTA_3: melta_3,
+    CRITICAL_HIT_5: critical_hit_5,
+    MINUS_ONE_DAMAGE: minus_one_damage,
+    PLUS_TWO_STRENGTH: plus_two_strength,
+    IGNORE_HIT_PENALTIES: ignore_hit_penalties,
+    IGNORE_WOUND_PENALTIES: ignore_wound_penalties,
 }
 
 
