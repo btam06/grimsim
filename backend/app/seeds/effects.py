@@ -2,6 +2,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.combat_rules.effects import (
+    ADD_D6_PLUS_3_ATTACKS,
     ADD_EXTRA_ATTACK,
     ADD_EXTRA_HIT,
     ADD_SIX_ATTACKS,
@@ -25,7 +26,9 @@ from app.combat_rules.effects import (
     IMPROVE_AP,
     INVULNERABLE_4,
     INVULNERABLE_5,
+    MELTA_2,
     MELTA_3,
+    MELTA_6,
     MINUS_ONE_TO_HIT,
     MINUS_ONE_TO_WOUND,
     NO_SAVE,
@@ -34,9 +37,9 @@ from app.combat_rules.effects import (
     PLUS_ONE_SKILL_MELEE,
     PLUS_ONE_SKILL_RANGED,
     PLUS_ONE_STRENGTH,
+    PLUS_ONE_TOUGHNESS,
     PLUS_ONE_TO_HIT,
     PLUS_ONE_TO_WOUND,
-    PLUS_ONE_TOUGHNESS,
     PRECISION,
     RANGED_SKILL_3,
     REROLL_FAILED_HITS,
@@ -51,6 +54,11 @@ from app.models import Effect
 # (keyword, name, description) - keyword must match a function registered in
 # app/combat_rules/effects.py.
 ENTRIES = [
+    (
+        ADD_D6_PLUS_3_ATTACKS,
+        "Add D6+3 Attacks",
+        "Adds D6+3 additional attacks to this weapon, each with its own hit roll.",
+    ),
     (
         ADD_EXTRA_ATTACK,
         "Add Extra Attack",
@@ -167,9 +175,19 @@ ENTRIES = [
         "The targeted model has a 5+ invulnerable save against this attack (a better one is kept).",
     ),
     (
+        MELTA_2,
+        "Melta 2",
+        "Each attack this weapon makes inflicts 2 extra damage.",
+    ),
+    (
         MELTA_3,
         "Melta 3",
         "Each attack this weapon makes inflicts 3 extra damage.",
+    ),
+    (
+        MELTA_6,
+        "Melta 6",
+        "Each attack this weapon makes inflicts 6 extra damage.",
     ),
     (
         MINUS_ONE_TO_HIT,
@@ -212,6 +230,11 @@ ENTRIES = [
         "Add 1 to the weapon's Strength for this attack.",
     ),
     (
+        PLUS_ONE_TOUGHNESS,
+        "+1 Toughness",
+        "Add 1 to the Toughness of the defending model it applies to.",
+    ),
+    (
         PLUS_ONE_TO_HIT,
         "+1 to Hit",
         "This attack's hit roll needs 1 less to succeed.",
@@ -252,19 +275,14 @@ ENTRIES = [
         "A Wound roll of 1 for this attack can be re-rolled.",
     ),
     (
-        WORSEN_AP,
-        "Worsen AP by 1",
-        "This attack's Armour Penetration is worsened by 1 (AP0 stays AP0).",
-    ),
-    (
-        PLUS_ONE_TOUGHNESS,
-        "+1 Toughness",
-        "Add 1 to the Toughness of the defending model it applies to.",
-    ),
-    (
         TORRENT,
         "Torrent",
         "Every attack this weapon makes hits automatically.",
+    ),
+    (
+        WORSEN_AP,
+        "Worsen AP by 1",
+        "This attack's Armour Penetration is worsened by 1 (AP0 stays AP0).",
     ),
 ]
 

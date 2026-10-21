@@ -5557,3 +5557,98 @@ def test_robotic_bodyguard_gives_the_datasmith_fnp_4(monkeypatch):
     assert (on_datasmith.total_damage, on_datasmith.fnp_rolls) == (0, [4])
     on_kastelan = _shoot_kastelan_unit(monkeypatch, [6, 6, 1, 4], bodyguard)
     assert (on_kastelan.total_damage, on_kastelan.fnp_rolls) == (1, [])
+
+
+# --- Imperial Knights: Knight Crusader ---
+
+
+def _seeded_weapon_ability(name):
+    entry = next(e for e in weapon_ability_seeds.ENTRIES if e[0] == name)
+    return _ability([_condition(c) for c in entry[2]], [_effect(e) for e in entry[3]])
+
+
+@pytest.mark.parametrize("weapon_type,saved", [("ranged", True), ("melee", False)])
+def test_ranged_only_invulnerable_save(monkeypatch, weapon_type, saved):
+    # AP-4 vs a 3+ save needs a 7; a 5+ invulnerable (ranged only) saves a 5.
+    rolls = iter([6, 6, 5])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(
+        attacks="1",
+        skill=3,
+        strength=10,
+        ap=-4,
+        weapon_type=weapon_type,
+        range=None if weapon_type == "melee" else 24,
+    )
+    knight = _model(toughness=1, wounds=10, save=3, invulnerable=5)
+    knight.invulnerable_ranged_only = True
+    result = _fire(weapon, [knight], in_engagement_range=weapon_type == "melee")
+    assert result.total_damage == (0 if saved else 1)
+
+
+@pytest.mark.parametrize("ability,bonus", [("Melta 2", 2), ("Melta 6", 6)])
+def test_melta_2_and_6(monkeypatch, ability, bonus):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, damage="1", weapon_type="ranged")
+    weapon.abilities = [_seeded_weapon_ability(ability)]
+    target = [_model(toughness=1, wounds=20, save=7)]
+    assert _fire(weapon, target, half_range=True).total_damage == 1 + bonus
+    assert _fire(weapon, target).total_damage == 1
+
+
+def test_rapid_fire_d6_plus_3(monkeypatch):
+    # Every roll a 2: the D6+3 extra attacks come to 5.
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 2)
+    weapon = _weapon(attacks="1", skill=3, weapon_type="ranged")
+    weapon.abilities = [_seeded_weapon_ability("Rapid Fire D6+3")]
+    target = [_model(toughness=1, wounds=20, save=7)]
+    assert len(_fire(weapon, target, half_range=True).attack_rolls) == 6
+    assert len(_fire(weapon, target).attack_rolls) == 1
+
+
+@pytest.mark.parametrize("keyword,wounded", [("FLY", True), ("INFANTRY", False)])
+def test_anti_fly_2(monkeypatch, keyword, wounded):
+    # S1 vs T10 needs a 6 to wound - unless Anti-Fly 2+ makes a 2 critical.
+    rolls = iter([6, 2, 1])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=1, ap=-10, weapon_type="ranged")
+    weapon.abilities = [_seeded_weapon_ability("Anti-Fly 2+")]
+    target = [_model(toughness=10, wounds=10, save=7, keywords=[_keyword(keyword)])]
+    assert _fire(weapon, target).total_damage == (1 if wounded else 0)
+
+
+@pytest.mark.parametrize("weapon_type,extra_hits", [("ranged", 1), ("melee", 0)])
+def test_punishing_salvoes_gives_ranged_weapons_sustained_hits(
+    monkeypatch, weapon_type, extra_hits
+):
+    from app.seeds.factions.imperial_knights import datasheet_abilities as knights
+
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    option = knights.OPTIONS["Punishing Salvoes"]["Remained Stationary"]
+    weapon = _weapon(
+        attacks="1",
+        skill=3,
+        strength=10,
+        ap=-10,
+        weapon_type=weapon_type,
+        range=None if weapon_type == "melee" else 24,
+    )
+    result = _fire(
+        weapon,
+        [_model(toughness=1, wounds=20, save=7)],
+        in_engagement_range=weapon_type == "melee",
+        attacker_rules=list(option.rules),
+    )
+    assert len(result.wound_rolls) == 1 + extra_hits
+
+
+def test_crusaders_duty_gives_plus_one_to_hit_on_ranged_attacks(monkeypatch):
+    from app.seeds.factions.imperial_knights import datasheet_abilities as knights
+
+    option = knights.OPTIONS["Crusader's Duty (Bondsman)"]["Crusader's Duty"]
+    rolls = iter([2, 6, 1])  # a 2 misses at BS3, hits at +1
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, weapon_type="ranged")
+    target = [_model(toughness=1, wounds=10, save=7)]
+    assert _fire(weapon, target, attacker_rules=list(option.rules)).total_damage == 1
+    assert option.army_wide

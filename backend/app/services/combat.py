@@ -100,6 +100,8 @@ class _Target:
     remaining_wounds : int
     # Feel No Pain against mortal wounds only (see feel_no_pain_mortal).
     feel_no_pain_mortal: int | None = None
+    # Its invulnerable save is against ranged attacks only.
+    invulnerable_ranged_only: bool = False
     is_leader        : bool = False
     is_support       : bool = False
     # Rolls to explode when destroyed (a datasheet ability with the
@@ -370,6 +372,7 @@ def resolve_combat(
                 default=None,
             ),
             feel_no_pain_mortal=unit_model.model.feel_no_pain_mortal,
+            invulnerable_ranged_only=unit_model.model.invulnerable_ranged_only,
             remaining_wounds=unit_model.model.wounds,
             is_leader=bool(unit_model.model.is_leader),
             is_support=bool(unit_model.model.is_support),
@@ -823,7 +826,11 @@ def resolve_combat(
                 if attack.get("worsen_ap"):
                     ap = min(0, ap + 1)
                 save_needed = target.save - ap
-                if target.invulnerable is not None:
+                # (A ranged-only invulnerable save, e.g. an ion shield, doesn't
+                # help against melee attacks.)
+                if target.invulnerable is not None and (
+                    fired["is_ranged"] or not target.invulnerable_ranged_only
+                ):
                     save_needed = min(save_needed, target.invulnerable)
                 # An invulnerable save granted by a rule (e.g. Waaagh!'s 5+ while
                 # riled up) - also unaffected by AP.

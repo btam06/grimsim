@@ -48,6 +48,7 @@ class ModelSpec:
     is_support: bool = False
     is_leader: bool = False
     feel_no_pain_mortal: int | None = None  # Feel No Pain vs mortal wounds only
+    invulnerable_ranged_only: bool = False  # the invulnerable save is vs ranged only
     base_size: str | None = None  # a BaseSize name, e.g. "32mm" or "105 x 70mm"
     keywords: tuple[str, ...] = ()  # Keyword names
     faction_abilities: tuple[str, ...] = ()  # FactionAbility names in this faction

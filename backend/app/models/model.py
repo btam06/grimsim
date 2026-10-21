@@ -62,6 +62,22 @@ class Model(Base):
         cascade="all, delete-orphan", uselist=False, lazy="selectin"
     )
 
+    ranged_only_invulnerable_link: Mapped["ModelRangedOnlyInvulnerable | None"] = relationship(
+        cascade="all, delete-orphan", uselist=False, lazy="selectin"
+    )
+
+    @property
+    def invulnerable_ranged_only(self) -> bool:
+        # Its invulnerable save only applies against ranged attacks (e.g. an
+        # Imperial Knight's ion shield).
+        return self.ranged_only_invulnerable_link is not None
+
+    @invulnerable_ranged_only.setter
+    def invulnerable_ranged_only(self, ranged_only: bool) -> None:
+        self.ranged_only_invulnerable_link = (
+            ModelRangedOnlyInvulnerable() if ranged_only else None
+        )
+
     @property
     def feel_no_pain_mortal(self) -> int | None:
         # A Feel No Pain that only applies against mortal wounds (e.g. 5+),
@@ -85,3 +101,12 @@ class ModelMortalFeelNoPain(Base):
 
     model_id: Mapped[int] = mapped_column(ForeignKey("models.id"), primary_key=True)
     value: Mapped[int] = mapped_column(Integer)
+
+
+class ModelRangedOnlyInvulnerable(Base):
+    # Marks a model's invulnerable save as against ranged attacks only. Its own
+    # table rather than a column on models, so existing databases pick it up
+    # without a migration.
+    __tablename__ = "model_ranged_only_invulnerable"
+
+    model_id: Mapped[int] = mapped_column(ForeignKey("models.id"), primary_key=True)

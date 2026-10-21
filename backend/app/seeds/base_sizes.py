@@ -25,6 +25,7 @@ NAMES = [
     "120 x 92mm",
     "150 x 95mm",
     "170 x 105mm",
+    "170 x 109mm",
     "Small flying base",
     "Large flying base",
     "Use model",

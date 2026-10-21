@@ -31,6 +31,13 @@ CORE_ENTRIES = [
         [DEADLY_DEMISE],
     ),
     (
+        "Deadly Demise D6",
+        "When this model is destroyed, roll one D6. On a 6, each unit within 6\" of it "
+        "suffers D6 mortal wounds.",
+        [ALWAYS],
+        [DEADLY_DEMISE],
+    ),
+    (
         "Deadly Demise 1",
         "When this model is destroyed, roll one D6. On a 6, each unit within 6\" of it "
         "suffers 1 mortal wound.",
@@ -58,6 +65,7 @@ CORE_ENTRIES = [
 CORE_CALCULATOR_NOTES = {
     "Deadly Demise D3": "Only whether it explodes is resolved, not the D3 mortal wounds.",
     "Deadly Demise 1": "Only whether it explodes is resolved, not the mortal wound.",
+    "Deadly Demise D6": "Only whether it explodes is resolved, not the D6 mortal wounds.",
     "Infiltrators": "Descriptive only: a deployment rule.",
 }
 

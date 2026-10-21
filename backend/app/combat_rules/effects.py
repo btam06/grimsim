@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from collections import deque
 from typing import Any
 
@@ -49,6 +50,9 @@ WORSEN_AP = "worsen_ap"
 FEEL_NO_PAIN_6 = "feel_no_pain_6"
 FEEL_NO_PAIN_MORTAL_5 = "feel_no_pain_mortal_5"
 TORRENT = "torrent"
+MELTA_2 = "melta_2"
+MELTA_6 = "melta_6"
+ADD_D6_PLUS_3_ATTACKS = "add_d6_plus_3_attacks"
 PLUS_ONE_TOUGHNESS = "plus_one_toughness"
 BLAST = "blast"
 REROLL_FAILED_WOUNDS = "reroll_failed_wounds"
@@ -324,6 +328,23 @@ def melta_3(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
     state["melta"] = max(state.get("melta", 0), 3)
 
 
+def melta_2(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # As melta_3, but 2 extra damage (Melta 2).
+    state["melta"] = max(state.get("melta", 0), 2)
+
+
+def melta_6(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # As melta_3, but 6 extra damage (Melta 6).
+    state["melta"] = max(state.get("melta", 0), 6)
+
+
+def add_d6_plus_3_attacks(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # Queues D6+3 additional attacks for this weapon, each with its own hit
+    # roll (e.g. Rapid Fire D6+3 within half range).
+    for _ in range(random.randint(1, 6) + 3):
+        pending.append({"auto_hit": False})
+
+
 EFFECTS = {
     AUTO_PASS_WOUND: auto_pass_wound,
     ADD_EXTRA_HIT: add_extra_hit,
@@ -360,6 +381,9 @@ EFFECTS = {
     FEEL_NO_PAIN_6: feel_no_pain_6,
     FEEL_NO_PAIN_MORTAL_5: feel_no_pain_mortal_5,
     TORRENT: torrent,
+    MELTA_2: melta_2,
+    MELTA_6: melta_6,
+    ADD_D6_PLUS_3_ATTACKS: add_d6_plus_3_attacks,
     PLUS_ONE_TOUGHNESS: plus_one_toughness,
     BLAST: blast,
     REROLL_FAILED_WOUNDS: reroll_failed_wounds,

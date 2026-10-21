@@ -90,7 +90,9 @@ function UnitDatasheet({ unit, data }) {
               </table>
               <p>
                 {[
-                  model.invulnerable && `Invulnerable save ${model.invulnerable}+`,
+                  model.invulnerable &&
+                    `Invulnerable save ${model.invulnerable}+` +
+                      (model.invulnerable_ranged_only ? ' (ranged attacks only)' : ''),
                   model.feel_no_pain && `Feel No Pain ${model.feel_no_pain}+`,
                   model.feel_no_pain_mortal &&
                     `Feel No Pain ${model.feel_no_pain_mortal}+ vs mortal wounds`,

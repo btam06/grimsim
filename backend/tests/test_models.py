@@ -411,3 +411,15 @@ async def test_model_feel_no_pain_against_mortal_wounds(client: AsyncClient, fac
     assert listed["feel_no_pain_mortal"] == 5
     cleared = await client.put(f"/models/{model['id']}", json=_model_payload(faction_id))
     assert cleared.json()["feel_no_pain_mortal"] is None
+
+
+async def test_model_invulnerable_against_ranged_attacks_only(
+    client: AsyncClient, faction_id: int
+):
+    payload = _model_payload(faction_id, invulnerable=5, invulnerable_ranged_only=True)
+    model = (await client.post("/models", json=payload)).json()
+    assert model["invulnerable_ranged_only"] is True
+    cleared = await client.put(
+        f"/models/{model['id']}", json=_model_payload(faction_id, invulnerable=5)
+    )
+    assert cleared.json()["invulnerable_ranged_only"] is False

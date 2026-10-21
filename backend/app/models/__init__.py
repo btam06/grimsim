@@ -52,7 +52,7 @@ from app.models.faction_unit import FactionUnit
 from app.models.game import Game, GamePlayer, GameScore, GameSecondary, GameStratagemUse
 from app.models.keyword import Keyword
 from app.models.mission import PrimaryMission, SecondaryMission
-from app.models.model import Model, ModelMortalFeelNoPain
+from app.models.model import Model, ModelMortalFeelNoPain, ModelRangedOnlyInvulnerable
 from app.models.stratagem import (
     Stratagem,
     StratagemCombatSide,
@@ -79,6 +79,7 @@ __all__ = [
     "WargearScope",
     "Model",
     "ModelMortalFeelNoPain",
+    "ModelRangedOnlyInvulnerable",
     "BaseSize",
     "Keyword",
     "DatasheetAbility",

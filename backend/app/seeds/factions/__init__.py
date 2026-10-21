@@ -646,6 +646,9 @@ async def seed_datasheets(session: AsyncSession) -> None:
             for spec in datasheet.models:
                 model = existing.get((faction_id, spec.name))
                 if model is not None:
+                    if spec.invulnerable_ranged_only and not model.invulnerable_ranged_only:
+                        model.invulnerable_ranged_only = True
+                        changed = True
                     if spec.feel_no_pain_mortal and not model.feel_no_pain_mortal:
                         model.feel_no_pain_mortal = spec.feel_no_pain_mortal
                         changed = True
@@ -723,6 +726,7 @@ async def seed_datasheets(session: AsyncSession) -> None:
                         is_support=spec.is_support,
                         is_leader=spec.is_leader,
                         feel_no_pain_mortal=spec.feel_no_pain_mortal,
+                        invulnerable_ranged_only=spec.invulnerable_ranged_only,
                         base_size=(
                             lookup(base_sizes, spec.base_size, "base size", datasheet.name)
                             if spec.base_size

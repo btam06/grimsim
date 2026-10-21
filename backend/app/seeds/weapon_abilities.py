@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.combat_rules.conditions import (
     ALWAYS,
+    ANTI_FLY_2,
     ANTI_INFANTRY_2,
     ANTI_INFANTRY_3,
     ANTI_INFANTRY_4,
@@ -23,6 +24,7 @@ from app.combat_rules.conditions import (
     WITHIN_HALF_RANGE,
 )
 from app.combat_rules.effects import (
+    ADD_D6_PLUS_3_ATTACKS,
     ADD_EXTRA_ATTACK,
     ADD_EXTRA_HIT,
     ADD_SIX_ATTACKS,
@@ -38,7 +40,9 @@ from app.combat_rules.effects import (
     HEAVY,
     IGNORE_COVER,
     IMPROVE_AP,
+    MELTA_2,
     MELTA_3,
+    MELTA_6,
     NO_SAVE,
     PISTOL,
     PLUS_ONE_DAMAGE,
@@ -72,6 +76,12 @@ ENTRIES = [
         "Add 2 to this weapon's Attacks characteristic.",
         [PRE_WEAPON],
         [ADD_TWO_ATTACKS],
+    ),
+    (
+        "Anti-Fly 2+",
+        "Against a defending unit that contains a FLY model, a wound roll of 2+ is a critical wound.",
+        [ANTI_FLY_2],
+        [FORCE_CRITICAL_WOUND],
     ),
     (
         "Anti-Infantry 2+",
@@ -221,10 +231,22 @@ ENTRIES = [
         [AUTO_PASS_WOUND],
     ),
     (
+        "Melta 2",
+        "When the target is within half range, each attack made with this weapon inflicts 2 extra damage.",
+        [WITHIN_HALF_RANGE],
+        [MELTA_2],
+    ),
+    (
         "Melta 3",
         "When the target is within half range, each attack made with this weapon inflicts 3 extra damage.",
         [WITHIN_HALF_RANGE],
         [MELTA_3],
+    ),
+    (
+        "Melta 6",
+        "When the target is within half range, each attack made with this weapon inflicts 6 extra damage.",
+        [WITHIN_HALF_RANGE],
+        [MELTA_6],
     ),
     (
         "Pistol",
@@ -255,6 +277,12 @@ ENTRIES = [
         "When the shooting model is within half range, this weapon makes 3 additional attacks.",
         [WITHIN_HALF_RANGE],
         [ADD_THREE_ATTACKS],
+    ),
+    (
+        "Rapid Fire D6+3",
+        "When the shooting model is within half range, this weapon makes D6+3 additional attacks.",
+        [WITHIN_HALF_RANGE],
+        [ADD_D6_PLUS_3_ATTACKS],
     ),
     (
         "Sustained 1",

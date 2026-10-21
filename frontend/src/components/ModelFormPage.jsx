@@ -25,6 +25,7 @@ function buildEmptyForm() {
     invulnerable: '',
     feel_no_pain: '',
     feel_no_pain_mortal: '',
+    invulnerable_ranged_only: false,
     is_support: false,
     is_leader: false,
     base_size_id: '',
@@ -48,6 +49,7 @@ function formFromModel(model) {
     feel_no_pain: model.feel_no_pain === null ? '' : String(model.feel_no_pain),
     feel_no_pain_mortal:
       model.feel_no_pain_mortal === null ? '' : String(model.feel_no_pain_mortal),
+    invulnerable_ranged_only: model.invulnerable_ranged_only,
     is_support: model.is_support,
     is_leader: model.is_leader,
     base_size_id: model.base_size_id === null ? '' : String(model.base_size_id),
@@ -71,6 +73,7 @@ function toPayload(form) {
     feel_no_pain: form.feel_no_pain === '' ? null : Number(form.feel_no_pain),
     feel_no_pain_mortal:
       form.feel_no_pain_mortal === '' ? null : Number(form.feel_no_pain_mortal),
+    invulnerable_ranged_only: form.invulnerable_ranged_only,
     is_support: form.is_support,
     is_leader: form.is_leader,
     base_size_id: form.base_size_id === '' ? null : Number(form.base_size_id),
@@ -248,6 +251,14 @@ function ModelFormPage({
         <Field label="Invulnerable (optional)">
           <input type="number" value={form.invulnerable} onChange={handleChange('invulnerable')} />
         </Field>
+        <label className="checkbox-field">
+          <input
+            type="checkbox"
+            checked={form.invulnerable_ranged_only}
+            onChange={(e) => setForm({ ...form, invulnerable_ranged_only: e.target.checked })}
+          />
+          Invulnerable save against ranged attacks only
+        </label>
         <Field label="Feel No Pain (optional)">
           <input type="number" value={form.feel_no_pain} onChange={handleChange('feel_no_pain')} />
         </Field>

@@ -46,7 +46,9 @@ function ModelsListPage({
             <div>
               {m.name} — M{m.movement}" T{m.toughness} Sv{m.save}+ W{m.wounds} OC{m.oc} Ld
               {m.leadership}+
-              {m.invulnerable ? ` Inv${m.invulnerable}+` : ''}
+              {m.invulnerable
+                ? ` Inv${m.invulnerable}+${m.invulnerable_ranged_only ? ' (ranged only)' : ''}`
+                : ''}
               {m.feel_no_pain ? ` FNP${m.feel_no_pain}+` : ''}
               {m.feel_no_pain_mortal ? ` FNP${m.feel_no_pain_mortal}+ vs mortals` : ''}
               {m.base_size_id !== null && ` — Base: ${baseSizeName(m.base_size_id)}`}

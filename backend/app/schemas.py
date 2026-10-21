@@ -83,6 +83,8 @@ class ModelIn(BaseModel):
     # Feel No Pain against mortal wounds only (e.g. 5+), on top of any
     # feel_no_pain.
     feel_no_pain_mortal: int | None = None
+    # The invulnerable save only applies against ranged attacks.
+    invulnerable_ranged_only: bool = False
     # One of the base sizes (GET /base-sizes); None if not entered.
     base_size_id: int | None = None
     ability_ids: list[int] = []
@@ -106,6 +108,7 @@ class ModelOut(BaseModel):
     is_support: bool
     is_leader: bool
     feel_no_pain_mortal: int | None
+    invulnerable_ranged_only: bool
     base_size_id: int | None
     ability_ids: list[int]
     wargear_ids: list[int]

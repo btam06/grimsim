@@ -21,6 +21,8 @@ ANTI_VEHICLE_2 = "anti_vehicle_2"
 ANTI_VEHICLE_3 = "anti_vehicle_3"
 ANTI_VEHICLE_4 = "anti_vehicle_4"
 ANTI_MONSTER_4 = "anti_monster_4"
+ANTI_FLY_2 = "anti_fly_2"
+RANGED_CRITICAL_HIT = "ranged_critical_hit"
 WITHIN_HALF_RANGE = "within_half_range"
 MOVED_LESS_THAN_3 = "moved_less_than_3"
 TARGET_MONSTER_OR_VEHICLE = "target_monster_or_vehicle"
@@ -180,6 +182,22 @@ def target_not_monster_or_vehicle(context: dict) -> bool:
     return not target_monster_or_vehicle(context)
 
 
+def anti_fly_2(context: dict) -> bool:
+    # True at the wound step if the wound roll was a 2+ against a defending
+    # unit that contains a FLY model (e.g. for "Anti-Fly 2+").
+    return (
+        context.get("step") == "wound"
+        and context.get("roll", 0) >= 2
+        and "FLY" in context.get("defender_keywords", set())
+    )
+
+
+def ranged_critical_hit(context: dict) -> bool:
+    # A critical hit with a ranged weapon (e.g. "ranged weapons have
+    # [SUSTAINED HITS 1]").
+    return critical_hit(context) and context.get("is_ranged", False)
+
+
 def critical_hit_not_monster_or_vehicle(context: dict) -> bool:
     # A critical hit against a defending unit with no MONSTER or VEHICLE model
     # (e.g. for "LETHAL HITS: non-MONSTER/VEHICLE").
@@ -284,6 +302,8 @@ CORE_CONDITIONS = {
     PRE_WEAPON: pre_weapon,
     DEFENDER_IN_RANGE_OF_OBJECTIVE: defender_in_range_of_objective,
     CHARGED: charged,
+    ANTI_FLY_2: anti_fly_2,
+    RANGED_CRITICAL_HIT: ranged_critical_hit,
 }
 
 
