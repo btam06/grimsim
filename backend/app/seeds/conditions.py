@@ -24,6 +24,7 @@ from app.combat_rules.conditions import (
     RANGED_CRITICAL_HIT,
     RANGED_MOVED_LESS_THAN_3,
     RILED_UP_RANGED_CRITICAL_HIT,
+    STATIONARY_RANGED_CRITICAL_HIT,
     TARGET_HAS_CHARACTER,
     TARGET_INFANTRY,
     TARGET_LED_BY_CHARACTER,
@@ -164,6 +165,11 @@ CORE_ENTRIES = [
         RANGED_CRITICAL_HIT,
         "Ranged Critical Hit",
         "A critical hit (unmodified 6 to hit) with a ranged weapon.",
+    ),
+    (
+        STATIONARY_RANGED_CRITICAL_HIT,
+        "Ranged Critical Hit While Stationary",
+        "A ranged critical hit by a unit that Remained Stationary this turn.",
     ),
 ]
 

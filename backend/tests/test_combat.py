@@ -4956,8 +4956,10 @@ async def test_positions_are_asked_about_only_for_units_whose_rules_use_them(
     assert near in await positions("attacker", ability_ids=[breaching])
     assert near not in await positions("defender", ability_ids=[breaching])
     assert near not in await positions("attacker")
-    # Every defender is also asked whether it's on an objective.
+    # Every defender is also asked whether it's on an objective, and every
+    # attacker whether it Remained Stationary.
     assert "in_range_of_objective" in await positions("defender")
+    assert "remained_stationary" in await positions("attacker")
 
 
 def test_rapid_fire_2_adds_two_attacks_within_half_range(monkeypatch):
@@ -5624,7 +5626,7 @@ def test_punishing_salvoes_gives_ranged_weapons_sustained_hits(
     from app.seeds.factions.imperial_knights import datasheet_abilities as knights
 
     monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
-    option = knights.OPTIONS["Punishing Salvoes"]["Remained Stationary"]
+    rules = list(knights.RULES["Punishing Salvoes"])
     weapon = _weapon(
         attacks="1",
         skill=3,
@@ -5637,9 +5639,37 @@ def test_punishing_salvoes_gives_ranged_weapons_sustained_hits(
         weapon,
         [_model(toughness=1, wounds=20, save=7)],
         in_engagement_range=weapon_type == "melee",
-        attacker_rules=list(option.rules),
+        attacker_rules=rules,
+        attacker_positions={"remained_stationary"},
     )
     assert len(result.wound_rolls) == 1 + extra_hits
+
+
+def test_punishing_salvoes_needs_remained_stationary(monkeypatch):
+    from app.seeds.factions.imperial_knights import datasheet_abilities as knights
+
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, weapon_type="ranged")
+    result = _fire(
+        weapon,
+        [_model(toughness=1, wounds=20, save=7)],
+        attacker_rules=list(knights.RULES["Punishing Salvoes"]),
+    )
+    assert len(result.wound_rolls) == 1
+
+
+def test_remained_stationary_counts_as_moving_less_than_3_inches(monkeypatch):
+    # [HEAVY]: +1 to hit, so a 2 hits at BS3.
+    rolls = iter([2, 6, 1])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, weapon_type="ranged")
+    weapon.abilities = [_ability([_condition("moved_less_than_3")], [_effect("heavy")])]
+    result = _fire(
+        weapon,
+        [_model(toughness=1, wounds=10, save=7)],
+        attacker_positions={"remained_stationary"},
+    )
+    assert result.total_damage == 1
 
 
 def test_crusaders_duty_gives_plus_one_to_hit_on_ranged_attacks(monkeypatch):

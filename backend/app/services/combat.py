@@ -312,6 +312,8 @@ def resolve_combat(
     # app/combat_rules/positions.py), e.g. within 6" of a BATTLELINE unit.
     attacker_positions = set(attacker_positions or ())
     defender_positions = set(defender_positions or ())
+    # A unit that Remained Stationary moved less than 3" (e.g. for [HEAVY]).
+    moved_less_than_3 = moved_less_than_3 or "remained_stationary" in attacker_positions
     all_unit_wide_abilities = [
         ability
         for unit_model in attacker.unit_models

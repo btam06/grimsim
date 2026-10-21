@@ -1,5 +1,5 @@
 from app.combat_rules import Rule, RuleOption
-from app.combat_rules.conditions import RANGED_ATTACK, RANGED_CRITICAL_HIT
+from app.combat_rules.conditions import RANGED_ATTACK, STATIONARY_RANGED_CRITICAL_HIT
 from app.combat_rules.effects import ADD_EXTRA_HIT, PLUS_ONE_TO_HIT
 
 # Imperial Knights datasheet abilities - see app/seeds/datasheet_abilities.py
@@ -17,7 +17,7 @@ ENTRIES = [
         [],
     ),
     (
-        # Remaining Stationary is the "Remained Stationary" option in OPTIONS.
+        # Its effect is in RULES, read from the calculator's Positioning.
         "Punishing Salvoes",
         "In your Movement phase, if this model Remains Stationary, until the end of the turn, "
         "ranged weapons equipped by this model have the [SUSTAINED HITS 1] ability.",
@@ -39,12 +39,18 @@ OPTIONS = {
             ),
         ),
     },
-    "Punishing Salvoes": {
-        "Remained Stationary": RuleOption(
-            rules=(Rule(conditions=(RANGED_CRITICAL_HIT,), effects=(ADD_EXTRA_HIT,)),),
+}
+
+# Code-defined rules for abilities above, by name.
+RULES = {
+    "Punishing Salvoes": [
+        Rule(
+            conditions=(STATIONARY_RANGED_CRITICAL_HIT,),
+            effects=(ADD_EXTRA_HIT,),
             description=(
-                "The model Remained Stationary: its ranged weapons have [SUSTAINED HITS 1]."
+                "Ranged weapons have [SUSTAINED HITS 1] when Remained Stationary is ticked "
+                "under Positioning."
             ),
         ),
-    },
+    ],
 }

@@ -23,6 +23,7 @@ ANTI_VEHICLE_4 = "anti_vehicle_4"
 ANTI_MONSTER_4 = "anti_monster_4"
 ANTI_FLY_2 = "anti_fly_2"
 RANGED_CRITICAL_HIT = "ranged_critical_hit"
+STATIONARY_RANGED_CRITICAL_HIT = "stationary_ranged_critical_hit"
 WITHIN_HALF_RANGE = "within_half_range"
 MOVED_LESS_THAN_3 = "moved_less_than_3"
 TARGET_MONSTER_OR_VEHICLE = "target_monster_or_vehicle"
@@ -41,6 +42,7 @@ RANGED_ATTACK = "ranged_attack"
 # so the user says (see app/combat_rules/positions.py); conditions read them
 # from the context's attacker_positions/defender_positions.
 IN_RANGE_OF_OBJECTIVE = "in_range_of_objective"
+REMAINED_STATIONARY = "remained_stationary"
 DEFENDER_IN_RANGE_OF_OBJECTIVE = "defender_in_range_of_objective"
 
 PRE_WEAPON = "pre_weapon"
@@ -198,6 +200,14 @@ def ranged_critical_hit(context: dict) -> bool:
     return critical_hit(context) and context.get("is_ranged", False)
 
 
+def stationary_ranged_critical_hit(context: dict) -> bool:
+    # As ranged_critical_hit, while the attacking unit Remained Stationary
+    # (ticked under the calculator's Positioning) - e.g. Punishing Salvoes.
+    return ranged_critical_hit(context) and REMAINED_STATIONARY in context.get(
+        "attacker_positions", set()
+    )
+
+
 def critical_hit_not_monster_or_vehicle(context: dict) -> bool:
     # A critical hit against a defending unit with no MONSTER or VEHICLE model
     # (e.g. for "LETHAL HITS: non-MONSTER/VEHICLE").
@@ -304,6 +314,7 @@ CORE_CONDITIONS = {
     CHARGED: charged,
     ANTI_FLY_2: anti_fly_2,
     RANGED_CRITICAL_HIT: ranged_critical_hit,
+    STATIONARY_RANGED_CRITICAL_HIT: stationary_ranged_critical_hit,
 }
 
 
