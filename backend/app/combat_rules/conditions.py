@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 # Each condition is a hardcoded keyword + a function that inspects the current
 # combat-resolution step and reports whether that condition is met. The keyword
 # is what gets stored on a Condition row (app/models/condition.py) and seeded
@@ -23,7 +25,6 @@ WITHIN_HALF_RANGE = "within_half_range"
 MOVED_LESS_THAN_3 = "moved_less_than_3"
 TARGET_MONSTER_OR_VEHICLE = "target_monster_or_vehicle"
 RANGED_MOVED_LESS_THAN_3 = "ranged_moved_less_than_3"
-MELEE_ATTACK_AGAINST_BATTLELINE = "melee_attack_against_battleline"
 ATTACKER_IS_BATTLELINE = "attacker_is_battleline"
 TARGET_NOT_MONSTER_OR_VEHICLE = "target_not_monster_or_vehicle"
 CRITICAL_HIT_NOT_MONSTER_OR_VEHICLE = "critical_hit_not_monster_or_vehicle"
@@ -33,15 +34,15 @@ TARGET_HAS_CHARACTER = "target_has_character"
 TARGET_LED_BY_CHARACTER = "target_led_by_character"
 TARGET_INFANTRY = "target_infantry"
 RANGED_ATTACK = "ranged_attack"
-TARGET_ELECTRO_PRIESTS_LED_BY_CHARACTER = "target_electro_priests_led_by_character"
-ATTACKER_NEAR_ADMECH_BATTLELINE = "attacker_near_admech_battleline"
-ATTACKER_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE = "attacker_battleline_or_near_admech_battleline"
-MELEE_VS_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE = "melee_vs_battleline_or_near_admech_battleline"
 
 # Positions a unit can be in that the calculator can't work out for itself,
 # so the user says (see app/combat_rules/positions.py); conditions read them
 # from the context's attacker_positions/defender_positions.
-NEAR_ADMECH_BATTLELINE = "near_admech_battleline"
+IN_RANGE_OF_OBJECTIVE = "in_range_of_objective"
+DEFENDER_IN_RANGE_OF_OBJECTIVE = "defender_in_range_of_objective"
+
+PRE_WEAPON = "pre_weapon"
+CHARGED = "charged"
 
 # Name of the Orks Waaagh! rule option that riles a unit up (see
 # app/seeds/factions/orks/abilities.py), for "if this unit is riled up".
@@ -159,14 +160,6 @@ def ranged_moved_less_than_3(context: dict) -> bool:
     return moved_less_than_3(context) and context.get("is_ranged", False)
 
 
-def melee_attack_against_battleline(context: dict) -> bool:
-    # True at the pre-hit check of a melee attack against a defending unit
-    # that contains a BATTLELINE model (e.g. Protector Imperative's -1 to hit).
-    return (
-        context.get("step") == "pre_hit"
-        and not context.get("is_ranged", True)
-        and "BATTLELINE" in context.get("defender_keywords", set())
-    )
 
 
 def attacker_is_battleline(context: dict) -> bool:
@@ -175,29 +168,10 @@ def attacker_is_battleline(context: dict) -> bool:
     return "BATTLELINE" in context.get("attacker_keywords", set())
 
 
-def attacker_near_admech_battleline(context: dict) -> bool:
-    # True at every step while the attacking unit is within 6" of a friendly
-    # ADEPTUS MECHANICUS BATTLELINE unit (e.g. Breaching Command's re-rolls).
-    return NEAR_ADMECH_BATTLELINE in context.get("attacker_positions", set())
 
 
-def attacker_battleline_or_near_admech_battleline(context: dict) -> bool:
-    # As attacker_is_battleline, or while the attacking unit is within 6" of a
-    # friendly ADEPTUS MECHANICUS BATTLELINE unit (Conqueror Imperative).
-    return attacker_is_battleline(context) or attacker_near_admech_battleline(context)
 
 
-def melee_vs_battleline_or_near_admech_battleline(context: dict) -> bool:
-    # As melee_attack_against_battleline, or against a defending unit within
-    # 6" of a friendly ADEPTUS MECHANICUS BATTLELINE unit (Protector Imperative).
-    return (
-        context.get("step") == "pre_hit"
-        and not context.get("is_ranged", True)
-        and (
-            "BATTLELINE" in context.get("defender_keywords", set())
-            or NEAR_ADMECH_BATTLELINE in context.get("defender_positions", set())
-        )
-    )
 
 
 def target_not_monster_or_vehicle(context: dict) -> bool:
@@ -228,6 +202,30 @@ def pre_weapon_not_monster_or_vehicle(context: dict) -> bool:
     return context.get("step") == "pre_weapon" and target_not_monster_or_vehicle(context)
 
 
+def defender_in_range_of_objective(context: dict) -> bool:
+    # True at every step while the defending unit is within range of an
+    # objective marker (ticked under the calculator's Positioning) - e.g.
+    # Scriptural Prognosis.
+    return IN_RANGE_OF_OBJECTIVE in context.get("defender_positions", set())
+
+
+def charged(context: dict) -> bool:
+    # True at every step when the attacking unit made a Charge move this turn
+    # (the calculator's "charged this turn" modifier) - e.g. [LANCE].
+    return bool(context.get("charged"))
+
+
+def pre_weapon(context: dict) -> bool:
+    # Checked once per weapon (not per attack) - for effects that add attacks
+    # to the weapon (e.g. "+2 Attacks"), which would otherwise be added again
+    # at every step of every attack.
+    return context.get("step") == "pre_weapon"
+
+
+
+
+
+
 def target_has_character(context: dict) -> bool:
     # True at every step when the defending unit contains a CHARACTER model -
     # e.g. "while a CHARACTER model is leading this unit" on a defensive rule.
@@ -244,11 +242,6 @@ def target_led_by_character(context: dict) -> bool:
     )
 
 
-def target_electro_priests_led_by_character(context: dict) -> bool:
-    # As target_led_by_character, for a led unit with the ELECTRO-PRIESTS keyword.
-    return target_led_by_character(context) and "ELECTRO-PRIESTS" in context.get(
-        "defender_keywords", set()
-    )
 
 
 def target_infantry(context: dict) -> bool:
@@ -264,7 +257,7 @@ def ranged_attack(context: dict) -> bool:
     return context.get("step") == "pre_hit" and context.get("is_ranged", False)
 
 
-CONDITIONS = {
+CORE_CONDITIONS = {
     CRITICAL_HIT: critical_hit,
     CRITICAL_WOUND: critical_wound,
     ALWAYS: always,
@@ -279,7 +272,6 @@ CONDITIONS = {
     MOVED_LESS_THAN_3: moved_less_than_3,
     TARGET_MONSTER_OR_VEHICLE: target_monster_or_vehicle,
     RANGED_MOVED_LESS_THAN_3: ranged_moved_less_than_3,
-    MELEE_ATTACK_AGAINST_BATTLELINE: melee_attack_against_battleline,
     ATTACKER_IS_BATTLELINE: attacker_is_battleline,
     TARGET_NOT_MONSTER_OR_VEHICLE: target_not_monster_or_vehicle,
     CRITICAL_HIT_NOT_MONSTER_OR_VEHICLE: critical_hit_not_monster_or_vehicle,
@@ -289,8 +281,42 @@ CONDITIONS = {
     TARGET_LED_BY_CHARACTER: target_led_by_character,
     TARGET_INFANTRY: target_infantry,
     RANGED_ATTACK: ranged_attack,
-    TARGET_ELECTRO_PRIESTS_LED_BY_CHARACTER: target_electro_priests_led_by_character,
-    ATTACKER_NEAR_ADMECH_BATTLELINE: attacker_near_admech_battleline,
-    ATTACKER_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE: attacker_battleline_or_near_admech_battleline,
-    MELEE_VS_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE: melee_vs_battleline_or_near_admech_battleline,
+    PRE_WEAPON: pre_weapon,
+    DEFENDER_IN_RANGE_OF_OBJECTIVE: defender_in_range_of_objective,
+    CHARGED: charged,
 }
+
+
+class _Conditions(Mapping):
+    # CORE_CONDITIONS plus each faction's own (its conditions.py CONDITIONS,
+    # where it has one), looked up like a dict. Built on first use rather than
+    # at import, since faction files import this one.
+    _combined: dict | None = None
+
+    def _all(self) -> dict:
+        if self._combined is None:
+            from app.seeds.factions import FACTIONS
+
+            combined = dict(CORE_CONDITIONS)
+            for faction in FACTIONS:
+                for keyword, check in getattr(
+                    getattr(faction, "conditions", None), "CONDITIONS", {}
+                ).items():
+                    if keyword in combined:
+                        raise ValueError(f"condition {keyword!r} is defined more than once")
+                    combined[keyword] = check
+            self._combined = combined
+        return self._combined
+
+    def __getitem__(self, keyword: str):
+        return self._all()[keyword]
+
+    def __iter__(self):
+        return iter(self._all())
+
+    def __len__(self) -> int:
+        return len(self._all())
+
+
+# Every condition, core and faction: {keyword: check}.
+CONDITIONS = _Conditions()

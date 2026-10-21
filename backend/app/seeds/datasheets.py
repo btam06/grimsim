@@ -31,6 +31,7 @@ class WargearSpec:
     name: str
     description: str | None = None
     abilities: tuple[str, ...] = ()  # WargearAbility names
+    scope: str = "bearer"  # "bearer" or "bearers_unit" (see WARGEAR_SCOPES)
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,7 @@ class ModelSpec:
     feel_no_pain: int | None = None
     is_support: bool = False
     is_leader: bool = False
+    feel_no_pain_mortal: int | None = None  # Feel No Pain vs mortal wounds only
     base_size: str | None = None  # a BaseSize name, e.g. "32mm" or "105 x 70mm"
     keywords: tuple[str, ...] = ()  # Keyword names
     faction_abilities: tuple[str, ...] = ()  # FactionAbility names in this faction

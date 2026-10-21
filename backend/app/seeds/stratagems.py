@@ -17,6 +17,7 @@ from app.models import (
 from app.models.game import PHASES
 from app.models.stratagem import (
     STRATAGEM_COMBAT_SIDES,
+    STRATAGEM_DURATIONS,
     STRATAGEM_GAME_ACTIONS,
     STRATAGEM_TURNS,
 )
@@ -37,8 +38,8 @@ def load(path: Path | None = None) -> list[dict]:
 async def seed(session: AsyncSession, path: Path | None = None) -> None:
     # Adds any stratagems not already present (by name). An existing one that
     # has no keyword requirements, options or exclusions, timings, detachments,
-    # game action or combat side yet (e.g. seeded before those existed) gets them filled in; nothing
-    # else is changed.
+    # game action, combat side, duration or conditions/effects yet (e.g. seeded
+    # before those existed) gets them filled in; nothing else is changed.
     # Everything is referenced by name - an unknown keyword, condition,
     # effect, detachment, phase or turn is an error, not skipped - so this
     # must run after keywords, conditions, effects and detachments are seeded.
@@ -66,6 +67,8 @@ async def seed(session: AsyncSession, path: Path | None = None) -> None:
                     selectinload(Stratagem.timings),
                     selectinload(Stratagem.detachments),
                     selectinload(Stratagem.game_action_link),
+                    selectinload(Stratagem.conditions),
+                    selectinload(Stratagem.effects),
                 )
             )
         ).scalars()
@@ -106,10 +109,17 @@ async def seed(session: AsyncSession, path: Path | None = None) -> None:
         game_action = entry.get("game_action")
         if game_action is not None:
             lookup({a: a for a in STRATAGEM_GAME_ACTIONS}, game_action, "game action", name)
+        duration = entry.get("duration")
+        if duration is not None:
+            lookup({d: d for d in STRATAGEM_DURATIONS}, duration, "duration", name)
         combat_side = entry.get("combat_side")
         if combat_side is not None:
             lookup({s: s for s in STRATAGEM_COMBAT_SIDES}, combat_side, "combat side", name)
 
+        entry_conditions = [
+            lookup(conditions, c, "condition", name) for c in entry.get("conditions", [])
+        ]
+        entry_effects = [lookup(effects, e, "effect", name) for e in entry.get("effects", [])]
         stratagem = existing.get(name)
         if stratagem is None:
             stratagem = Stratagem(
@@ -122,13 +132,12 @@ async def seed(session: AsyncSession, path: Path | None = None) -> None:
                 excluded_keywords=entry_excluded,
                 keyword_options=entry_options,
                 timings=timings,
-                conditions=[
-                    lookup(conditions, c, "condition", name) for c in entry.get("conditions", [])
-                ],
-                effects=[lookup(effects, e, "effect", name) for e in entry.get("effects", [])],
+                conditions=entry_conditions,
+                effects=entry_effects,
             )
             stratagem.game_action = game_action
             stratagem.combat_side = combat_side
+            stratagem.duration = duration
             session.add(stratagem)
             continue
         if entry_keywords and not stratagem.keywords:
@@ -145,5 +154,12 @@ async def seed(session: AsyncSession, path: Path | None = None) -> None:
             stratagem.game_action = game_action
         if combat_side and not stratagem.combat_side:
             stratagem.combat_side = combat_side
+        if duration and not stratagem.duration:
+            stratagem.duration = duration
+        # A combat effect added after it was first seeded (e.g. once the
+        # calculator can model it).
+        if (entry_conditions or entry_effects) and not (stratagem.conditions or stratagem.effects):
+            stratagem.conditions = entry_conditions
+            stratagem.effects = entry_effects
 
     await session.commit()

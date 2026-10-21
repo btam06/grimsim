@@ -326,6 +326,34 @@ async def test_seed_enhancements_from_data_file(
         for g in job["datasheet_abilities"]
     ] == [("Stealth", "bearer")]
     assert gear["weapon_abilities"] == gear["datasheet_abilities"] == []
+    [shoota] = job["weapons"]
+    assert (shoota["name"], shoota["attacks"], shoota["skill"]) == ("Test Shoota", "2", 5)
+    assert [weapon_abilities[i] for i in shoota["ability_ids"]] == ["Sustained 1"]
+    assert [(keywords[g["keyword_id"]], g["scope"]) for g in job["granted_keywords"]] == [
+        ("GRENADES", "bearer")
+    ]
+
+
+async def test_seed_fills_in_weapons_and_keywords_on_an_existing_enhancement(
+    session: AsyncSession, client: AsyncClient, fixture_game_data
+):
+    from sqlalchemy import select
+
+    from app.models import Enhancement
+
+    await run_all(session)
+    job = (
+        await session.execute(select(Enhancement).where(Enhancement.name == "Test Kustom Job"))
+    ).scalar_one()
+    job.weapons = []
+    job.keyword_grants = []
+    await session.commit()
+
+    await run_all(session)
+    enhancements = (await client.get("/enhancements")).json()
+    job = next(e for e in enhancements if e["name"] == "Test Kustom Job")
+    assert [w["name"] for w in job["weapons"]] == ["Test Shoota"]
+    assert len(job["granted_keywords"]) == 1
 
 
 @pytest.mark.parametrize(
@@ -441,3 +469,125 @@ async def test_create_enhancement_with_granted_abilities(client: AsyncClient, ar
         },
     )
     assert missing.status_code == 400
+
+
+async def test_enhancement_with_a_weapon_and_granted_keywords(
+    client: AsyncClient, army, session: AsyncSession
+):
+    from app.seeds import weapon_abilities as weapon_abilities_seed
+
+    await conditions_seed.seed(session)
+    await effects_seed.seed(session)
+    await weapon_abilities_seed.seed(session)
+    hazardous = next(
+        a["id"]
+        for a in (await client.get("/weapon-abilities")).json()
+        if a["name"] == "Hazardous"
+    )
+    skitarii = await _keyword(client, "SKITARII")
+    weapon = {
+        "name": "TL-4Ø9",
+        "weapon_type": "ranged",
+        "range": 24,
+        "attacks": "3",
+        "skill": 2,
+        "strength": 11,
+        "ap": -2,
+        "damage": "D3+2",
+        "ability_ids": [hazardous],
+    }
+    response = await client.post(
+        "/enhancements",
+        json={
+            "name": "Casket",
+            "points": 30,
+            "kind": "enhancement",
+            "detachment_id": army["mine"],
+            "weapons": [weapon],
+            "granted_keywords": [{"keyword_id": skitarii, "scope": "bearers_unit"}],
+        },
+    )
+    assert response.status_code == 201, response.text
+    created = response.json()
+    [out] = created["weapons"]
+    assert {k: out[k] for k in weapon} == weapon
+    assert created["granted_keywords"] == [{"keyword_id": skitarii, "scope": "bearers_unit"}]
+
+    # An upgrade can't give a weapon; scopes follow the kind; ids must exist.
+    for bad in (
+        {"kind": "upgrade", "weapons": [weapon]},
+        {"granted_keywords": [{"keyword_id": skitarii, "scope": "unit"}]},
+        {"weapons": [{**weapon, "attacks": "lots"}]},
+    ):
+        payload = {
+            "name": "Bad",
+            "points": 1,
+            "kind": "enhancement",
+            "detachment_id": army["mine"],
+            **bad,
+        }
+        assert (await client.post("/enhancements", json=payload)).status_code == 422, bad
+    for bad in (
+        {"granted_keywords": [{"keyword_id": 9999, "scope": "bearer"}]},
+        {"weapons": [{**weapon, "ability_ids": [9999]}]},
+    ):
+        payload = {
+            "name": "Bad",
+            "points": 1,
+            "kind": "enhancement",
+            "detachment_id": army["mine"],
+            **bad,
+        }
+        assert (await client.post("/enhancements", json=payload)).status_code == 400, bad
+
+    # Deleting it removes its weapon too.
+    assert (await client.delete(f"/enhancements/{created['id']}")).status_code == 204
+
+
+async def test_combat_endpoint_fires_a_selected_enhancement_weapon(
+    client: AsyncClient, army, monkeypatch
+):
+    from app.services import combat
+
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    casket = await client.post(
+        "/enhancements",
+        json={
+            "name": "Casket",
+            "points": 30,
+            "kind": "enhancement",
+            "detachment_id": army["mine"],
+            "weapons": [
+                {
+                    "name": "TL-4Ø9",
+                    "weapon_type": "ranged",
+                    "range": 24,
+                    "attacks": "3",
+                    "skill": 2,
+                    "strength": 11,
+                    "ap": -2,
+                    "damage": "1",
+                }
+            ],
+        },
+    )
+    casket = casket.json()
+    attacker = await _unit(
+        client, army["faction_unit"], army["list"], [(army["hero"], casket["id"])]
+    )
+    assert attacker.status_code == 201, attacker.text
+    target = await _unit(client, army["faction_unit"], army["list"], [(army["trooper"], None)])
+    request = {
+        "attacking_unit_id": attacker.json()["id"],
+        "defending_unit_id": target.json()["id"],
+        "selected_weapon_ids": [],
+        "selected_enhancement_weapon_ids": [casket["weapons"][0]["id"]],
+    }
+    response = await client.post("/combat", json=request)
+    assert response.status_code == 200, response.text
+    assert [w["name"] for w in response.json()["weapon_results"]] == ["TL-4Ø9"]
+    assert len(response.json()["attack_rolls"]) == 3
+
+    # Not the attacking unit's.
+    request["selected_enhancement_weapon_ids"] = [9999]
+    assert (await client.post("/combat", json=request)).status_code == 400

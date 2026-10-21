@@ -10,6 +10,8 @@ from app.models import (
     Detachment,
     Enhancement,
     EnhancementDatasheetAbility,
+    EnhancementKeyword,
+    EnhancementWeapon,
     EnhancementWeaponAbility,
     Keyword,
     Model,
@@ -22,8 +24,10 @@ from app.models import (
 from app.schemas import (
     EnhancementDatasheetAbilitySchema,
     EnhancementIn,
+    EnhancementKeywordSchema,
     EnhancementOut,
     EnhancementWeaponAbilitySchema,
+    EnhancementWeaponOut,
 )
 from app.services import enhancements as enhancement_rules
 from app.services import list_building
@@ -52,6 +56,25 @@ def _to_out(enhancement: Enhancement) -> EnhancementOut:
                 datasheet_ability_id=g.datasheet_ability_id, scope=g.scope
             )
             for g in enhancement.datasheet_ability_grants
+        ],
+        granted_keywords=[
+            EnhancementKeywordSchema(keyword_id=g.keyword_id, scope=g.scope)
+            for g in enhancement.keyword_grants
+        ],
+        weapons=[
+            EnhancementWeaponOut(
+                id=w.id,
+                name=w.name,
+                weapon_type=w.weapon_type,
+                range=w.range,
+                attacks=w.attacks,
+                skill=w.skill,
+                strength=w.strength,
+                ap=w.ap,
+                damage=w.damage,
+                ability_ids=[a.id for a in w.abilities],
+            )
+            for w in enhancement.weapons
         ],
     )
 
@@ -182,6 +205,23 @@ async def create_enhancement(payload: EnhancementIn, session: AsyncSession = Dep
         found = (await session.execute(select(model.id).where(model.id.in_(ids)))).scalars()
         if set(ids) - set(found):
             raise HTTPException(status_code=400, detail=f"one or more {field}s not found")
+    granted = await _load_keywords(
+        session, [g.keyword_id for g in payload.granted_keywords], "granted keyword_ids"
+    )
+    if len(granted) != len(payload.granted_keywords):
+        raise HTTPException(status_code=400, detail="duplicate granted keyword_ids")
+    weapon_abilities = {
+        a.id: a
+        for a in (
+            await session.execute(
+                select(WeaponAbility).where(
+                    WeaponAbility.id.in_({i for w in payload.weapons for i in w.ability_ids})
+                )
+            )
+        ).scalars()
+    }
+    if {i for w in payload.weapons for i in w.ability_ids} - set(weapon_abilities):
+        raise HTTPException(status_code=400, detail="one or more weapon ability_ids not found")
     enhancement = Enhancement(
         name=payload.name,
         description=payload.description,
@@ -199,6 +239,17 @@ async def create_enhancement(payload: EnhancementIn, session: AsyncSession = Dep
         datasheet_ability_grants=[
             EnhancementDatasheetAbility(datasheet_ability_id=g.datasheet_ability_id, scope=g.scope)
             for g in payload.datasheet_abilities
+        ],
+        keyword_grants=[
+            EnhancementKeyword(keyword_id=g.keyword_id, scope=g.scope)
+            for g in payload.granted_keywords
+        ],
+        weapons=[
+            EnhancementWeapon(
+                **w.model_dump(exclude={"ability_ids"}),
+                abilities=[weapon_abilities[i] for i in dict.fromkeys(w.ability_ids)],
+            )
+            for w in payload.weapons
         ],
     )
     session.add(enhancement)

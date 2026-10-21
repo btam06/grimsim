@@ -1,6 +1,7 @@
 import pytest
 from httpx import AsyncClient
 
+from app.combat_rules import Rule
 from app.models import (
     Condition,
     DatasheetAbility,
@@ -1761,41 +1762,6 @@ def test_resolve_combat_hazardous_models_destroyed_only_counts_models_that_fired
     assert result.hazardous_models_destroyed == 1
 
 
-def test_resolve_combat_ignore_cover_unit_wargear_applies_to_every_model_in_the_unit(
-    monkeypatch,
-):
-    # The "Ignore Cover (Unit)" ability is equipped on model A's wargear, but
-    # it must still negate the cover penalty for model B's weapon too.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
-
-    ignore_cover_unit = _wargear_ability([_condition("always")], [_effect("ignore_cover_unit")])
-    gear = _wargear([ignore_cover_unit])
-    model_a_weapon = _weapon(attacks="1", skill=3, weapon_type="ranged")
-    model_a_weapon.id = 1
-    model_b_weapon = _weapon(attacks="1", skill=3, weapon_type="ranged")
-    model_b_weapon.id = 2
-    attacker = _unit(
-        [
-            _unit_model(_model(), [model_a_weapon], wargear=[gear]),
-            _unit_model(_model(), [model_b_weapon]),
-        ]
-    )
-    defender = _unit([_unit_model(_model(wounds=5), [])])
-
-    result = combat.resolve_combat(
-        attacker,
-        defender,
-        {model_a_weapon.id, model_b_weapon.id},
-        in_engagement_range=False,
-        visible=True,
-        in_range=True,
-        in_cover=True,
-        half_range=False, moved_less_than_3=False, advanced=False,
-    )
-    # Both weapons hit on a roll of 3 (unworsened skill 3), proving the unit-wide
-    # effect applied to model B's weapon even though the wargear is on model A.
-    assert result.attack_rolls == [3, 3]
-    assert result.wound_rolls == [3, 3]
 
 
 def test_resolve_combat_ignore_cover_per_model_does_not_leak_to_other_models(monkeypatch):
@@ -1903,9 +1869,11 @@ async def test_combat_endpoint_applies_sustained_1_weapon_ability(
 
     monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
 
-    ability_id = (
-        await client.get("/weapon-abilities")
-    ).json()[0]["id"]
+    ability_id = next(
+        a["id"]
+        for a in (await client.get("/weapon-abilities")).json()
+        if a["name"] == "Sustained 1"
+    )
 
     attacker_model_id = await _create_model(client, faction_id)
     weapon_id = await _create_weapon(
@@ -4239,12 +4207,12 @@ def test_unrestricted_stratagem_affects_every_model(monkeypatch):
 
 
 def test_restricted_stratagem_stays_out_of_the_unit_wide_check(monkeypatch):
-    # A CHARACTER-only "ignore cover (unit)" mustn't spread to the whole unit.
+    # A CHARACTER-only re-roll mustn't spread to the whole unit.
     stratagem = Stratagem(name="Restricted", description=None, cp=1, is_core=True)
     stratagem.conditions = [_condition("always")]
-    stratagem.effects = [_effect("ignore_cover_unit")]
+    stratagem.effects = [_effect("reroll_failed_hits")]
     stratagem.keywords = [_keyword("CHARACTER")]
-    rolls = iter([4, 6, 1])  # hit 4 vs BS4: misses only in cover
+    rolls = iter([1, 6, 6, 1])  # a missed hit - it would hit if re-rolled
     monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=4, strength=10, ap=-10, damage="1", weapon_type="ranged")
     weapon.id = 1
@@ -4255,13 +4223,13 @@ def test_restricted_stratagem_stays_out_of_the_unit_wide_check(monkeypatch):
         in_engagement_range=False,
         visible=True,
         in_range=True,
-        in_cover=True,
+        in_cover=False,
         half_range=False,
         moved_less_than_3=False,
         advanced=False,
         stratagems=[stratagem],
     )
-    assert result.total_damage == 0
+    assert (result.attack_rerolls, result.total_damage) == ([], 0)
 
 
 @pytest.mark.parametrize("with_character,status", [(True, 200), (False, 400)])
@@ -4982,12 +4950,14 @@ async def test_positions_are_asked_about_only_for_units_whose_rules_use_them(
         assert response.status_code == 200
         return [p["id"] for p in response.json()]
 
-    near = ["near_admech_battleline"]
-    assert await positions("attacker", faction_ability_ids=[doctrina]) == near
-    assert await positions("defender", faction_ability_ids=[doctrina]) == near
-    assert await positions("attacker", ability_ids=[breaching]) == near
-    assert await positions("defender", ability_ids=[breaching]) == []
-    assert await positions("attacker") == []
+    near = "near_admech_battleline"
+    assert near in await positions("attacker", faction_ability_ids=[doctrina])
+    assert near in await positions("defender", faction_ability_ids=[doctrina])
+    assert near in await positions("attacker", ability_ids=[breaching])
+    assert near not in await positions("defender", ability_ids=[breaching])
+    assert near not in await positions("attacker")
+    # Every defender is also asked whether it's on an objective.
+    assert "in_range_of_objective" in await positions("defender")
 
 
 def test_rapid_fire_2_adds_two_attacks_within_half_range(monkeypatch):
@@ -5000,3 +4970,590 @@ def test_rapid_fire_2_adds_two_attacks_within_half_range(monkeypatch):
     target = [_model(toughness=1, wounds=20, save=7)]
     assert len(_fire(weapon, target, half_range=True).attack_rolls) == 4
     assert len(_fire(weapon, target).attack_rolls) == 2
+
+
+# --- characteristic effects (Cohort Cybernetica, Eradication Cohort, Lords of the Forge) ---
+
+
+def _one_attack(monkeypatch, rolls, effects, weapon_type="ranged", defender_effects=(), **stats):
+    # One attack with effects on the weapon (and maybe a defender rule), every
+    # roll scripted; returns the result.
+    rolls = iter(rolls)
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon_stats = dict(attacks="1", skill=3, strength=4, ap=0, damage="1")
+    weapon_stats.update(stats)
+    weapon = _weapon(
+        weapon_type=weapon_type, range=None if weapon_type == "melee" else 24, **weapon_stats
+    )
+    weapon.abilities = [_ability([_condition("always")], [_effect(e)]) for e in effects]
+    defender_rules = [Rule(conditions=("always",), effects=defender_effects, side="defender")]
+    return _fire(
+        weapon,
+        [_model(toughness=4, wounds=10, save=4)],
+        in_engagement_range=weapon_type == "melee",
+        defender_rules=defender_rules if defender_effects else None,
+    )
+
+
+def test_ranged_skill_3_sets_ballistic_skill(monkeypatch):
+    # A 3 misses at BS5, hits at BS3+; melee weapons keep their WS.
+    assert _one_attack(monkeypatch, [3, 6, 1], [], skill=5).total_damage == 0
+    assert _one_attack(monkeypatch, [3, 6, 1], ["ranged_skill_3"], skill=5).total_damage == 1
+    melee = _one_attack(monkeypatch, [3, 6, 1], ["ranged_skill_3"], weapon_type="melee", skill=5)
+    assert melee.total_damage == 0
+
+
+def test_plus_one_strength(monkeypatch):
+    # S4 vs T4 needs a 4 to wound; S5 a 3.
+    assert _one_attack(monkeypatch, [6, 3, 1], []).total_damage == 0
+    assert _one_attack(monkeypatch, [6, 3, 1], ["plus_one_strength"]).total_damage == 1
+
+
+def test_plus_one_damage(monkeypatch):
+    assert _one_attack(monkeypatch, [6, 6, 1], ["plus_one_damage"], damage="2").total_damage == 3
+
+
+@pytest.mark.parametrize("ap,save_roll,saved", [(-2, 5, True), (-2, 4, False), (0, 4, True)])
+def test_worsen_ap(monkeypatch, ap, save_roll, saved):
+    # Against a 4+ save: AP-2 worsened to AP-1 needs a 5; AP0 stays AP0.
+    result = _one_attack(
+        monkeypatch, [6, 6, save_roll], [], ap=ap, defender_effects=("worsen_ap",)
+    )
+    assert result.total_damage == (0 if saved else 1)
+
+
+def test_reroll_wound_ones(monkeypatch):
+    result = _one_attack(monkeypatch, [6, 1, 4, 1], ["reroll_wound_ones"])
+    assert (result.wound_rerolls, result.total_damage) == ([4], 1)
+    result = _one_attack(monkeypatch, [6, 2, 4, 1], ["reroll_wound_ones"])
+    assert (result.wound_rerolls, result.total_damage) == ([], 0)
+
+
+def test_feel_no_pain_6(monkeypatch):
+    # hit, wound, failed save, FNP roll
+    fnp = ("feel_no_pain_6",)
+    assert _one_attack(monkeypatch, [6, 6, 1, 6], [], defender_effects=fnp).total_damage == 0
+    assert _one_attack(monkeypatch, [6, 6, 1, 5], [], defender_effects=fnp).total_damage == 1
+
+
+def test_plus_two_attacks_ability_adds_two_attacks_once(monkeypatch):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    entry = next(e for e in weapon_ability_seeds.ENTRIES if e[0] == "+2 Attacks")
+    weapon = _weapon(attacks="2", skill=3, strength=10, ap=-10, weapon_type="melee", range=None)
+    weapon.abilities = [
+        _ability([_condition(c) for c in entry[2]], [_effect(e) for e in entry[3]])
+    ]
+    result = _fire(weapon, [_model(toughness=1, wounds=20, save=7)], in_engagement_range=True)
+    assert len(result.attack_rolls) == 4
+
+
+@pytest.mark.parametrize(
+    "options,rolls,hit_rerolls,wound_rerolls",
+    [
+        ({"Protector Imperative"}, [1, 4, 1, 4], [4], []),  # hit 1 re-rolled
+        ({"Conqueror Imperative"}, [6, 1, 4, 1], [], [4]),  # wound 1 re-rolled
+        (set(), [1, 4], [], []),
+    ],
+)
+def test_murderous_imperative(monkeypatch, options, rolls, hit_rerolls, wound_rerolls):
+    from app.seeds.factions.adeptus_mechanicus import datasheet_abilities as admech_datasheet
+
+    rolls = iter(rolls)
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=4, ap=-10, damage="1", weapon_type="ranged")
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    defender = _unit([_unit_model(_model(toughness=4, wounds=10, save=7), [])])
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {1},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+        attacker_rules=list(admech_datasheet.RULES["Murderous Imperative"]),
+        attacker_options=options,
+    )
+    assert (result.attack_rerolls, result.wound_rerolls) == (hit_rerolls, wound_rerolls)
+
+
+def test_bearers_unit_grant_reaches_the_whole_unit_even_if_not_leading(monkeypatch):
+    # The bearer isn't a CHARACTER, so it isn't leading - "bearers_unit" still
+    # reaches every model in its unit.
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+    stats = dict(attacks="1", skill=4, strength=10, ap=-10, damage="1", weapon_type="ranged")
+    guns = []
+    for i in (1, 2):
+        gun = _weapon(name=f"Gun {i}", **stats)
+        gun.id = i
+        guns.append(gun)
+    bearer = _unit_model(_model(keywords=[_keyword("INFANTRY")]), [guns[0]])
+    bearer.enhancement = _enhancement(weapon_grants=[_plus_one_grant("bearers_unit", "ranged")])
+    attacker = _unit([bearer, _unit_model(_model(keywords=[_keyword("INFANTRY")]), [guns[1]])])
+    defender = _unit([_unit_model(_model(toughness=1, wounds=10, save=7), [])])
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {1, 2},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+    )
+    assert {wr.name: wr.total_damage for wr in result.weapon_results} == {"Gun 1": 1, "Gun 2": 1}
+
+
+# --- stratagems lasting until your next Command phase ---
+
+
+async def test_lasting_command_phase_stratagem_is_offered_whenever_the_unit_fights(
+    client: AsyncClient, faction_id: int
+):
+    attacker_id, defender_id, _ = await _combat_units_in_list(client, faction_id, [])
+    for name, duration, side in [
+        ("Lasting", "until_next_command_phase", "attacker"),
+        ("Lasting Defence", "until_next_command_phase", "defender"),
+        ("Momentary", None, None),
+    ]:
+        response = await client.post(
+            "/stratagems",
+            json={
+                "name": name,
+                "cp": 1,
+                "is_core": True,
+                "timings": [{"phase": "command", "turn": "your_turn"}],
+                "duration": duration,
+                "combat_side": side,
+            },
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["duration"] == duration
+
+    for melee in (False, True):
+        assert await _usable(client, attacker_id, "attacker", melee) == {"Lasting"}
+        assert await _usable(client, defender_id, "defender", melee) == {"Lasting Defence"}
+
+
+
+@pytest.mark.parametrize("on_objective,saved", [(True, True), (False, False)])
+def test_scriptural_prognosis_needs_the_defender_on_an_objective(
+    monkeypatch, on_objective, saved
+):
+    # AP-2 against a 4+ save: a 5 saves only if the AP is worsened to -1.
+    rolls = iter([6, 6, 5])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    prognosis = Stratagem(name="Scriptural Prognosis", description=None, cp=1, is_core=True)
+    prognosis.conditions = [_condition("defender_in_range_of_objective")]
+    prognosis.effects = [_effect("worsen_ap")]
+    prognosis.keywords = []
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=-2, damage="1", weapon_type="ranged")
+    result = _fire(
+        weapon,
+        [_model(toughness=1, wounds=10, save=4)],
+        defender_stratagems=[prognosis],
+        defender_positions={"in_range_of_objective"} if on_objective else set(),
+    )
+    assert result.total_damage == (0 if saved else 1)
+
+
+# --- enhancement weapons and keywords ---
+
+
+def test_enhancement_weapon_fires_with_the_bearer(monkeypatch):
+    from app.models import EnhancementWeapon
+
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    casket = EnhancementWeapon(
+        name="TL-4Ø9",
+        weapon_type="ranged",
+        range=24,
+        attacks="3",
+        skill=2,
+        strength=11,
+        ap=-2,
+        damage="2",
+    )
+    casket.id = 7
+    casket.abilities = []
+    relic = _enhancement()
+    relic.weapons = [casket]
+    gun = _weapon(name="Gun", attacks="1", skill=3, weapon_type="ranged")
+    gun.id = 1
+    bearer = _unit_model(_model(keywords=[_keyword("CHARACTER")]), [gun])
+    bearer.enhancement = relic
+    attacker = _unit([bearer])
+    defender = _unit([_unit_model(_model(toughness=4, wounds=50, save=7), [])])
+
+    def attacks(selected):
+        result = combat.resolve_combat(
+            attacker,
+            defender,
+            selected,
+            in_engagement_range=False,
+            visible=True,
+            in_range=True,
+            in_cover=False,
+            half_range=False,
+            moved_less_than_3=False,
+            advanced=False,
+        )
+        return {wr.name: len(wr.attack_rolls) for wr in result.weapon_results}
+
+    assert attacks({1, ("enhancement", 7)}) == {"Gun": 1, "TL-4Ø9": 3}
+    assert attacks({1}) == {"Gun": 1}  # only when it's selected
+
+
+def test_enhancement_keyword_counts_for_stratagem_targeting(monkeypatch):
+    # A SKITARII-only +1 to hit stratagem reaches the bearer's whole unit once
+    # the enhancement gives it SKITARII.
+    from app.models import EnhancementKeyword
+
+    stratagem = _restricted_stratagem("SKITARII")
+    relic = _enhancement()
+    relic.keyword_grants = [
+        EnhancementKeyword(keyword=_keyword("SKITARII"), scope="bearers_unit")
+    ]
+
+    def damage(enhancement):
+        monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+        gun = _weapon(
+            attacks="1", skill=4, strength=10, ap=-10, damage="1", weapon_type="ranged"
+        )
+        gun.id = 1
+        bearer = _unit_model(_model(keywords=[_keyword("TECH-PRIEST")]), [gun])
+        bearer.enhancement = enhancement
+        defender = _unit([_unit_model(_model(toughness=1, wounds=10, save=7), [])])
+        return combat.resolve_combat(
+            _unit([bearer]),
+            defender,
+            {1},
+            in_engagement_range=False,
+            visible=True,
+            in_range=True,
+            in_cover=False,
+            half_range=False,
+            moved_less_than_3=False,
+            advanced=False,
+            stratagems=[stratagem],
+        ).total_damage
+
+    assert damage(relic) == 1
+    assert damage(None) == 0
+
+
+# --- charged this turn ---
+
+
+@pytest.mark.parametrize("charged,wounded", [(True, True), (False, False)])
+def test_lance_adds_1_to_wound_after_charging(monkeypatch, charged, wounded):
+    entry = next(e for e in weapon_ability_seeds.ENTRIES if e[0] == "Lance")
+    rolls = iter([6, 3, 1])  # hit, wound (S4 vs T4 needs a 4), save
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=4, ap=-10, weapon_type="melee", range=None)
+    weapon.abilities = [
+        _ability([_condition(c) for c in entry[2]], [_effect(e) for e in entry[3]])
+    ]
+    result = _fire(
+        weapon,
+        [_model(toughness=4, wounds=10, save=7)],
+        in_engagement_range=True,
+        charged=charged,
+    )
+    assert result.total_damage == (1 if wounded else 0)
+
+
+@pytest.mark.parametrize("charged,wounded", [(True, True), (False, False)])
+def test_servo_driven_charge_gives_lance_after_charging(monkeypatch, charged, wounded):
+    rolls = iter([6, 3, 1])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    charge = Stratagem(name="Servo-Driven Charge", description=None, cp=1, is_core=True)
+    charge.conditions = [_condition("charged")]
+    charge.effects = [_effect("plus_one_to_wound")]
+    charge.keywords = []
+    weapon = _weapon(attacks="1", skill=3, strength=4, ap=-10, weapon_type="melee", range=None)
+    result = _fire(
+        weapon,
+        [_model(toughness=4, wounds=10, save=7)],
+        in_engagement_range=True,
+        charged=charged,
+        stratagems=[charge],
+    )
+    assert result.total_damage == (1 if wounded else 0)
+
+
+# --- Feel No Pain against mortal wounds (Hazardous) ---
+
+
+def _hazard(monkeypatch, fnp_roll, shooter, stratagems=()):
+    # An INFANTRY shooter fails its hazard roll (1 mortal wound); then its FNP roll.
+    rolls = iter([1, fnp_roll])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    hazardous = _ability([_condition("always")], [_effect("hazardous")])
+    weapon = _weapon(attacks="0", skill=2)
+    weapon.id = 1
+    weapon.abilities = [hazardous]
+    attacker = _unit([_unit_model(shooter, [weapon])])
+    defender = _unit([_unit_model(_model(wounds=5), [])])
+    return combat.resolve_combat(
+        attacker,
+        defender,
+        {1},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+        stratagems=list(stratagems),
+    ).hazardous_wounds
+
+
+def test_hazardous_wounds_are_mortal_so_fnp_vs_mortals_applies(monkeypatch):
+    shooter = _model(keywords=[_keyword("INFANTRY")])
+    shooter.feel_no_pain_mortal = 5
+    assert _hazard(monkeypatch, 5, shooter) == 0
+    assert _hazard(monkeypatch, 4, shooter) == 1
+
+
+def _benevolence():
+    stratagem = Stratagem(name="Benevolence", description=None, cp=1, is_core=True)
+    stratagem.conditions = [_condition("always")]
+    stratagem.effects = [_effect("feel_no_pain_6"), _effect("feel_no_pain_mortal_5")]
+    stratagem.keywords = []
+    return stratagem
+
+
+def test_attacker_stratagem_fnp_protects_its_own_unit_from_hazardous(monkeypatch):
+    shooter = _model(keywords=[_keyword("INFANTRY")])
+    assert _hazard(monkeypatch, 5, shooter, [_benevolence()]) == 0  # 5+ vs mortals
+    assert _hazard(monkeypatch, 5, shooter) == 1
+
+
+def test_attacker_stratagem_fnp_does_not_protect_its_target(monkeypatch):
+    # Benevolence used on the attacking unit: the target doesn't get FNP 6+.
+    rolls = iter([6, 6, 1, 6])  # hit, wound, failed save, (no FNP roll expected)
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, weapon_type="ranged")
+    result = _fire(weapon, [_model(toughness=1, wounds=10, save=7)], stratagems=[_benevolence()])
+    assert (result.total_damage, result.fnp_rolls) == (1, [])
+
+
+def test_defender_stratagem_fnp_protects_the_defender(monkeypatch):
+    rolls = iter([6, 6, 1, 6])  # hit, wound, failed save, FNP 6
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, weapon_type="ranged")
+    result = _fire(
+        weapon, [_model(toughness=1, wounds=10, save=7)], defender_stratagems=[_benevolence()]
+    )
+    assert (result.total_damage, result.fnp_rolls) == (0, [6])
+
+
+# --- Feel No Pain against mortal wounds, for attacks that allow no save ---
+
+
+@pytest.mark.parametrize(
+    "devastating,fnp_roll,damage",
+    [
+        (True, 5, 0),  # a mortal wound: FNP 5+ vs mortals beats the model's 6+
+        (True, 4, 1),
+        (False, 5, 1),  # an ordinary wound (failed save): only the 6+
+        (False, 6, 0),
+    ],
+)
+def test_attacks_allowing_no_save_use_fnp_vs_mortal_wounds(
+    monkeypatch, devastating, fnp_roll, damage
+):
+    rolls = iter([6, 6, fnp_roll] if devastating else [6, 6, 1, fnp_roll])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=0, damage="1", weapon_type="ranged")
+    if devastating:
+        weapon.abilities = [_ability([_condition("always")], [_effect("no_save")])]
+    target = _model(toughness=1, wounds=10, save=7, feel_no_pain=6)
+    target.feel_no_pain_mortal = 5
+    assert _fire(weapon, [target]).total_damage == damage
+
+
+def test_defender_stratagem_fnp_vs_mortals_counts_against_devastating_wounds(monkeypatch):
+    # Benevolence (FNP 6+, 5+ vs mortals) on the defender: a 5 saves a mortal.
+    rolls = iter([6, 6, 5])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=0, damage="1", weapon_type="ranged")
+    weapon.abilities = [_ability([_condition("always")], [_effect("no_save")])]
+    result = _fire(
+        weapon, [_model(toughness=1, wounds=10, save=7)], defender_stratagems=[_benevolence()]
+    )
+    assert result.total_damage == 0
+
+
+# --- wargear scope ---
+
+
+@pytest.mark.parametrize("scope,cover_ignored", [("bearers_unit", True), ("bearer", False)])
+def test_bearers_unit_wargear_reaches_every_model(monkeypatch, scope, cover_ignored):
+    # An Omnispex-style item on model 1 (which doesn't shoot): model 2's shot
+    # ignores cover only if the item reaches the bearer's unit. A 3 hits
+    # against BS3, unless the target's cover makes it -1.
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+    omnispex = _wargear([_wargear_ability([_condition("always")], [_effect("ignore_cover")])])
+    omnispex.scope = scope
+    gun = _weapon(attacks="1", skill=3, strength=10, ap=-10, damage="1", weapon_type="ranged")
+    gun.id = 2
+    attacker = _unit([_unit_model(_model(), [], [omnispex]), _unit_model(_model(), [gun])])
+    defender = _unit([_unit_model(_model(toughness=1, wounds=10, save=7), [])])
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {2},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=True,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+    )
+    assert result.total_damage == (1 if cover_ignored else 0)
+
+
+async def test_end_of_turn_stratagem_is_in_effect_in_later_phases_of_its_turn(
+    client: AsyncClient, faction_id: int
+):
+    # Used in your Movement phase, until the end of the turn: in effect in your
+    # Shooting and Fight phases, not for the defender (your opponent's turn).
+    attacker_id, defender_id, _ = await _combat_units_in_list(client, faction_id, [])
+    response = await client.post(
+        "/stratagems",
+        json={
+            "name": "Superiority",
+            "cp": 1,
+            "is_core": True,
+            "timings": [{"phase": "movement", "turn": "your_turn"}],
+            "duration": "until_end_of_turn",
+        },
+    )
+    assert response.status_code == 201, response.text
+    for melee in (False, True):
+        assert await _usable(client, attacker_id, "attacker", melee) == {"Superiority"}
+        assert await _usable(client, defender_id, "defender", melee) == set()
+
+
+# --- Cybernetica Datasmith and Kastelan Robots ---
+
+
+def test_torrent_hits_automatically(monkeypatch):
+    entry = next(e for e in weapon_ability_seeds.ENTRIES if e[0] == "Torrent")
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 1)  # would miss
+    weapon = _weapon(attacks="2", skill=0, strength=10, ap=-10, weapon_type="ranged")
+    weapon.abilities = [
+        _ability([_condition(c) for c in entry[2]], [_effect(e) for e in entry[3]])
+    ]
+    result = _fire(weapon, [_model(toughness=1, wounds=10, save=7)])
+    assert result.attack_rolls == []  # no hit rolls at all
+    assert len(result.wound_rolls) == 2
+
+
+def _kastelan_unit(datasmith_gun=None, kastelan_gun=None):
+    datasmith = _model(
+        name="Datasmith", keywords=[_keyword("CHARACTER"), _keyword("CYBERNETICA DATASMITH")]
+    )
+    kastelan = _model(name="Kastelan", keywords=[_keyword("KASTELAN ROBOTS")])
+    return _unit(
+        [
+            _unit_model(datasmith, [datasmith_gun] if datasmith_gun else []),
+            _unit_model(kastelan, [kastelan_gun] if kastelan_gun else []),
+        ]
+    )
+
+
+def test_protector_protocol_adds_attacks_to_kastelan_ranged_weapons_only(monkeypatch):
+    from app.seeds.factions.adeptus_mechanicus import datasheet_abilities as admech
+
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    protocol = admech.OPTIONS["Battle Protocols"]["Protector Protocol"]
+    guns = []
+    for i, name in ((1, "Pistol"), (2, "Blaster")):
+        gun = _weapon(name=name, attacks="1", skill=3, weapon_type="ranged")
+        gun.id = i
+        guns.append(gun)
+    attacker = _kastelan_unit(*guns)
+    defender = _unit([_unit_model(_model(toughness=1, wounds=50, save=7), [])])
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {1, 2},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+        attacker_rules=list(protocol.rules),
+    )
+    assert {wr.name: len(wr.attack_rolls) for wr in result.weapon_results} == {
+        "Pistol": 1,
+        "Blaster": 3,
+    }
+
+
+def _shoot_kastelan_unit(monkeypatch, rolls, defender_rules, apply_precision=False):
+    rolls = iter(rolls)
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=9, ap=-10, damage="1", weapon_type="ranged")
+    weapon.id = 1
+    if apply_precision:
+        weapon.abilities = [_ability([_condition("always")], [_effect("precision")])]
+    defender = _kastelan_unit()
+    datasmith, kastelan = (um.model for um in defender.unit_models)
+    datasmith.is_support = True  # targeted after the Kastelan
+    datasmith.toughness, kastelan.toughness = 9, 9
+    for model in (datasmith, kastelan):
+        model.wounds, model.save = 10, 7
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    return combat.resolve_combat(
+        attacker,
+        defender,
+        {1},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+        apply_precision=apply_precision,
+        defender_rules=defender_rules,
+    )
+
+
+def test_aegis_protocol_gives_kastelans_plus_one_toughness(monkeypatch):
+    from app.seeds.factions.adeptus_mechanicus import datasheet_abilities as admech
+
+    aegis = list(admech.OPTIONS["Battle Protocols"]["Aegis Protocol"].rules)
+    # S9 vs T9 wounds on a 4; vs T10 it needs a 5.
+    assert _shoot_kastelan_unit(monkeypatch, [6, 4, 1], []).total_damage == 1
+    assert _shoot_kastelan_unit(monkeypatch, [6, 4, 1], aegis).total_damage == 0
+    # The Datasmith isn't a Kastelan: still T9.
+    hit_datasmith = _shoot_kastelan_unit(monkeypatch, [6, 4, 1], aegis, apply_precision=True)
+    assert hit_datasmith.total_damage == 1
+
+
+def test_robotic_bodyguard_gives_the_datasmith_fnp_4(monkeypatch):
+    from app.seeds.factions.adeptus_mechanicus import datasheet_abilities as admech
+
+    bodyguard = list(admech.RULES["Robotic Bodyguard"])
+    # hit, wound, failed save, FNP 4 - only the Datasmith gets to roll it.
+    on_datasmith = _shoot_kastelan_unit(
+        monkeypatch, [6, 6, 1, 4], bodyguard, apply_precision=True
+    )
+    assert (on_datasmith.total_damage, on_datasmith.fnp_rolls) == (0, [4])
+    on_kastelan = _shoot_kastelan_unit(monkeypatch, [6, 6, 1, 4], bodyguard)
+    assert (on_kastelan.total_damage, on_kastelan.fnp_rolls) == (1, [])

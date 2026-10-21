@@ -5,7 +5,7 @@ from sqlalchemy.orm import selectinload
 
 from app.db import get_session
 from app.combat_rules import Rule
-from app.combat_rules.positions import POSITION_CONDITIONS, POSITIONS
+from app.combat_rules.positions import ALWAYS_ASKED, POSITION_CONDITIONS, POSITIONS
 from app.models import (
     ArmyList,
     DatasheetAbility,
@@ -14,6 +14,7 @@ from app.models import (
     DetachmentRuleWeaponAbility,
     Enhancement,
     EnhancementDatasheetAbility,
+    EnhancementWeapon,
     EnhancementWeaponAbility,
     FactionAbility,
     Model,
@@ -63,6 +64,12 @@ async def _load_unit(session: AsyncSession, unit_id: int) -> Unit | None:
             enhancements.selectinload(Enhancement.datasheet_ability_grants)
             .selectinload(EnhancementDatasheetAbility.datasheet_ability)
             .selectinload(DatasheetAbility.effects),
+            enhancements.selectinload(Enhancement.weapons)
+            .selectinload(EnhancementWeapon.abilities)
+            .selectinload(WeaponAbility.conditions),
+            enhancements.selectinload(Enhancement.weapons)
+            .selectinload(EnhancementWeapon.abilities)
+            .selectinload(WeaponAbility.effects),
         )
     ]
     result = await session.execute(
@@ -325,7 +332,8 @@ async def relevant_positions(
     return [
         PositionOut(id=position, label=label)
         for position, label in POSITIONS.items()
-        if POSITION_CONDITIONS[position][side] & conditions
+        if side in ALWAYS_ASKED.get(position, set())
+        or POSITION_CONDITIONS[position][side] & conditions
     ]
 
 
@@ -346,6 +354,17 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
         raise HTTPException(
             status_code=400,
             detail="one or more selected_weapon_ids are not equipped by the attacking unit",
+        )
+    attacker_enhancement_weapon_ids = {
+        weapon.id
+        for unit_model in attacker.unit_models
+        if unit_model.enhancement is not None
+        for weapon in unit_model.enhancement.weapons
+    }
+    if not set(payload.selected_enhancement_weapon_ids) <= attacker_enhancement_weapon_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="one or more selected_enhancement_weapon_ids aren't the attacking unit's",
         )
 
     phase = stratagem_availability.calculator_phase(payload.in_engagement_range)
@@ -379,7 +398,8 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
     result = combat_service.resolve_combat(
         attacker=attacker,
         defender=defender,
-        selected_weapon_ids=set(payload.selected_weapon_ids),
+        selected_weapon_ids=set(payload.selected_weapon_ids)
+        | {("enhancement", i) for i in payload.selected_enhancement_weapon_ids},
         in_engagement_range=payload.in_engagement_range,
         visible=visible,
         in_range=in_range,
@@ -398,8 +418,11 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
         attacker_extra_keywords=attacker_extra_keywords,
         defender_extra_keywords=defender_extra_keywords,
         attacker_detachment_rules=attacker_detachment_rules,
+        defender_detachment_rules=defender_detachment_rules,
+        ability_rules=datasheet_ability_seeds.RULES,
         attacker_positions=set(payload.attacker_positions),
         defender_positions=set(payload.defender_positions),
+        charged=payload.charged,
     )
 
     return CombatOut(

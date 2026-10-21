@@ -83,8 +83,9 @@
               "name": "Test Scope",
               "description": "Ignores cover.",
               "abilities": [
-                "Ignore Cover (Unit)"
-              ]
+                "Ignores Cover"
+              ],
+              "scope": "bearers_unit"
             }
           ],
           "base_size": "32mm"
@@ -112,7 +113,8 @@
               "ap": -1,
               "damage": "1"
             }
-          ]
+          ],
+          "feel_no_pain_mortal": 5
         }
       ]
     }

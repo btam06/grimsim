@@ -4,8 +4,10 @@ import random
 import re
 from collections import deque
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 
 from app.combat_rules import CONDITIONS, EFFECTS, Rule
+from app.combat_rules.effects import OWN_UNIT_EFFECTS
 from app.models import DetachmentRule, Model, Stratagem, Unit, WargearAbility, WeaponAbility
 from app.services import detachment_rules as detachment_rule_service
 from app.services import enhancements as enhancement_rules
@@ -96,11 +98,17 @@ class _Target:
     invulnerable     : int | None
     feel_no_pain     : int | None
     remaining_wounds : int
+    # Feel No Pain against mortal wounds only (see feel_no_pain_mortal).
+    feel_no_pain_mortal: int | None = None
     is_leader        : bool = False
     is_support       : bool = False
     # Rolls to explode when destroyed (a datasheet ability with the
     # deadly_demise effect, e.g. "Deadly Demise D3").
     deadly_demise    : bool = False
+    # Defender rules only this model has (from a per-model detachment rule,
+    # e.g. War-Form Mantles: TECH-PRIEST models have a 4+ invulnerable save),
+    # applied to an attack once it's allocated to this model.
+    rules            : tuple = ()
 
 
 def _precision_target(targets: deque[_Target]) -> _Target:
@@ -182,8 +190,11 @@ def resolve_combat(
     attacker_extra_keywords: set[str] | None = None,
     defender_extra_keywords: set[str] | None = None,
     attacker_detachment_rules: list[DetachmentRule] | None = None,
+    defender_detachment_rules: list[DetachmentRule] | None = None,
+    ability_rules: dict[str, list[Rule]] | None = None,
     attacker_positions: set[str] | None = None,
     defender_positions: set[str] | None = None,
+    charged: bool = False,
 ) -> CombatResult:
     # The defending unit is a queue of individual models, each with its own wound pool.
     # Each attack targets whichever model is at the front of the queue; once that
@@ -197,24 +208,25 @@ def resolve_combat(
     # The full set of keywords across every model in the defending unit's
     # original composition - used by conditions like "target has INFANTRY"
     # (e.g. for Anti-Infantry/Anti-Vehicle), independent of casualties so far.
+    # (Each model's keywords include any its unit's enhancements give it.)
     defender_keywords = {
-        keyword.name
+        keyword
         for unit_model in defender.unit_models
-        for keyword in unit_model.model.keywords
+        for keyword in enhancement_rules.model_keywords(defender, unit_model)
     } | set(defender_extra_keywords or ())
     # The same keywords, but kept per defending model - e.g. to tell a
     # CHARACTER leading a unit apart from a CHARACTER on its own.
     defender_model_keywords = [
-        frozenset(keyword.name for keyword in unit_model.model.keywords)
+        frozenset(enhancement_rules.model_keywords(defender, unit_model))
         for unit_model in defender.unit_models
     ]
     # Likewise for the attacking unit - e.g. for "if this unit has BATTLELINE".
     # Either side can also have keywords granted by a rule option (e.g. Mantra
     # of Discipline's BATTLELINE).
     attacker_keywords = {
-        keyword.name
+        keyword
         for unit_model in attacker.unit_models
-        for keyword in unit_model.model.keywords
+        for keyword in enhancement_rules.model_keywords(attacker, unit_model)
     } | set(attacker_extra_keywords or ())
 
     # Code-defined rules (e.g. an active Doctrina Imperative) from faction
@@ -233,15 +245,31 @@ def resolve_combat(
     # Stratagems the defender used on its unit: like the defender's rules,
     # they're in play for every weapon, modifying the attacks against it.
     defender_stratagems = list(defender_stratagems or [])
-    unrestricted_stratagems = [s for s in stratagems if s.is_unrestricted]
+    # A stratagem used on the attacking unit that protects it (e.g. Feel No
+    # Pain) protects that unit, not the targets of its attacks - so attacks
+    # only get its other effects, and its protective ones are kept for the
+    # unit itself (see OWN_UNIT_EFFECTS).
+    def attack_effects(stratagem: Stratagem) -> SimpleNamespace:
+        return SimpleNamespace(
+            conditions=stratagem.conditions,
+            effects=[e for e in stratagem.effects if _keyword(e) not in OWN_UNIT_EFFECTS],
+        )
 
-    def stratagems_for(model: Model) -> list[Stratagem]:
-        model_keywords = {keyword.name for keyword in model.keywords}
-        return [s for s in stratagems if s.applies_to(model_keywords)]
+    def own_unit_effects(stratagem: Stratagem) -> SimpleNamespace:
+        return SimpleNamespace(
+            conditions=stratagem.conditions,
+            effects=[e for e in stratagem.effects if _keyword(e) in OWN_UNIT_EFFECTS],
+        )
+
+    unrestricted_stratagems = [attack_effects(s) for s in stratagems if s.is_unrestricted]
+
+    def stratagems_for(unit_model) -> list[Stratagem]:
+        keywords = enhancement_rules.model_keywords(attacker, unit_model)
+        return [s for s in stratagems if s.applies_to(keywords)]
 
     # Some wargear/datasheet abilities apply to the whole attacking unit rather
-    # than just the model carrying them (e.g. "Ignore Cover (Unit)", or a
-    # datasheet ability granting the unit a reroll) - checked once, across
+    # than just the model carrying them (e.g. a datasheet ability granting the
+    # unit a reroll) - checked once, across
     # every model's wargear and datasheet abilities, regardless of which
     # weapon is firing.
     unit_wide_state: dict = {}
@@ -261,9 +289,20 @@ def resolve_combat(
     datasheet_abilities += detachment_rule_service.granted_datasheet_abilities(
         attacker_detachment_rules, attacker
     )
-    detachment_weapon_abilities = detachment_rule_service.granted_weapon_abilities(
-        attacker_detachment_rules, attacker
-    )
+    # Code-defined rules by datasheet ability name (e.g. War-Form Mantle's),
+    # for abilities a per-model detachment rule gives single models.
+    ability_rules = ability_rules or {}
+
+    def model_abilities(rules: list[DetachmentRule], keywords: set[str], side: str) -> list:
+        # The datasheet abilities a per-model detachment rule gives a model with
+        # these keywords, and their code-defined rules for `side`.
+        abilities = detachment_rule_service.model_datasheet_abilities(rules, keywords)
+        return abilities + [
+            rule
+            for ability in abilities
+            for rule in ability_rules.get(ability.name, [])
+            if rule.side == side
+        ]
     # Names of the faction-ability rule options active for the attacking unit
     # (e.g. "Riled Up"), for conditions like "if this unit is riled up".
     attacker_options = set(attacker_options or ())
@@ -287,19 +326,50 @@ def resolve_combat(
             "defender_model_keywords": defender_model_keywords,
             "attacker_positions": attacker_positions,
             "defender_positions": defender_positions,
+            "charged": charged,
         },
         unit_wide_state,
         deque(),
     )
-    unit_ignores_cover = unit_wide_state.get("ignore_cover_unit", False)
     unit_rerolls_failed_hits = unit_wide_state.get("reroll_failed_hits", False)
 
+    def model_state(unit_model) -> dict:
+        # What the defender's rules do for one of its models in particular -
+        # e.g. the Aegis Protocol's +1 Toughness for KASTELAN ROBOT models, or
+        # Robotic Bodyguard's Feel No Pain 4+ for the Datasmith leading them.
+        state: dict = {}
+        _apply_triggered_effects(
+            defender_rules,
+            {
+                "step": "target_model",
+                "target_model_keywords": enhancement_rules.model_keywords(defender, unit_model),
+                "defender_keywords": defender_keywords,
+                "defender_model_keywords": defender_model_keywords,
+            },
+            state,
+            deque(),
+        )
+        return state
+
+    model_states = {id(unit_model): model_state(unit_model) for unit_model in ordered_unit_models}
     targets: deque[_Target] = deque(
         _Target(
-            toughness=unit_model.model.toughness,
+            toughness=unit_model.model.toughness
+            + (1 if model_states[id(unit_model)].get("plus_one_toughness") else 0),
             save=unit_model.model.save,
             invulnerable=unit_model.model.invulnerable,
-            feel_no_pain=unit_model.model.feel_no_pain,
+            feel_no_pain=min(
+                (
+                    fnp
+                    for fnp in (
+                        unit_model.model.feel_no_pain,
+                        model_states[id(unit_model)].get("feel_no_pain"),
+                    )
+                    if fnp is not None
+                ),
+                default=None,
+            ),
+            feel_no_pain_mortal=unit_model.model.feel_no_pain_mortal,
             remaining_wounds=unit_model.model.wounds,
             is_leader=bool(unit_model.model.is_leader),
             is_support=bool(unit_model.model.is_support),
@@ -307,6 +377,15 @@ def resolve_combat(
                 effect.keyword == "deadly_demise"
                 for ability in unit_model.model.abilities
                 for effect in ability.effects
+            ),
+            rules=tuple(
+                ability
+                for ability in model_abilities(
+                    list(defender_detachment_rules or []),
+                    enhancement_rules.model_keywords(defender, unit_model),
+                    "defender",
+                )
+                if isinstance(ability, Rule)
             ),
         )
         for unit_model in ordered_unit_models
@@ -338,17 +417,54 @@ def resolve_combat(
                 continue
 
             # Abilities on wargear equipped by this model are in play for every
-            # weapon it fires, same as the weapon's own abilities.
+            # weapon it fires, same as the weapon's own abilities - and so are
+            # those on wargear another model in the unit has, if it reaches the
+            # bearer's unit (e.g. an Omnispex).
             wargear_abilities = [
-                ability for gear in unit_model.wargear for ability in gear.abilities
+                ability
+                for other in attacker.unit_models
+                for gear in other.wargear
+                if other is unit_model or gear.scope == "bearers_unit"
+                for ability in gear.abilities
             ]
-            model_stratagems = stratagems_for(unit_model.model)
+            own_stratagems = stratagems_for(unit_model)
+            model_stratagems = [attack_effects(s) for s in own_stratagems]
+            # This model's own Feel No Pain against mortal wounds (e.g. from a
+            # Hazardous weapon): the best of its Feel No Pain, its Feel No Pain
+            # against mortal wounds, and any its stratagems give it.
+            own_state: dict = {}
+            _apply_triggered_effects(
+                [own_unit_effects(s) for s in own_stratagems],
+                {"step": "own_unit"},
+                own_state,
+                deque(),
+            )
+            shooter_fnp = min(
+                (
+                    fnp
+                    for fnp in (
+                        unit_model.model.feel_no_pain,
+                        unit_model.model.feel_no_pain_mortal,
+                        own_state.get("feel_no_pain"),
+                        own_state.get("feel_no_pain_mortal"),
+                    )
+                    if fnp is not None
+                ),
+                default=None,
+            )
             # Weapon abilities this model's weapons gain from enhancements,
             # upgrades and detachment rules (e.g. [SUSTAINED HITS 1] on ranged
             # weapons), each limited to a weapon type or not.
-            granted_weapon_abilities = (
-                enhancement_rules.granted_weapon_abilities(attacker, unit_model)
-                + detachment_weapon_abilities
+            granted_weapon_abilities = enhancement_rules.granted_weapon_abilities(
+                attacker, unit_model
+            ) + detachment_rule_service.granted_weapon_abilities(
+                attacker_detachment_rules, attacker, unit_model
+            )
+            # What a per-model detachment rule gives this model alone.
+            model_rule_abilities = model_abilities(
+                attacker_detachment_rules,
+                enhancement_rules.model_keywords(attacker, unit_model),
+                "attacker",
             )
 
             # Hazardous wounds taken by this model accumulate across every one
@@ -356,7 +472,8 @@ def resolve_combat(
             # against its own wounds once it's done firing (see below).
             model_hazardous_damage = 0
 
-            for weapon in unit_model.weapons:
+            # Its own weapons, and any its enhancement gives it (e.g. TL-4Ø9).
+            for weapon in list(unit_model.weapons) + enhancement_rules.granted_weapons(unit_model):
                 # Only weapons the caller chose to fire/swing with this attack count.
                 if weapon.id not in selected_weapon_ids:
                     continue
@@ -378,6 +495,7 @@ def resolve_combat(
                             ]
                             + wargear_abilities
                             + datasheet_abilities
+                            + model_rule_abilities
                             + model_stratagems
                             + attacker_rules
                             + defender_rules
@@ -394,6 +512,12 @@ def resolve_combat(
                     "defender_model_keywords": defender_model_keywords,
                     "attacker_positions": attacker_positions,
                     "defender_positions": defender_positions,
+                    "charged": charged,
+                    # The firing model's own keywords - e.g. for "weapons
+                    # equipped by KASTELAN ROBOT models".
+                    "attacker_model_keywords": enhancement_rules.model_keywords(
+                        attacker, unit_model
+                    ),
                 }
 
                 # Weapon eligibility: a static, no-dice-rolled check of this
@@ -472,21 +596,25 @@ def resolve_combat(
                     # resolve), rounding down.
                     for _ in range(len(targets) // 5):
                         pending_attacks.append({"auto_hit": False})
+                if pre_weapon_state.get("torrent"):
+                    # Torrent: every attack hits automatically.
+                    for pending_attack in pending_attacks:
+                        pending_attack["auto_hit"] = True
                 if pre_weapon_state.get("hazardous"):
-                    # Hazard roll: a 1-2 means the firing model takes damage based
-                    # on its own keywords, reduced by its own feel no pain.
+                    # Hazard roll: a 1-2 means the firing model takes mortal
+                    # wounds based on its own keywords, reduced by its own feel
+                    # no pain (against mortal wounds - see shooter_fnp).
                     hazard_roll = random.randint(1, 6)
                     result.hazardous_rolls.append(hazard_roll)
                     weapon_result.hazardous_rolls.append(hazard_roll)
                     if hazard_roll <= 2:
-                        shooter_keywords = {k.name for k in unit_model.model.keywords}
+                        shooter_keywords = enhancement_rules.model_keywords(attacker, unit_model)
                         if "VEHICLE" in shooter_keywords:
                             self_wounds = 3
                         elif "INFANTRY" in shooter_keywords:
                             self_wounds = 1
                         else:
                             self_wounds = 0
-                        shooter_fnp = unit_model.model.feel_no_pain
                         for _ in range(self_wounds):
                             if shooter_fnp is not None and random.randint(1, 6) >= shooter_fnp:
                                 continue  # feel no pain negated this point of damage
@@ -546,12 +674,14 @@ def resolve_combat(
             if (
                 (in_cover or attack.get("benefit_of_cover"))
                 and is_ranged
-                and not unit_ignores_cover
                 and not attack.get("ignore_cover")
             ):
                 hit_modifier -= 1
             hit_modifier = max(-1, min(1, hit_modifier))
-            effective_skill = weapon.skill - hit_modifier
+            # Setting the characteristic (e.g. "a Ballistic Skill of 3+") comes
+            # before any modifiers or improvements.
+            skill = 3 if is_ranged and attack.get("ranged_skill_3") else weapon.skill
+            effective_skill = skill - hit_modifier
             # Improving the BS/WS characteristic itself (e.g. a Doctrina
             # Imperative) isn't a hit roll modifier, so it's outside the cap.
             if is_ranged and attack.get("plus_one_skill_ranged"):
@@ -600,16 +730,22 @@ def resolve_combat(
             abilities = fired["abilities"]
             weapon_context = fired["context"]
             weapon_result = fired["result"]
-            threshold = wound_threshold(weapon.strength, target_for(fired).toughness)
+            strength = weapon.strength + (1 if attack.get("plus_one_strength") else 0)
+            threshold = wound_threshold(strength, target_for(fired).toughness)
 
             if attack.get("auto_pass_wound"):
                 wound_passed = True
             else:
                 wound_passed = False
-                # A failed wound roll may be re-rolled once (e.g. Twin-linked),
-                # with the wound-step triggers re-checked against the new roll.
+                # A failed wound roll may be re-rolled once (e.g. Twin-linked,
+                # or just a 1), with the wound-step triggers re-checked against
+                # the new roll.
+                wound_roll = None
                 for is_reroll in (False, True):
-                    if is_reroll and not attack.get("reroll_failed_wounds"):
+                    if is_reroll and not (
+                        attack.get("reroll_failed_wounds")
+                        or (wound_roll == 1 and attack.get("reroll_wound_ones"))
+                    ):
                         break
                     wound_roll = random.randint(1, 6)
                     if is_reroll:
@@ -667,6 +803,14 @@ def resolve_combat(
             weapon_context = fired["context"]
             weapon_result = fired["result"]
             target = target_for(fired)
+            if target.rules:
+                # Rules only the model it's allocated to has (e.g. a
+                # TECH-PRIEST's 4+ invulnerable save) apply to this attack from
+                # here on - its save and damage.
+                attack = dict(attack)
+                _apply_triggered_effects(
+                    target.rules, {"step": "allocated", **weapon_context}, attack, deque()
+                )
 
             # Save roll: armor save is worsened by the weapon's AP, but the
             # defender may use their invulnerable save instead if it's better.
@@ -676,6 +820,8 @@ def resolve_combat(
                 save_passed = False
             else:
                 ap = weapon.ap - 1 if attack.get("improve_ap") else weapon.ap
+                if attack.get("worsen_ap"):
+                    ap = min(0, ap + 1)
                 save_needed = target.save - ap
                 if target.invulnerable is not None:
                     save_needed = min(save_needed, target.invulnerable)
@@ -698,22 +844,24 @@ def resolve_combat(
 
             # Damage roll: how many wounds this one failed save inflicts, plus any
             # bonus for the weapon (e.g. Melta within half range).
-            damage = roll_dice(weapon.damage) + fired["damage_bonus"]
+            damage = (
+                roll_dice(weapon.damage)
+                + fired["damage_bonus"]
+                + (1 if attack.get("plus_one_damage") else 0)
+            )
 
             # Apply damage a single point at a time, each rolling feel no pain
             # separately, against the one model this attack is allocated to. If
             # that model dies partway through, this attack's remaining damage is
             # wasted rather than carrying onto the next model.
             # The model's own feel no pain, or a better one granted by a rule
-            # (e.g. a leader's Lord of the Machine Cult).
-            feel_no_pain = min(
-                (
-                    fnp
-                    for fnp in (target.feel_no_pain, attack.get("feel_no_pain"))
-                    if fnp is not None
-                ),
-                default=None,
-            )
+            # (e.g. a leader's Lord of the Machine Cult). An attack that allows
+            # no save (e.g. Devastating Wounds) inflicts mortal wounds, so a
+            # Feel No Pain against mortal wounds counts too, if it's better.
+            fnps = [target.feel_no_pain, attack.get("feel_no_pain")]
+            if attack.get("no_save"):
+                fnps += [target.feel_no_pain_mortal, attack.get("feel_no_pain_mortal")]
+            feel_no_pain = min((fnp for fnp in fnps if fnp is not None), default=None)
             for _ in range(damage):
                 if feel_no_pain is not None:
                     fnp_roll = random.randint(1, 6)

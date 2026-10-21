@@ -1,8 +1,6 @@
 from app.combat_rules import Rule
 from app.combat_rules.conditions import (
     ALWAYS,
-    ATTACKER_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE,
-    MELEE_VS_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE,
     RANGED_MOVED_LESS_THAN_3,
 )
 from app.combat_rules.effects import (
@@ -12,6 +10,10 @@ from app.combat_rules.effects import (
     MINUS_ONE_TO_HIT,
     PLUS_ONE_SKILL_MELEE,
     PLUS_ONE_SKILL_RANGED,
+)
+from app.seeds.factions.adeptus_mechanicus.conditions import (
+    ATTACKER_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE,
+    MELEE_VS_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE,
 )
 
 DOCTRINA_IMPERATIVES = "Doctrina Imperatives"

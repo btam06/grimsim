@@ -6,7 +6,7 @@ import {
   detachDatasheetAbility,
   updateModel,
 } from '../api'
-import { skillLabel } from '../weaponDisplay'
+import { skillLabel, skillValue } from '../weaponDisplay'
 import Field from './Field'
 import MultiSelect from './MultiSelect'
 import Select from './Select'
@@ -24,6 +24,7 @@ function buildEmptyForm() {
     leadership: '',
     invulnerable: '',
     feel_no_pain: '',
+    feel_no_pain_mortal: '',
     is_support: false,
     is_leader: false,
     base_size_id: '',
@@ -45,6 +46,8 @@ function formFromModel(model) {
     leadership: String(model.leadership),
     invulnerable: model.invulnerable === null ? '' : String(model.invulnerable),
     feel_no_pain: model.feel_no_pain === null ? '' : String(model.feel_no_pain),
+    feel_no_pain_mortal:
+      model.feel_no_pain_mortal === null ? '' : String(model.feel_no_pain_mortal),
     is_support: model.is_support,
     is_leader: model.is_leader,
     base_size_id: model.base_size_id === null ? '' : String(model.base_size_id),
@@ -66,6 +69,8 @@ function toPayload(form) {
     leadership: Number(form.leadership),
     invulnerable: form.invulnerable === '' ? null : Number(form.invulnerable),
     feel_no_pain: form.feel_no_pain === '' ? null : Number(form.feel_no_pain),
+    feel_no_pain_mortal:
+      form.feel_no_pain_mortal === '' ? null : Number(form.feel_no_pain_mortal),
     is_support: form.is_support,
     is_leader: form.is_leader,
     base_size_id: form.base_size_id === '' ? null : Number(form.base_size_id),
@@ -246,6 +251,13 @@ function ModelFormPage({
         <Field label="Feel No Pain (optional)">
           <input type="number" value={form.feel_no_pain} onChange={handleChange('feel_no_pain')} />
         </Field>
+        <Field label="Feel No Pain vs mortal wounds (optional)">
+          <input
+            type="number"
+            value={form.feel_no_pain_mortal}
+            onChange={handleChange('feel_no_pain_mortal')}
+          />
+        </Field>
         <Field label="Base size">
           <Select
             options={[{ id: '', name: 'Not set' }, ...baseSizes]}
@@ -305,7 +317,7 @@ function ModelFormPage({
                 <li key={w.id}>
                   {w.name} —{w.range !== null ? ` R${w.range}"` : ''} A{w.attacks} S{w.strength} AP
                   {w.ap} D{w.damage} {skillLabel(w.weapon_type)}
-                  {w.skill}+
+                  {skillValue(w.skill)}
                   <EditButton onClick={() => onEditWeapon(w)} />
                   <DeleteButton onClick={() => handleDeleteWeapon(w.id)} />
                 </li>

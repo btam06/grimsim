@@ -353,7 +353,8 @@ section .app-dialog form {
    between them; stacked on narrow screens. */
 .matchup {
   display: flex;
-  align-items: center;
+  /* Top-aligned, so opening one side's datasheet doesn't push the other down. */
+  align-items: flex-start;
   gap: 0.5rem;
   flex: 1 1 100%;
 }
@@ -368,6 +369,8 @@ section .app-dialog form {
 
 .swap-button {
   flex: 0 0 auto;
+  /* Level with the list/unit pickers. */
+  margin-top: 4.5rem;
   padding: 0.5rem 0.6rem;
   cursor: pointer;
 }
@@ -380,9 +383,103 @@ section .app-dialog form {
 
   .swap-button {
     align-self: center;
+    margin-top: 0;
   }
 
   .swap-button svg {
     transform: rotate(90deg);
   }
+}
+
+/* A unit's datasheet in the calculator (inside a collapsed accordion). */
+.datasheet h4 {
+  margin: 0.5rem 0 0.3rem;
+}
+
+.datasheet h5 {
+  margin: 0.5rem 0 0.2rem;
+  font-size: 0.85rem;
+}
+
+.datasheet p,
+.datasheet ul {
+  margin: 0.3rem 0;
+}
+
+.datasheet ul {
+  padding-left: 1.2rem;
+}
+
+.datasheet-model + .datasheet-model {
+  margin-top: 0.6rem;
+  border-top: 1px solid #8884;
+  padding-top: 0.4rem;
+}
+
+.datasheet-table {
+  overflow-x: auto;
+  margin: 0.3rem 0;
+}
+
+.datasheet table {
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.datasheet th,
+.datasheet td {
+  padding: 0.15rem 0.4rem;
+  border-bottom: 1px solid #8883;
+  text-align: center;
+}
+
+.datasheet th:first-child,
+.datasheet-table td:first-child {
+  text-align: left;
+}
+
+.datasheet-table table {
+  width: 100%;
+}
+
+/* Text whose description shows in a hover tooltip (see Described). */
+.described {
+  cursor: help;
+}
+
+.described-icon {
+  font-size: 0.75em;
+  opacity: 0.6;
+}
+
+/* The datasheet opens over what's below it rather than pushing it down: its
+   panel hangs under the "Datasheet" header, above the rest of the form. */
+.datasheet-accordion.MuiAccordion-root {
+  position: relative;
+  /* Its panel is out of the flow, so it doesn't give it any width. */
+  flex: 1 1 100%;
+  width: 100%;
+}
+
+.datasheet-accordion .MuiCollapse-root {
+  position: absolute;
+  top: 100%;
+  left: -1px;
+  /* Wider than the side it's in (up to 40rem, within the screen), growing
+     towards the middle of the page - see the defender's below. */
+  width: max(100%, min(40rem, calc(100vw - 2rem)));
+  z-index: 20;
+  max-height: 70vh;
+  overflow-y: auto;
+  border: 1px solid #8884;
+  border-radius: 0 0 4px 4px;
+  background: Canvas;
+  color: CanvasText;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
+}
+
+/* The defender's datasheet grows leftwards, towards the middle. */
+.matchup-side:last-child .datasheet-accordion .MuiCollapse-root {
+  left: auto;
+  right: -1px;
 }

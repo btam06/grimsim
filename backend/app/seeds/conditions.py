@@ -13,17 +13,15 @@ from app.combat_rules.conditions import (
     CRITICAL_HIT,
     CRITICAL_HIT_NOT_MONSTER_OR_VEHICLE,
     CRITICAL_WOUND,
-    ATTACKER_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE,
     ATTACKER_IS_BATTLELINE,
-    ATTACKER_NEAR_ADMECH_BATTLELINE,
-    MELEE_ATTACK_AGAINST_BATTLELINE,
-    MELEE_VS_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE,
+    CHARGED,
+    DEFENDER_IN_RANGE_OF_OBJECTIVE,
+    PRE_WEAPON,
     MOVED_LESS_THAN_3,
     PRE_WEAPON_NOT_MONSTER_OR_VEHICLE,
     RANGED_ATTACK,
     RANGED_MOVED_LESS_THAN_3,
     RILED_UP_RANGED_CRITICAL_HIT,
-    TARGET_ELECTRO_PRIESTS_LED_BY_CHARACTER,
     TARGET_HAS_CHARACTER,
     TARGET_INFANTRY,
     TARGET_LED_BY_CHARACTER,
@@ -35,7 +33,8 @@ from app.models import Condition
 
 # (keyword, name, description) - keyword must match a function registered in
 # app/combat_rules/conditions.py.
-ENTRIES = [
+# Core conditions; each faction's own are in its conditions.py ENTRIES.
+CORE_ENTRIES = [
     (CRITICAL_HIT, "Critical Hit", "The hit roll for this attack was a natural 6."),
     (CRITICAL_WOUND, "Critical Wound", "The wound roll for this attack was a natural 6."),
     (ALWAYS, "Always", "Always applies, regardless of step or roll."),
@@ -95,11 +94,6 @@ ENTRIES = [
         "The weapon is ranged and the attacking unit moved less than 3\" this turn.",
     ),
     (
-        MELEE_ATTACK_AGAINST_BATTLELINE,
-        "Melee Attack Against Battleline",
-        "A melee attack against a defending unit that contains a BATTLELINE model.",
-    ),
-    (
         ATTACKER_IS_BATTLELINE,
         "Attacker is Battleline",
         "The attacking unit contains a BATTLELINE model. Applies at every step.",
@@ -135,11 +129,6 @@ ENTRIES = [
         "The defending unit is a CHARACTER leading other models. Applies at every step.",
     ),
     (
-        TARGET_ELECTRO_PRIESTS_LED_BY_CHARACTER,
-        "Target is Electro-priests Led by Character",
-        "The defending unit is ELECTRO-PRIESTS led by a CHARACTER. Applies at every step.",
-    ),
-    (
         TARGET_INFANTRY,
         "Target is Infantry",
         "The defending unit contains an INFANTRY model. Applies at every step.",
@@ -150,30 +139,47 @@ ENTRIES = [
         "A ranged attack, checked before its hit roll.",
     ),
     (
-        ATTACKER_NEAR_ADMECH_BATTLELINE,
-        "Attacker Near AdMech Battleline",
-        "The attacking unit is within 6\" of a friendly ADEPTUS MECHANICUS BATTLELINE unit.",
+        PRE_WEAPON,
+        "Once per Weapon",
+        "Checked once per weapon, not per attack - for effects that add attacks.",
     ),
     (
-        ATTACKER_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE,
-        "Attacker Battleline or Near AdMech Battleline",
-        "The attacking unit is BATTLELINE, or within 6\" of a friendly ADEPTUS MECHANICUS "
-        "BATTLELINE unit.",
+        DEFENDER_IN_RANGE_OF_OBJECTIVE,
+        "Defender in Range of Objective",
+        "The defending unit is within range of an objective marker.",
     ),
     (
-        MELEE_VS_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE,
-        "Melee Attack vs Battleline or Near AdMech Battleline",
-        "A melee attack against a unit that is BATTLELINE, or within 6\" of a friendly "
-        "ADEPTUS MECHANICUS BATTLELINE unit.",
+        CHARGED,
+        "Charged This Turn",
+        "The attacking unit made a Charge move this turn.",
     ),
 ]
+
+
+def all_entries() -> list[tuple[str, str, str]]:
+    # The core conditions' rows and every faction's.
+    from app.seeds.factions import FACTIONS
+
+    return CORE_ENTRIES + [
+        entry
+        for faction in FACTIONS
+        for entry in getattr(getattr(faction, "conditions", None), "ENTRIES", [])
+    ]
+
+
+def __getattr__(name: str):
+    # ENTRIES: every condition row, core and faction (built on first use, since
+    # the factions package imports the combat rules this module uses).
+    if name == "ENTRIES":
+        return all_entries()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 async def seed(session: AsyncSession) -> None:
     existing = set((await session.execute(select(Condition.keyword))).scalars().all())
     missing = [
         Condition(keyword=keyword, name=name, description=description)
-        for keyword, name, description in ENTRIES
+        for keyword, name, description in all_entries()
         if keyword not in existing
     ]
     if missing:

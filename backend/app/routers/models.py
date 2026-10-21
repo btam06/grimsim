@@ -32,6 +32,7 @@ def _to_out(
         feel_no_pain=model.feel_no_pain,
         is_support=model.is_support,
         is_leader=model.is_leader,
+        feel_no_pain_mortal=model.feel_no_pain_mortal,
         base_size_id=model.base_size.id if model.base_size else None,
         ability_ids=ability_ids,
         wargear_ids=wargear_ids,
@@ -119,8 +120,10 @@ async def create_model(payload: ModelIn, session: AsyncSession = Depends(get_ses
                 "keyword_ids",
                 "faction_ability_ids",
                 "base_size_id",
+                "feel_no_pain_mortal",
             }
         ),
+        feel_no_pain_mortal=payload.feel_no_pain_mortal,
         base_size=await _base_size(session, payload.base_size_id),
         abilities=abilities,
         keywords=keywords,
@@ -195,6 +198,7 @@ async def update_model(
     model.is_support = payload.is_support
     model.is_leader = payload.is_leader
     model.base_size = await _base_size(session, payload.base_size_id)
+    model.feel_no_pain_mortal = payload.feel_no_pain_mortal
     model.abilities = abilities
     model.keywords = keywords
     model.faction_abilities = faction_abilities

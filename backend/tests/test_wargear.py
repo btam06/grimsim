@@ -182,3 +182,37 @@ async def test_delete_wargear_equipped_by_unit_returns_400(client: AsyncClient, 
 
     response = await client.delete(f"/wargear/{wargear_id}")
     assert response.status_code == 400
+
+
+async def test_wargear_scope(client: AsyncClient, faction_id: int):
+    model_id = (
+        await client.post(
+            "/models",
+            json={
+                "name": "Alpha",
+                "faction_id": faction_id,
+                "save": 4,
+                "toughness": 3,
+                "oc": 1,
+                "movement": 6,
+                "wounds": 1,
+                "leadership": 7,
+            },
+        )
+    ).json()["id"]
+    created = await client.post(
+        "/wargear", json={"name": "Omnispex", "model_id": model_id, "scope": "bearers_unit"}
+    )
+    assert created.status_code == 201
+    assert created.json()["scope"] == "bearers_unit"
+    plain = await client.post("/wargear", json={"name": "Grenades", "model_id": model_id})
+    assert plain.json()["scope"] == "bearer"
+    updated = await client.put(
+        f"/wargear/{created.json()['id']}",
+        json={"name": "Omnispex", "model_id": model_id, "scope": "bearer"},
+    )
+    assert updated.json()["scope"] == "bearer"
+    bad = await client.post(
+        "/wargear", json={"name": "Bad", "model_id": model_id, "scope": "army"}
+    )
+    assert bad.status_code == 422

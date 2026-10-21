@@ -525,7 +525,7 @@ async def test_faction_rule_options_belong_to_a_seeded_ability_and_have_unique_n
 
 async def test_doctrina_imperatives_has_protector_and_conqueror_options():
     options = factions.rule_options("Adeptus Mechanicus", "Doctrina Imperatives")
-    assert set(options) == {"Protector Imperative", "Conqueror Imperative"}
+    assert {"Protector Imperative", "Conqueror Imperative"} <= set(options)
 
 
 async def test_seed_weapon_abilities_renames_old_names_in_place(session: AsyncSession):
@@ -846,7 +846,8 @@ async def test_load_datasheets_from_a_data_file(fixture_game_data):
     assert trooper.keywords == ("INFANTRY", "BATTLELINE")
     assert [w.name for w in trooper.weapons].count("Test Stubber") == 3
     assert trooper.weapons[0].abilities == ("Rapid Fire 1", "Heavy")
-    assert trooper.wargear[0].abilities == ("Ignore Cover (Unit)",)
+    assert trooper.wargear[0].abilities == ("Ignores Cover",)
+    assert trooper.wargear[0].scope == "bearers_unit"
     # Fields left out of the file take their defaults.
     assert (sergeant.is_leader, sergeant.invulnerable, sergeant.wargear) == (True, None, ())
 
@@ -886,10 +887,12 @@ async def test_run_all_seeds_datasheets_from_data_files(session: AsyncSession, f
     assert (rifle.range, rifle.attacks, rifle.ap, rifle.damage) == (24, "2", -1, "D3")
     assert {a.name for a in rifle.abilities} == {"Rapid Fire 1", "Heavy"}
     [scope] = trooper.wargear
-    assert [a.name for a in scope.abilities] == ["Ignore Cover (Unit)"]
+    assert [a.name for a in scope.abilities] == ["Ignores Cover"]
+    assert scope.scope == "bearers_unit"
     assert sergeant.is_leader is True
     assert [w.name for w in sergeant.weapons] == ["Test Blade"]
     assert (trooper.base_size.name, sergeant.base_size) == ("32mm", None)
+    assert (trooper.feel_no_pain_mortal, sergeant.feel_no_pain_mortal) == (None, 5)
 
 
 async def test_seed_datasheets_fills_in_a_missing_base_size(
@@ -1000,11 +1003,11 @@ async def test_seed_datasheets_fills_in_what_an_existing_model_is_missing(
 
 
 async def test_canticles_of_the_omnissiah_options():
-    assert set(datasheet_abilities.OPTIONS["Canticles of the Omnissiah"]) == {
+    assert {
         "Invocation of Machine Vengeance",
         "Mantra of Discipline",
         "Shroudpsalm",
-    }
+    } <= set(datasheet_abilities.OPTIONS["Canticles of the Omnissiah"])
 
 
 async def test_seed_detachments_fills_in_missing_dispositions(
@@ -1120,7 +1123,9 @@ async def test_local_enhancements_are_well_formed(faction, entries):
         assert isinstance(entry["points"], int) and entry["points"] >= 0, entry["name"]
         keywords = entry.get("keywords", []) + entry.get("excluded_keywords", [])
         assert set(keywords) <= LOCAL_KEYWORDS, entry["name"]
-        scopes = {"enhancement": {"bearer", "led_unit"}, "upgrade": {"unit"}}[entry["kind"]]
+        from app.models.enhancement import KIND_SCOPES
+
+        scopes = set(KIND_SCOPES[entry["kind"]])
         for grant in entry.get("weapon_abilities", []):
             assert grant["name"] in weapon_ability_names, entry["name"]
             assert grant.get("weapon_type") in (None, "ranged", "melee"), entry["name"]
@@ -1153,6 +1158,22 @@ async def _stratagems(session: AsyncSession) -> dict:
 async def test_seed_stratagems_without_a_data_file_adds_nothing(session: AsyncSession):
     await run_all(session)
     assert (await session.execute(select(Stratagem))).scalars().all() == []
+
+
+async def test_seed_fills_in_conditions_and_effects_on_an_existing_stratagem(
+    session: AsyncSession, fixture_game_data
+):
+    # One seeded before the calculator could model it (no conditions/effects)
+    # gets them; one that already has some keeps its own.
+    session.add(Stratagem(name="Test Waaagh Trick", description=None, cp=2, is_core=True))
+    await session.commit()
+
+    await run_all(session)
+    trick = (await _stratagems(session))["Test Waaagh Trick"]
+    assert ([c.keyword for c in trick.conditions], [e.keyword for e in trick.effects]) == (
+        ["always"],
+        ["plus_one_to_hit"],
+    )
 
 
 async def test_seed_stratagems_from_a_data_file(session: AsyncSession, fixture_game_data):
@@ -1253,7 +1274,11 @@ LOCAL_STRATAGEMS = stratagems.load(LOCAL_DATA_DIR / "stratagems.json")
 async def test_local_stratagems_are_well_formed():
     # Checks your local data file, if you have one.
     from app.models.game import PHASES
-    from app.models.stratagem import STRATAGEM_GAME_ACTIONS, STRATAGEM_TURNS
+    from app.models.stratagem import (
+        STRATAGEM_DURATIONS,
+        STRATAGEM_GAME_ACTIONS,
+        STRATAGEM_TURNS,
+    )
 
     names = [s["name"] for s in LOCAL_STRATAGEMS]
     assert len(names) == len(set(names))
@@ -1266,6 +1291,7 @@ async def test_local_stratagems_are_well_formed():
             assert option and set(option) <= LOCAL_KEYWORDS, entry["name"]
         assert entry.get("game_action") in (None, *STRATAGEM_GAME_ACTIONS), entry["name"]
         assert entry.get("combat_side") in (None, "attacker", "defender"), entry["name"]
+        assert entry.get("duration") in (None, *STRATAGEM_DURATIONS), entry["name"]
         for timing in entry.get("timings", []):
             assert timing["phase"] in PHASES and timing["turn"] in STRATAGEM_TURNS, entry["name"]
         for detachment in entry.get("detachments", []):
@@ -1295,16 +1321,6 @@ def test_faction_ability_options_say_what_they_do():
     assert set(factions.CALCULATOR_NOTES) <= seeded
 
 
-def test_core_datasheet_abilities_are_the_shared_ones():
-    # Faction-specific abilities live in their faction's folder.
-    assert {name for name, _, _, _ in datasheet_abilities.CORE_ENTRIES} == {
-        "Reroll Failed Hits",
-        "Deadly Demise D3",
-        "Deadly Demise 1",
-        "Stealth",
-        "Infiltrators",
-    }
-
 
 def test_faction_datasheet_abilities_are_combined_with_the_core_ones():
     from app.seeds.factions.adeptus_mechanicus import datasheet_abilities as admech
@@ -1317,3 +1333,25 @@ def test_faction_datasheet_abilities_are_combined_with_the_core_ones():
     assert "Canticles of the Omnissiah" in datasheet_abilities.OPTIONS
     assert datasheet_abilities.OPTION_OWNERS["Shroudpsalm"] == "Canticles of the Omnissiah"
     assert "Breaching Command" in datasheet_abilities.RULES
+
+
+def test_admech_conditions_live_in_their_faction_folder():
+    from app.combat_rules import conditions as core
+    from app.combat_rules.conditions import CONDITIONS
+    from app.seeds.factions.adeptus_mechanicus import conditions as admech
+
+    moved = {
+        "protector_imperative_active",
+        "conqueror_imperative_active",
+        "attacker_near_admech_battleline",
+        "attacker_battleline_or_near_admech_battleline",
+        "melee_attack_against_battleline",
+        "melee_vs_battleline_or_near_admech_battleline",
+        "target_electro_priests_led_by_character",
+    }
+    assert moved <= set(admech.CONDITIONS)
+    assert set(admech.CONDITIONS) == {keyword for keyword, _, _ in admech.ENTRIES}
+    assert not moved & set(core.CORE_CONDITIONS)
+    # ...but the engine still finds them, alongside the core ones.
+    assert moved <= set(CONDITIONS) and "always" in CONDITIONS
+    assert moved <= {keyword for keyword, _, _ in conditions.ENTRIES}

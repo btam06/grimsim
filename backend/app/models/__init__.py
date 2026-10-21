@@ -4,6 +4,7 @@ from app.models.associations import (
     detachment_dispositions,
     enhancement_excluded_keywords,
     enhancement_keywords,
+    enhancement_weapon_ability_links,
     list_owners,
     model_base_sizes,
     model_faction_ability_links,
@@ -33,6 +34,7 @@ from app.models.detachment_rule import (
     DetachmentRule,
     DetachmentRuleDatasheetAbility,
     DetachmentRuleKeywordOption,
+    DetachmentRulePerModel,
     DetachmentRuleWeaponAbility,
 )
 from app.models.disposition import Disposition
@@ -40,6 +42,8 @@ from app.models.effect import Effect
 from app.models.enhancement import (
     Enhancement,
     EnhancementDatasheetAbility,
+    EnhancementKeyword,
+    EnhancementWeapon,
     EnhancementWeaponAbility,
 )
 from app.models.faction import Faction
@@ -48,10 +52,11 @@ from app.models.faction_unit import FactionUnit
 from app.models.game import Game, GamePlayer, GameScore, GameSecondary, GameStratagemUse
 from app.models.keyword import Keyword
 from app.models.mission import PrimaryMission, SecondaryMission
-from app.models.model import Model
+from app.models.model import Model, ModelMortalFeelNoPain
 from app.models.stratagem import (
     Stratagem,
     StratagemCombatSide,
+    StratagemDuration,
     StratagemGameAction,
     StratagemKeywordOption,
     StratagemTiming,
@@ -59,7 +64,7 @@ from app.models.stratagem import (
 from app.models.unit import Unit
 from app.models.unit_model import UnitModel
 from app.models.user import User
-from app.models.wargear import Wargear
+from app.models.wargear import Wargear, WargearScope
 from app.models.wargear_ability import WargearAbility
 from app.models.weapon import Weapon
 from app.models.weapon_ability import WeaponAbility
@@ -71,7 +76,9 @@ __all__ = [
     "FactionUnit",
     "Weapon",
     "Wargear",
+    "WargearScope",
     "Model",
+    "ModelMortalFeelNoPain",
     "BaseSize",
     "Keyword",
     "DatasheetAbility",
@@ -84,16 +91,20 @@ __all__ = [
     "Detachment",
     "DetachmentRule",
     "DetachmentRuleKeywordOption",
+    "DetachmentRulePerModel",
     "DetachmentRuleWeaponAbility",
     "DetachmentRuleDatasheetAbility",
     "Enhancement",
     "EnhancementWeaponAbility",
     "EnhancementDatasheetAbility",
+    "EnhancementKeyword",
+    "EnhancementWeapon",
     "Disposition",
     "ArmyList",
     "Stratagem",
     "StratagemTiming",
     "StratagemCombatSide",
+    "StratagemDuration",
     "StratagemGameAction",
     "StratagemKeywordOption",
     "User",
@@ -126,5 +137,6 @@ __all__ = [
     "enhancement_excluded_keywords",
     "unit_model_enhancements",
     "unit_upgrades",
+    "enhancement_weapon_ability_links",
     "model_base_sizes",
 ]

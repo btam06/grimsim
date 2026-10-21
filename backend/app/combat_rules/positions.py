@@ -1,4 +1,8 @@
 from app.combat_rules.conditions import (
+    DEFENDER_IN_RANGE_OF_OBJECTIVE,
+    IN_RANGE_OF_OBJECTIVE,
+)
+from app.seeds.factions.adeptus_mechanicus.conditions import (
     ATTACKER_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE,
     ATTACKER_NEAR_ADMECH_BATTLELINE,
     MELEE_VS_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE,
@@ -9,6 +13,7 @@ from app.combat_rules.conditions import (
 # {position: label}. A combat request lists each side's positions.
 POSITIONS = {
     NEAR_ADMECH_BATTLELINE: 'Within 6" of a friendly ADEPTUS MECHANICUS BATTLELINE unit',
+    IN_RANGE_OF_OBJECTIVE: "Within range of an objective marker",
 }
 
 # The conditions that read each position, by the side whose position it is -
@@ -22,4 +27,10 @@ POSITION_CONDITIONS = {
         },
         "defender": {MELEE_VS_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE},
     },
+    IN_RANGE_OF_OBJECTIVE: {"attacker": set(), "defender": {DEFENDER_IN_RANGE_OF_OBJECTIVE}},
 }
+
+# Positions asked about for every unit on a side, whatever its rules - board
+# state as general as cover (e.g. stratagems like Scriptural Prognosis read
+# whether the defender is on an objective): {position: sides}.
+ALWAYS_ASKED = {IN_RANGE_OF_OBJECTIVE: {"defender"}}

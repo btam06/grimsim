@@ -12,27 +12,52 @@ import Field from './Field'
 import { DeleteButton } from './IconButtons'
 import MultiSelect from './MultiSelect'
 import Select from './Select'
+import { skillValue } from '../weaponDisplay'
 
 export const ENHANCEMENT_KINDS = [
   { id: 'enhancement', name: 'Enhancement (carried by a Character)' },
   { id: 'upgrade', name: 'Upgrade (taken by a unit)' },
 ]
 
-// Who a granted ability reaches - an enhancement's: the bearer, or the unit
-// it leads; an upgrade's: the unit.
+// Who a granted ability reaches - an enhancement's: the bearer, the unit it
+// leads, or the bearer's unit whether leading or not; an upgrade's: the unit.
 const SCOPES = {
   enhancement: [
     { id: 'bearer', name: 'The bearer' },
     { id: 'led_unit', name: 'The unit it leads' },
+    { id: 'bearers_unit', name: "The bearer's unit (leading or not)" },
   ],
   upgrade: [{ id: 'unit', name: 'The unit' }],
 }
-const SCOPE_NAMES = { bearer: 'bearer', led_unit: 'led unit', unit: 'unit' }
+const SCOPE_NAMES = {
+  bearer: 'bearer',
+  led_unit: 'led unit',
+  bearers_unit: "bearer's unit",
+  unit: 'unit',
+}
 const WEAPON_TYPES = [
   { id: '', name: 'All weapons' },
   { id: 'ranged', name: 'Ranged weapons' },
   { id: 'melee', name: 'Melee weapons' },
 ]
+
+const EMPTY_WEAPON = {
+  name: '',
+  weapon_type: 'ranged',
+  range: '',
+  attacks: '',
+  skill: '',
+  strength: '',
+  ap: '0',
+  damage: '',
+  ability_ids: [],
+}
+
+// e.g. 'TL-4Ø9 (24" A3 BS2+ S11 AP-2 D D3+2)'.
+const weaponProfile = (w) =>
+  `${w.name} (${w.weapon_type === 'melee' ? 'Melee' : `${w.range}"`} A${w.attacks} ` +
+  `${w.weapon_type === 'melee' ? 'WS' : 'BS'} ${skillValue(w.skill)} S${w.strength} AP${w.ap} ` +
+  `D${w.damage})`
 
 function EnhancementsPanel() {
   const [enhancements, setEnhancements] = useState([])
@@ -55,6 +80,13 @@ function EnhancementsPanel() {
   const [weaponScope, setWeaponScope] = useState('bearer')
   const [datasheetAbilityId, setDatasheetAbilityId] = useState('')
   const [datasheetScope, setDatasheetScope] = useState('bearer')
+  // Keywords it gives models, and the picker for adding one.
+  const [keywordGrants, setKeywordGrants] = useState([])
+  const [grantKeywordId, setGrantKeywordId] = useState('')
+  const [keywordScope, setKeywordScope] = useState('bearer')
+  // Weapons it gives the bearer (enhancements only), and the one being added.
+  const [weapons, setWeapons] = useState([])
+  const [weaponDraft, setWeaponDraft] = useState(EMPTY_WEAPON)
   const [error, setError] = useState(null)
 
   const refresh = () =>
@@ -74,9 +106,37 @@ function EnhancementsPanel() {
     const scope = SCOPES[newKind][0].id
     setWeaponScope(scope)
     setDatasheetScope(scope)
+    setKeywordScope(scope)
     setWeaponGrants([])
     setDatasheetGrants([])
+    setKeywordGrants([])
+    if (newKind !== 'enhancement') setWeapons([])
   }
+
+  const addKeywordGrant = () => {
+    if (!grantKeywordId) return
+    const id = Number(grantKeywordId)
+    setKeywordGrants([
+      ...keywordGrants.filter((g) => g.keyword_id !== id),
+      { keyword_id: id, scope: keywordScope },
+    ])
+  }
+
+  const addWeapon = () => {
+    const d = weaponDraft
+    setWeapons([
+      ...weapons,
+      {
+        ...d,
+        range: d.weapon_type === 'melee' || d.range === '' ? null : Number(d.range),
+        skill: Number(d.skill),
+        strength: Number(d.strength),
+        ap: Number(d.ap),
+      },
+    ])
+    setWeaponDraft(EMPTY_WEAPON)
+  }
+  const draftField = (field) => (e) => setWeaponDraft({ ...weaponDraft, [field]: e.target.value })
 
   const addWeaponGrant = () => {
     if (!weaponAbilityId) return
@@ -129,6 +189,8 @@ function EnhancementsPanel() {
         excluded_keyword_ids: excludedKeywordIds,
         weapon_abilities: weaponGrants,
         datasheet_abilities: datasheetGrants,
+        granted_keywords: keywordGrants,
+        weapons,
       })
       setName('')
       setDescription('')
@@ -137,6 +199,8 @@ function EnhancementsPanel() {
       setExcludedKeywordIds([])
       setWeaponGrants([])
       setDatasheetGrants([])
+      setKeywordGrants([])
+      setWeapons([])
       refresh()
     } catch (err) {
       setError(err.message)
@@ -253,6 +317,106 @@ function EnhancementsPanel() {
         <button type="button" disabled={!datasheetAbilityId} onClick={addDatasheetGrant}>
           Add datasheet ability
         </button>
+        <div className="checkbox-group">
+          Gives keywords
+          {keywordGrants.length > 0 && (
+            <ul>
+              {keywordGrants.map((g, i) => (
+                <li key={g.keyword_id}>
+                  {keywordName(g.keyword_id)} ({SCOPE_NAMES[g.scope]})
+                  <DeleteButton
+                    onClick={() => setKeywordGrants(keywordGrants.filter((_, j) => j !== i))}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <Field label="Keyword">
+          <Select
+            options={keywords}
+            value={grantKeywordId}
+            onChange={setGrantKeywordId}
+            placeholder="Select keyword"
+          />
+        </Field>
+        <Field label="For">
+          <Select options={SCOPES[kind]} value={keywordScope} onChange={setKeywordScope} />
+        </Field>
+        <button type="button" disabled={!grantKeywordId} onClick={addKeywordGrant}>
+          Add keyword
+        </button>
+        {kind === 'enhancement' && (
+          <>
+            <div className="checkbox-group">
+              Gives the bearer weapons
+              {weapons.length > 0 && (
+                <ul>
+                  {weapons.map((w, i) => (
+                    <li key={i}>
+                      {weaponProfile(w)}
+                      <DeleteButton onClick={() => setWeapons(weapons.filter((_, j) => j !== i))} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <Field label="Weapon name">
+              <input value={weaponDraft.name} onChange={draftField('name')} />
+            </Field>
+            <Field label="Type">
+              <Select
+                options={[
+                  { id: 'ranged', name: 'Ranged' },
+                  { id: 'melee', name: 'Melee' },
+                ]}
+                value={weaponDraft.weapon_type}
+                onChange={(weapon_type) => setWeaponDraft({ ...weaponDraft, weapon_type })}
+              />
+            </Field>
+            {weaponDraft.weapon_type === 'ranged' && (
+              <Field label="Range">
+                <input type="number" value={weaponDraft.range} onChange={draftField('range')} />
+              </Field>
+            )}
+            <Field label="Attacks (e.g. 3, D6)">
+              <input value={weaponDraft.attacks} onChange={draftField('attacks')} />
+            </Field>
+            <Field label={weaponDraft.weapon_type === 'melee' ? 'WS' : 'BS'}>
+              <input type="number" value={weaponDraft.skill} onChange={draftField('skill')} />
+            </Field>
+            <Field label="Strength">
+              <input type="number" value={weaponDraft.strength} onChange={draftField('strength')} />
+            </Field>
+            <Field label="AP">
+              <input type="number" value={weaponDraft.ap} onChange={draftField('ap')} />
+            </Field>
+            <Field label="Damage (e.g. 2, D3+2)">
+              <input value={weaponDraft.damage} onChange={draftField('damage')} />
+            </Field>
+            <label className="field">
+              Weapon abilities
+              <MultiSelect
+                options={weaponAbilities}
+                value={weaponDraft.ability_ids}
+                onChange={(ability_ids) => setWeaponDraft({ ...weaponDraft, ability_ids })}
+              />
+            </label>
+            <button
+              type="button"
+              disabled={
+                !weaponDraft.name ||
+                !weaponDraft.attacks ||
+                !weaponDraft.skill ||
+                !weaponDraft.strength ||
+                !weaponDraft.damage
+              }
+              onClick={addWeapon}
+            >
+              Add weapon
+            </button>
+          </>
+        )}
         <button type="submit">Add Enhancement</button>
       </form>
       <ul>
@@ -265,6 +429,20 @@ function EnhancementsPanel() {
             {e.excluded_keyword_ids.length > 0 &&
               ` — Excludes: ${e.excluded_keyword_ids.map(keywordName).join(', ')}`}
             {grantLabels(e).length > 0 && ` — Grants: ${grantLabels(e).join(', ')}`}
+            {e.granted_keywords.length > 0 &&
+              ` — Gives keywords: ${e.granted_keywords
+                .map((g) => `${keywordName(g.keyword_id)} (${SCOPE_NAMES[g.scope]})`)
+                .join(', ')}`}
+            {e.weapons.length > 0 &&
+              ` — Weapons: ${e.weapons
+                .map(
+                  (w) =>
+                    weaponProfile(w) +
+                    (w.ability_ids.length
+                      ? ` [${w.ability_ids.map(weaponAbilityName).join(', ')}]`
+                      : '')
+                )
+                .join(', ')}`}
             <DeleteButton onClick={() => handleRemove(e.id)} />
           </li>
         ))}

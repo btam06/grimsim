@@ -19,6 +19,27 @@
           "name": "Stealth",
           "scope": "bearer"
         }
+      ],
+      "weapons": [
+        {
+          "name": "Test Shoota",
+          "weapon_type": "ranged",
+          "range": 18,
+          "attacks": "2",
+          "skill": 5,
+          "strength": 4,
+          "ap": 0,
+          "damage": "1",
+          "abilities": [
+            "Sustained 1"
+          ]
+        }
+      ],
+      "granted_keywords": [
+        {
+          "name": "GRENADES",
+          "scope": "bearer"
+        }
       ]
     },
     {

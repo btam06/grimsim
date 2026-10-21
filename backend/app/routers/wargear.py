@@ -18,6 +18,7 @@ def _to_out(item: Wargear) -> WargearOut:
         model_id=item.model_id,
         description=item.description,
         ability_ids=[ability.id for ability in item.abilities],
+        scope=item.scope,
     )
 
 
@@ -40,7 +41,8 @@ async def create_wargear(payload: WargearIn, session: AsyncSession = Depends(get
         if len(abilities) != len(set(payload.ability_ids)):
             raise HTTPException(status_code=400, detail="one or more ability_ids not found")
 
-    item = Wargear(**payload.model_dump(exclude={"ability_ids"}), abilities=abilities)
+    item = Wargear(**payload.model_dump(exclude={"ability_ids", "scope"}), abilities=abilities)
+    item.scope = payload.scope
     session.add(item)
     try:
         await session.commit()
@@ -75,6 +77,7 @@ async def update_wargear(
     item.model_id = payload.model_id
     item.description = payload.description
     item.abilities = abilities
+    item.scope = payload.scope
 
     try:
         await session.commit()

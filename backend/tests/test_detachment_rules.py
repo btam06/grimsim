@@ -4,6 +4,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.combat_rules import Rule
 from app.models import (
     Condition,
     DatasheetAbility,
@@ -373,3 +374,168 @@ async def test_seed_detachment_rules_rejects_bad_entries(
     await _seed_abilities(session)
     with pytest.raises(ValueError, match=message):
         await faction_seeds.seed_detachment_rules(session)
+
+
+# --- per-model rules ---
+
+
+def _per_model_rule(*options: tuple[str, ...]) -> DetachmentRule:
+    rule = _rule(*options)
+    rule.per_model = True
+    return rule
+
+
+def test_per_model_rule_reaches_matching_models_not_units():
+    rule = _per_model_rule(("TECH-PRIEST",))
+    unit = _unit(("TECH-PRIEST", "CHARACTER"), ("SKITARII", "INFANTRY"))
+    assert detachment_rules.applies_to(rule, unit) is False
+    priest, skitarius = ({k.name for k in um.model.keywords} for um in unit.unit_models)
+    assert detachment_rules.model_matches(rule, priest)
+    assert not detachment_rules.model_matches(rule, skitarius)
+
+
+def _mantle_rule() -> DetachmentRule:
+    # War-Form Mantles-style: TECH-PRIEST models have a 4+ invulnerable save.
+    mantle = DatasheetAbility(name="Mantle", description=None)
+    mantle.conditions, mantle.effects = [], []
+    rule = _per_model_rule(("TECH-PRIEST",))
+    rule.datasheet_ability_grants = [DetachmentRuleDatasheetAbility(datasheet_ability=mantle)]
+    return rule
+
+
+MANTLE_RULES = {
+    "Mantle": [Rule(conditions=("always",), effects=("invulnerable_4",), side="defender")]
+}
+
+
+def _shot_at(monkeypatch, defender: Unit, rules, apply_precision=False, save_roll=4):
+    # One AP-4 attack (3+ saves need a 7): only a 4+ invulnerable save stops a 4.
+    rolls = iter([6, 6, save_roll])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    gun = Weapon(
+        name="Gun",
+        model_id=1,
+        damage="1",
+        range=24,
+        strength=10,
+        ap=-4,
+        attacks="1",
+        skill=3,
+        weapon_type="ranged",
+    )
+    gun.id = 1
+    precision = WeaponAbility(name="Precision", description=None)
+    precision.conditions = [Condition(keyword="always", name="always", description=None)]
+    precision.effects = [Effect(keyword="precision", name="precision", description=None)]
+    gun.abilities = [precision] if apply_precision else []
+    attacker = _unit(("INFANTRY",))
+    attacker.unit_models[0].weapons = [gun]
+    for unit_model in defender.unit_models:
+        unit_model.model.save, unit_model.model.wounds = 3, 5
+    return combat.resolve_combat(
+        attacker,
+        defender,
+        {1},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+        apply_precision=apply_precision,
+        defender_detachment_rules=rules,
+        ability_rules=MANTLE_RULES,
+    ).total_damage
+
+
+def test_per_model_defender_rule_protects_only_the_matching_model(monkeypatch):
+    # A lone Tech-Priest saves on a 4+.
+    assert _shot_at(monkeypatch, _unit(("TECH-PRIEST",)), [_mantle_rule()]) == 0
+    # A Tech-Priest leading Skitarii: the attack goes to a Skitarius first,
+    # who doesn't have it...
+    leading = _unit(("TECH-PRIEST", "CHARACTER"), ("SKITARII",))
+    leading.unit_models[0].model.is_leader = True
+    assert _shot_at(monkeypatch, leading, [_mantle_rule()]) == 1
+    # ...but one allocated to the Tech-Priest (Precision) gets the save.
+    assert _shot_at(monkeypatch, leading, [_mantle_rule()], apply_precision=True) == 0
+    # Without the rule, nobody has it.
+    assert _shot_at(monkeypatch, _unit(("TECH-PRIEST",)), []) == 1
+
+
+def test_per_model_attacker_rule_reaches_only_matching_models_weapons(monkeypatch):
+    # +1 to hit on ranged weapons for TECH-PRIEST models: a 3 hits against BS4.
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+    plus_one = WeaponAbility(name="+1", description=None)
+    plus_one.conditions = [Condition(keyword="always", name="always", description=None)]
+    plus_one.effects = [Effect(keyword="plus_one_to_hit", name="+1", description=None)]
+    rule = _per_model_rule(("TECH-PRIEST",))
+    rule.weapon_ability_grants = [
+        DetachmentRuleWeaponAbility(weapon_ability=plus_one, weapon_type="ranged")
+    ]
+    attacker = _unit(("TECH-PRIEST",), ("SKITARII",))
+    for i, unit_model in enumerate(attacker.unit_models, start=1):
+        gun = Weapon(
+            name=f"Gun {i}",
+            model_id=1,
+            damage="1",
+            range=24,
+            strength=10,
+            ap=-10,
+            attacks="1",
+            skill=4,
+            weapon_type="ranged",
+        )
+        gun.id = i
+        gun.abilities = []
+        unit_model.weapons = [gun]
+    defender = _unit(("INFANTRY",))
+    target = defender.unit_models[0].model
+    target.toughness, target.wounds, target.save = 1, 10, 7
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {1, 2},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+        attacker_detachment_rules=[rule],
+    )
+    assert {wr.name: wr.total_damage for wr in result.weapon_results} == {"Gun 1": 1, "Gun 2": 0}
+
+
+async def test_create_per_model_detachment_rule(client: AsyncClient, faction_id: int):
+    detachment = await _detachment(client, faction_id)
+    for per_model in (True, False):
+        response = await client.post(
+            "/detachment-rules",
+            json={"detachment_id": detachment, "name": f"R{per_model}", "per_model": per_model},
+        )
+        assert response.status_code == 201
+        assert response.json()["per_model"] is per_model
+    assert [r["per_model"] for r in (await client.get("/detachment-rules")).json()] == [True, False]
+
+
+async def test_seed_sets_per_model_on_an_existing_rule(
+    session: AsyncSession, client: AsyncClient, tmp_path, monkeypatch
+):
+    folder = tmp_path / "factions" / "orks"
+    folder.mkdir(parents=True)
+
+    def write(rule):
+        detachment = {"name": "Mob", "dp": 1, "dispositions": [], "rules": [rule]}
+        (folder / "detachments.json").write_text(
+            json.dumps({"faction": "Orks", "detachments": [detachment]})
+        )
+
+    monkeypatch.setattr(data_files, "DATA_DIR", tmp_path)
+    write({"name": "R"})
+    await run_all(session)
+    assert (await client.get("/detachment-rules")).json()[0]["per_model"] is False
+    write({"name": "R", "per_model": True})
+    await run_all(session)
+    assert (await client.get("/detachment-rules")).json()[0]["per_model"] is True

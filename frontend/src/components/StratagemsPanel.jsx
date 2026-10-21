@@ -31,6 +31,13 @@ const COMBAT_SIDES = [
   { id: 'attacker', name: 'The attacking unit' },
   { id: 'defender', name: 'The unit being attacked' },
 ]
+// How long its effect lasts beyond the phase it's used in ('' means just that
+// phase).
+const DURATIONS = [
+  { id: '', name: 'Until the end of the phase' },
+  { id: 'until_end_of_turn', name: 'Until the end of the turn' },
+  { id: 'until_next_command_phase', name: 'Until the start of your next Command phase' },
+]
 const timingLabel = (t) =>
   `${PHASES.find((p) => p.id === t.phase)?.name ?? t.phase} (${(
     TURNS.find((x) => x.id === t.turn)?.name ?? t.turn
@@ -60,6 +67,7 @@ function StratagemsPanel() {
   const [timingPhase, setTimingPhase] = useState('command')
   const [timingTurn, setTimingTurn] = useState('your_turn')
   const [combatSide, setCombatSide] = useState('')
+  const [duration, setDuration] = useState('')
   const [error, setError] = useState(null)
 
   const refresh = () => listStratagems().then(setStratagems).catch((err) => setError(err.message))
@@ -106,6 +114,7 @@ function StratagemsPanel() {
         keyword_option_ids: keywordOptions,
         timings,
         combat_side: combatSide || null,
+        duration: duration || null,
       })
       setName('')
       setDescription('')
@@ -120,6 +129,7 @@ function StratagemsPanel() {
       setOptionDraft([])
       setTimings([])
       setCombatSide('')
+      setDuration('')
       refresh()
     } catch (err) {
       setError(err.message)
@@ -229,6 +239,9 @@ function StratagemsPanel() {
         >
           Add timing
         </button>
+        <Field label="Effect lasts">
+          <Select options={DURATIONS} value={duration} onChange={setDuration} />
+        </Field>
         <Field label="Used on (in combat)">
           <Select options={COMBAT_SIDES} value={combatSide} onChange={setCombatSide} />
         </Field>
@@ -280,6 +293,8 @@ function StratagemsPanel() {
             {s.excluded_keyword_ids.length > 0 &&
               ` — Excludes: ${s.excluded_keyword_ids.map(keywordName).join(', ')}`}
             {` — Usable: ${s.timings.length > 0 ? s.timings.map(timingLabel).join(', ') : 'any time'}`}
+            {s.duration &&
+              ` — Lasts: ${DURATIONS.find((d) => d.id === s.duration).name.toLowerCase()}`}
             {s.combat_side &&
               ` — Used on: ${COMBAT_SIDES.find((c) => c.id === s.combat_side).name.toLowerCase()}`}
             <button type="button" onClick={() => handleRemove(s.id)}>

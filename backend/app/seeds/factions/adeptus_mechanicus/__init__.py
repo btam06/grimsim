@@ -1,1 +1,1 @@
-from . import abilities, datasheet_abilities, info
+from . import abilities, conditions, datasheet_abilities, info

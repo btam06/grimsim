@@ -53,8 +53,11 @@ from app.models.enhancement import (
     ENHANCEMENT_KINDS,
     KIND_SCOPES,
     EnhancementDatasheetAbility,
+    EnhancementKeyword,
+    EnhancementWeapon,
     EnhancementWeaponAbility,
 )
+from app.models.wargear import WARGEAR_SCOPES
 from app.seeds import data_files
 from app.seeds import datasheets as datasheet_data
 from app.seeds.lookup import get_dispositions_by_name
@@ -330,10 +333,10 @@ async def seed_detachments(session: AsyncSession) -> None:
 
 async def seed_detachment_rules(session: AsyncSession) -> None:
     # Adds each detachment's rules (the "rules" of its entry in
-    # detachments.json) that it doesn't have yet, by name - existing ones are
-    # left alone. Must run after seed_detachments, seed_keywords and the
-    # weapon/datasheet ability seeds; an unknown keyword or ability is an
-    # error, not skipped.
+    # detachments.json) that it doesn't have yet, by name. An existing one
+    # only gains per_model if it's since been set; nothing else is changed.
+    # Must run after seed_detachments, seed_keywords and the weapon/datasheet
+    # ability seeds; an unknown keyword or ability is an error, not skipped.
     faction_ids = await _faction_ids_by_name(session)
     keywords = {k.name: k for k in (await session.execute(select(Keyword))).scalars().all()}
     weapon_abilities = {
@@ -347,7 +350,7 @@ async def seed_detachment_rules(session: AsyncSession) -> None:
         for d in (await session.execute(select(Detachment))).scalars().all()
     }
     existing = {
-        (r.detachment_id, r.name)
+        (r.detachment_id, r.name): r
         for r in (await session.execute(select(DetachmentRule))).scalars().all()
     }
 
@@ -388,19 +391,24 @@ async def seed_detachment_rules(session: AsyncSession) -> None:
                     )
                     for ability in entry.get("datasheet_abilities", [])
                 ]
-                if (detachment_id, name) in existing:
+                rule = existing.get((detachment_id, name))
+                if rule is not None:
+                    # Added after it was first seeded.
+                    if entry.get("per_model") and not rule.per_model:
+                        rule.per_model = True
+                        changed = True
                     continue
-                existing.add((detachment_id, name))
-                session.add(
-                    DetachmentRule(
-                        detachment_id=detachment_id,
-                        name=name,
-                        description=entry.get("description"),
-                        keyword_options=options,
-                        weapon_ability_grants=weapon_grants,
-                        datasheet_ability_grants=datasheet_grants,
-                    )
+                rule = DetachmentRule(
+                    detachment_id=detachment_id,
+                    name=name,
+                    description=entry.get("description"),
+                    keyword_options=options,
+                    weapon_ability_grants=weapon_grants,
+                    datasheet_ability_grants=datasheet_grants,
                 )
+                rule.per_model = entry.get("per_model", False)
+                existing[(detachment_id, name)] = rule
+                session.add(rule)
                 changed = True
 
     if changed:
@@ -409,8 +417,9 @@ async def seed_detachment_rules(session: AsyncSession) -> None:
 
 async def seed_enhancements(session: AsyncSession) -> None:
     # Adds each faction's enhancements and upgrades (see load_enhancements)
-    # that its detachments don't have yet, by name. An existing one that
-    # grants no abilities yet gets the ones listed; nothing else is changed.
+    # that its detachments don't have yet, by name. An existing one gets any
+    # kind of grant (weapon/datasheet abilities, keywords, weapons) it has none
+    # of yet; nothing else is changed.
     # Must run after seed_detachments, seed_keywords and the weapon/datasheet
     # ability seeds; an unknown detachment, kind, keyword, ability or scope is
     # an error, not skipped.
@@ -439,10 +448,17 @@ async def seed_enhancements(session: AsyncSession) -> None:
     def lookup_keyword(name: str, enhancement: str) -> Keyword:
         return lookup(keywords, name, "keyword", enhancement)
 
-    def grants(entry: dict) -> tuple[list, list]:
+    def grants(entry: dict) -> dict[str, list]:
+        # What the entry grants, by Enhancement attribute.
         name = entry["name"]
         allowed = KIND_SCOPES[entry["kind"]]
-        for grant in entry.get("weapon_abilities", []) + entry.get("datasheet_abilities", []):
+        if entry.get("weapons") and entry["kind"] != "enhancement":
+            raise ValueError(f"enhancement {name!r} is an upgrade, which can't give a weapon")
+        for grant in (
+            entry.get("weapon_abilities", [])
+            + entry.get("datasheet_abilities", [])
+            + entry.get("granted_keywords", [])
+        ):
             if grant["scope"] not in allowed:
                 raise ValueError(
                     f"enhancement {name!r} has scope {grant['scope']!r}; "
@@ -465,7 +481,36 @@ async def seed_enhancements(session: AsyncSession) -> None:
             )
             for g in entry.get("datasheet_abilities", [])
         ]
-        return weapon, datasheet
+        granted_keywords = [
+            EnhancementKeyword(
+                keyword=lookup_keyword(g["name"], name),
+                scope=g["scope"],
+            )
+            for g in entry.get("granted_keywords", [])
+        ]
+        weapons = [
+            EnhancementWeapon(
+                name=w["name"],
+                weapon_type=w["weapon_type"],
+                range=w.get("range"),
+                attacks=w["attacks"],
+                skill=w["skill"],
+                strength=w["strength"],
+                ap=w["ap"],
+                damage=w["damage"],
+                abilities=[
+                    lookup(weapon_abilities, a, "weapon ability", name)
+                    for a in w.get("abilities", [])
+                ],
+            )
+            for w in entry.get("weapons", [])
+        ]
+        return {
+            "weapon_ability_grants": weapon,
+            "datasheet_ability_grants": datasheet,
+            "keyword_grants": granted_keywords,
+            "weapons": weapons,
+        }
 
     changed = False
     for faction in FACTIONS:
@@ -483,16 +528,15 @@ async def seed_enhancements(session: AsyncSession) -> None:
                 raise ValueError(f"enhancement {name!r} has unknown kind {entry['kind']!r}")
             required = [lookup_keyword(k, name) for k in entry.get("keywords", [])]
             excluded = [lookup_keyword(k, name) for k in entry.get("excluded_keywords", [])]
-            weapon_grants, datasheet_grants = grants(entry)
+            entry_grants = grants(entry)
             enhancement = existing.get((detachment_id, name))
             if enhancement is not None:
-                grants_nothing = not (
-                    enhancement.weapon_ability_grants or enhancement.datasheet_ability_grants
-                )
-                if grants_nothing:
-                    enhancement.weapon_ability_grants = weapon_grants
-                    enhancement.datasheet_ability_grants = datasheet_grants
-                    changed = True
+                # Fill in each kind of grant it has none of yet (e.g. a weapon
+                # added to the data after it was first seeded).
+                for attribute, values in entry_grants.items():
+                    if values and not getattr(enhancement, attribute):
+                        setattr(enhancement, attribute, values)
+                        changed = True
                 continue
             enhancement = Enhancement(
                 name=name,
@@ -502,8 +546,7 @@ async def seed_enhancements(session: AsyncSession) -> None:
                 detachment_id=detachment_id,
                 keywords=required,
                 excluded_keywords=excluded,
-                weapon_ability_grants=weapon_grants,
-                datasheet_ability_grants=datasheet_grants,
+                **entry_grants,
             )
             existing[(detachment_id, name)] = enhancement
             session.add(enhancement)
@@ -581,7 +624,9 @@ async def seed_datasheets(session: AsyncSession) -> None:
         )
 
     def build_wargear(gear, datasheet: str) -> Wargear:
-        return Wargear(
+        if gear.scope not in WARGEAR_SCOPES:
+            raise ValueError(f"{datasheet}: wargear {gear.name!r} has unknown scope {gear.scope!r}")
+        wargear = Wargear(
             name=gear.name,
             description=gear.description,
             abilities=[
@@ -589,6 +634,8 @@ async def seed_datasheets(session: AsyncSession) -> None:
                 for name in gear.abilities
             ],
         )
+        wargear.scope = gear.scope
+        return wargear
 
     changed = False
     for faction in FACTIONS:
@@ -599,6 +646,9 @@ async def seed_datasheets(session: AsyncSession) -> None:
             for spec in datasheet.models:
                 model = existing.get((faction_id, spec.name))
                 if model is not None:
+                    if spec.feel_no_pain_mortal and not model.feel_no_pain_mortal:
+                        model.feel_no_pain_mortal = spec.feel_no_pain_mortal
+                        changed = True
                     if spec.base_size and not model.base_size:
                         model.base_size = lookup(
                             base_sizes, spec.base_size, "base size", datasheet.name
@@ -672,6 +722,7 @@ async def seed_datasheets(session: AsyncSession) -> None:
                         feel_no_pain=spec.feel_no_pain,
                         is_support=spec.is_support,
                         is_leader=spec.is_leader,
+                        feel_no_pain_mortal=spec.feel_no_pain_mortal,
                         base_size=(
                             lookup(base_sizes, spec.base_size, "base size", datasheet.name)
                             if spec.base_size

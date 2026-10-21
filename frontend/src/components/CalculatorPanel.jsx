@@ -1,9 +1,14 @@
-import { faArrowRightArrowLeft } from '@fortawesome/free-solid-svg-icons'
+import { faArrowRightArrowLeft, faCircleInfo } from '@fortawesome/free-solid-svg-icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import Tooltip from '@mui/material/Tooltip'
 import { useEffect, useMemo, useState } from 'react'
 import {
   listDatasheetAbilities,
   listEffects,
+  listBaseSizes,
+  listEnhancements,
+  listKeywords,
+  listWargear,
   listFactionAbilities,
   listFactionUnits,
   listLists,
@@ -17,6 +22,7 @@ import {
 } from '../api'
 import Field from './Field'
 import Select from './Select'
+import UnitDatasheet from './UnitDatasheet'
 
 const DIE_FACES = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅']
 const diceFace = (roll) => DIE_FACES[roll - 1] ?? roll
@@ -32,11 +38,25 @@ function DiceRolls({ rolls }) {
 
 // One radio group per faction ability with rule options (e.g. Doctrina
 // Imperatives), for picking which option is active for one side - or none.
+// Text with its description in a hover tooltip, marked with an info icon -
+// or just the text, if there's no description.
+function Described({ description, children }) {
+  if (!description) return children
+  return (
+    <Tooltip title={description} placement="top" arrow>
+      <span className="described">
+        {children} <FontAwesomeIcon icon={faCircleInfo} className="described-icon" />
+      </span>
+    </Tooltip>
+  )
+}
+
 function RuleOptionPicker({ side, abilities, choices, onChange }) {
   return abilities.map((ability) => (
     <div key={ability.key} className="radio-group">
-      {side} — {ability.name}
-      {ability.description && <p className="hint">{ability.description}</p>}
+      <Described description={ability.description}>
+        {side} — {ability.name}
+      </Described>
       {['', ...ability.rule_options].map((option) => (
         <label key={option || 'none'} className="radio-option">
           <input
@@ -45,10 +65,9 @@ function RuleOptionPicker({ side, abilities, choices, onChange }) {
             checked={(choices[ability.key] ?? '') === option}
             onChange={() => onChange({ ...choices, [ability.key]: option })}
           />
-          {option || 'None'}
-          {ability.option_descriptions?.[option] && (
-            <span className="hint"> — {ability.option_descriptions[option]}</span>
-          )}
+          <Described description={ability.option_descriptions?.[option]}>
+            {option || 'None'}
+          </Described>
         </label>
       ))}
     </div>
@@ -151,12 +170,17 @@ function CalculatorPanel() {
   const [units, setUnits] = useState([])
   const [factionUnits, setFactionUnits] = useState([])
   const [weapons, setWeapons] = useState([])
+  const [enhancements, setEnhancements] = useState([])
   const [lists, setLists] = useState([])
   const [weaponAbilities, setWeaponAbilities] = useState([])
   const [effects, setEffects] = useState([])
   const [models, setModels] = useState([])
   const [factionAbilities, setFactionAbilities] = useState([])
   const [datasheetAbilities, setDatasheetAbilities] = useState([])
+  // For the units' datasheets.
+  const [keywords, setKeywords] = useState([])
+  const [wargear, setWargear] = useState([])
+  const [baseSizes, setBaseSizes] = useState([])
   // {faction ability id: selected rule option name ('' for none)}, per side.
   const [attackerRuleChoices, setAttackerRuleChoices] = useState({})
   const [defenderRuleChoices, setDefenderRuleChoices] = useState({})
@@ -169,6 +193,7 @@ function CalculatorPanel() {
   const [inCover, setInCover] = useState(false)
   const [halfRange, setHalfRange] = useState(false)
   const [movedLessThan3, setMovedLessThan3] = useState(false)
+  const [charged, setCharged] = useState(false)
   const [advanced, setAdvanced] = useState(false)
   const [selectedWeaponNames, setSelectedWeaponNames] = useState([])
   const [selectedStratagemIds, setSelectedStratagemIds] = useState([])
@@ -183,12 +208,16 @@ function CalculatorPanel() {
     listUnits().then(setUnits).catch((err) => setError(err.message))
     listFactionUnits().then(setFactionUnits).catch((err) => setError(err.message))
     listWeapons().then(setWeapons).catch((err) => setError(err.message))
+    listEnhancements().then(setEnhancements).catch((err) => setError(err.message))
     listLists().then(setLists).catch((err) => setError(err.message))
     listWeaponAbilities().then(setWeaponAbilities).catch((err) => setError(err.message))
     listEffects().then(setEffects).catch((err) => setError(err.message))
     listModels().then(setModels).catch((err) => setError(err.message))
     listFactionAbilities().then(setFactionAbilities).catch((err) => setError(err.message))
     listDatasheetAbilities().then(setDatasheetAbilities).catch((err) => setError(err.message))
+    listKeywords().then(setKeywords).catch((err) => setError(err.message))
+    listWargear().then(setWargear).catch((err) => setError(err.message))
+    listBaseSizes().then(setBaseSizes).catch((err) => setError(err.message))
   }, [])
 
   const unitLabel = (unit) => {
@@ -220,18 +249,38 @@ function CalculatorPanel() {
   // Weapons sharing a name (e.g. one per model in a 5-model squad) are
   // grouped into a single checklist entry - checking it selects every
   // underlying weapon id in the group.
+  // Weapons the attacking unit's enhancements give it (e.g. TL-4Ø9), shaped
+  // like weapons, with ids like "enh-7" (sent as selected_enhancement_weapon_ids).
+  const enhancementWeapons = useMemo(() => {
+    if (!attackingUnit) return []
+    return attackingUnit.unit_models.flatMap((um) =>
+      (enhancements.find((e) => e.id === um.enhancement_id)?.weapons ?? []).map((w) => ({
+        ...w,
+        id: `enh-${w.id}`,
+        enhancementWeaponId: w.id,
+      }))
+    )
+  }, [attackingUnit, enhancements])
+  const knownWeapons = useMemo(
+    () => [...weapons, ...enhancementWeapons],
+    [weapons, enhancementWeapons]
+  )
+
   const weaponGroups = useMemo(() => {
     if (!attackingUnit) return []
-    const weaponIds = attackingUnit.unit_models.flatMap((um) => um.weapon_ids)
+    const weaponIds = [
+      ...attackingUnit.unit_models.flatMap((um) => um.weapon_ids),
+      ...enhancementWeapons.map((w) => w.id),
+    ]
     const groups = new Map()
     weaponIds.forEach((id) => {
-      const weapon = weapons.find((w) => w.id === id)
+      const weapon = knownWeapons.find((w) => w.id === id)
       if (!weapon) return
       if (!groups.has(weapon.name)) groups.set(weapon.name, [])
       groups.get(weapon.name).push(id)
     })
     return Array.from(groups.entries()).map(([name, ids]) => ({ name, weaponIds: ids }))
-  }, [attackingUnit, weapons])
+  }, [attackingUnit, knownWeapons, enhancementWeapons])
 
   // Only the weapons usable in the chosen engagement: ranged weapons when
   // shooting; melee weapons in engagement range, plus Pistols (which can
@@ -243,20 +292,20 @@ function CalculatorPanel() {
     )
     return weaponGroups
       .map((g) => {
-        const weapon = weapons.find((w) => w.id === g.weaponIds[0])
+        const weapon = knownWeapons.find((w) => w.id === g.weaponIds[0])
         const isMelee = weapon?.weapon_type === 'melee'
         const isPistol = !isMelee && weapon?.ability_ids.some((id) => pistolAbilityIds.has(id))
         return { ...g, isMelee, isPistol }
       })
       .filter((g) => (inEngagementRange ? g.isMelee || g.isPistol : !g.isMelee))
-  }, [weaponGroups, weapons, weaponAbilities, effects, inEngagementRange])
+  }, [weaponGroups, knownWeapons, weaponAbilities, effects, inEngagementRange])
 
   // Default every weapon group to selected whenever the attacking unit
   // changes (or its weapons finish loading).
   useEffect(() => {
     setSelectedWeaponNames(weaponGroups.map((g) => g.name))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [attackingUnitId, weapons])
+  }, [attackingUnitId, weapons, enhancementWeapons])
 
   // Stratagems are opt-in, so clear them whenever that side's unit changes.
   useEffect(() => {
@@ -313,6 +362,7 @@ function CalculatorPanel() {
       .map((a) => ({
         key: `faction-${a.id}`,
         name: a.name,
+        description: a.description,
         rule_options: a.rule_options,
         option_descriptions: a.rule_option_descriptions,
       }))
@@ -342,6 +392,17 @@ function CalculatorPanel() {
     return entries
   }
   const defendingUnit = units.find((u) => u.id === Number(defendingUnitId))
+  const datasheetData = {
+    models,
+    weapons,
+    wargear,
+    weaponAbilities,
+    datasheetAbilities,
+    factionAbilities,
+    keywords,
+    baseSizes,
+    enhancements,
+  }
   const attackerRuleAbilities = ruleAbilitiesFor(attackingUnit)
   const defenderRuleAbilities = ruleAbilitiesFor(defendingUnit)
 
@@ -369,7 +430,9 @@ function CalculatorPanel() {
       .filter((g) => selectedWeaponNames.includes(g.name))
       .flatMap((g) => g.weaponIds)
       .some((id) =>
-        weapons.find((w) => w.id === id)?.ability_ids.some((aid) => precisionAbilityIds.has(aid))
+        knownWeapons
+          .find((w) => w.id === id)
+          ?.ability_ids.some((aid) => precisionAbilityIds.has(aid))
       )
     const stratagemHasPrecision = attackerStratagems.some(
       (s) => selectedStratagemIds.includes(s.id) && s.effect_ids.includes(precisionEffectId)
@@ -380,7 +443,7 @@ function CalculatorPanel() {
     weaponAbilities,
     visibleWeaponGroups,
     selectedWeaponNames,
-    weapons,
+    knownWeapons,
     attackerStratagems,
     selectedStratagemIds,
   ])
@@ -407,7 +470,10 @@ function CalculatorPanel() {
       const response = await runCombat({
         attacking_unit_id: Number(attackingUnitId),
         defending_unit_id: Number(defendingUnitId),
-        selected_weapon_ids: selectedWeaponIds,
+        selected_weapon_ids: selectedWeaponIds.filter((id) => typeof id === 'number'),
+        selected_enhancement_weapon_ids: selectedWeaponIds
+          .map((id) => knownWeapons.find((w) => w.id === id)?.enhancementWeaponId)
+          .filter((id) => id !== undefined),
         stratagem_ids: selectedStratagemIds,
         defender_stratagem_ids: selectedDefenderStratagemIds,
         attacker_positions: attackerPositionIds,
@@ -419,6 +485,7 @@ function CalculatorPanel() {
         in_cover: inCover,
         half_range: halfRange,
         moved_less_than_3: movedLessThan3,
+        charged: inEngagementRange && charged,
         advanced,
       })
       // Feel no pain rolls are only worth showing if the defender has FNP -
@@ -462,6 +529,7 @@ function CalculatorPanel() {
                 placeholder={attackingListId ? 'Select attacking unit' : 'Select a list first'}
               />
             </Field>
+            <UnitDatasheet unit={attackingUnit} data={datasheetData} />
           </fieldset>
           <button
             type="button"
@@ -492,6 +560,7 @@ function CalculatorPanel() {
                 placeholder={defendingListId ? 'Select defending unit' : 'Select a list first'}
               />
             </Field>
+            <UnitDatasheet unit={defendingUnit} data={datasheetData} />
           </fieldset>
         </div>
         <fieldset className="form-section">
@@ -632,6 +701,16 @@ function CalculatorPanel() {
             />
             Attacking unit moved less than 3" this turn
           </label>
+          {inEngagementRange && (
+            <label className="checkbox-field">
+              <input
+                type="checkbox"
+                checked={charged}
+                onChange={(e) => setCharged(e.target.checked)}
+              />
+              Attacking unit charged this turn
+            </label>
+          )}
           {hasPrecision && (
             <label className="checkbox-field">
               <input

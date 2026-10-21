@@ -193,3 +193,11 @@ model_base_sizes = Table(
     Column("model_id", ForeignKey("models.id"), primary_key=True),
     Column("base_size_id", ForeignKey("base_sizes.id")),
 )
+
+# Weapon abilities on an enhancement's weapon (e.g. TL-4Ø9's [HAZARDOUS]).
+enhancement_weapon_ability_links = Table(
+    "enhancement_weapon_ability_links",
+    Base.metadata,
+    Column("enhancement_weapon_id", ForeignKey("enhancement_weapons.id"), primary_key=True),
+    Column("weapon_ability_id", ForeignKey("weapon_abilities.id"), primary_key=True),
+)

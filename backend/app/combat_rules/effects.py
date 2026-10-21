@@ -20,7 +20,6 @@ IGNORE_COVER = "ignore_cover"
 NO_SAVE = "no_save"
 FORCE_CRITICAL_WOUND = "force_critical_wound"
 ADD_EXTRA_ATTACK = "add_extra_attack"
-IGNORE_COVER_UNIT = "ignore_cover_unit"
 HAZARDOUS = "hazardous"
 PLUS_ONE_TO_HIT = "plus_one_to_hit"
 REROLL_FAILED_HITS = "reroll_failed_hits"
@@ -42,6 +41,15 @@ FEEL_NO_PAIN_4 = "feel_no_pain_4"
 ADD_THREE_ATTACKS = "add_three_attacks"
 ADD_TWO_ATTACKS = "add_two_attacks"
 REROLL_HIT_ONES = "reroll_hit_ones"
+REROLL_WOUND_ONES = "reroll_wound_ones"
+RANGED_SKILL_3 = "ranged_skill_3"
+PLUS_ONE_STRENGTH = "plus_one_strength"
+PLUS_ONE_DAMAGE = "plus_one_damage"
+WORSEN_AP = "worsen_ap"
+FEEL_NO_PAIN_6 = "feel_no_pain_6"
+FEEL_NO_PAIN_MORTAL_5 = "feel_no_pain_mortal_5"
+TORRENT = "torrent"
+PLUS_ONE_TOUGHNESS = "plus_one_toughness"
 BLAST = "blast"
 REROLL_FAILED_WOUNDS = "reroll_failed_wounds"
 DEADLY_DEMISE = "deadly_demise"
@@ -84,12 +92,6 @@ def add_extra_attack(state: dict[str, Any], pending: deque[dict[str, Any]]) -> N
     # Queues one additional attack onto the chain for this weapon - unlike
     # add_extra_hit, this is a fresh attack that still needs its own hit roll.
     pending.append({"auto_hit": False})
-
-
-def ignore_cover_unit(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
-    # Marks the whole attacking unit (not just the model carrying this
-    # wargear) as ignoring the in-cover penalty, for every weapon it fires.
-    state["ignore_cover_unit"] = True
 
 
 def hazardous(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
@@ -225,6 +227,56 @@ def reroll_hit_ones(state: dict[str, Any], pending: deque[dict[str, Any]]) -> No
     state["reroll_hit_ones"] = True
 
 
+def reroll_wound_ones(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # A Wound roll of 1 for this attack can be re-rolled.
+    state["reroll_wound_ones"] = True
+
+
+def ranged_skill_3(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # Ranged weapons have a Ballistic Skill characteristic of 3+ (before any
+    # improvements, e.g. Auto-Divinatory Targeting).
+    state["ranged_skill_3"] = True
+
+
+def plus_one_strength(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # Add 1 to this weapon's Strength characteristic for this attack.
+    state["plus_one_strength"] = True
+
+
+def plus_one_damage(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # Add 1 to this attack's Damage.
+    state["plus_one_damage"] = True
+
+
+def worsen_ap(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # This attack's Armour Penetration is worsened by 1 (e.g. AP-2 becomes
+    # AP-1; AP0 stays AP0) - e.g. a defensive "-1 AP" rule.
+    state["worsen_ap"] = True
+
+
+def feel_no_pain_6(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # As feel_no_pain_5, but 6+.
+    state["feel_no_pain"] = min(state.get("feel_no_pain", 7), 6)
+
+
+def feel_no_pain_mortal_5(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # Feel No Pain 5+ against mortal wounds only (a better one is kept) - e.g.
+    # Benevolence of the Omnissiah.
+    state["feel_no_pain_mortal"] = min(state.get("feel_no_pain_mortal", 7), 5)
+
+
+def torrent(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # [TORRENT]: every attack this weapon makes hits automatically - checked
+    # once per weapon (see the pre_weapon condition).
+    state["torrent"] = True
+
+
+def plus_one_toughness(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # Add 1 to a defending model's Toughness - checked for each model in the
+    # defending unit (step "target_model"), e.g. the Aegis Protocol.
+    state["plus_one_toughness"] = True
+
+
 def blast(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
     # Marks this weapon as Blast - the engine adds 1 attack for every five
     # models in the target unit when the weapon fires.
@@ -279,7 +331,6 @@ EFFECTS = {
     NO_SAVE: no_save,
     FORCE_CRITICAL_WOUND: force_critical_wound,
     ADD_EXTRA_ATTACK: add_extra_attack,
-    IGNORE_COVER_UNIT: ignore_cover_unit,
     HAZARDOUS: hazardous,
     PLUS_ONE_TO_HIT: plus_one_to_hit,
     REROLL_FAILED_HITS: reroll_failed_hits,
@@ -301,6 +352,15 @@ EFFECTS = {
     ADD_THREE_ATTACKS: add_three_attacks,
     ADD_TWO_ATTACKS: add_two_attacks,
     REROLL_HIT_ONES: reroll_hit_ones,
+    REROLL_WOUND_ONES: reroll_wound_ones,
+    RANGED_SKILL_3: ranged_skill_3,
+    PLUS_ONE_STRENGTH: plus_one_strength,
+    PLUS_ONE_DAMAGE: plus_one_damage,
+    WORSEN_AP: worsen_ap,
+    FEEL_NO_PAIN_6: feel_no_pain_6,
+    FEEL_NO_PAIN_MORTAL_5: feel_no_pain_mortal_5,
+    TORRENT: torrent,
+    PLUS_ONE_TOUGHNESS: plus_one_toughness,
     BLAST: blast,
     REROLL_FAILED_WOUNDS: reroll_failed_wounds,
     DEADLY_DEMISE: deadly_demise,
@@ -308,4 +368,18 @@ EFFECTS = {
     BENEFIT_OF_COVER: benefit_of_cover,
     HEAVY: heavy,
     MELTA_3: melta_3,
+}
+
+
+# Effects that protect a unit rather than modify an attack. A stratagem with
+# one, used on the attacking unit (e.g. Benevolence of the Omnissiah, which
+# lasts the whole battle round), protects that unit - e.g. against its own
+# Hazardous weapons - instead of the target of its attacks.
+OWN_UNIT_EFFECTS = {
+    FEEL_NO_PAIN_4,
+    FEEL_NO_PAIN_5,
+    FEEL_NO_PAIN_6,
+    FEEL_NO_PAIN_MORTAL_5,
+    INVULNERABLE_4,
+    INVULNERABLE_5,
 }

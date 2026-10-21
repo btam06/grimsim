@@ -108,6 +108,19 @@ class Stratagem(Base):
     combat_side_link: Mapped["StratagemCombatSide | None"] = relationship(
         cascade="all, delete-orphan", uselist=False, lazy="selectin"
     )
+    duration_link: Mapped["StratagemDuration | None"] = relationship(
+        cascade="all, delete-orphan", uselist=False, lazy="selectin"
+    )
+
+    @property
+    def duration(self) -> str | None:
+        # How long its effect lasts, if beyond the phase it's used in (see
+        # STRATAGEM_DURATIONS). None means until the end of that phase.
+        return self.duration_link.duration if self.duration_link else None
+
+    @duration.setter
+    def duration(self, duration: str | None) -> None:
+        self.duration_link = StratagemDuration(duration=duration) if duration else None
 
     @property
     def combat_side(self) -> str | None:
@@ -185,3 +198,22 @@ class StratagemKeywordOption(Base):
     keyword_id: Mapped[int] = mapped_column(ForeignKey("keywords.id"), primary_key=True)
 
     keyword: Mapped["Keyword"] = relationship(lazy="selectin")
+
+
+# How long a stratagem's effect can last, beyond the phase it's used in (none
+# set: until the end of that phase):
+# - "until_end_of_turn": the rest of the turn it's used in (e.g. Machine
+#   Superiority) - so it's in effect in that turn's later phases too;
+# - "until_next_command_phase": used in your Command phase, it lasts until the
+#   start of your next one - so it's in effect whenever the unit attacks or is
+#   attacked (e.g. Benevolence of the Omnissiah).
+STRATAGEM_DURATIONS = ("until_end_of_turn", "until_next_command_phase")
+
+
+class StratagemDuration(Base):
+    # A stratagem's duration (one at most). Its own table rather than a column
+    # on stratagems, so existing databases pick it up without a migration.
+    __tablename__ = "stratagem_durations"
+
+    stratagem_id: Mapped[int] = mapped_column(ForeignKey("stratagems.id"), primary_key=True)
+    duration: Mapped[str] = mapped_column(String(32))

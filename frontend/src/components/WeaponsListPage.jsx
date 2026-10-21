@@ -1,4 +1,4 @@
-import { skillLabel } from '../weaponDisplay'
+import { skillLabel, skillValue } from '../weaponDisplay'
 import { DeleteButton, EditButton } from './IconButtons'
 
 function WeaponsListPage({ weapons, models, abilities, error, onEdit, onDelete }) {
@@ -14,7 +14,7 @@ function WeaponsListPage({ weapons, models, abilities, error, onEdit, onDelete }
           <li key={w.id}>
             {w.name} ({modelName(w.model_id)}) —{w.range !== null ? ` R${w.range}"` : ''} A
             {w.attacks} S{w.strength} AP{w.ap} D{w.damage} {skillLabel(w.weapon_type)}
-            {w.skill}+
+            {skillValue(w.skill)}
             {w.ability_ids.length > 0 && ` — ${w.ability_ids.map(abilityName).join(', ')}`}
             <EditButton onClick={() => onEdit(w)} />
             <DeleteButton onClick={() => onDelete(w.id)} />

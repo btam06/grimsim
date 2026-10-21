@@ -32,6 +32,7 @@ def _to_out(rule: DetachmentRule) -> DetachmentRuleOut:
             for g in rule.weapon_ability_grants
         ],
         datasheet_ability_ids=[g.datasheet_ability_id for g in rule.datasheet_ability_grants],
+        per_model=rule.per_model,
     )
 
 
@@ -94,6 +95,7 @@ async def create_detachment_rule(
             for i in payload.datasheet_ability_ids
         ],
     )
+    rule.per_model = payload.per_model
     session.add(rule)
     await session.commit()
     return _to_out(rule)

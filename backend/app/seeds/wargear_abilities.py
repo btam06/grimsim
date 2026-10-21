@@ -2,7 +2,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.combat_rules.conditions import ALWAYS
-from app.combat_rules.effects import IGNORE_COVER, IGNORE_COVER_UNIT
+from app.combat_rules.effects import IGNORE_COVER
 from app.models import Condition, Effect, WargearAbility
 
 # (name, description, [condition keywords], [effect keywords])
@@ -12,12 +12,6 @@ ENTRIES = [
         "Wargear equipped with this is not worsened by the defender being in cover.",
         [ALWAYS],
         [IGNORE_COVER],
-    ),
-    (
-        "Ignore Cover (Unit)",
-        "The whole unit this wargear is equipped in, not just the carrying model, ignores cover.",
-        [ALWAYS],
-        [IGNORE_COVER_UNIT],
     ),
 ]
 

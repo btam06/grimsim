@@ -26,6 +26,7 @@ def _to_out(stratagem: Stratagem) -> StratagemOut:
         timings=[StratagemTimingSchema(phase=t.phase, turn=t.turn) for t in stratagem.timings],
         game_action=stratagem.game_action,
         combat_side=stratagem.combat_side,
+        duration=stratagem.duration,
     )
 
 
@@ -119,6 +120,7 @@ async def create_stratagem(payload: StratagemIn, session: AsyncSession = Depends
     )
     stratagem.game_action = payload.game_action
     stratagem.combat_side = payload.combat_side
+    stratagem.duration = payload.duration
     session.add(stratagem)
     await session.commit()
     return _to_out(stratagem)

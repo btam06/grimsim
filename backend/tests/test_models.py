@@ -399,3 +399,15 @@ async def test_create_and_list_base_sizes(client: AsyncClient):
     assert [b["name"] for b in (await client.get("/base-sizes")).json()] == ["40mm"]
     assert (await client.post("/base-sizes", json={"name": "40mm"})).status_code == 400
     assert (await client.post("/base-sizes", json={"name": ""})).status_code == 422
+
+
+async def test_model_feel_no_pain_against_mortal_wounds(client: AsyncClient, faction_id: int):
+    response = await client.post(
+        "/models", json=_model_payload(faction_id, feel_no_pain_mortal=5)
+    )
+    model = response.json()
+    assert model["feel_no_pain_mortal"] == 5
+    listed = next(m for m in (await client.get("/models")).json() if m["id"] == model["id"])
+    assert listed["feel_no_pain_mortal"] == 5
+    cleared = await client.put(f"/models/{model['id']}", json=_model_payload(faction_id))
+    assert cleared.json()["feel_no_pain_mortal"] is None

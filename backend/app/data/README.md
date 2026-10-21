@@ -67,7 +67,12 @@ the units of a list that has taken the detachment: those whose every model has
 all the keywords of one of its `keyword_options` (a set of keywords - their
 order doesn't matter; leave it out for every unit). It grants
 `datasheet_abilities` (by name, e.g. `Stealth`) and `weapon_abilities` (by
-name, optionally only on `"ranged"` or `"melee"` weapons).
+name, optionally only on `"ranged"` or `"melee"` weapons). Set `"per_model": true` for a rule
+that reaches models rather than units (e.g. "friendly TECH-PRIEST models
+have..."): it then reaches each matching model in any unit, and on the defending
+side its abilities take effect when an attack is allocated to that model - so
+saves, invulnerable saves and Feel No Pain, but not hit-roll effects like
+cover, which come before allocation.
 
 ```json
 {
@@ -112,7 +117,20 @@ What they do in combat is given as abilities they grant, by name:
 - `"bearer"`: the model carrying an enhancement;
 - `"led_unit"`: every model in the bearer's unit, while it's leading one (it's
   a CHARACTER in a unit with non-CHARACTER models);
+- `"bearers_unit"`: every model in the bearer's unit, whether or not it's
+  leading one;
 - `"unit"`: every model in the unit - the only scope an upgrade can use.
+
+They can also give `granted_keywords` (`{"name": "SKITARII", "scope": ...}`),
+which count wherever the calculator checks keywords (stratagem targets,
+detachment rules, conditions like Anti-X), and an enhancement can give its
+bearer `weapons` - full profiles, with weapon abilities by name:
+
+```json
+"weapons": [{"name": "TL-4Ø9", "weapon_type": "ranged", "range": 24, "attacks": "3",
+             "skill": 2, "strength": 11, "ap": -2, "damage": "D3+2",
+             "abilities": ["Devastating Wounds", "Hazardous"]}]
+```
 
 ## `factions/<faction>/datasheets.json`
 
@@ -121,7 +139,11 @@ Each datasheet's `name` should be one of that faction's units
 Abilities and keywords are referenced by name and must already exist (seeded
 weapon/wargear/datasheet abilities, keywords from any faction's
 `keywords.json`, and the faction's abilities).
-See `app/seeds/datasheets.py` for every field and its default.
+See `app/seeds/datasheets.py` for every field and its default. `feel_no_pain_mortal` is a
+Feel No Pain against mortal wounds only (e.g. `5`) - in the calculator, that's
+the wounds a model takes from its own Hazardous weapons, and from attacks that
+allow no save (e.g. Devastating Wounds); the better of it and the model's Feel
+No Pain is used.
 `base_size` must be one of the seeded base sizes (`app/seeds/base_sizes.py`,
 e.g. `"32mm"`, `"105 x 70mm"`, `"Use model"`); it's filled in on an existing
 model that doesn't have one yet.

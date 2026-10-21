@@ -58,7 +58,30 @@ class Model(Base):
         secondary=model_faction_ability_links, back_populates="models"
     )
     unit_models: Mapped[list["UnitModel"]] = relationship(back_populates="model")
+    mortal_fnp_link: Mapped["ModelMortalFeelNoPain | None"] = relationship(
+        cascade="all, delete-orphan", uselist=False, lazy="selectin"
+    )
+
+    @property
+    def feel_no_pain_mortal(self) -> int | None:
+        # A Feel No Pain that only applies against mortal wounds (e.g. 5+),
+        # on top of any feel_no_pain. None if it has none.
+        return self.mortal_fnp_link.value if self.mortal_fnp_link else None
+
+    @feel_no_pain_mortal.setter
+    def feel_no_pain_mortal(self, value: int | None) -> None:
+        self.mortal_fnp_link = ModelMortalFeelNoPain(value=value) if value else None
+
     # The base it's on, if entered (see BaseSize).
     base_size: Mapped["BaseSize | None"] = relationship(
         secondary=model_base_sizes, uselist=False, lazy="selectin"
     )
+
+
+class ModelMortalFeelNoPain(Base):
+    # A model's Feel No Pain against mortal wounds. Its own table rather than a
+    # column on models, so existing databases pick it up without a migration.
+    __tablename__ = "model_mortal_feel_no_pain"
+
+    model_id: Mapped[int] = mapped_column(ForeignKey("models.id"), primary_key=True)
+    value: Mapped[int] = mapped_column(Integer)

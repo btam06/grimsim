@@ -30,6 +30,7 @@ function DetachmentRuleForm({
   const [weaponGrants, setWeaponGrants] = useState([])
   const [weaponAbilityId, setWeaponAbilityId] = useState('')
   const [weaponType, setWeaponType] = useState('')
+  const [perModel, setPerModel] = useState(false)
 
   const keywordName = (id) => keywords.find((k) => k.id === id)?.name ?? `#${id}`
   const weaponAbilityName = (id) => weaponAbilities.find((a) => a.id === id)?.name ?? `#${id}`
@@ -45,12 +46,14 @@ function DetachmentRuleForm({
         keyword_option_ids: keywordOptions,
         weapon_abilities: weaponGrants,
         datasheet_ability_ids: datasheetAbilityIds,
+        per_model: perModel,
       })
       setName('')
       setDescription('')
       setKeywordOptions([])
       setDatasheetAbilityIds([])
       setWeaponGrants([])
+      setPerModel(false)
       onSaved()
     } catch (err) {
       onError(err.message)
@@ -73,8 +76,18 @@ function DetachmentRuleForm({
       <Field label="Description (optional)">
         <input value={description} onChange={(e) => setDescription(e.target.value)} />
       </Field>
+      <label className="checkbox-field">
+        <input
+          type="checkbox"
+          checked={perModel}
+          onChange={(e) => setPerModel(e.target.checked)}
+        />
+        Reaches models, not units (e.g. "friendly TECH-PRIEST models have...")
+      </label>
       <div className="checkbox-group">
-        Units it reaches (every model needs all of one option; none means every unit)
+        {perModel
+          ? 'Models it reaches (a model needs all of one option; none means every model)'
+          : 'Units it reaches (every model needs all of one option; none means every unit)'}
         {keywordOptions.length > 0 && (
           <ul>
             {keywordOptions.map((option, i) => (

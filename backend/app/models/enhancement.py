@@ -5,7 +5,11 @@ from typing import TYPE_CHECKING
 from sqlalchemy import ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.associations import enhancement_excluded_keywords, enhancement_keywords
+from app.models.associations import (
+    enhancement_excluded_keywords,
+    enhancement_keywords,
+    enhancement_weapon_ability_links,
+)
 from app.models.base import Base
 
 if TYPE_CHECKING:
@@ -23,10 +27,13 @@ ENHANCEMENT_KINDS = ("enhancement", "upgrade")
 #   equipped by the bearer have [ANTI-INFANTRY 2+]");
 # - "led_unit": every model in the bearer's unit, while it's leading one (e.g.
 #   "while the bearer is leading a unit, models in that unit have Stealth");
+# - "bearers_unit": every model in the bearer's unit, whether or not it's
+#   leading one (e.g. "ranged weapons equipped by models in the bearer's
+#   unit");
 # - "unit": every model in the unit - for upgrades.
-ENHANCEMENT_SCOPES = ("bearer", "led_unit", "unit")
+ENHANCEMENT_SCOPES = ("bearer", "led_unit", "bearers_unit", "unit")
 # The scopes each kind can use.
-KIND_SCOPES = {"enhancement": ("bearer", "led_unit"), "upgrade": ("unit",)}
+KIND_SCOPES = {"enhancement": ("bearer", "led_unit", "bearers_unit"), "upgrade": ("unit",)}
 
 
 class Enhancement(Base):
@@ -54,6 +61,15 @@ class Enhancement(Base):
     )
     datasheet_ability_grants: Mapped[list["EnhancementDatasheetAbility"]] = relationship(
         cascade="all, delete-orphan", lazy="selectin"
+    )
+    # Keywords it gives models (e.g. Martial Signatum Amplificator: SKITARII
+    # for models in the bearer's unit).
+    keyword_grants: Mapped[list["EnhancementKeyword"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin"
+    )
+    # Weapons the bearer has (e.g. TL-4Ø9) - enhancements only.
+    weapons: Mapped[list["EnhancementWeapon"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="EnhancementWeapon.id"
     )
 
 
@@ -86,3 +102,36 @@ class EnhancementDatasheetAbility(Base):
     scope: Mapped[str] = mapped_column(String(32))
 
     datasheet_ability: Mapped["DatasheetAbility"] = relationship(lazy="selectin")
+
+
+class EnhancementKeyword(Base):
+    # A keyword an enhancement or upgrade gives models, and who it reaches
+    # (see ENHANCEMENT_SCOPES).
+    __tablename__ = "enhancement_keyword_grants"
+
+    enhancement_id: Mapped[int] = mapped_column(ForeignKey("enhancements.id"), primary_key=True)
+    keyword_id: Mapped[int] = mapped_column(ForeignKey("keywords.id"), primary_key=True)
+    scope: Mapped[str] = mapped_column(String(32))
+
+    keyword: Mapped["Keyword"] = relationship(lazy="selectin")
+
+
+class EnhancementWeapon(Base):
+    # A weapon an enhancement gives its bearer - a full profile of its own, as
+    # weapons otherwise belong to a model.
+    __tablename__ = "enhancement_weapons"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    enhancement_id: Mapped[int] = mapped_column(ForeignKey("enhancements.id"))
+    name: Mapped[str] = mapped_column(String(255))
+    weapon_type: Mapped[str] = mapped_column(String(16))
+    range: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    attacks: Mapped[str] = mapped_column(String(16))
+    skill: Mapped[int] = mapped_column(Integer)
+    strength: Mapped[int] = mapped_column(Integer)
+    ap: Mapped[int] = mapped_column(Integer)
+    damage: Mapped[str] = mapped_column(String(16))
+
+    abilities: Mapped[list["WeaponAbility"]] = relationship(
+        secondary=enhancement_weapon_ability_links, lazy="selectin"
+    )

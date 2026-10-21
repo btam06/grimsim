@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     DatasheetAbility,
     Enhancement,
     EnhancementDatasheetAbility,
+    EnhancementKeyword,
+    EnhancementWeapon,
     EnhancementWeaponAbility,
     Model,
     Unit,
@@ -16,6 +19,7 @@ from app.models import (
     WeaponAbility,
     enhancement_excluded_keywords,
     enhancement_keywords,
+    enhancement_weapon_ability_links,
     unit_model_enhancements,
     unit_upgrades,
 )
@@ -112,6 +116,8 @@ def _grants_reaching(unit: Unit, unit_model: UnitModel | None, grants_of) -> lis
                 reaching.append(grant)
             elif grant.scope == "led_unit" and is_leading(unit, carrier):
                 reaching.append(grant)
+            elif grant.scope == "bearers_unit":
+                reaching.append(grant)
     if unit.upgrade is not None:
         reaching += [g for g in grants_of(unit.upgrade) if g.scope == "unit"]
     return reaching
@@ -128,6 +134,59 @@ def granted_weapon_abilities(
     ]
 
 
+def granted_keywords(unit: Unit, unit_model: UnitModel) -> set[str]:
+    # The keywords a model gains from its unit's enhancements and upgrade.
+    return {
+        grant.keyword.name
+        for grant in _grants_reaching(unit, unit_model, lambda e: e.keyword_grants)
+    }
+
+
+def model_keywords(unit: Unit, unit_model: UnitModel) -> set[str]:
+    # A model's keywords, including any its unit's enhancements and upgrade
+    # give it (e.g. SKITARII from Martial Signatum Amplificator). Needs the
+    # model's keywords loaded.
+    return {k.name for k in unit_model.model.keywords} | granted_keywords(unit, unit_model)
+
+
+@dataclass(eq=False)
+class GrantedWeapon:
+    # An enhancement's weapon, shaped like a Weapon for the combat engine. Its
+    # id is ("enhancement", EnhancementWeapon.id), apart from real weapon ids.
+    id: tuple[str, int]
+    name: str
+    weapon_type: str
+    range: int | None
+    attacks: str
+    skill: int
+    strength: int
+    ap: int
+    damage: str
+    abilities: list[WeaponAbility]
+
+
+def granted_weapons(unit_model: UnitModel) -> list[GrantedWeapon]:
+    # The weapons a model has from the enhancement it carries (e.g. TL-4Ø9).
+    enhancement = unit_model.enhancement
+    if enhancement is None:
+        return []
+    return [
+        GrantedWeapon(
+            id=("enhancement", weapon.id),
+            name=weapon.name,
+            weapon_type=weapon.weapon_type,
+            range=weapon.range,
+            attacks=weapon.attacks,
+            skill=weapon.skill,
+            strength=weapon.strength,
+            ap=weapon.ap,
+            damage=weapon.damage,
+            abilities=list(weapon.abilities),
+        )
+        for weapon in enhancement.weapons
+    ]
+
+
 def granted_datasheet_abilities(unit: Unit) -> list[DatasheetAbility]:
     # The datasheet abilities a unit gains from its enhancements and upgrade.
     return [
@@ -141,7 +200,18 @@ async def delete_enhancements(session: AsyncSession, ids: list[int]) -> None:
     # have them. Doesn't commit.
     if not ids:
         return
-    for grant in (EnhancementWeaponAbility, EnhancementDatasheetAbility):
+    weapon_ids = select(EnhancementWeapon.id).where(EnhancementWeapon.enhancement_id.in_(ids))
+    await session.execute(
+        delete(enhancement_weapon_ability_links).where(
+            enhancement_weapon_ability_links.c.enhancement_weapon_id.in_(weapon_ids)
+        )
+    )
+    for grant in (
+        EnhancementWeaponAbility,
+        EnhancementDatasheetAbility,
+        EnhancementKeyword,
+        EnhancementWeapon,
+    ):
         await session.execute(delete(grant).where(grant.enhancement_id.in_(ids)))
     for table in (
         unit_model_enhancements,

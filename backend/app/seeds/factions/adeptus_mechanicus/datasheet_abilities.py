@@ -1,20 +1,32 @@
 from app.combat_rules import Rule, RuleOption
 from app.combat_rules.conditions import (
     ALWAYS,
-    ATTACKER_NEAR_ADMECH_BATTLELINE,
-    TARGET_ELECTRO_PRIESTS_LED_BY_CHARACTER,
     TARGET_HAS_CHARACTER,
     TARGET_LED_BY_CHARACTER,
 )
 from app.combat_rules.effects import (
+    ADD_TWO_ATTACKS,
     ASSAULT,
     FEEL_NO_PAIN_4,
     FEEL_NO_PAIN_5,
+    INVULNERABLE_4,
     MINUS_ONE_TO_WOUND,
+    PLUS_ONE_TOUGHNESS,
     REROLL_FAILED_HITS,
     REROLL_HIT_ONES,
+    REROLL_WOUND_ONES,
 )
 from app.seeds.datasheet_abilities import CORE_RULES
+from app.seeds.factions.adeptus_mechanicus.conditions import (
+    ATTACKER_NEAR_ADMECH_BATTLELINE,
+    CONQUEROR_IMPERATIVE_ACTIVE,
+    KASTELAN_MELEE_WEAPON,
+    KASTELAN_RANGED_WEAPON,
+    PROTECTOR_IMPERATIVE_ACTIVE,
+    TARGET_ELECTRO_PRIESTS_LED_BY_CHARACTER,
+    TARGET_MODEL_DATASMITH_LEADING_KASTELANS,
+    TARGET_MODEL_KASTELAN,
+)
 
 # Adeptus Mechanicus datasheet abilities - see app/seeds/datasheet_abilities.py
 # for what each of these holds. Core abilities (e.g. Stealth) are defined there.
@@ -104,6 +116,66 @@ ENTRIES = [
         [],
         [],
     ),
+    # Granted by detachment rules (see detachments.json).
+    (
+        "Murderous Imperative",
+        "Each time a model in this unit makes an attack: if the Protector Imperative is active "
+        "for this unit, re-roll a Hit roll of 1; if the Conqueror Imperative is active, "
+        "re-roll a Wound roll of 1.",
+        [],
+        [],
+    ),
+    (
+        "War-Form Mantle",
+        "This model has a 4+ invulnerable save and the Feel No Pain 5+ ability.",
+        [],
+        [],
+    ),
+    (
+        "Baffling Data Screed",
+        "In your Shooting phase, when this unit is selected to shoot, if it is not "
+        "Battle-shocked, you can roll one D6: on a 2+, select one enemy VEHICLE unit within "
+        "12\" of this unit; that unit takes a Battle-shock test with -1 to it (a unit can't "
+        "be selected for this more than once per turn). Or, on a 2+, those ranged attacks "
+        "don't prevent this unit from being hidden.",
+        [],
+        [],
+    ),
+    (
+        # Its protocols are in OPTIONS below.
+        "Battle Protocols",
+        "At the start of the battle, if this model is leading a KASTELAN ROBOTS unit, that unit "
+        "enters the Aegis Protocol. In your Command phase, if this model is leading a KASTELAN "
+        "ROBOTS unit, you can select one protocol for that unit to enter; it remains in it "
+        "until it enters a different one. Protector Protocol: add 2 to the Attacks of ranged "
+        "weapons equipped by KASTELAN ROBOT models in that unit. Conqueror Protocol: add 2 to "
+        "the Attacks of their melee weapons. Aegis Protocol: add 1 to the Toughness of "
+        "KASTELAN ROBOT models in that unit.",
+        [],
+        [],
+    ),
+    (
+        "Data-severed",
+        "If there are no KASTELAN ROBOT models in this unit, this unit loses VEHICLE and has "
+        "INFANTRY.",
+        [],
+        [],
+    ),
+    (
+        "Robotic Bodyguard",
+        "While a CYBERNETICA DATASMITH model is leading this unit, that model has the Feel No "
+        "Pain 4+ ability.",
+        [],
+        [],
+    ),
+    (
+        "Repulsor Grid",
+        "When an enemy unit targets this unit with ranged attacks, until that enemy unit has "
+        "shot, each time this unit makes a save roll of an unmodified 6, that enemy unit "
+        "suffers 1 mortal wound after it has shot.",
+        [],
+        [],
+    ),
 ]
 
 # How the calculator handles abilities above, where that needs saying:
@@ -127,6 +199,12 @@ CALCULATOR_NOTES = {
     "Self-repair Mechanisms": (
         "Descriptive only: healing between turns is outside the combat engine."
     ),
+    "Baffling Data Screed": "Descriptive only: Battle-shock and hiding are outside the calculator.",
+    "Data-severed": (
+        "Not modelled: a lone Datasmith keeps VEHICLE and doesn't gain INFANTRY in the "
+        "calculator."
+    ),
+    "Repulsor Grid": "Not modelled: mortal wounds to the attacking unit aren't tracked.",
 }
 
 # Code-defined rules for abilities above, by name.
@@ -169,6 +247,43 @@ RULES = {
             ),
         ),
     ],
+    "Murderous Imperative": [
+        Rule(
+            conditions=(PROTECTOR_IMPERATIVE_ACTIVE,),
+            effects=(REROLL_HIT_ONES,),
+            description="Re-roll Hit rolls of 1 while the Protector Imperative is picked.",
+        ),
+        Rule(
+            conditions=(CONQUEROR_IMPERATIVE_ACTIVE,),
+            effects=(REROLL_WOUND_ONES,),
+            description="Re-roll Wound rolls of 1 while the Conqueror Imperative is picked.",
+        ),
+    ],
+    "War-Form Mantle": [
+        Rule(
+            conditions=(ALWAYS,),
+            effects=(INVULNERABLE_4,),
+            side="defender",
+            description="4+ invulnerable save.",
+        ),
+        Rule(
+            conditions=(ALWAYS,),
+            effects=(FEEL_NO_PAIN_5,),
+            side="defender",
+            description="Feel No Pain 5+.",
+        ),
+    ],
+    "Robotic Bodyguard": [
+        Rule(
+            conditions=(TARGET_MODEL_DATASMITH_LEADING_KASTELANS,),
+            effects=(FEEL_NO_PAIN_4,),
+            side="defender",
+            description=(
+                "A CYBERNETICA DATASMITH in this unit (leading it) has Feel No Pain 4+; the "
+                "Kastelans don't."
+            ),
+        ),
+    ],
 }
 
 # Selectable options for abilities above: {ability name: {option name:
@@ -200,6 +315,26 @@ OPTIONS = {
                 "This model's unit, and other units of its faction in its army list, have "
                 "Stealth (the 6\" range isn't modelled)."
             ),
+        ),
+    },
+    "Battle Protocols": {
+        "Protector Protocol": RuleOption(
+            rules=(Rule(conditions=(KASTELAN_RANGED_WEAPON,), effects=(ADD_TWO_ATTACKS,)),),
+            description="+2 Attacks on KASTELAN ROBOT models' ranged weapons.",
+        ),
+        "Conqueror Protocol": RuleOption(
+            rules=(Rule(conditions=(KASTELAN_MELEE_WEAPON,), effects=(ADD_TWO_ATTACKS,)),),
+            description="+2 Attacks on KASTELAN ROBOT models' melee weapons.",
+        ),
+        "Aegis Protocol": RuleOption(
+            rules=(
+                Rule(
+                    conditions=(TARGET_MODEL_KASTELAN,),
+                    effects=(PLUS_ONE_TOUGHNESS,),
+                    side="defender",
+                ),
+            ),
+            description="+1 Toughness for KASTELAN ROBOT models when this unit is attacked.",
         ),
     },
 }

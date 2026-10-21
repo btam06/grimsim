@@ -1,4 +1,4 @@
-import { skillLabel } from '../weaponDisplay'
+import { skillLabel, skillValue } from '../weaponDisplay'
 import FactionFilter from './FactionFilter'
 import { EditButton } from './IconButtons'
 
@@ -48,6 +48,7 @@ function ModelsListPage({
               {m.leadership}+
               {m.invulnerable ? ` Inv${m.invulnerable}+` : ''}
               {m.feel_no_pain ? ` FNP${m.feel_no_pain}+` : ''}
+              {m.feel_no_pain_mortal ? ` FNP${m.feel_no_pain_mortal}+ vs mortals` : ''}
               {m.base_size_id !== null && ` — Base: ${baseSizeName(m.base_size_id)}`}
               {m.is_support ? ' [Support]' : ''}
               {m.is_leader ? ' [Leader]' : ''}
@@ -67,7 +68,7 @@ function ModelsListPage({
                   <li key={w.id}>
                     {w.name} —{w.range !== null ? ` R${w.range}"` : ''} A{w.attacks} S{w.strength} AP
                     {w.ap} D{w.damage} {skillLabel(w.weapon_type)}
-                    {w.skill}+
+                    {skillValue(w.skill)}
                   </li>
                 ))}
               </ul>

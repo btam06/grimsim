@@ -53,12 +53,13 @@ function DetachmentsPanel() {
   // e.g. "Stealth Optimisation — SKITARII + INFANTRY or IRONSTRIDER
   // BALLISTARII units — grants Stealth".
   const ruleLabel = (rule) => {
+    const what = rule.per_model ? 'model' : 'unit'
     const units =
       rule.keyword_option_ids.length > 0
         ? `${rule.keyword_option_ids
             .map((option) => option.map(keywordName).sort().join(' + '))
-            .join(' or ')} units`
-        : 'every unit'
+            .join(' or ')} ${what}s`
+        : `every ${what}`
     const grants = [
       ...rule.datasheet_ability_ids.map(
         (id) => datasheetAbilities.find((a) => a.id === id)?.name ?? `#${id}`

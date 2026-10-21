@@ -36,6 +36,21 @@ class DetachmentRule(Base):
     datasheet_ability_grants: Mapped[list["DetachmentRuleDatasheetAbility"]] = relationship(
         cascade="all, delete-orphan", lazy="selectin"
     )
+    per_model_link: Mapped["DetachmentRulePerModel | None"] = relationship(
+        cascade="all, delete-orphan", uselist=False, lazy="selectin"
+    )
+
+    @property
+    def per_model(self) -> bool:
+        # False: it reaches units whose every model matches one of its keyword
+        # options (e.g. Stealth Optimisation - a unit only has Stealth if all
+        # of it does). True: it reaches each matching model on its own, in any
+        # unit (e.g. War-Form Mantles: "friendly TECH-PRIEST models have...").
+        return self.per_model_link is not None
+
+    @per_model.setter
+    def per_model(self, per_model: bool) -> None:
+        self.per_model_link = DetachmentRulePerModel() if per_model else None
 
     @property
     def keyword_options(self) -> list[list["Keyword"]]:
@@ -90,3 +105,12 @@ class DetachmentRuleDatasheetAbility(Base):
     )
 
     datasheet_ability: Mapped["DatasheetAbility"] = relationship(lazy="selectin")
+
+
+class DetachmentRulePerModel(Base):
+    # Marks a rule as reaching models one at a time (see DetachmentRule.per_model).
+    # Its own table rather than a column, so existing databases pick it up
+    # without a migration.
+    __tablename__ = "detachment_rule_per_model"
+
+    rule_id: Mapped[int] = mapped_column(ForeignKey("detachment_rules.id"), primary_key=True)

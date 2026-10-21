@@ -2,6 +2,13 @@ import { useState } from 'react'
 import { createWargear, updateWargear } from '../api'
 import Field from './Field'
 import MultiSelect from './MultiSelect'
+import Select from './Select'
+
+// Who a piece of wargear's abilities reach.
+const SCOPES = [
+  { id: 'bearer', name: "The bearer's weapons" },
+  { id: 'bearers_unit', name: "Every model's weapons in the bearer's unit" },
+]
 
 function buildEmptyForm(defaultModelId) {
   return {
@@ -9,6 +16,7 @@ function buildEmptyForm(defaultModelId) {
     model_id: defaultModelId ? String(defaultModelId) : '',
     description: '',
     ability_ids: [],
+    scope: 'bearer',
   }
 }
 
@@ -18,6 +26,7 @@ function formFromWargear(item) {
     model_id: String(item.model_id),
     description: item.description ?? '',
     ability_ids: item.ability_ids,
+    scope: item.scope,
   }
 }
 
@@ -27,6 +36,7 @@ function toPayload(form) {
     model_id: Number(form.model_id),
     description: form.description || null,
     ability_ids: form.ability_ids,
+    scope: form.scope,
   }
 }
 
@@ -72,6 +82,13 @@ function WargearFormPage({ editingWargear, defaultModelId, wargearAbilities, onS
             onChange={(ability_ids) => setForm({ ...form, ability_ids })}
           />
         </div>
+        <Field label="Scope">
+          <Select
+            options={SCOPES}
+            value={form.scope}
+            onChange={(scope) => setForm({ ...form, scope })}
+          />
+        </Field>
         <button type="submit">{editingWargear ? 'Save Changes' : 'Add Wargear'}</button>
         <button type="button" onClick={onCancel}>
           Cancel

@@ -80,6 +80,9 @@ class ModelIn(BaseModel):
     feel_no_pain: int | None = None
     is_support: bool = False
     is_leader: bool = False
+    # Feel No Pain against mortal wounds only (e.g. 5+), on top of any
+    # feel_no_pain.
+    feel_no_pain_mortal: int | None = None
     # One of the base sizes (GET /base-sizes); None if not entered.
     base_size_id: int | None = None
     ability_ids: list[int] = []
@@ -102,6 +105,7 @@ class ModelOut(BaseModel):
     feel_no_pain: int | None
     is_support: bool
     is_leader: bool
+    feel_no_pain_mortal: int | None
     base_size_id: int | None
     ability_ids: list[int]
     wargear_ids: list[int]
@@ -147,6 +151,9 @@ class WargearIn(BaseModel):
     model_id: int
     description: str | None = None
     ability_ids: list[int] = []
+    # Who its abilities reach: the bearer's weapons, or every model's in the
+    # bearer's unit.
+    scope: Literal["bearer", "bearers_unit"] = "bearer"
 
 
 class WargearOut(BaseModel):
@@ -155,6 +162,7 @@ class WargearOut(BaseModel):
     model_id: int
     description: str | None
     ability_ids: list[int]
+    scope: str
 
 
 class UnitModelIn(BaseModel):
@@ -192,7 +200,7 @@ class UnitOut(BaseModel):
     upgrade_id: int | None
 
 
-EnhancementScope = Literal["bearer", "led_unit", "unit"]
+EnhancementScope = Literal["bearer", "led_unit", "bearers_unit", "unit"]
 
 
 class EnhancementWeaponAbilitySchema(BaseModel):
@@ -222,6 +230,9 @@ class DetachmentRuleIn(BaseModel):
     keyword_option_ids: list[list[int]] = []
     weapon_abilities: list[DetachmentRuleWeaponAbilitySchema] = []
     datasheet_ability_ids: list[int] = []
+    # False: reaches units whose every model matches an option. True: reaches
+    # each matching model on its own, in any unit.
+    per_model: bool = False
 
 
 class DetachmentRuleOut(BaseModel):
@@ -232,6 +243,31 @@ class DetachmentRuleOut(BaseModel):
     keyword_option_ids: list[list[int]]
     weapon_abilities: list[DetachmentRuleWeaponAbilitySchema]
     datasheet_ability_ids: list[int]
+    per_model: bool
+
+
+class EnhancementKeywordSchema(BaseModel):
+    # A keyword an enhancement/upgrade gives models, and who it reaches.
+    keyword_id: int
+    scope: EnhancementScope
+
+
+class EnhancementWeaponSchema(BaseModel):
+    # A weapon an enhancement gives its bearer: a full profile, and weapon
+    # abilities by id.
+    name: str
+    weapon_type: Literal["melee", "ranged"]
+    range: int | None = None
+    attacks: str = Field(pattern=DICE_PATTERN)
+    skill: int
+    strength: int
+    ap: int = Field(le=0)
+    damage: str = Field(pattern=DICE_PATTERN)
+    ability_ids: list[int] = []
+
+
+class EnhancementWeaponOut(EnhancementWeaponSchema):
+    id: int
 
 
 class EnhancementIn(BaseModel):
@@ -249,11 +285,20 @@ class EnhancementIn(BaseModel):
     # unit it leads; an upgrade's, the unit.
     weapon_abilities: list[EnhancementWeaponAbilitySchema] = []
     datasheet_abilities: list[EnhancementDatasheetAbilitySchema] = []
+    # Keywords it gives models (e.g. SKITARII for the bearer's unit).
+    granted_keywords: list[EnhancementKeywordSchema] = []
+    # Weapons the bearer has (enhancements only).
+    weapons: list[EnhancementWeaponSchema] = []
 
     @model_validator(mode="after")
     def check_scopes(self):
-        allowed = {"enhancement": ("bearer", "led_unit"), "upgrade": ("unit",)}[self.kind]
-        for grant in [*self.weapon_abilities, *self.datasheet_abilities]:
+        allowed = {
+            "enhancement": ("bearer", "led_unit", "bearers_unit"),
+            "upgrade": ("unit",),
+        }[self.kind]
+        if self.weapons and self.kind != "enhancement":
+            raise ValueError("only an enhancement (carried by a model) can give a weapon")
+        for grant in [*self.weapon_abilities, *self.datasheet_abilities, *self.granted_keywords]:
             if grant.scope not in allowed:
                 raise ValueError(
                     f"an {self.kind}'s abilities must have scope {' or '.join(allowed)}"
@@ -272,6 +317,8 @@ class EnhancementOut(BaseModel):
     excluded_keyword_ids: list[int]
     weapon_abilities: list[EnhancementWeaponAbilitySchema]
     datasheet_abilities: list[EnhancementDatasheetAbilitySchema]
+    granted_keywords: list[EnhancementKeywordSchema]
+    weapons: list[EnhancementWeaponOut]
 
 
 class ConditionOut(BaseModel):
@@ -404,6 +451,9 @@ class StratagemIn(BaseModel):
     game_action: Literal["replace_secondary"] | None = None
     # Which unit in a combat it's used on; None means either.
     combat_side: Literal["attacker", "defender"] | None = None
+    # How long its effect lasts beyond the phase it's used in; None: just that
+    # phase.
+    duration: Literal["until_end_of_turn", "until_next_command_phase"] | None = None
 
     @model_validator(mode="after")
     def check_core_xor_detachments(self):
@@ -431,6 +481,7 @@ class StratagemOut(BaseModel):
     timings: list[StratagemTimingSchema]
     game_action: str | None
     combat_side: str | None
+    duration: str | None
 
 
 class PositionOut(BaseModel):
@@ -443,6 +494,9 @@ class CombatIn(BaseModel):
     attacking_unit_id: int
     defending_unit_id: int
     selected_weapon_ids: list[int] = []
+    # Weapons the attacking unit's enhancements give it (EnhancementWeapon
+    # ids, e.g. TL-4Ø9) to attack with as well.
+    selected_enhancement_weapon_ids: list[int] = []
     # Stratagems used on the attacking unit, and on the defending unit, for this
     # attack - each must be usable on that unit, by that side, in this phase
     # (see GET /combat/stratagems).
@@ -452,6 +506,8 @@ class CombatIn(BaseModel):
     # /combat/positions), e.g. ["near_admech_battleline"].
     attacker_positions: list[str] = []
     defender_positions: list[str] = []
+    # The attacking unit made a Charge move this turn (e.g. for [LANCE]).
+    charged: bool = False
     # Whether attacks from weapons with the Precision effect pick off leaders
     # (then supports) first, rather than following normal targeting.
     apply_precision: bool = False
