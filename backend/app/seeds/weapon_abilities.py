@@ -12,6 +12,7 @@ from app.combat_rules.conditions import (
     ANTI_VEHICLE_2,
     ANTI_VEHICLE_3,
     ANTI_VEHICLE_4,
+    ANTI_WALKER_2,
     BEYOND_HALF_RANGE_ATTACK,
     CHARGED,
     CRITICAL_HIT,
@@ -134,6 +135,12 @@ ENTRIES = [
         "Anti-Vehicle 4+",
         "Against a defending unit that contains a VEHICLE model, a wound roll of 4+ is a critical wound.",
         [ANTI_VEHICLE_4],
+        [FORCE_CRITICAL_WOUND],
+    ),
+    (
+        "Anti-Walker 2+",
+        "Against a defending unit that contains a WALKER model, a wound roll of 2+ is a critical wound.",
+        [ANTI_WALKER_2],
         [FORCE_CRITICAL_WOUND],
     ),
     (

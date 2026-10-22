@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db import get_session
-from app.combat_rules import Rule
+from app.combat_rules import Rule, RuleOption
 from app.combat_rules.positions import ALWAYS_ASKED, POSITION_CONDITIONS, POSITIONS
 from app.models import (
     ArmyList,
@@ -209,7 +209,26 @@ def _active_options(
                 continue
             take(_datasheet_ability_names(other), army_wide_only=True)
 
+    # Options that active ones make active too (e.g. The Fires of Mars: both
+    # Doctrina Imperatives), applied as if they'd been picked.
+    granted = [
+        name
+        for option_name in active
+        for name in _datasheet_option(option_name).grants_options
+        if name not in option_names
+    ]
+    if granted:
+        return _active_options(unit, option_names + granted, detachment_rules)
     return active, rules, keywords
+
+
+def _datasheet_option(option_name: str) -> RuleOption:
+    # A datasheet ability's option by name (an empty one for a faction
+    # ability's option, which grants no other options).
+    ability = datasheet_ability_seeds.OPTION_OWNERS.get(option_name)
+    if ability is None:
+        return RuleOption()
+    return datasheet_ability_seeds.OPTIONS[ability][option_name]
 
 
 def _datasheet_rules(unit: Unit, detachment_rules: list[DetachmentRule]) -> list[Rule]:

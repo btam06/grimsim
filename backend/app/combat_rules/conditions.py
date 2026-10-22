@@ -22,6 +22,7 @@ ANTI_VEHICLE_3 = "anti_vehicle_3"
 ANTI_VEHICLE_4 = "anti_vehicle_4"
 ANTI_MONSTER_4 = "anti_monster_4"
 ANTI_FLY_2 = "anti_fly_2"
+ANTI_WALKER_2 = "anti_walker_2"
 RANGED_CRITICAL_HIT = "ranged_critical_hit"
 STATIONARY_RANGED_CRITICAL_HIT = "stationary_ranged_critical_hit"
 WITHIN_HALF_RANGE = "within_half_range"
@@ -222,6 +223,16 @@ def anti_fly_2(context: dict) -> bool:
         context.get("step") == "wound"
         and context.get("roll", 0) >= 2
         and "FLY" in context.get("defender_keywords", set())
+    )
+
+
+def anti_walker_2(context: dict) -> bool:
+    # True at the wound step if the wound roll was a 2+ against a defending
+    # unit that contains a WALKER model (e.g. for "Anti-Walker 2+").
+    return (
+        context.get("step") == "wound"
+        and context.get("roll", 0) >= 2
+        and "WALKER" in context.get("defender_keywords", set())
     )
 
 
@@ -433,6 +444,7 @@ CORE_CONDITIONS = {
     DEFENDER_IN_RANGE_OF_OBJECTIVE: defender_in_range_of_objective,
     CHARGED: charged,
     ANTI_FLY_2: anti_fly_2,
+    ANTI_WALKER_2: anti_walker_2,
     RANGED_CRITICAL_HIT: ranged_critical_hit,
     STATIONARY_RANGED_CRITICAL_HIT: stationary_ranged_critical_hit,
     MELEE_ATTACK: melee_attack,

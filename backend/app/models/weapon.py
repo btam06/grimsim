@@ -31,3 +31,26 @@ class Weapon(Base):
     abilities: Mapped[list["WeaponAbility"]] = relationship(
         secondary=weapon_ability_links, back_populates="weapons"
     )
+    default_link: Mapped["WeaponDefault | None"] = relationship(
+        cascade="all, delete-orphan", uselist=False, lazy="selectin"
+    )
+
+    @property
+    def is_default(self) -> bool:
+        # Whether the model is equipped with it by default (its datasheet's
+        # "This model is equipped with: ..."), so it's pre-selected when the
+        # model is added to a unit.
+        return self.default_link is not None
+
+    @is_default.setter
+    def is_default(self, is_default: bool) -> None:
+        self.default_link = WeaponDefault() if is_default else None
+
+
+class WeaponDefault(Base):
+    # Marks a weapon as equipped by default (see Weapon.is_default). Its own
+    # table rather than a column, so existing databases pick it up without a
+    # migration.
+    __tablename__ = "weapon_defaults"
+
+    weapon_id: Mapped[int] = mapped_column(ForeignKey("weapons.id"), primary_key=True)

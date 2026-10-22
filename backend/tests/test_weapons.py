@@ -290,3 +290,27 @@ async def test_create_weapon_accepts_dice_with_a_modifier(client: AsyncClient, f
     assert (await client.post("/weapons", json=payload)).status_code == 201
     payload["damage"] = "D6+"
     assert (await client.post("/weapons", json=payload)).status_code == 422
+
+
+async def test_weapon_default_flag_round_trips(client: AsyncClient, faction_id: int):
+    model_id = await _create_model(client, faction_id)
+    response = await client.post("/weapons", json=_weapon_payload(model_id, is_default=True))
+    assert response.status_code == 201
+    weapon = response.json()
+    assert weapon["is_default"] is True
+
+    response = await client.put(
+        f"/weapons/{weapon['id']}", json=_weapon_payload(model_id, is_default=False)
+    )
+    assert response.json()["is_default"] is False
+    listed = next(w for w in (await client.get("/weapons")).json() if w["id"] == weapon["id"])
+    assert listed["is_default"] is False
+    # Not default unless said so.
+    plain = (await client.post("/weapons", json=_weapon_payload(model_id))).json()
+    assert plain["is_default"] is False
+
+
+async def test_deleting_a_default_weapon(client: AsyncClient, faction_id: int):
+    model_id = await _create_model(client, faction_id)
+    weapon = (await client.post("/weapons", json=_weapon_payload(model_id, is_default=True))).json()
+    assert (await client.delete(f"/weapons/{weapon['id']}")).status_code == 204

@@ -36,7 +36,8 @@
               "abilities": [
                 "Rapid Fire 1",
                 "Heavy"
-              ]
+              ],
+              "default": true
             },
             {
               "name": "Test Stubber",

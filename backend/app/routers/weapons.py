@@ -24,6 +24,7 @@ def _to_out(weapon: Weapon) -> WeaponOut:
         skill=weapon.skill,
         weapon_type=weapon.weapon_type,
         ability_ids=[ability.id for ability in weapon.abilities],
+        is_default=weapon.is_default,
     )
 
 
@@ -46,7 +47,10 @@ async def create_weapon(payload: WeaponIn, session: AsyncSession = Depends(get_s
         if len(abilities) != len(set(payload.ability_ids)):
             raise HTTPException(status_code=400, detail="one or more ability_ids not found")
 
-    weapon = Weapon(**payload.model_dump(exclude={"ability_ids"}), abilities=abilities)
+    weapon = Weapon(
+        **payload.model_dump(exclude={"ability_ids", "is_default"}), abilities=abilities
+    )
+    weapon.is_default = payload.is_default
     session.add(weapon)
     try:
         await session.commit()
@@ -87,6 +91,7 @@ async def update_weapon(
     weapon.skill = payload.skill
     weapon.weapon_type = payload.weapon_type
     weapon.abilities = abilities
+    weapon.is_default = payload.is_default
 
     try:
         await session.commit()

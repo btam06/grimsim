@@ -127,6 +127,8 @@ class WeaponIn(BaseModel):
     skill: int
     weapon_type: Literal["melee", "ranged"] | None = None
     ability_ids: list[int] = []
+    # Equipped by default: pre-selected when the model is added to a unit.
+    is_default: bool = False
 
     @model_validator(mode="after")
     def check_range_required_unless_melee(self):
@@ -147,6 +149,7 @@ class WeaponOut(BaseModel):
     skill: int
     weapon_type: Literal["melee", "ranged"] | None
     ability_ids: list[int]
+    is_default: bool = False
 
 
 class WargearIn(BaseModel):

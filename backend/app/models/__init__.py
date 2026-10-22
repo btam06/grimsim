@@ -68,7 +68,7 @@ from app.models.unit_model import UnitModel
 from app.models.user import User
 from app.models.wargear import Wargear, WargearScope
 from app.models.wargear_ability import WargearAbility
-from app.models.weapon import Weapon
+from app.models.weapon import Weapon, WeaponDefault
 from app.models.weapon_ability import WeaponAbility
 
 __all__ = [
@@ -77,6 +77,7 @@ __all__ = [
     "FactionAbility",
     "FactionUnit",
     "Weapon",
+    "WeaponDefault",
     "Wargear",
     "WargearScope",
     "Model",

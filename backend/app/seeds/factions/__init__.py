@@ -629,7 +629,7 @@ async def seed_datasheets(session: AsyncSession) -> None:
         return table[key]
 
     def build_weapon(weapon, datasheet: str) -> Weapon:
-        return Weapon(
+        built = Weapon(
             name=weapon.name,
             weapon_type=weapon.weapon_type,
             range=weapon.range,
@@ -643,6 +643,8 @@ async def seed_datasheets(session: AsyncSession) -> None:
                 for name in weapon.abilities
             ],
         )
+        built.is_default = weapon.default
+        return built
 
     def build_wargear(gear, datasheet: str) -> Wargear:
         if gear.scope not in WARGEAR_SCOPES:
@@ -712,6 +714,11 @@ async def seed_datasheets(session: AsyncSession) -> None:
                         for weapon in weapon_specs[len(existing_weapons):]:
                             model.weapons.append(build_weapon(weapon, datasheet.name))
                             changed = True
+                        for existing_weapon, weapon_spec in zip(existing_weapons, weapon_specs):
+                            # Marked as a default weapon since it was seeded.
+                            if weapon_spec.default and not existing_weapon.is_default:
+                                existing_weapon.is_default = True
+                                changed = True
                         for existing_weapon in existing_weapons:
                             ability_names = {a.name for a in existing_weapon.abilities}
                             for ability_name in weapon_specs[0].abilities:

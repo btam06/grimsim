@@ -15,6 +15,7 @@ function buildEmptyForm(defaultModelId) {
     skill: '',
     weapon_type: '',
     ability_ids: [],
+    is_default: false,
   }
 }
 
@@ -30,6 +31,7 @@ function formFromWeapon(weapon) {
     skill: String(weapon.skill),
     weapon_type: weapon.weapon_type ?? '',
     ability_ids: weapon.ability_ids,
+    is_default: weapon.is_default ?? false,
   }
 }
 
@@ -45,6 +47,7 @@ function toPayload(form) {
     skill: Number(form.skill),
     weapon_type: form.weapon_type === '' ? null : form.weapon_type,
     ability_ids: form.ability_ids,
+    is_default: form.is_default,
   }
 }
 
@@ -152,6 +155,14 @@ function WeaponFormPage({
             onChange={(ability_ids) => setForm({ ...form, ability_ids })}
           />
         </div>
+        <label className="checkbox-field">
+          <input
+            type="checkbox"
+            checked={form.is_default}
+            onChange={(e) => setForm({ ...form, is_default: e.target.checked })}
+          />
+          Equipped by default (pre-selected when the model is added to a unit)
+        </label>
         <button type="submit">{editingWeapon ? 'Save Changes' : 'Add Weapon'}</button>
         <button type="button" onClick={onCancel}>
           Cancel

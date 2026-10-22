@@ -73,6 +73,13 @@ ENTRIES = [
         [ASSAULT],
     ),
     (
+        "Dynamic Efficiency",
+        "This unit is eligible to declare a charge in a turn in which it Advanced or Fell "
+        "Back, and you can re-roll Desperate Escape tests taken for models in this unit.",
+        [],
+        [],
+    ),
+    (
         "Broad Spectrum Data-tether",
         "Each time you target this unit with a Stratagem, roll one D6: on a 5+, you gain 1CP.",
         [],
@@ -100,6 +107,34 @@ ENTRIES = [
         "At the start of your Command phase, select one of the abilities in the Canticles of "
         "the Omnissiah section. Until the start of your next Command phase, this model has that "
         "ability.",
+        [],
+        [],
+    ),
+    (
+        # Its Icon of War abilities are in OPTIONS below.
+        "Rod of the War Forge",
+        "In your Command phase, select one of the abilities in the Icon of War section. Until "
+        "the start of your next Command phase, this model has that ability. Fanatical "
+        "Devotion: select one friendly SKITARII or THULIA GHULD unit within 6\" of this model; "
+        "until the start of your next Command phase, that unit is eligible to shoot and "
+        "declare a charge in a turn in which it Advanced. Adaptive Tactics: as Fanatical "
+        "Devotion, but in a turn in which it Fell Back. The Fires of Mars: select one friendly "
+        "SKITARII or THULIA GHULD unit within 6\" of this model; until the start of your next "
+        "Command phase, the Conqueror Imperative and Protector Imperative are both active for "
+        "that unit.",
+        [],
+        [],
+    ),
+    (
+        "Secutor of Olympus",
+        "At the start of your Shooting phase, select one enemy VEHICLE unit within 12\" of "
+        "this model and roll one D6: on a 2+, that enemy unit suffers D3+1 mortal wounds.",
+        [],
+        [],
+    ),
+    (
+        "Supreme Commander",
+        "If this model is in your army, it must be your Warlord.",
         [],
         [],
     ),
@@ -190,12 +225,17 @@ CALCULATOR_NOTES = {
         "Falling Back and Desperate Escape aren't modelled."
     ),
     "Broad Spectrum Data-tether": "Descriptive only: gaining CP is outside the combat engine.",
+    "Dynamic Efficiency": "Descriptive only: charging and Desperate Escape aren't modelled.",
     "Voices in the Code": "Descriptive only: Battle-shock is outside the combat engine.",
     "Neurostatic Interference (Aura)": (
         "Descriptive only: Battle-shock/Leadership is outside the combat "
         "engine."
     ),
     "Mechanicus Bodyguard": "Descriptive only: targeting restrictions aren't modelled.",
+    "Secutor of Olympus": (
+        "Descriptive only: a start-of-Shooting-phase action outside the attack sequence."
+    ),
+    "Supreme Commander": "Descriptive only: an army-building restriction.",
     "Self-repair Mechanisms": (
         "Descriptive only: healing between turns is outside the combat engine."
     ),
@@ -314,6 +354,32 @@ OPTIONS = {
             description=(
                 "This model's unit, and other units of its faction in its army list, have "
                 "Stealth (the 6\" range isn't modelled)."
+            ),
+        ),
+    },
+    "Rod of the War Forge": {
+        "Fanatical Devotion": RuleOption(
+            rules=(Rule(conditions=(ALWAYS,), effects=(ASSAULT,)),),
+            army_wide=True,
+            description=(
+                "A SKITARII or THULIA GHULD unit within 6\" can shoot after Advancing - "
+                "modelled as its ranged weapons having [ASSAULT] (the 6\" isn't modelled)."
+            ),
+        ),
+        "Adaptive Tactics": RuleOption(
+            army_wide=True,
+            description=(
+                "Not modelled: shooting and charging after Falling Back are outside the "
+                "calculator."
+            ),
+        ),
+        "The Fires of Mars": RuleOption(
+            army_wide=True,
+            grants_options=("Protector Imperative", "Conqueror Imperative"),
+            description=(
+                "A SKITARII or THULIA GHULD unit within 6\" has both the Protector and "
+                "Conqueror Imperatives active (if it has Doctrina Imperatives; the 6\" isn't "
+                "modelled)."
             ),
         ),
     },

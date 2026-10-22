@@ -6487,3 +6487,86 @@ def test_stalker_plus_one_to_wound_against_an_isolated_target(monkeypatch, posit
         weapon, [_model(toughness=4, wounds=10, save=7)], attacker_positions=positions
     )
     assert result.total_damage == expected
+
+
+def test_anti_walker_2_condition_checks_wound_roll_and_keyword():
+    from app.combat_rules.conditions import CONDITIONS
+
+    check = CONDITIONS["anti_walker_2"]
+    assert check({"step": "wound", "roll": 2, "defender_keywords": {"WALKER"}})
+    assert not check({"step": "wound", "roll": 1, "defender_keywords": {"WALKER"}})
+    assert not check({"step": "wound", "roll": 6, "defender_keywords": {"VEHICLE"}})
+    assert not check({"step": "hit", "roll": 6, "defender_keywords": {"WALKER"}})
+
+
+@pytest.mark.parametrize("option,expected_damage", [("The Fires of Mars", 1), (None, 0)])
+async def test_fires_of_mars_makes_both_imperatives_active_for_another_unit(
+    client: AsyncClient, session, monkeypatch, option, expected_damage
+):
+    # Thulia Ghuld's Rod of the War Forge, elsewhere in the list: The Fires of
+    # Mars makes both Imperatives active, so Murderous Imperative re-rolls a
+    # Hit roll of 1 (Protector) and a Wound roll of 1 (Conqueror).
+    from app.seeds import factions as factions_seed
+
+    await factions_seed.seed(session)
+    await factions_seed.seed_abilities(session)
+    await _seed_combat_catalog(session)
+    admech = next(
+        f["id"] for f in (await client.get("/factions")).json() if f["name"] == "Adeptus Mechanicus"
+    )
+    abilities = {a["name"]: a["id"] for a in (await client.get("/datasheet-abilities")).json()}
+    doctrina = next(
+        a["id"]
+        for a in (await client.get("/faction-abilities")).json()
+        if a["name"] == "Doctrina Imperatives"
+    )
+    list_id = (
+        await client.post(
+            "/lists",
+            json={"name": "Forge", "points_limit": 2000, "faction_id": admech, "detachment_ids": []},
+        )
+    ).json()["id"]
+
+    async def listed_unit(model_id, weapon_ids=()):
+        faction_unit = await _create_faction_unit(client, admech, f"Unit {model_id}")
+        response = await client.post(
+            "/units",
+            json={
+                "faction_unit_id": faction_unit,
+                "points": 100,
+                "list_id": list_id,
+                "unit_models": [{"model_id": model_id, "weapon_ids": list(weapon_ids)}],
+            },
+        )
+        assert response.status_code == 201, response.text
+        return response.json()["id"]
+
+    thulia = await _create_model(client, admech, ability_ids=[abilities["Rod of the War Forge"]])
+    await listed_unit(thulia)
+    skitarii = await _create_model(
+        client,
+        admech,
+        faction_ability_ids=[doctrina],
+        ability_ids=[abilities["Murderous Imperative"]],
+    )
+    weapon_id = await _create_weapon(client, skitarii, weapon_type="ranged")
+    attacker = await listed_unit(skitarii, [weapon_id])
+    defender = await _create_unit(
+        client,
+        await _create_faction_unit(client, admech, "Targets"),
+        await _create_model(client, admech),
+    )
+
+    rolls = iter([1, 6, 1, 6, 1])  # hit 1 re-rolled to 6, wound 1 re-rolled to 6, save 1
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    response = await client.post(
+        "/combat",
+        json={
+            "attacking_unit_id": attacker,
+            "defending_unit_id": defender,
+            "selected_weapon_ids": [weapon_id],
+            "attacker_rule_options": [option] if option else [],
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["total_damage"] == expected_damage

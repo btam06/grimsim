@@ -1355,3 +1355,27 @@ def test_admech_conditions_live_in_their_faction_folder():
     # ...but the engine still finds them, alongside the core ones.
     assert moved <= set(CONDITIONS) and "always" in CONDITIONS
     assert moved <= {keyword for keyword, _, _ in conditions.ENTRIES}
+
+
+async def test_seed_datasheets_marks_default_weapons(session: AsyncSession, fixture_game_data):
+    await run_all(session)
+    trooper = (await _test_squad(session))["Test Trooper"]
+    defaults = {w.name for w in trooper.weapons if w.is_default}
+    assert defaults == {"Test Rifle"}
+
+
+async def test_seed_datasheets_marks_an_existing_weapon_as_default(
+    session: AsyncSession, fixture_game_data
+):
+    await run_all(session)
+    rifle = next(
+        w for w in (await _test_squad(session))["Test Trooper"].weapons if w.name == "Test Rifle"
+    )
+    rifle.is_default = False
+    await session.commit()
+
+    await run_all(session)
+    rifle = next(
+        w for w in (await _test_squad(session))["Test Trooper"].weapons if w.name == "Test Rifle"
+    )
+    assert rifle.is_default

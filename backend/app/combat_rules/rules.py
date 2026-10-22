@@ -33,3 +33,7 @@ class RuleOption:
     army_wide: bool = False
     # What picking it does in the calculator - shown with the option.
     description: str | None = None
+    # Other rule options picking it makes active too, for a unit with the
+    # ability they belong to (e.g. The Fires of Mars: both Doctrina
+    # Imperatives).
+    grants_options: tuple[str, ...] = ()

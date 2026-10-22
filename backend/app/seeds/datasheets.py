@@ -24,6 +24,8 @@ class WeaponSpec:
     damage: str  # flat or dice notation
     range: int | None = None  # inches; None for melee
     abilities: tuple[str, ...] = ()  # WeaponAbility names
+    # Equipped by default ("This model is equipped with: ...").
+    default: bool = False
 
 
 @dataclass(frozen=True)

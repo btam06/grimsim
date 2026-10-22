@@ -180,11 +180,14 @@ function UnitFormPage({
 
   const removeSlot = (index) => setSlots(slots.filter((_, i) => i !== index))
 
+  // A model starts with its default weapons (its datasheet's "This model is
+  // equipped with: ...") and any it always carries.
   const selectModel = (model_id) => {
     const modelWeapons = weapons.filter((w) => String(w.model_id) === model_id)
+    const defaults = modelWeapons.filter((w) => w.is_default).map((w) => w.id)
     setSlot({
       model_id,
-      weapon_ids: requiredWeaponIds(modelWeapons),
+      weapon_ids: [...new Set([...defaults, ...requiredWeaponIds(modelWeapons)])],
       wargear_ids: [],
       enhancement_id: '',
     })

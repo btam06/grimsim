@@ -12,6 +12,7 @@ from app.combat_rules.conditions import (
     ANTI_VEHICLE_2,
     ANTI_VEHICLE_3,
     ANTI_VEHICLE_4,
+    ANTI_WALKER_2,
     ATTACKER_DAMAGED,
     ATTACKER_IS_BATTLELINE,
     BEYOND_HALF_RANGE_ATTACK,
@@ -249,6 +250,11 @@ CORE_ENTRIES = [
         TARGET_TITANIC,
         "Target is Titanic",
         "The defending unit has a TITANIC model. Applies at every step.",
+    ),
+    (
+        ANTI_WALKER_2,
+        "Anti-Walker 2+",
+        "The wound roll was a 2+ against a defending unit that contains a WALKER model.",
     ),
     (
         RANGED_VS_OBJECTIVE_TARGET,

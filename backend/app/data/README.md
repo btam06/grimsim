@@ -186,6 +186,10 @@ model that doesn't have one yet.
 ```
 
 Repeat a weapon to give a model several of it (e.g. three heavy stubbers).
+Mark the weapons a model is equipped with by default (its datasheet's "This
+model is equipped with: ...") with `"default": true`; they're pre-selected when
+the model is added to a unit, and the flag is filled in on an existing weapon
+that doesn't have it yet.
 
 ## `stratagems.json`
 
