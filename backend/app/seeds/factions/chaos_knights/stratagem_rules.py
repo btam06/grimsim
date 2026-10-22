@@ -1,11 +1,10 @@
 from app.combat_rules import Rule
-from app.combat_rules.conditions import MELEE_ATTACK
+from app.combat_rules.conditions import MELEE_ATTACK, TARGET_TITANIC
 from app.combat_rules.effects import (
     MINUS_ONE_TO_HIT,
     REROLL_FAILED_HITS,
     REROLL_FAILED_WOUNDS,
 )
-from app.seeds.factions.chaos_knights.conditions import TARGET_TITANIC
 
 # Code-defined rules for Chaos Knights stratagems, by stratagem name - for the
 # parts a stratagem's own conditions/effects (in stratagems.json) can't say.

@@ -32,12 +32,14 @@ from app.combat_rules.conditions import (
     RANGED_ATTACK,
     RANGED_CRITICAL_HIT,
     RANGED_MOVED_LESS_THAN_3,
+    RANGED_VS_OBJECTIVE_TARGET,
     RILED_UP_RANGED_CRITICAL_HIT,
     STATIONARY_RANGED_CRITICAL_HIT,
     STRENGTH_EXCEEDS_TOUGHNESS,
     TARGET_HAS_CHARACTER,
     TARGET_INFANTRY,
     TARGET_ISOLATED,
+    TARGET_TITANIC,
     TARGET_LED_BY_CHARACTER,
     TARGET_MODEL_CHARACTER,
     TARGET_MONSTER_OR_VEHICLE,
@@ -242,6 +244,16 @@ CORE_ENTRIES = [
         TARGET_ISOLATED,
         "Target Isolated",
         "No other units from the defender's army are within 6\" of it. Applies at every step.",
+    ),
+    (
+        TARGET_TITANIC,
+        "Target is Titanic",
+        "The defending unit has a TITANIC model. Applies at every step.",
+    ),
+    (
+        RANGED_VS_OBJECTIVE_TARGET,
+        "Ranged Attack vs Target on Objective",
+        "A ranged attack against a unit within range of an objective marker.",
     ),
 ]
 

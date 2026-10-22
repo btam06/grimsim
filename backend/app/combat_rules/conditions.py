@@ -49,6 +49,8 @@ DEFENDER_BATTLE_SHOCKED = "defender_battle_shocked"
 ATTACKER_DAMAGED = "attacker_damaged"
 BEYOND_HALF_RANGE_ATTACK = "beyond_half_range_attack"
 TARGET_ISOLATED = "target_isolated"
+TARGET_TITANIC = "target_titanic"
+RANGED_VS_OBJECTIVE_TARGET = "ranged_vs_objective_target"
 
 # Positions a unit can be in that the calculator can't work out for itself,
 # so the user says (see app/combat_rules/positions.py); conditions read them
@@ -391,6 +393,18 @@ def target_isolated(context: dict) -> bool:
     return ISOLATED_TARGET in context.get("attacker_positions", set())
 
 
+def target_titanic(context: dict) -> bool:
+    # True at every step when the defending unit has a TITANIC model - e.g.
+    # Titanic Duel's full re-rolls.
+    return "TITANIC" in context.get("defender_keywords", set())
+
+
+def ranged_vs_objective_target(context: dict) -> bool:
+    # A ranged attack against a unit within range of an objective marker
+    # (ticked under Positioning) - e.g. the War Dog Brigand's [IGNORES COVER].
+    return context.get("is_ranged", False) and defender_in_range_of_objective(context)
+
+
 CORE_CONDITIONS = {
     CRITICAL_HIT: critical_hit,
     CRITICAL_WOUND: critical_wound,
@@ -433,6 +447,8 @@ CORE_CONDITIONS = {
     ATTACKER_DAMAGED: attacker_damaged,
     BEYOND_HALF_RANGE_ATTACK: beyond_half_range_attack,
     TARGET_ISOLATED: target_isolated,
+    TARGET_TITANIC: target_titanic,
+    RANGED_VS_OBJECTIVE_TARGET: ranged_vs_objective_target,
 }
 
 

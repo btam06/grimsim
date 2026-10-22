@@ -8,6 +8,7 @@ from app.combat_rules.conditions import (
     TARGET_MONSTER_OR_VEHICLE,
     MELEE_ATTACK,
     RANGED_ATTACK,
+    RANGED_VS_OBJECTIVE_TARGET,
     TARGET_MODEL_CHARACTER,
 )
 from app.combat_rules.effects import (
@@ -28,7 +29,6 @@ from app.seeds.factions.chaos_knights.conditions import (
     DIABOLIC_POWER,
     DIABOLIC_POWER_CHARGED_MELEE,
     MARKED_PREY_CRITICAL_HIT,
-    RANGED_VS_OBJECTIVE_TARGET,
 )
 
 # Chaos Knights datasheet abilities - see app/seeds/datasheet_abilities.py for
