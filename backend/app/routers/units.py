@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -11,11 +11,12 @@ from app.models import (
     Model,
     Unit,
     UnitModel,
+    UnitRuleSelection,
     Wargear,
     Weapon,
 )
 from app.routers.enhancements import used_in_list
-from app.schemas import UnitIn, UnitModelIn, UnitModelOut, UnitOut
+from app.schemas import SelectableRuleOut, UnitIn, UnitModelIn, UnitModelOut, UnitOut
 from app.services import enhancements as enhancement_rules
 from app.services import list_building
 
@@ -40,6 +41,7 @@ def _to_out(unit: Unit) -> UnitOut:
         list_id=unit.list_id,
         unit_models=[_unit_model_to_out(um) for um in unit.unit_models],
         upgrade_id=unit.upgrade.id if unit.upgrade else None,
+        selected_rule_ids=unit.selected_rule_ids,
     )
 
 
@@ -101,6 +103,91 @@ async def _build_unit_models(
     return unit_models, models
 
 
+def _rule_reaches(rule, keyword_sets: list[set[str]]) -> bool:
+    # Whether a unit whose models have these keywords matches a rule's keyword
+    # options (every model one of them, or it has none).
+    options = [{k.name for k in option} for option in rule.keyword_options]
+    return bool(keyword_sets) and all(
+        not options or any(option <= keywords for option in options)
+        for keywords in keyword_sets
+    )
+
+
+async def _selected_elsewhere(
+    session: AsyncSession, list_id: int, rule_id: int, unit_id: int | None
+) -> int:
+    # How many other units in the list are selected for a rule.
+    others = select(Unit.id).where(Unit.list_id == list_id)
+    if unit_id is not None:
+        others = others.where(Unit.id != unit_id)
+    rows = await session.execute(
+        select(UnitRuleSelection.unit_id).where(
+            UnitRuleSelection.rule_id == rule_id, UnitRuleSelection.unit_id.in_(others)
+        )
+    )
+    return len(rows.all())
+
+
+async def _selectable_list_rules(session: AsyncSession, list_id: int) -> dict[int, object]:
+    # The rules with a selection limit of the list's detachments, by id.
+    army_list = (
+        await session.execute(
+            select(ArmyList)
+            .options(selectinload(ArmyList.detachments))
+            .where(ArmyList.id == list_id)
+        )
+    ).scalar_one_or_none()
+    if army_list is None:
+        raise HTTPException(status_code=400, detail="invalid list_id")
+    return {
+        rule.id: rule
+        for rule in enhancement_rules.list_rules(army_list)
+        if rule.selection_limit is not None
+    }
+
+
+async def _check_rule_selections(
+    session: AsyncSession, payload: UnitIn, models: list[Model], unit_id: int | None
+) -> list[int]:
+    # The detachment rules the unit is selected for (see
+    # DetachmentRule.selection_limit) - checking each is a rule with a
+    # selection limit of one of its list's detachments, reaches units like this
+    # one, and isn't already selected for by as many other units in the list as
+    # it allows.
+    ids = list(dict.fromkeys(payload.selected_rule_ids))
+    if not ids:
+        return []
+    if payload.list_id is None:
+        raise HTTPException(
+            status_code=400, detail="a unit needs to be in a list to be selected for a rule"
+        )
+    rules = await _selectable_list_rules(session, payload.list_id)
+    if any(i not in rules for i in ids):
+        raise HTTPException(
+            status_code=400,
+            detail="selected_rule_ids must be rules of the list's detachments that units are "
+            "selected for",
+        )
+    keyword_sets = [{k.name for k in model.keywords} for model in models]
+    for rule_id in ids:
+        rule = rules[rule_id]
+        if not _rule_reaches(rule, keyword_sets):
+            raise HTTPException(
+                status_code=400, detail=f"'{rule.name}' can't be selected for this unit"
+            )
+        if await _selected_elsewhere(session, payload.list_id, rule_id, unit_id) >= (
+            rule.selection_limit
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"'{rule.name}' can be selected for at most {rule.selection_limit} "
+                    "units in a list"
+                ),
+            )
+    return ids
+
+
 async def _apply_enhancements(
     session: AsyncSession,
     payload: UnitIn,
@@ -108,6 +195,7 @@ async def _apply_enhancements(
     models: list[Model],
     unit_id: int | None,
     context: list_building.ListContext | None,
+    selected_rule_ids: list[int] = (),
 ) -> Enhancement | None:
     # Puts each model's enhancement on its unit model, and returns the unit's
     # upgrade - checking that the unit is in a list that has taken their
@@ -141,6 +229,12 @@ async def _apply_enhancements(
         )
     ).scalar_one()
     detachment_ids = {d.id for d in army_list.detachments}
+    # Keywords the list's detachment rules give each model (e.g. BATTLELINE).
+    granted = enhancement_rules.rule_granted_keywords(
+        enhancement_rules.list_rules(army_list),
+        [{k.name for k in model.keywords} for model in models],
+        selected_rule_ids,
+    )
     taken = set(ids) & await used_in_list(session, payload.list_id, unit_id)
     if taken:
         names = ", ".join(sorted(enhancements[i].name for i in taken))
@@ -148,11 +242,13 @@ async def _apply_enhancements(
             status_code=400, detail=f"already taken by another unit in this list: {names}"
         )
 
-    for entry, unit_model, model in zip(payload.unit_models, unit_models, models):
+    for entry, unit_model, model, extra in zip(payload.unit_models, unit_models, models, granted):
         if entry.enhancement_id is None:
             continue
         enhancement = enhancements[entry.enhancement_id]
-        reason = enhancement_rules.model_unavailable_reason(enhancement, model, detachment_ids)
+        reason = enhancement_rules.model_unavailable_reason(
+            enhancement, model, detachment_ids, extra
+        )
         if reason is None and not list_building.can_take_enhancements(context, model):
             reason = "can't be given to a model included under an ally rule"
         if reason:
@@ -165,7 +261,7 @@ async def _apply_enhancements(
     if payload.upgrade_id is None:
         return None
     upgrade = enhancements[payload.upgrade_id]
-    reason = enhancement_rules.unit_unavailable_reason(upgrade, models, detachment_ids)
+    reason = enhancement_rules.unit_unavailable_reason(upgrade, models, detachment_ids, granted)
     if reason:
         raise HTTPException(status_code=400, detail=f"'{upgrade.name}' {reason}")
     return upgrade
@@ -197,6 +293,41 @@ def _check_list_building(
         raise HTTPException(status_code=400, detail=reason)
 
 
+@router.get("/selectable-rules", response_model=list[SelectableRuleOut])
+async def selectable_rules(
+    list_id: int,
+    model_ids: list[int] = Query(default=[]),
+    unit_id: int | None = None,
+    session: AsyncSession = Depends(get_session),
+):
+    # The detachment rules a unit made of these models (one id per model) in
+    # this list can be selected for (`unit_id`: the unit being edited, if any),
+    # with how many other units already are - one that's full is still listed.
+    rules = await _selectable_list_rules(session, list_id)
+    if not rules or not model_ids:
+        return []
+    models = {
+        m.id: m
+        for m in (
+            await session.execute(
+                select(Model).options(selectinload(Model.keywords)).where(Model.id.in_(model_ids))
+            )
+        ).scalars()
+    }
+    keyword_sets = [{k.name for k in models[i].keywords} for i in model_ids if i in models]
+    return [
+        SelectableRuleOut(
+            id=rule.id,
+            name=rule.name,
+            description=rule.description,
+            selection_limit=rule.selection_limit,
+            selected_elsewhere=await _selected_elsewhere(session, list_id, rule.id, unit_id),
+        )
+        for rule in rules.values()
+        if _rule_reaches(rule, keyword_sets)
+    ]
+
+
 @router.get("", response_model=list[UnitOut])
 async def list_units(session: AsyncSession = Depends(get_session)):
     result = await session.execute(
@@ -224,7 +355,10 @@ async def create_unit(payload: UnitIn, session: AsyncSession = Depends(get_sessi
 
     unit_models, models = await _build_unit_models(session, payload.unit_models)
     _check_list_building(context, faction_unit, payload.points, models)
-    upgrade = await _apply_enhancements(session, payload, unit_models, models, None, context)
+    selected = await _check_rule_selections(session, payload, models, None)
+    upgrade = await _apply_enhancements(
+        session, payload, unit_models, models, None, context, selected
+    )
     unit = Unit(
         faction_unit_id=payload.faction_unit_id,
         points=payload.points,
@@ -232,6 +366,7 @@ async def create_unit(payload: UnitIn, session: AsyncSession = Depends(get_sessi
         unit_models=unit_models,
         upgrade=upgrade,
     )
+    unit.selected_rule_ids = selected
     session.add(unit)
     await session.commit()
     return _to_out(unit)
@@ -261,8 +396,9 @@ async def update_unit(
 
     new_unit_models, models = await _build_unit_models(session, payload.unit_models)
     _check_list_building(context, faction_unit, payload.points, models)
+    selected = await _check_rule_selections(session, payload, models, unit_id)
     upgrade = await _apply_enhancements(
-        session, payload, new_unit_models, models, unit_id, context
+        session, payload, new_unit_models, models, unit_id, context, selected
     )
 
     unit.faction_unit_id = payload.faction_unit_id
@@ -270,6 +406,7 @@ async def update_unit(
     unit.list_id = payload.list_id
     unit.unit_models = new_unit_models
     unit.upgrade = upgrade
+    unit.selected_rule_ids = selected
 
     await session.commit()
 

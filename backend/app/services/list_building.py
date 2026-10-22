@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.list_rules import AllyRule
-from app.models import ArmyList, Faction, FactionUnit, Model, Unit
+from app.models import ArmyList, Faction, FactionUnit, Model, Unit, UnitModel
 from app.seeds.factions import ALLY_RULES
 
 # Which factions' units and models an army list can include, beyond its own
@@ -19,9 +19,15 @@ def _keywords(model: Model) -> set[str]:
     return {k.name for k in model.keywords}
 
 
-def active_rules(list_faction: str) -> list[AllyRule]:
-    # The ally rules for a list of this faction.
-    return [rule for rule in ALLY_RULES if rule.host_faction == list_faction]
+def active_rules(list_faction: str, detachments: set[str] = frozenset()) -> list[AllyRule]:
+    # The ally rules for a list of this faction that has taken these
+    # detachments (by name).
+    return [
+        rule
+        for rule in ALLY_RULES
+        if rule.host_faction == list_faction
+        and (rule.detachment is None or rule.detachment in detachments)
+    ]
 
 
 def model_rule(model: Model, model_faction: str, rules: list[AllyRule]) -> AllyRule | None:
@@ -61,6 +67,10 @@ class ListContext:
     faction_names: dict[int, str]
     other_units: list[Unit]
 
+    @property
+    def detachments(self) -> set[str]:
+        return {d.name for d in self.army_list.detachments}
+
     def points_by_faction(self) -> dict[str, int]:
         # The other units' points, totalled by their faction unit's faction.
         totals: dict[str, int] = {}
@@ -88,7 +98,13 @@ async def load_list_context(
     }
     query = (
         select(Unit)
-        .options(selectinload(Unit.faction_unit))
+        .options(
+            selectinload(Unit.faction_unit),
+            # Their models' keywords, for ally rules that cap models.
+            selectinload(Unit.unit_models)
+            .selectinload(UnitModel.model)
+            .selectinload(Model.keywords),
+        )
         .where(Unit.list_id == list_id)
     )
     if except_unit_id is not None:
@@ -105,7 +121,7 @@ def unit_unavailable_reason(
 ) -> str | None:
     # Why a unit (this faction unit, these points and models, which need
     # their keywords loaded) can't go in the list, or None if it can.
-    rules = active_rules(context.faction)
+    rules = active_rules(context.faction, context.detachments)
     unit_faction = context.faction_names[faction_unit.faction_id]
     if not faction_allowed(unit_faction, context.faction, rules):
         return f"{faction_unit.name} ({unit_faction}) can't be included in a {context.faction} list"
@@ -115,6 +131,9 @@ def unit_unavailable_reason(
         )
         if reason:
             return reason
+    reason = _model_limit_reason(context, models, rules)
+    if reason:
+        return reason
     totals = context.points_by_faction()
     totals[unit_faction] = totals.get(unit_faction, 0) + points
     for rule in rules:
@@ -127,11 +146,52 @@ def unit_unavailable_reason(
     return None
 
 
+def _model_limit_reason(
+    context: ListContext, models: list[Model], rules: list[AllyRule]
+) -> str | None:
+    # Why adding these models would break an ally rule's model cap, or its
+    # choice group (only one rule of a group can be used), or None.
+    # By id(rule), since a rule (holding a dict) isn't hashable.
+    counts: dict[int, int] = {}
+    every_model = [
+        unit_model.model for unit in context.other_units for unit_model in unit.unit_models
+    ] + models
+    for model in every_model:
+        model_faction = context.faction_names[model.faction_id]
+        if model_faction == context.faction:
+            continue
+        rule = model_rule(model, model_faction, rules)
+        if rule is not None:
+            counts[id(rule)] = counts.get(id(rule), 0) + 1
+    used_rules = [rule for rule in rules if id(rule) in counts]
+    for rule in used_rules:
+        count = counts[id(rule)]
+        if rule.model_limit is not None and count > rule.model_limit:
+            return (
+                f"a {context.faction} list can include at most {rule.model_limit} "
+                f"{' / '.join(rule.model_keywords)} {rule.ally_faction} model"
+                f"{'s' if rule.model_limit != 1 else ''}"
+            )
+    groups: dict[str, list[AllyRule]] = {}
+    for rule in used_rules:
+        if rule.choice_group:
+            groups.setdefault(rule.choice_group, []).append(rule)
+    for group, used in groups.items():
+        if len(used) > 1:
+            return (
+                f"{group}: a {context.faction} list can include models under only one of "
+                + ", ".join(
+                    f"{r.model_limit} {' / '.join(r.model_keywords)}" for r in used
+                )
+            )
+    return None
+
+
 def can_take_enhancements(context: ListContext, model: Model) -> bool:
     # Whether a model can be given Enhancements - not if it's only in the list
     # under an ally rule that forbids them.
     model_faction = context.faction_names[model.faction_id]
     if model_faction == context.faction:
         return True
-    rule = model_rule(model, model_faction, active_rules(context.faction))
+    rule = model_rule(model, model_faction, active_rules(context.faction, context.detachments))
     return rule is None or rule.enhancements

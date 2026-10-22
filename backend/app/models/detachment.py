@@ -9,6 +9,7 @@ from app.models.associations import detachment_dispositions, stratagem_detachmen
 from app.models.base import Base
 
 if TYPE_CHECKING:
+    from app.models.detachment_rule import DetachmentRule
     from app.models.disposition import Disposition
     from app.models.faction import Faction
     from app.models.stratagem import Stratagem
@@ -28,6 +29,12 @@ class Detachment(Base):
     )
     stratagems: Mapped[list["Stratagem"]] = relationship(
         secondary=stratagem_detachments, back_populates="detachments"
+    )
+    # Loaded with the detachment, so a list's detachments always bring their
+    # rules (e.g. for the keywords they grant). Rules are added and removed
+    # through DetachmentRule itself.
+    rules: Mapped[list["DetachmentRule"]] = relationship(
+        viewonly=True, lazy="selectin", order_by="DetachmentRule.id"
     )
     unique_tag_link: Mapped["DetachmentUniqueTag | None"] = relationship(
         cascade="all, delete-orphan", uselist=False, lazy="selectin"

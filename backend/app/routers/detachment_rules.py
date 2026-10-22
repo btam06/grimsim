@@ -32,7 +32,9 @@ def _to_out(rule: DetachmentRule) -> DetachmentRuleOut:
             for g in rule.weapon_ability_grants
         ],
         datasheet_ability_ids=[g.datasheet_ability_id for g in rule.datasheet_ability_grants],
+        granted_keyword_ids=[link.keyword_id for link in rule.keyword_grant_links],
         per_model=rule.per_model,
+        selection_limit=rule.selection_limit,
     )
 
 
@@ -60,6 +62,10 @@ async def create_detachment_rule(
 ):
     if await session.get(Detachment, payload.detachment_id) is None:
         raise HTTPException(status_code=400, detail="invalid detachment_id")
+    if payload.per_model and payload.selection_limit is not None:
+        raise HTTPException(
+            status_code=400, detail="a rule selected for units can't reach models one at a time"
+        )
     if any(not option for option in payload.keyword_option_ids):
         raise HTTPException(status_code=400, detail="a keyword option can't be empty")
     keywords = await _check_ids(
@@ -76,6 +82,9 @@ async def create_detachment_rule(
     )
     await _check_ids(
         session, DatasheetAbility, payload.datasheet_ability_ids, "datasheet_ability_ids"
+    )
+    granted_keywords = await _check_ids(
+        session, Keyword, payload.granted_keyword_ids, "granted_keyword_ids"
     )
     rule = DetachmentRule(
         detachment_id=payload.detachment_id,
@@ -96,6 +105,8 @@ async def create_detachment_rule(
         ],
     )
     rule.per_model = payload.per_model
+    rule.granted_keywords = [granted_keywords[i] for i in payload.granted_keyword_ids]
+    rule.selection_limit = payload.selection_limit
     session.add(rule)
     await session.commit()
     return _to_out(rule)

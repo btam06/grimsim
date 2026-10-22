@@ -69,8 +69,13 @@ A detachment can also have `rules`. In combat, a rule grants abilities to
 the units of a list that has taken the detachment: those whose every model has
 all the keywords of one of its `keyword_options` (a set of keywords - their
 order doesn't matter; leave it out for every unit). It grants
-`datasheet_abilities` (by name, e.g. `Stealth`) and `weapon_abilities` (by
-name, optionally only on `"ranged"` or `"melee"` weapons). Set `"per_model": true` for a rule
+`datasheet_abilities` (by name, e.g. `Stealth`), `weapon_abilities` (by
+name, optionally only on `"ranged"` or `"melee"` weapons) and
+`granted_keywords` (by name, e.g. `BATTLELINE` - these count everywhere
+keywords do: other rules, stratagems, enhancements). Give a rule a
+`"selection_limit"` (e.g. `3`) when it only reaches units picked for it while
+building the list, up to that many per list - e.g. Houndpack Lance's three
+WAR DOG units with CHARACTER. Set `"per_model": true` for a rule
 that reaches models rather than units (e.g. "friendly TECH-PRIEST models
 have..."): it then reaches each matching model in any unit, and on the defending
 side its abilities take effect when an attack is allocated to that model - so

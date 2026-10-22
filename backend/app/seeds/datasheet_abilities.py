@@ -4,11 +4,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.combat_rules import Rule
 from app.combat_rules.conditions import (
     ALWAYS,
+    ATTACKER_DAMAGED,
     RANGED_ATTACK,
 )
 from app.combat_rules.effects import (
     BENEFIT_OF_COVER,
     DEADLY_DEMISE,
+    MINUS_ONE_TO_HIT,
     REROLL_FAILED_HITS,
 )
 from app.models import Condition, DatasheetAbility, Effect
@@ -58,6 +60,21 @@ CORE_ENTRIES = [
         [],
     ),
     (
+        "Damaged: 1-5 Wounds Remaining",
+        "While this model has 1-5 wounds remaining, subtract 3 from this model's Objective "
+        "Control characteristic and each time this model makes an attack, subtract 1 from the "
+        "Hit roll.",
+        [],
+        [],
+    ),
+    (
+        "Scouts 6\"",
+        "At the start of the first battle round, before the first turn begins, this unit can "
+        "make a Normal move of up to 6\".",
+        [],
+        [],
+    ),
+    (
         "Fights First",
         "Units with this ability that are eligible to fight do so in the Fights First step, "
         "provided every model in the unit has this ability.",
@@ -86,6 +103,7 @@ CORE_CALCULATOR_NOTES = {
     "Infiltrators": "Descriptive only: a deployment rule.",
     "Deep Strike": "Descriptive only: a deployment rule.",
     "Fights First": "Descriptive only: fight order isn't modelled.",
+    'Scouts 6"': "Descriptive only: a pre-battle move.",
 }
 
 # Code-defined rules for core abilities, by name - for rules the
@@ -95,6 +113,16 @@ CORE_CALCULATOR_NOTES = {
 # attacks made against its unit. Applied to a unit if any of its models has the
 # ability. Rows listed here are seeded with no conditions/effects of their own.
 CORE_RULES = {
+    "Damaged: 1-5 Wounds Remaining": [
+        Rule(
+            conditions=(ATTACKER_DAMAGED,),
+            effects=(MINUS_ONE_TO_HIT,),
+            description=(
+                "-1 to hit when \"Attacking model is Damaged\" is ticked under Modifiers (the "
+                "OC change is outside the calculator)."
+            ),
+        ),
+    ],
     "Stealth": [
         Rule(
             conditions=(RANGED_ATTACK,),

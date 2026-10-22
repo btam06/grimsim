@@ -48,6 +48,8 @@ export const listStratagems = () => request('/stratagems')
 // shooting phase or (in engagement range) the fight phase.
 // Positions worth asking about for a unit as the 'attacker' or 'defender'
 // (e.g. within 6" of a friendly ADEPTUS MECHANICUS BATTLELINE unit).
+export const listGrantedAbilities = (unitId) =>
+  request(`/combat/granted-abilities?unit_id=${unitId}`)
 export const listRelevantPositions = (unitId, side) =>
   request(`/combat/positions?unit_id=${unitId}&side=${side}`)
 export const listCalculatorStratagems = (unitId, side, inEngagementRange) =>
@@ -64,15 +66,29 @@ export const createEnhancement = (payload) =>
 export const deleteEnhancement = (id) => request(`/enhancements/${id}`, { method: 'DELETE' })
 // Enhancements a model could carry in a unit of a list (unitId: the unit
 // being edited, if any - its own enhancements still count as available).
-export const listAvailableEnhancements = (listId, modelId, unitId) =>
+// selectedRuleIds: detachment rules the unit is selected for (e.g. one giving
+// CHARACTER), which can change what it can take.
+const ruleParams = (selectedRuleIds = []) =>
+  selectedRuleIds.map((id) => `&selected_rule_ids=${id}`).join('')
+export const listAvailableEnhancements = (listId, modelId, unitId, selectedRuleIds) =>
   request(
     `/enhancements/available?list_id=${listId}&model_id=${modelId}` +
-      (unitId ? `&unit_id=${unitId}` : '')
+      (unitId ? `&unit_id=${unitId}` : '') +
+      ruleParams(selectedRuleIds)
   )
 // Upgrades a unit made of these models (one id per model) could take.
-export const listAvailableUpgrades = (listId, modelIds, unitId) =>
+export const listAvailableUpgrades = (listId, modelIds, unitId, selectedRuleIds) =>
   request(
     `/enhancements/available-upgrades?list_id=${listId}` +
+      modelIds.map((id) => `&model_ids=${id}`).join('') +
+      (unitId ? `&unit_id=${unitId}` : '') +
+      ruleParams(selectedRuleIds)
+  )
+// Detachment rules a unit made of these models could be selected for in its
+// list (e.g. Houndpack Alphas), with how many other units already are.
+export const listSelectableRules = (listId, modelIds, unitId) =>
+  request(
+    `/units/selectable-rules?list_id=${listId}` +
       modelIds.map((id) => `&model_ids=${id}`).join('') +
       (unitId ? `&unit_id=${unitId}` : '')
   )

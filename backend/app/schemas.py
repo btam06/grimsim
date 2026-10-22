@@ -192,6 +192,18 @@ class UnitIn(BaseModel):
     unit_models: list[UnitModelIn] = []
     # An upgrade the whole unit takes (from a detachment its list has taken).
     upgrade_id: int | None = None
+    # Detachment rules with a selection limit this unit is selected for.
+    selected_rule_ids: list[int] = []
+
+
+class SelectableRuleOut(BaseModel):
+    # A detachment rule a unit can be selected for in list building (e.g.
+    # Houndpack Alphas), and how many other units in the list already are.
+    id: int
+    name: str
+    description: str | None
+    selection_limit: int
+    selected_elsewhere: int
 
 
 class UnitOut(BaseModel):
@@ -201,6 +213,7 @@ class UnitOut(BaseModel):
     list_id: int | None
     unit_models: list[UnitModelOut]
     upgrade_id: int | None
+    selected_rule_ids: list[int] = []
 
 
 EnhancementScope = Literal["bearer", "led_unit", "bearers_unit", "unit"]
@@ -233,9 +246,14 @@ class DetachmentRuleIn(BaseModel):
     keyword_option_ids: list[list[int]] = []
     weapon_abilities: list[DetachmentRuleWeaponAbilitySchema] = []
     datasheet_ability_ids: list[int] = []
+    # Keywords it gives the models it reaches (e.g. BATTLELINE).
+    granted_keyword_ids: list[int] = []
     # False: reaches units whose every model matches an option. True: reaches
     # each matching model on its own, in any unit.
     per_model: bool = False
+    # Only reaches units selected for it in list building, up to this many per
+    # list (e.g. 3 WAR DOG units have CHARACTER). None: every matching unit.
+    selection_limit: int | None = Field(default=None, ge=1)
 
 
 class DetachmentRuleOut(BaseModel):
@@ -246,6 +264,8 @@ class DetachmentRuleOut(BaseModel):
     keyword_option_ids: list[list[int]]
     weapon_abilities: list[DetachmentRuleWeaponAbilitySchema]
     datasheet_ability_ids: list[int]
+    granted_keyword_ids: list[int] = []
+    selection_limit: int | None = None
     per_model: bool
 
 
@@ -514,6 +534,11 @@ class CombatIn(BaseModel):
     defender_positions: list[str] = []
     # The attacking unit made a Charge move this turn (e.g. for [LANCE]).
     charged: bool = False
+    # The defending unit is Battle-shocked (e.g. for the Chaos Knights' Doom).
+    defender_battle_shocked: bool = False
+    # The attacking model is on its Damaged profile (e.g. a War Dog with 1-5
+    # wounds remaining: -1 to hit).
+    attacker_damaged: bool = False
     # Whether attacks from weapons with the Precision effect pick off leaders
     # (then supports) first, rather than following normal targeting.
     apply_precision: bool = False
@@ -533,12 +558,14 @@ class CombatIn(BaseModel):
 
 class WeaponCombatResultOut(BaseModel):
     name: str
+    damage: str
     attack_rolls: list[int]
     attack_rerolls: list[int]
     wound_rolls: list[int]
     wound_rerolls: list[int]
     save_rolls: list[int]
     fnp_rolls: list[int]
+    damage_rolls: list[int]
     total_damage: int
     models_destroyed: int
     hazardous_rolls: list[int]

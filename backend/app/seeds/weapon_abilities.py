@@ -12,6 +12,7 @@ from app.combat_rules.conditions import (
     ANTI_VEHICLE_2,
     ANTI_VEHICLE_3,
     ANTI_VEHICLE_4,
+    BEYOND_HALF_RANGE_ATTACK,
     CHARGED,
     CRITICAL_HIT,
     CRITICAL_HIT_NOT_MONSTER_OR_VEHICLE,
@@ -25,6 +26,7 @@ from app.combat_rules.conditions import (
     WITHIN_HALF_RANGE,
 )
 from app.combat_rules.effects import (
+    ADD_D3_EXTRA_HITS,
     ADD_D6_PLUS_3_ATTACKS,
     ADD_EXTRA_ATTACK,
     ADD_EXTRA_HIT,
@@ -36,6 +38,7 @@ from app.combat_rules.effects import (
     AUTO_PASS_WOUND,
     BLAST,
     CANNOT_ATTACK,
+    CRITICAL_HIT_4,
     FORCE_CRITICAL_WOUND,
     HAZARDOUS,
     HEAVY,
@@ -43,6 +46,7 @@ from app.combat_rules.effects import (
     IMPROVE_AP,
     MELTA_2,
     MELTA_3,
+    MELTA_4,
     MELTA_6,
     NO_SAVE,
     PISTOL,
@@ -169,6 +173,16 @@ ENTRIES = [
         [PISTOL],
     ),
     (
+        # Approximated: "not within 12\"" as "not within half range", which is
+        # the same on the 24\" weapons that have it.
+        "Conversion",
+        "Each time an attack made with this weapon targets an enemy unit that is not within "
+        "12\", an unmodified Hit roll of 4+ scores a Critical Hit. (In the calculator: when "
+        "the target isn't within half range.)",
+        [BEYOND_HALF_RANGE_ATTACK],
+        [CRITICAL_HIT_4],
+    ),
+    (
         "Devastating Wounds",
         "Each critical wound (an unmodified roll of 6 to wound) allows no save.",
         [CRITICAL_WOUND],
@@ -250,6 +264,12 @@ ENTRIES = [
         [MELTA_3],
     ),
     (
+        "Melta 4",
+        "When the target is within half range, each attack made with this weapon inflicts 4 extra damage.",
+        [WITHIN_HALF_RANGE],
+        [MELTA_4],
+    ),
+    (
         "Melta 6",
         "When the target is within half range, each attack made with this weapon inflicts 6 extra damage.",
         [WITHIN_HALF_RANGE],
@@ -302,6 +322,12 @@ ENTRIES = [
         "Each critical hit (an unmodified roll of 6 to hit) scores 2 additional hits.",
         [CRITICAL_HIT],
         [ADD_TWO_EXTRA_HITS],
+    ),
+    (
+        "Sustained D3",
+        "Each critical hit (an unmodified roll of 6 to hit) scores D3 additional hits.",
+        [CRITICAL_HIT],
+        [ADD_D3_EXTRA_HITS],
     ),
     (
         "Torrent",

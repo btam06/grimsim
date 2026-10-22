@@ -27,6 +27,7 @@ function DetachmentRuleForm({
   const [keywordOptions, setKeywordOptions] = useState([])
   const [optionDraft, setOptionDraft] = useState([])
   const [datasheetAbilityIds, setDatasheetAbilityIds] = useState([])
+  const [grantedKeywordIds, setGrantedKeywordIds] = useState([])
   const [weaponGrants, setWeaponGrants] = useState([])
   const [weaponAbilityId, setWeaponAbilityId] = useState('')
   const [weaponType, setWeaponType] = useState('')
@@ -46,12 +47,14 @@ function DetachmentRuleForm({
         keyword_option_ids: keywordOptions,
         weapon_abilities: weaponGrants,
         datasheet_ability_ids: datasheetAbilityIds,
+        granted_keyword_ids: grantedKeywordIds,
         per_model: perModel,
       })
       setName('')
       setDescription('')
       setKeywordOptions([])
       setDatasheetAbilityIds([])
+      setGrantedKeywordIds([])
       setWeaponGrants([])
       setPerModel(false)
       onSaved()
@@ -122,6 +125,10 @@ function DetachmentRuleForm({
           value={datasheetAbilityIds}
           onChange={setDatasheetAbilityIds}
         />
+      </label>
+      <label className="field">
+        Grants keywords
+        <MultiSelect options={keywords} value={grantedKeywordIds} onChange={setGrantedKeywordIds} />
       </label>
       <div className="checkbox-group">
         Grants weapon abilities

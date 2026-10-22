@@ -150,13 +150,14 @@ def _datasheet_ability_names(unit: Unit) -> set[str]:
 
 
 def _active_options(
-    unit: Unit, option_names: list[str]
+    unit: Unit, option_names: list[str], detachment_rules: list[DetachmentRule] = ()
 ) -> tuple[set[str], list[Rule], set[str]]:
     # The selected options this unit actually gains, as (option names, their
     # rules, keywords they grant). Options for abilities it doesn't have
     # access to are ignored:
     # - a faction ability's options, if any of the unit's models has it;
-    # - a datasheet ability's options, if any of the unit's models has it;
+    # - a datasheet ability's options, if any of the unit's models has it, or
+    #   its enhancements or detachment rules grant it (e.g. Malefic Surge);
     # - a datasheet ability's army-wide options, if a model with it is in
     #   another unit of the same faction in this unit's army list.
     active: set[str] = set()
@@ -190,7 +191,16 @@ def _active_options(
                 if not army_wide_only:
                     keywords.update(option.keywords)
 
-    take(_datasheet_ability_names(unit), army_wide_only=False)
+    take(
+        _datasheet_ability_names(unit)
+        | {
+            ability.name
+            for ability in detachment_rule_service.granted_datasheet_abilities(
+                list(detachment_rules), unit
+            )
+        },
+        army_wide_only=False,
+    )
     if unit.army_list is not None:
         for other in unit.army_list.units:
             if other.id == unit.id:
@@ -326,6 +336,11 @@ def _stratagem_rules(stratagems: list[Stratagem], side: str) -> list[Rule]:
     ]
 
 
+def _granted_options(stratagems: list[Stratagem]) -> list[str]:
+    # The rule options the stratagems used on one side's unit make active.
+    return [option for s in stratagems for option in stratagem_seeds.granted_options(s.name)]
+
+
 def _possible_rules(unit: Unit, detachment_rules: list[DetachmentRule]) -> list[Rule]:
     # Every code-defined rule the unit could have in play: its datasheet
     # abilities' rules (including those its enhancements and detachment rules
@@ -335,7 +350,7 @@ def _possible_rules(unit: Unit, detachment_rules: list[DetachmentRule]) -> list[
     all_options = list(faction_seeds.OPTION_OWNERS) + [
         name for options in datasheet_ability_seeds.OPTIONS.values() for name in options
     ]
-    _, option_rules, _ = _active_options(unit, all_options)
+    _, option_rules, _ = _active_options(unit, all_options, detachment_rules)
     abilities = (
         [ability for unit_model in unit.unit_models for ability in unit_model.model.abilities]
         + enhancement_rules.granted_datasheet_abilities(unit)
@@ -346,6 +361,22 @@ def _possible_rules(unit: Unit, detachment_rules: list[DetachmentRule]) -> list[
         for ability in abilities
     ]
     return option_rules + _datasheet_rules(unit, detachment_rules) + ability_rules
+
+
+@router.get("/granted-abilities", response_model=list[int])
+async def granted_abilities(unit_id: int, session: AsyncSession = Depends(get_session)):
+    # The ids of the datasheet abilities a unit gains from its enhancements and
+    # the detachment rules of its army list (beyond its models' own) - so the
+    # calculator can offer their options (e.g. Malefic Surge's).
+    unit = await _load_unit(session, unit_id)
+    if unit is None:
+        raise HTTPException(status_code=400, detail="invalid unit_id")
+    abilities = enhancement_rules.granted_datasheet_abilities(
+        unit
+    ) + detachment_rule_service.granted_datasheet_abilities(
+        await _detachment_rules(session, unit), unit
+    )
+    return sorted({ability.id for ability in abilities})
 
 
 @router.get("/positions", response_model=list[PositionOut])
@@ -420,15 +451,21 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
         if unknown:
             raise HTTPException(status_code=400, detail=f"unknown {field}: {', '.join(unknown)}")
 
-    attacker_options, attacker_option_rules, attacker_extra_keywords = _active_options(
-        attacker, payload.attacker_rule_options
-    )
-    defender_options, defender_option_rules, defender_extra_keywords = _active_options(
-        defender, payload.defender_rule_options
-    )
-
     attacker_detachment_rules = await _detachment_rules(session, attacker)
     defender_detachment_rules = await _detachment_rules(session, defender)
+
+    # Options picked under Faction Rules, plus any a stratagem used on that
+    # side makes active (e.g. Transcendent Cogitation: both Imperatives).
+    attacker_options, attacker_option_rules, attacker_extra_keywords = _active_options(
+        attacker,
+        payload.attacker_rule_options + _granted_options(stratagems),
+        attacker_detachment_rules,
+    )
+    defender_options, defender_option_rules, defender_extra_keywords = _active_options(
+        defender,
+        payload.defender_rule_options + _granted_options(defender_stratagems),
+        defender_detachment_rules,
+    )
 
     visible = True if payload.game_id is None else payload.defender_visible
     in_range = True if payload.game_id is None else payload.defender_in_range
@@ -463,6 +500,8 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
         attacker_positions=set(payload.attacker_positions),
         defender_positions=set(payload.defender_positions),
         charged=payload.charged,
+        defender_battle_shocked=payload.defender_battle_shocked,
+        attacker_damaged=payload.attacker_damaged,
     )
 
     return CombatOut(
@@ -490,12 +529,14 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
         weapon_results=[
             WeaponCombatResultOut(
                 name=wr.name,
+                damage=wr.damage,
                 attack_rolls=wr.attack_rolls,
                 attack_rerolls=wr.attack_rerolls,
                 wound_rolls=wr.wound_rolls,
                 wound_rerolls=wr.wound_rerolls,
                 save_rolls=wr.save_rolls,
                 fnp_rolls=wr.fnp_rolls,
+                damage_rolls=wr.damage_rolls,
                 total_damage=wr.total_damage,
                 models_destroyed=wr.models_destroyed,
                 hazardous_rolls=wr.hazardous_rolls,

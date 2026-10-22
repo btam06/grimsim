@@ -39,6 +39,35 @@ class DetachmentRule(Base):
     per_model_link: Mapped["DetachmentRulePerModel | None"] = relationship(
         cascade="all, delete-orphan", uselist=False, lazy="selectin"
     )
+    # Keywords it gives the models it reaches (e.g. Houndpack Lance: WAR DOG
+    # units have BATTLELINE).
+    keyword_grant_links: Mapped[list["DetachmentRuleKeyword"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin"
+    )
+    selection_limit_link: Mapped["DetachmentRuleSelectionLimit | None"] = relationship(
+        cascade="all, delete-orphan", uselist=False, lazy="selectin"
+    )
+
+    @property
+    def selection_limit(self) -> int | None:
+        # None: it reaches every matching unit. A number: it only reaches units
+        # selected for it when building the list, up to that many per list
+        # (e.g. Houndpack Lance: three WAR DOG units have CHARACTER).
+        return self.selection_limit_link.limit if self.selection_limit_link else None
+
+    @selection_limit.setter
+    def selection_limit(self, limit: int | None) -> None:
+        self.selection_limit_link = (
+            DetachmentRuleSelectionLimit(limit=limit) if limit is not None else None
+        )
+
+    @property
+    def granted_keywords(self) -> list["Keyword"]:
+        return [link.keyword for link in self.keyword_grant_links]
+
+    @granted_keywords.setter
+    def granted_keywords(self, keywords: list["Keyword"]) -> None:
+        self.keyword_grant_links = [DetachmentRuleKeyword(keyword=k) for k in keywords]
 
     @property
     def per_model(self) -> bool:
@@ -105,6 +134,26 @@ class DetachmentRuleDatasheetAbility(Base):
     )
 
     datasheet_ability: Mapped["DatasheetAbility"] = relationship(lazy="selectin")
+
+
+class DetachmentRuleKeyword(Base):
+    # A keyword a rule gives the models it reaches.
+    __tablename__ = "detachment_rule_keyword_grants"
+
+    rule_id: Mapped[int] = mapped_column(ForeignKey("detachment_rules.id"), primary_key=True)
+    keyword_id: Mapped[int] = mapped_column(ForeignKey("keywords.id"), primary_key=True)
+
+    keyword: Mapped["Keyword"] = relationship(lazy="selectin")
+
+
+class DetachmentRuleSelectionLimit(Base):
+    # How many units of a list can be selected for a rule (see
+    # DetachmentRule.selection_limit). Its own table rather than a column, so
+    # existing databases pick it up without a migration.
+    __tablename__ = "detachment_rule_selection_limits"
+
+    rule_id: Mapped[int] = mapped_column(ForeignKey("detachment_rules.id"), primary_key=True)
+    limit: Mapped[int] = mapped_column(Integer)
 
 
 class DetachmentRulePerModel(Base):

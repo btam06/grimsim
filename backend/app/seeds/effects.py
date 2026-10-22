@@ -2,6 +2,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.combat_rules.effects import (
+    ADD_D3_EXTRA_HITS,
     ADD_D6_PLUS_3_ATTACKS,
     ADD_EXTRA_ATTACK,
     ADD_EXTRA_HIT,
@@ -14,6 +15,7 @@ from app.combat_rules.effects import (
     BENEFIT_OF_COVER,
     BLAST,
     CANNOT_ATTACK,
+    CRITICAL_HIT_4,
     CRITICAL_HIT_5,
     DEADLY_DEMISE,
     FEEL_NO_PAIN_4,
@@ -31,6 +33,7 @@ from app.combat_rules.effects import (
     INVULNERABLE_5,
     MELTA_2,
     MELTA_3,
+    MELTA_4,
     MELTA_6,
     MINUS_ONE_DAMAGE,
     MINUS_ONE_TO_HIT,
@@ -59,6 +62,11 @@ from app.models import Effect
 # (keyword, name, description) - keyword must match a function registered in
 # app/combat_rules/effects.py.
 ENTRIES = [
+    (
+        ADD_D3_EXTRA_HITS,
+        "Add D3 Extra Hits",
+        "Adds D3 additional hits to the attack chain.",
+    ),
     (
         ADD_D6_PLUS_3_ATTACKS,
         "Add D6+3 Attacks",
@@ -118,6 +126,11 @@ ENTRIES = [
         CANNOT_ATTACK,
         "Cannot Attack",
         "This weapon can't be used against the current target.",
+    ),
+    (
+        CRITICAL_HIT_4,
+        "Critical Hit on 4+",
+        "An unmodified Hit roll of 4+ scores a Critical Hit for this attack.",
     ),
     (
         CRITICAL_HIT_5,
@@ -203,6 +216,11 @@ ENTRIES = [
         MELTA_3,
         "Melta 3",
         "Each attack this weapon makes inflicts 3 extra damage.",
+    ),
+    (
+        MELTA_4,
+        "Melta 4",
+        "Each attack this weapon makes inflicts 4 extra damage.",
     ),
     (
         MELTA_6,

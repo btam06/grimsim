@@ -74,7 +74,7 @@ async def eligible_for_list(list_id: int, session: AsyncSession = Depends(get_se
     context = await list_building.load_list_context(session, list_id, None)
     if context is None:
         raise HTTPException(status_code=404, detail="list not found")
-    rules = list_building.active_rules(context.faction)
+    rules = list_building.active_rules(context.faction, context.detachments)
     faction_units = (await session.execute(select(FactionUnit))).scalars().all()
     models = (
         await session.execute(select(Model).options(selectinload(Model.keywords)))

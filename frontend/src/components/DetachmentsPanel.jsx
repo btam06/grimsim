@@ -62,6 +62,7 @@ function DetachmentsPanel() {
             .join(' or ')} ${what}s`
         : `every ${what}`
     const grants = [
+      ...(rule.granted_keyword_ids ?? []).map(keywordName),
       ...rule.datasheet_ability_ids.map(
         (id) => datasheetAbilities.find((a) => a.id === id)?.name ?? `#${id}`
       ),

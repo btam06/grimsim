@@ -14,6 +14,7 @@ import {
   listLists,
   listModels,
   listCalculatorStratagems,
+  listGrantedAbilities,
   listRelevantPositions,
   listUnits,
   listWeaponAbilities,
@@ -36,21 +37,24 @@ function DiceRolls({ rolls }) {
   ))
 }
 
-// One radio group per faction ability with rule options (e.g. Doctrina
-// Imperatives), for picking which option is active for one side - or none.
-// Text with its description in a hover tooltip, marked with an info icon -
-// or just the text, if there's no description.
+// Text followed by an info icon whose hover (or focus) tooltip holds its
+// description - or just the text, if there's no description.
 function Described({ description, children }) {
   if (!description) return children
   return (
-    <Tooltip title={description} placement="top" arrow>
-      <span className="described">
-        {children} <FontAwesomeIcon icon={faCircleInfo} className="described-icon" />
-      </span>
-    </Tooltip>
+    <>
+      {children}{' '}
+      <Tooltip title={description} placement="top" arrow>
+        <span className="described-icon" tabIndex={0} aria-label={description}>
+          <FontAwesomeIcon icon={faCircleInfo} />
+        </span>
+      </Tooltip>
+    </>
   )
 }
 
+// One radio group per faction ability with rule options (e.g. Doctrina
+// Imperatives), for picking which option is active for one side - or none.
 function RuleOptionPicker({ side, abilities, choices, onChange }) {
   return abilities.map((ability) => (
     <div key={ability.key} className="radio-group">
@@ -124,23 +128,48 @@ function useRelevantPositions(unitId, side, setSelected, onError) {
   return available
 }
 
+// The ids of the datasheet abilities a unit gains from its enhancements and
+// its list's detachment rules (e.g. Malefic Surge), from the server - so their
+// options can be offered too.
+function useGrantedAbilities(unitId, onError) {
+  const [granted, setGranted] = useState([])
+  useEffect(() => {
+    if (!unitId) {
+      setGranted([])
+      return
+    }
+    let cancelled = false
+    listGrantedAbilities(unitId)
+      .then((ids) => !cancelled && setGranted(ids))
+      .catch((err) => onError(err.message))
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unitId])
+  return granted
+}
+
+// One side's positions, as a column headed by the side.
 function PositionPicker({ side, positions, selectedIds, onChange }) {
-  return positions.map((p) => (
-    <label key={p.id} className="checkbox-field">
-      <input
-        type="checkbox"
-        checked={selectedIds.includes(p.id)}
-        onChange={() =>
-          onChange(
-            selectedIds.includes(p.id)
-              ? selectedIds.filter((id) => id !== p.id)
-              : [...selectedIds, p.id]
-          )
-        }
-      />
-      {side} — {p.label}
-    </label>
-  ))
+  const toggle = (id) =>
+    onChange(selectedIds.includes(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id])
+  return (
+    <div className="checkbox-group">
+      {side}
+      {positions.length === 0 && <p className="hint">None</p>}
+      {positions.map((p) => (
+        <label key={p.id} className="checkbox-field">
+          <input
+            type="checkbox"
+            checked={selectedIds.includes(p.id)}
+            onChange={() => toggle(p.id)}
+          />
+          {p.label}
+        </label>
+      ))}
+    </div>
+  )
 }
 
 function StratagemPicker({ side, stratagems, selectedIds, onChange }) {
@@ -152,13 +181,15 @@ function StratagemPicker({ side, stratagems, selectedIds, onChange }) {
       {stratagems.length === 0 && <p className="hint">None usable in this phase</p>}
       <div className="checkbox-grid">
         {stratagems.map((s) => (
-          <label key={s.id} className="checkbox-field" title={s.description ?? ''}>
+          <label key={s.id} className="checkbox-field">
             <input
               type="checkbox"
               checked={selectedIds.includes(s.id)}
               onChange={() => toggle(s.id)}
             />
-            {s.name} ({s.cp} CP{s.is_core ? ', Core' : ''})
+            <Described description={s.description}>
+              {s.name} ({s.cp} CP{s.is_core ? ', Core' : ''})
+            </Described>
           </label>
         ))}
       </div>
@@ -194,6 +225,8 @@ function CalculatorPanel() {
   const [halfRange, setHalfRange] = useState(false)
   const [movedLessThan3, setMovedLessThan3] = useState(false)
   const [charged, setCharged] = useState(false)
+  const [defenderBattleShocked, setDefenderBattleShocked] = useState(false)
+  const [attackerDamaged, setAttackerDamaged] = useState(false)
   const [advanced, setAdvanced] = useState(false)
   const [selectedWeaponNames, setSelectedWeaponNames] = useState([])
   const [selectedStratagemIds, setSelectedStratagemIds] = useState([])
@@ -203,6 +236,33 @@ function CalculatorPanel() {
   const [applyPrecision, setApplyPrecision] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
+
+  // Results are for the options they were calculated with, so changing any
+  // option clears them.
+  useEffect(() => {
+    setResult(null)
+  }, [
+    attackerRuleChoices,
+    defenderRuleChoices,
+    attackingListId,
+    defendingListId,
+    attackingUnitId,
+    defendingUnitId,
+    inEngagementRange,
+    inCover,
+    halfRange,
+    movedLessThan3,
+    charged,
+    defenderBattleShocked,
+    attackerDamaged,
+    advanced,
+    selectedWeaponNames,
+    selectedStratagemIds,
+    selectedDefenderStratagemIds,
+    attackerPositionIds,
+    defenderPositionIds,
+    applyPrecision,
+  ])
 
   useEffect(() => {
     listUnits().then(setUnits).catch((err) => setError(err.message))
@@ -335,6 +395,8 @@ function CalculatorPanel() {
     setDefenderPositionIds,
     setError
   )
+  const attackerGrantedAbilityIds = useGrantedAbilities(attackingUnitId, setError)
+  const defenderGrantedAbilityIds = useGrantedAbilities(defendingUnitId, setError)
   const defenderStratagems = useUsableStratagems(
     defendingUnitId,
     'defender',
@@ -349,8 +411,10 @@ function CalculatorPanel() {
   // - datasheet abilities (e.g. Belisarius Cawl's Canticles of the Omnissiah)
   //   any of its models has, or any model in another unit of the same faction
   //   in its army list has - the server applies only the options that reach
-  //   that far.
-  const ruleAbilitiesFor = (unit) => {
+  //   that far;
+  // - datasheet abilities its enhancements or detachment rules give it
+  //   (grantedIds).
+  const ruleAbilitiesFor = (unit, grantedIds) => {
     if (!unit) return []
     const modelsIn = (u) =>
       u.unit_models.map((um) => models.find((m) => m.id === um.model_id)).filter(Boolean)
@@ -389,6 +453,18 @@ function CalculatorPanel() {
         })
       })
     })
+    grantedIds.forEach((id) => {
+      const ability = datasheetAbilities.find((a) => a.id === id)
+      if (!ability || ability.rule_options.length === 0 || seen.has(id)) return
+      seen.add(id)
+      entries.push({
+        key: `datasheet-${id}`,
+        name: ability.name,
+        description: ability.description,
+        rule_options: ability.rule_options,
+        option_descriptions: ability.rule_option_descriptions,
+      })
+    })
     return entries
   }
   const defendingUnit = units.find((u) => u.id === Number(defendingUnitId))
@@ -403,8 +479,8 @@ function CalculatorPanel() {
     baseSizes,
     enhancements,
   }
-  const attackerRuleAbilities = ruleAbilitiesFor(attackingUnit)
-  const defenderRuleAbilities = ruleAbilitiesFor(defendingUnit)
+  const attackerRuleAbilities = ruleAbilitiesFor(attackingUnit, attackerGrantedAbilityIds)
+  const defenderRuleAbilities = ruleAbilitiesFor(defendingUnit, defenderGrantedAbilityIds)
 
   useEffect(() => {
     setAttackerRuleChoices({})
@@ -486,6 +562,8 @@ function CalculatorPanel() {
         half_range: halfRange,
         moved_less_than_3: movedLessThan3,
         charged: inEngagementRange && charged,
+        defender_battle_shocked: defenderBattleShocked,
+        attacker_damaged: attackerDamaged,
         advanced,
       })
       // Feel no pain rolls are only worth showing if the defender has FNP -
@@ -665,18 +743,20 @@ function CalculatorPanel() {
                 </label>
               </>
             )}
-            <PositionPicker
-              side="Attacker"
-              positions={attackerPositions}
-              selectedIds={attackerPositionIds}
-              onChange={setAttackerPositionIds}
-            />
-            <PositionPicker
-              side="Defender"
-              positions={defenderPositions}
-              selectedIds={defenderPositionIds}
-              onChange={setDefenderPositionIds}
-            />
+            <div className="side-columns">
+              <PositionPicker
+                side="Attacker"
+                positions={attackerPositions}
+                selectedIds={attackerPositionIds}
+                onChange={setAttackerPositionIds}
+              />
+              <PositionPicker
+                side="Defender"
+                positions={defenderPositions}
+                selectedIds={defenderPositionIds}
+                onChange={setDefenderPositionIds}
+              />
+            </div>
           </fieldset>
         )}
         <fieldset className="form-section">
@@ -711,6 +791,22 @@ function CalculatorPanel() {
               Attacking unit charged this turn
             </label>
           )}
+          <label className="checkbox-field">
+            <input
+              type="checkbox"
+              checked={defenderBattleShocked}
+              onChange={(e) => setDefenderBattleShocked(e.target.checked)}
+            />
+            Defending unit is Battle-shocked
+          </label>
+          <label className="checkbox-field">
+            <input
+              type="checkbox"
+              checked={attackerDamaged}
+              onChange={(e) => setAttackerDamaged(e.target.checked)}
+            />
+            Attacking model is Damaged (on its Damaged profile)
+          </label>
           {hasPrecision && (
             <label className="checkbox-field">
               <input
@@ -751,6 +847,12 @@ function CalculatorPanel() {
                   <li>
                     Save rolls: <DiceRolls rolls={wr.save_rolls} />
                   </li>
+                  {/* Only for a random Damage characteristic (e.g. D6+2). */}
+                  {wr.damage.includes('D') && (
+                    <li>
+                      Damage rolls ({wr.damage}): <DiceRolls rolls={wr.damage_rolls} />
+                    </li>
+                  )}
                   {result.defenderHasFnp && (
                     <li>
                       Feel no pain rolls: <DiceRolls rolls={wr.fnp_rolls} />

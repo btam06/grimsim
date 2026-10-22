@@ -45,6 +45,10 @@ STRENGTH_EXCEEDS_TOUGHNESS = "strength_exceeds_toughness"
 ANTI_INFANTRY_5 = "anti_infantry_5"
 DEFENDER_BELOW_STARTING_STRENGTH = "defender_below_starting_strength"
 DEFENDER_BELOW_HALF_STRENGTH = "defender_below_half_strength"
+DEFENDER_BATTLE_SHOCKED = "defender_battle_shocked"
+ATTACKER_DAMAGED = "attacker_damaged"
+BEYOND_HALF_RANGE_ATTACK = "beyond_half_range_attack"
+TARGET_ISOLATED = "target_isolated"
 
 # Positions a unit can be in that the calculator can't work out for itself,
 # so the user says (see app/combat_rules/positions.py); conditions read them
@@ -54,6 +58,8 @@ REMAINED_STATIONARY = "remained_stationary"
 DEFENDER_IN_RANGE_OF_OBJECTIVE = "defender_in_range_of_objective"
 BELOW_STARTING_STRENGTH = "below_starting_strength"
 BELOW_HALF_STRENGTH = "below_half_strength"
+# "There are no other units from your opponent's army within 6\" of the target".
+ISOLATED_TARGET = "isolated_target"
 
 PRE_WEAPON = "pre_weapon"
 CHARGED = "charged"
@@ -358,6 +364,33 @@ def defender_below_half_strength(context: dict) -> bool:
     return BELOW_HALF_STRENGTH in context.get("defender_positions", set())
 
 
+def defender_battle_shocked(context: dict) -> bool:
+    # True at every step while the defending unit is Battle-shocked (the
+    # calculator's "defender is Battle-shocked" modifier) - e.g. the Chaos
+    # Knights' Doom.
+    return bool(context.get("defender_battle_shocked"))
+
+
+def attacker_damaged(context: dict) -> bool:
+    # True at the pre-hit check while the attacking model is on its Damaged
+    # profile (the calculator's "attacking model is Damaged" modifier) - e.g.
+    # "Damaged: 1-5 wounds remaining ... subtract 1 from the Hit roll".
+    return context.get("step") == "pre_hit" and bool(context.get("attacker_damaged"))
+
+
+def beyond_half_range_attack(context: dict) -> bool:
+    # The opposite of half_range_attack: an attack whose target isn't within
+    # half range, at its pre-hit check - e.g. [CONVERSION] ("not within 12\""
+    # on a 24\" weapon).
+    return context.get("step") == "pre_hit" and not context.get("half_range", False)
+
+
+def target_isolated(context: dict) -> bool:
+    # True at every step while no other units from the defender's army are
+    # within 6\" of it (ticked under Positioning) - e.g. the War Dog Stalker.
+    return ISOLATED_TARGET in context.get("attacker_positions", set())
+
+
 CORE_CONDITIONS = {
     CRITICAL_HIT: critical_hit,
     CRITICAL_WOUND: critical_wound,
@@ -396,6 +429,10 @@ CORE_CONDITIONS = {
     ANTI_INFANTRY_5: anti_infantry_5,
     DEFENDER_BELOW_STARTING_STRENGTH: defender_below_starting_strength,
     DEFENDER_BELOW_HALF_STRENGTH: defender_below_half_strength,
+    DEFENDER_BATTLE_SHOCKED: defender_battle_shocked,
+    ATTACKER_DAMAGED: attacker_damaged,
+    BEYOND_HALF_RANGE_ATTACK: beyond_half_range_attack,
+    TARGET_ISOLATED: target_isolated,
 }
 
 

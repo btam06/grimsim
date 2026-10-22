@@ -52,6 +52,9 @@ FEEL_NO_PAIN_MORTAL_5 = "feel_no_pain_mortal_5"
 TORRENT = "torrent"
 MELTA_2 = "melta_2"
 MELTA_6 = "melta_6"
+MELTA_4 = "melta_4"
+ADD_D3_EXTRA_HITS = "add_d3_extra_hits"
+CRITICAL_HIT_4 = "critical_hit_4"
 ADD_D6_PLUS_3_ATTACKS = "add_d6_plus_3_attacks"
 PLUS_ONE_TOUGHNESS = "plus_one_toughness"
 BLAST = "blast"
@@ -338,6 +341,22 @@ def melta_2(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
     state["melta"] = max(state.get("melta", 0), 2)
 
 
+def add_d3_extra_hits(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # Queues D3 additional hits onto the attack chain (e.g. Sustained Hits D3).
+    for _ in range(random.randint(1, 3)):
+        pending.append({"auto_hit": True})
+
+
+def critical_hit_4(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # As critical_hit_5, on an unmodified Hit roll of 4+ (e.g. [CONVERSION]).
+    state["critical_hit_on"] = min(state.get("critical_hit_on", 6), 4)
+
+
+def melta_4(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # As melta_3, but 4 extra damage (Melta 4).
+    state["melta"] = max(state.get("melta", 0), 4)
+
+
 def melta_6(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
     # As melta_3, but 6 extra damage (Melta 6).
     state["melta"] = max(state.get("melta", 0), 6)
@@ -416,6 +435,9 @@ EFFECTS = {
     TORRENT: torrent,
     MELTA_2: melta_2,
     MELTA_6: melta_6,
+    MELTA_4: melta_4,
+    ADD_D3_EXTRA_HITS: add_d3_extra_hits,
+    CRITICAL_HIT_4: critical_hit_4,
     ADD_D6_PLUS_3_ATTACKS: add_d6_plus_3_attacks,
     PLUS_ONE_TOUGHNESS: plus_one_toughness,
     BLAST: blast,

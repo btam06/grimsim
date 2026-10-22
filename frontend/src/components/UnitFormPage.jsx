@@ -4,6 +4,7 @@ import {
   listAvailableEnhancements,
   listAvailableUpgrades,
   listEnhancements,
+  listSelectableRules,
   updateUnit,
 } from '../api'
 import Field from './Field'
@@ -61,6 +62,10 @@ function UnitFormPage({
   const [enhancements, setEnhancements] = useState([])
   const [slotEnhancements, setSlotEnhancements] = useState([])
   const [upgrades, setUpgrades] = useState([])
+  // Detachment rules this unit could be selected for, and the ones it is.
+  const [selectableRules, setSelectableRules] = useState([])
+  const [selectedRuleIds, setSelectedRuleIds] = useState(editingUnit?.selected_rule_ids ?? [])
+  const selectedRuleKey = selectedRuleIds.join(',')
   const [error, setError] = useState(null)
   const unitId = editingUnit?.id
 
@@ -76,13 +81,14 @@ function UnitFormPage({
       return
     }
     let cancelled = false
-    listAvailableEnhancements(listId, slot.model_id, unitId)
+    listAvailableEnhancements(listId, slot.model_id, unitId, selectedRuleIds)
       .then((available) => !cancelled && setSlotEnhancements(available))
       .catch((err) => setError(err.message))
     return () => {
       cancelled = true
     }
-  }, [listId, slot.model_id, unitId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listId, slot.model_id, unitId, selectedRuleKey])
 
   // Upgrades depend on every model in the unit, so re-check them as models
   // are added or removed, dropping the chosen one if it no longer applies.
@@ -97,7 +103,8 @@ function UnitFormPage({
     listAvailableUpgrades(
       listId,
       slots.map((s) => s.model_id),
-      unitId
+      unitId,
+      selectedRuleIds
     )
       .then((available) => {
         if (cancelled) return
@@ -109,7 +116,38 @@ function UnitFormPage({
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listId, slotModelIds, unitId, selectedRuleKey])
+
+  // Rules the unit can be selected for depend on its models too; drop any
+  // selection that no longer applies.
+  useEffect(() => {
+    if (!listId || slots.length === 0) {
+      setSelectableRules([])
+      setSelectedRuleIds([])
+      return
+    }
+    let cancelled = false
+    listSelectableRules(
+      listId,
+      slots.map((s) => s.model_id),
+      unitId
+    )
+      .then((rules) => {
+        if (cancelled) return
+        setSelectableRules(rules)
+        const ids = new Set(rules.map((r) => r.id))
+        setSelectedRuleIds((selected) => selected.filter((id) => ids.has(id)))
+      })
+      .catch((err) => setError(err.message))
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listId, slotModelIds, unitId])
+  const toggleRule = (id) =>
+    setSelectedRuleIds((selected) =>
+      selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]
+    )
 
   const modelName = (id) => models.find((m) => m.id === id)?.name ?? `#${id}`
   const weaponName = (id) => weapons.find((w) => w.id === id)?.name ?? `#${id}`
@@ -181,6 +219,7 @@ function UnitFormPage({
           enhancement_id: s.enhancement_id ? Number(s.enhancement_id) : null,
         })),
         upgrade_id: upgradeId ? Number(upgradeId) : null,
+        selected_rule_ids: selectedRuleIds,
       }
       if (editingUnit) {
         await updateUnit(editingUnit.id, payload)
@@ -220,6 +259,28 @@ function UnitFormPage({
               onChange={setUpgradeId}
             />
           </Field>
+        )}
+
+        {selectableRules.length > 0 && (
+          <div className="checkbox-group">
+            Selected for detachment rules
+            {selectableRules.map((r) => {
+              const full = r.selected_elsewhere >= r.selection_limit
+              const selected = selectedRuleIds.includes(r.id)
+              return (
+                <label key={r.id} className="checkbox-field" title={r.description ?? ''}>
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    disabled={full && !selected}
+                    onChange={() => toggleRule(r.id)}
+                  />
+                  {r.name} ({r.selected_elsewhere + (selected ? 1 : 0)}/{r.selection_limit} in
+                  this list)
+                </label>
+              )
+            })}
+          </div>
         )}
 
         {slots.length > 0 && (

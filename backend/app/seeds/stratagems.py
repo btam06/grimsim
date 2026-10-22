@@ -44,6 +44,21 @@ def rules(stratagem_name: str) -> list:
     ]
 
 
+def granted_options(stratagem_name: str) -> list[str]:
+    # Rule options a stratagem makes active (e.g. Transcendent Cogitation's
+    # Protector and Conqueror Imperatives), across every faction's
+    # stratagem_rules.py GRANTED_OPTIONS.
+    from app.seeds.factions import FACTIONS
+
+    return [
+        option
+        for faction in FACTIONS
+        for option in getattr(
+            getattr(faction, "stratagem_rules", None), "GRANTED_OPTIONS", {}
+        ).get(stratagem_name, ())
+    ]
+
+
 def load(path: Path | None = None) -> list[dict]:
     path = path or data_files.data_dir() / "stratagems.json"
     if not path.exists():

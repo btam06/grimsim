@@ -338,7 +338,8 @@ async def seed_detachments(session: AsyncSession) -> None:
 async def seed_detachment_rules(session: AsyncSession) -> None:
     # Adds each detachment's rules (the "rules" of its entry in
     # detachments.json) that it doesn't have yet, by name. An existing one
-    # only gains per_model if it's since been set; nothing else is changed.
+    # only gains per_model if it's since been set, and granted keywords if it
+    # has none; nothing else is changed.
     # Must run after seed_detachments, seed_keywords and the weapon/datasheet
     # ability seeds; an unknown keyword or ability is an error, not skipped.
     faction_ids = await _faction_ids_by_name(session)
@@ -380,6 +381,10 @@ async def seed_detachment_rules(session: AsyncSession) -> None:
                 ]
                 if any(not option for option in options):
                     raise ValueError(f"detachment rule {name!r} has an empty keyword option")
+                if entry.get("per_model") and entry.get("selection_limit"):
+                    raise ValueError(
+                        f"detachment rule {name!r} can't be both per_model and selected for units"
+                    )
                 weapon_grants = [
                     DetachmentRuleWeaponAbility(
                         weapon_ability=lookup(weapon_abilities, g["name"], "weapon ability", name),
@@ -395,11 +400,21 @@ async def seed_detachment_rules(session: AsyncSession) -> None:
                     )
                     for ability in entry.get("datasheet_abilities", [])
                 ]
+                granted_keywords = [
+                    lookup(keywords, k, "keyword", name)
+                    for k in entry.get("granted_keywords", [])
+                ]
                 rule = existing.get((detachment_id, name))
                 if rule is not None:
                     # Added after it was first seeded.
                     if entry.get("per_model") and not rule.per_model:
                         rule.per_model = True
+                        changed = True
+                    if granted_keywords and not rule.keyword_grant_links:
+                        rule.granted_keywords = granted_keywords
+                        changed = True
+                    if entry.get("selection_limit") and rule.selection_limit is None:
+                        rule.selection_limit = entry["selection_limit"]
                         changed = True
                     continue
                 rule = DetachmentRule(
@@ -411,6 +426,8 @@ async def seed_detachment_rules(session: AsyncSession) -> None:
                     datasheet_ability_grants=datasheet_grants,
                 )
                 rule.per_model = entry.get("per_model", False)
+                rule.granted_keywords = granted_keywords
+                rule.selection_limit = entry.get("selection_limit")
                 existing[(detachment_id, name)] = rule
                 session.add(rule)
                 changed = True

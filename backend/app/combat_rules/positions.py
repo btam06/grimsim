@@ -5,14 +5,20 @@ from app.combat_rules.conditions import (
     DEFENDER_BELOW_STARTING_STRENGTH,
     DEFENDER_IN_RANGE_OF_OBJECTIVE,
     IN_RANGE_OF_OBJECTIVE,
+    ISOLATED_TARGET,
     REMAINED_STATIONARY,
     STATIONARY_RANGED_CRITICAL_HIT,
+    TARGET_ISOLATED,
 )
 from app.seeds.factions.adeptus_mechanicus.conditions import (
     ATTACKER_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE,
     ATTACKER_NEAR_ADMECH_BATTLELINE,
     MELEE_VS_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE,
     NEAR_ADMECH_BATTLELINE,
+)
+from app.seeds.factions.chaos_knights.conditions import (
+    MARKED_PREY_CRITICAL_HIT,
+    MARKED_PREY_TARGET,
 )
 from app.seeds.factions.necrons.conditions import (
     ATTACKER_IN_POWER_MATRIX,
@@ -41,6 +47,7 @@ POSITIONS = {
     NEAR_ADMECH_BATTLELINE: 'Within 6" of a friendly ADEPTUS MECHANICUS BATTLELINE unit',
     IN_RANGE_OF_OBJECTIVE: "Within range of an objective marker",
     REMAINED_STATIONARY: "Remained Stationary this turn",
+    ISOLATED_TARGET: 'Target has no other units from its army within 6"',
     BELOW_STARTING_STRENGTH: "Below Starting Strength",
     BELOW_HALF_STRENGTH: "Below Half-strength",
     SET_UP_THIS_TURN: "Set up on the battlefield this turn",
@@ -52,6 +59,7 @@ POSITIONS = {
     NEAR_PROPHET_OF_DESTRUCTION: (
         'Within 9" of Nekrosor Ammentar after it destroyed a unit this phase'
     ),
+    MARKED_PREY_TARGET: "Targeting the unit selected for Marked Prey",
 }
 
 # The conditions that read each position, by the side whose position it is -
@@ -67,6 +75,7 @@ POSITION_CONDITIONS = {
     },
     IN_RANGE_OF_OBJECTIVE: {"attacker": set(), "defender": {DEFENDER_IN_RANGE_OF_OBJECTIVE}},
     REMAINED_STATIONARY: {"attacker": {STATIONARY_RANGED_CRITICAL_HIT}, "defender": set()},
+    ISOLATED_TARGET: {"attacker": {TARGET_ISOLATED}, "defender": set()},
     BELOW_STARTING_STRENGTH: {"attacker": set(), "defender": {DEFENDER_BELOW_STARTING_STRENGTH}},
     BELOW_HALF_STRENGTH: {
         "attacker": set(),
@@ -93,6 +102,7 @@ POSITION_CONDITIONS = {
         "attacker": {PROPHET_OF_DESTRUCTION_TARGET},
         "defender": set(),
     },
+    MARKED_PREY_TARGET: {"attacker": {MARKED_PREY_CRITICAL_HIT}, "defender": set()},
 }
 
 # Positions asked about for every unit on a side, whatever its rules - board

@@ -6142,3 +6142,348 @@ def test_prophet_of_destruction_rerolls_wound_ones(monkeypatch, keywords, positi
         attacker_positions=positions,
     )
     assert result.total_damage == expected
+
+
+def test_roll_dice_faces_returns_each_die():
+    assert combat.roll_dice_faces("3") == (3, [])
+
+
+def test_roll_dice_faces_adds_the_modifier(monkeypatch):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 4)
+    assert combat.roll_dice_faces("D6+2") == (6, [4])
+    assert combat.roll_dice_faces("2D6") == (8, [4, 4])
+
+
+def test_damage_rolls_are_recorded_for_random_damage_only(monkeypatch):
+    # Hit 6, wound 6, save 1 (fails), damage die 3: D6+2 deals 5.
+    _scripted(monkeypatch, [6, 6, 1, 3])
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=0, damage="D6+2", weapon_type="ranged")
+    result = _fire(weapon, [_model(toughness=1, wounds=10, save=7)])
+    assert result.weapon_results[0].damage == "D6+2"
+    assert result.weapon_results[0].damage_rolls == [3]
+    assert result.total_damage == 5
+
+    _scripted(monkeypatch, [6, 6, 1])
+    flat = _weapon(attacks="1", skill=3, strength=10, ap=0, damage="2", weapon_type="ranged")
+    assert _fire(flat, [_model(toughness=1, wounds=10, save=7)]).weapon_results[0].damage_rolls == []
+
+
+def test_damage_is_not_rolled_for_a_saved_attack(monkeypatch):
+    _scripted(monkeypatch, [6, 6, 6])  # the save passes
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=0, damage="D6", weapon_type="ranged")
+    result = _fire(weapon, [_model(toughness=1, wounds=10, save=3)])
+    assert result.weapon_results[0].damage_rolls == []
+
+
+def test_transcendent_cogitation_grants_both_imperatives():
+    from app.seeds import stratagems as stratagem_seeds
+
+    granted = stratagem_seeds.granted_options("Transcendent Cogitation")
+    assert {"Protector Imperative", "Conqueror Imperative"} <= set(granted)
+    assert stratagem_seeds.granted_options("Not a Stratagem") == []
+
+
+@pytest.mark.parametrize("use_stratagem,expected_damage", [(True, 1), (False, 0)])
+async def test_transcendent_cogitation_feeds_murderous_imperative(
+    client: AsyncClient, session, monkeypatch, use_stratagem, expected_damage
+):
+    # Both Imperatives active: Murderous Imperative re-rolls a Hit roll of 1
+    # (Protector) and a Wound roll of 1 (Conqueror).
+    from app.seeds import conditions as conditions_seed
+    from app.seeds import datasheet_abilities as datasheet_abilities_seed
+    from app.seeds import effects as effects_seed
+    from app.seeds import factions as factions_seed
+
+    await factions_seed.seed(session)
+    await factions_seed.seed_abilities(session)
+    await conditions_seed.seed(session)
+    await effects_seed.seed(session)
+    await datasheet_abilities_seed.seed(session)
+    admech = next(
+        f["id"] for f in (await client.get("/factions")).json() if f["name"] == "Adeptus Mechanicus"
+    )
+    doctrina = next(
+        a["id"]
+        for a in (await client.get("/faction-abilities")).json()
+        if a["name"] == "Doctrina Imperatives"
+    )
+    murderous = next(
+        a["id"]
+        for a in (await client.get("/datasheet-abilities")).json()
+        if a["name"] == "Murderous Imperative"
+    )
+    stratagem_id = (
+        await client.post(
+            "/stratagems", json={"name": "Transcendent Cogitation", "cp": 1, "is_core": True}
+        )
+    ).json()["id"]
+    model_id = await _create_model(
+        client, admech, faction_ability_ids=[doctrina], ability_ids=[murderous]
+    )
+    weapon_id = await _create_weapon(client, model_id, weapon_type="ranged")
+    attacker = await _create_unit(
+        client, await _create_faction_unit(client, admech, "Skitarii"), model_id, weapon_id
+    )
+    defender = await _create_unit(
+        client,
+        await _create_faction_unit(client, admech, "Targets"),
+        await _create_model(client, admech),
+    )
+
+    # Hit 1 (re-rolled to 6), wound 1 (re-rolled to 6), save 1.
+    rolls = iter([1, 6, 1, 6, 1])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    response = await client.post(
+        "/combat",
+        json={
+            "attacking_unit_id": attacker,
+            "defending_unit_id": defender,
+            "selected_weapon_ids": [weapon_id],
+            "stratagem_ids": [stratagem_id] if use_stratagem else [],
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["total_damage"] == expected_damage
+
+
+@pytest.mark.parametrize("battle_shocked,expected", [(True, 1), (False, 0)])
+def test_dread_doom_plus_one_to_wound_against_battle_shocked(monkeypatch, battle_shocked, expected):
+    from app.seeds.factions.chaos_knights import abilities as chaos_knights
+
+    _scripted(monkeypatch, [6, 3, 1])  # S4 vs T4: a 3 wounds only at +1
+    weapon = _weapon(attacks="1", skill=3, strength=4, ap=0, weapon_type="ranged")
+    result = _fire(
+        weapon,
+        [_model(toughness=4, wounds=10, save=7)],
+        attacker_rules=list(chaos_knights.OPTIONS["Harbingers of Dread"]["Doom"]),
+        defender_battle_shocked=battle_shocked,
+    )
+    assert result.total_damage == expected
+
+
+def test_dread_options_are_doom_attacking_and_darkness_defending():
+    from app.seeds.factions.chaos_knights import abilities as chaos_knights
+
+    options = chaos_knights.OPTIONS["Harbingers of Dread"]
+    assert {r.side for r in options["Doom"]} == {"attacker"}
+    assert {r.side for r in options["Darkness"]} == {"defender"}
+
+
+# --- Chaos Knights ---
+
+
+async def _seed_combat_catalog(session):
+    from app.seeds import conditions as conditions_seed
+    from app.seeds import datasheet_abilities as datasheet_abilities_seed
+    from app.seeds import effects as effects_seed
+
+    await conditions_seed.seed(session)
+    await effects_seed.seed(session)
+    await datasheet_abilities_seed.seed(session)
+
+
+@pytest.mark.parametrize(
+    "option,rolls,expected",
+    [
+        # Lethal Hits: a 6 to hit wounds automatically - then the save fails.
+        ("Diabolic Power: Lethal Hits", [6, 1], 1),
+        # Without it, that wound roll of 1 fails.
+        (None, [6, 1, 1], 0),
+    ],
+)
+async def test_malefic_surge_options_come_from_the_detachment_rule(
+    client: AsyncClient, faction_id: int, session, monkeypatch, option, rolls, expected
+):
+    await _seed_combat_catalog(session)
+    surge = next(
+        a for a in (await client.get("/datasheet-abilities")).json() if a["name"] == "Malefic Surge"
+    )
+    assert "Diabolic Power: Lethal Hits" in surge["rule_options"]
+    detachment_id = await _create_detachment(client, faction_id, "Infernal Lance")
+    response = await client.post(
+        "/detachment-rules",
+        json={
+            "detachment_id": detachment_id,
+            "name": "Malefic Surge",
+            "datasheet_ability_ids": [surge["id"]],
+        },
+    )
+    assert response.status_code == 201
+    attacker_id, defender_id, weapon_id = await _combat_units_in_list(
+        client, faction_id, [detachment_id]
+    )
+    # The calculator is told the unit has the ability, so it offers its options.
+    granted = await client.get("/combat/granted-abilities", params={"unit_id": attacker_id})
+    assert surge["id"] in granted.json()
+
+    rolls = iter(rolls)
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    response = await client.post(
+        "/combat",
+        json={
+            "attacking_unit_id": attacker_id,
+            "defending_unit_id": defender_id,
+            "selected_weapon_ids": [weapon_id],
+            "attacker_rule_options": [option] if option else [],
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["total_damage"] == expected
+
+
+async def test_granted_abilities_are_only_the_lists_detachments(
+    client: AsyncClient, faction_id: int, session
+):
+    await _seed_combat_catalog(session)
+    attacker_id, _, _ = await _combat_units_in_list(client, faction_id, [])
+    response = await client.get("/combat/granted-abilities", params={"unit_id": attacker_id})
+    assert response.json() == []
+
+
+@pytest.mark.parametrize("weapon_type,save_roll,expected", [("ranged", 4, 0), ("melee", 4, 1), ("melee", 5, 0)])
+def test_veil_of_medrengard_invulnerable_saves(monkeypatch, weapon_type, save_roll, expected):
+    from app.seeds.factions.chaos_knights import datasheet_abilities as chaos_knights
+
+    _scripted(monkeypatch, [6, 6, save_roll])
+    weapon = _weapon(
+        attacks="1", skill=3, strength=10, ap=-6, weapon_type=weapon_type,
+        range=None if weapon_type == "melee" else 24,
+    )
+    result = _fire(
+        weapon,
+        [_model(toughness=1, wounds=10, save=7)],
+        in_engagement_range=weapon_type == "melee",
+        defender_rules=list(chaos_knights.RULES["Veil of Medrengard"]),
+    )
+    assert result.total_damage == expected
+
+
+@pytest.mark.parametrize("keywords,expected", [(["VEHICLE", "TITANIC"], 1), (["VEHICLE"], 0)])
+def test_titanic_duel_rerolls_any_miss_against_titanic(monkeypatch, keywords, expected):
+    from app.seeds import stratagems as stratagem_seeds
+
+    _scripted(monkeypatch, [2, 6, 6, 1])  # a 2 misses at BS3; re-rolled only vs TITANIC
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=0, weapon_type="ranged")
+    result = _fire(
+        weapon,
+        [_model(toughness=1, wounds=10, save=7, keywords=[_keyword(k) for k in keywords])],
+        attacker_rules=stratagem_seeds.rules("Titanic Duel"),
+    )
+    assert result.total_damage == expected
+
+
+@pytest.mark.parametrize(
+    "keywords,positions,expected",
+    [
+        (["WAR DOG"], {"marked_prey_target"}, True),
+        (["WAR DOG"], set(), False),
+        (["TITANIC"], {"marked_prey_target"}, False),
+    ],
+)
+def test_marked_prey_sustained_hits_for_war_dogs(keywords, positions, expected):
+    from app.combat_rules.conditions import CONDITIONS
+
+    context = {
+        "step": "hit",
+        "roll": 6,
+        "attacker_model_keywords": set(keywords),
+        "attacker_positions": positions,
+    }
+    assert CONDITIONS["marked_prey_critical_hit"](context) is expected
+
+
+@pytest.mark.parametrize(
+    "options,charged,expected",
+    [
+        ({"Diabolic Power: Lethal Hits"}, True, True),
+        ({"Diabolic Power: Sustained Hits 1"}, True, True),
+        ({"Unnatural Fortitude: 5+ Invulnerable"}, True, False),
+        ({"Diabolic Power: Lethal Hits"}, False, False),
+    ],
+)
+def test_knight_diabolus_lance_while_using_diabolic_power(options, charged, expected):
+    from app.combat_rules.conditions import CONDITIONS
+
+    context = {"is_ranged": False, "charged": charged, "attacker_options": options}
+    assert CONDITIONS["diabolic_power_charged_melee"](context) is expected
+
+
+@pytest.mark.parametrize("half_range,expected", [(True, 5), (False, 1)])
+def test_melta_4_adds_four_damage_within_half_range(monkeypatch, half_range, expected):
+    _scripted(monkeypatch, [6, 6, 1, 1])  # hit, wound, failed save, D6 damage of 1
+    entry = next(e for e in weapon_ability_seeds.ENTRIES if e[0] == "Melta 4")
+    weapon = _weapon(attacks="1", skill=3, strength=12, ap=-4, damage="D6", weapon_type="ranged")
+    weapon.abilities = [
+        _ability([_condition(c) for c in entry[2]], [_effect(e) for e in entry[3]])
+    ]
+    result = _fire(weapon, [_model(toughness=1, wounds=20, save=7)], half_range=half_range)
+    assert result.total_damage == expected
+
+
+@pytest.mark.parametrize("damaged,expected", [(True, 0), (False, 1)])
+def test_damaged_profile_minus_one_to_hit(monkeypatch, damaged, expected):
+    rules = list(datasheet_ability_seeds.RULES["Damaged: 1-5 Wounds Remaining"])
+    _scripted(monkeypatch, [3, 6, 1])  # a 3 hits at BS3, misses at -1
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=0, weapon_type="ranged")
+    result = _fire(
+        weapon,
+        [_model(toughness=1, wounds=10, save=7)],
+        attacker_rules=rules,
+        attacker_damaged=damaged,
+    )
+    assert result.total_damage == expected
+
+
+@pytest.mark.parametrize(
+    "is_ranged,positions,expected",
+    [(True, {"in_range_of_objective"}, True), (True, set(), False), (False, {"in_range_of_objective"}, False)],
+)
+def test_brigand_ignores_cover_against_targets_on_objectives(is_ranged, positions, expected):
+    from app.combat_rules.conditions import CONDITIONS
+
+    context = {"is_ranged": is_ranged, "defender_positions": positions}
+    assert CONDITIONS["ranged_vs_objective_target"](context) is expected
+
+
+def test_sustained_d3_adds_d3_hits_on_a_critical(monkeypatch):
+    # Hit 6, then the D3 rolls a 2: three hits in all.
+    _scripted(monkeypatch, [6, 2, 6, 6, 6, 1, 1, 1])
+    entry = next(e for e in weapon_ability_seeds.ENTRIES if e[0] == "Sustained D3")
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=0, weapon_type="ranged")
+    weapon.abilities = [
+        _ability([_condition(c) for c in entry[2]], [_effect(e) for e in entry[3]])
+    ]
+    result = _fire(weapon, [_model(toughness=1, wounds=20, save=7)])
+    assert len(result.wound_rolls) == 3
+
+
+@pytest.mark.parametrize("half_range,expected_wound_rolls", [(False, 2), (True, 0)])
+def test_conversion_critical_hits_on_4_beyond_half_range(
+    monkeypatch, half_range, expected_wound_rolls
+):
+    # A 4 at BS6 only hits as a critical hit - then Sustained Hits adds one.
+    _scripted(monkeypatch, [4, 6, 6, 1, 1])
+    conversion = next(e for e in weapon_ability_seeds.ENTRIES if e[0] == "Conversion")
+    weapon = _weapon(attacks="1", skill=6, strength=10, ap=0, weapon_type="ranged")
+    weapon.abilities = [
+        _ability([_condition(c) for c in conversion[2]], [_effect(e) for e in conversion[3]]),
+        _ability([_condition("critical_hit")], [_effect("add_extra_hit")]),
+    ]
+    result = _fire(weapon, [_model(toughness=1, wounds=20, save=7)], half_range=half_range)
+    assert len(result.wound_rolls) == expected_wound_rolls
+
+
+@pytest.mark.parametrize("positions,expected", [({"isolated_target"}, 1), (set(), 0)])
+def test_stalker_plus_one_to_wound_against_an_isolated_target(monkeypatch, positions, expected):
+    from app.seeds.factions.chaos_knights import datasheet_abilities as chaos_knights
+
+    entry = next(e for e in chaos_knights.ENTRIES if e[0] == "Stalker")
+    _scripted(monkeypatch, [6, 3, 1])  # S4 vs T4: a 3 wounds only at +1
+    weapon = _weapon(attacks="1", skill=3, strength=4, ap=0, weapon_type="ranged")
+    weapon.abilities = [
+        _ability([_condition(c) for c in entry[2]], [_effect(e) for e in entry[3]])
+    ]
+    result = _fire(
+        weapon, [_model(toughness=4, wounds=10, save=7)], attacker_positions=positions
+    )
+    assert result.total_damage == expected

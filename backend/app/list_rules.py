@@ -23,6 +23,16 @@ class AllyRule:
     points_limits: dict[int, int] = field(default_factory=dict)
     # Whether models included this way can be given Enhancements.
     enhancements: bool = True
+    # Most models a list can include this way (None: no cap) - e.g.
+    # Dreadblades: 1 TITANIC CHAOS KNIGHTS model.
+    model_limit: int | None = None
+    # Rules sharing a group are alternatives: a list can include models under
+    # only one of them (e.g. Dreadblades: either 1 TITANIC model or up to 3
+    # WAR DOG models).
+    choice_group: str | None = None
+    # Only for a list that has taken this detachment (None: any list) - e.g.
+    # Iconoclast Fiefdom's DAMNED units.
+    detachment: str | None = None
 
 
 def imperial_allies(host_faction: str) -> list[AllyRule]:
@@ -30,7 +40,8 @@ def imperial_allies(host_faction: str) -> list[AllyRule]:
     # Custodes, Adeptus Mechanicus, Adeptus Titanicus, Astra Militarum, Grey
     # Knights, Imperial Agents, Imperial Knights, Space Marines): its lists can
     # include Imperial Agents' RETINUE, CHARACTER and REQUISITIONED units, and
-    # Imperial Knights' TITANIC and ARMIGER units - other than its own
+    # Imperial Knights' Freeblades - either 1 TITANIC model or up to 3 ARMIGER
+    # models (as Chaos Knights' Dreadblades, below) - other than its own
     # faction's. Models included this way can't be given Enhancements.
     rules = [
         AllyRule(
@@ -42,8 +53,44 @@ def imperial_allies(host_faction: str) -> list[AllyRule]:
         AllyRule(
             host_faction=host_faction,
             ally_faction="Imperial Knights",
-            model_keywords=("TITANIC", "ARMIGER"),
+            model_keywords=("TITANIC",),
             enhancements=False,
+            model_limit=1,
+            choice_group="Freeblades",
+        ),
+        AllyRule(
+            host_faction=host_faction,
+            ally_faction="Imperial Knights",
+            model_keywords=("ARMIGER",),
+            enhancements=False,
+            model_limit=3,
+            choice_group="Freeblades",
         ),
     ]
     return [rule for rule in rules if rule.ally_faction != host_faction]
+
+
+def chaos_allies(host_faction: str) -> list[AllyRule]:
+    # The Chaos Knights' Dreadblades rule, for a Chaos faction's lists (Chaos
+    # Daemons, Chaos Space Marines, Death Guard, Emperor's Children, Thousand
+    # Sons, World Eaters): either 1 TITANIC CHAOS KNIGHTS model or up to 3 WAR
+    # DOG models, which can't be given Enhancements. (It also needs every model
+    # in the army to be CHAOS, which every model of these factions is.)
+    return [
+        AllyRule(
+            host_faction=host_faction,
+            ally_faction="Chaos Knights",
+            model_keywords=("TITANIC",),
+            enhancements=False,
+            model_limit=1,
+            choice_group="Dreadblades",
+        ),
+        AllyRule(
+            host_faction=host_faction,
+            ally_faction="Chaos Knights",
+            model_keywords=("WAR DOG",),
+            enhancements=False,
+            model_limit=3,
+            choice_group="Dreadblades",
+        ),
+    ]

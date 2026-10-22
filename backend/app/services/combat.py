@@ -20,13 +20,20 @@ _DICE_PATTERN = re.compile(
 def roll_dice(notation: str) -> int:
     # notation is either a flat number or dice notation (D3/D6/2D6/D6+1/...); roll
     # it to a value. Used for both a weapon's damage and its number of attacks.
+    return roll_dice_faces(notation)[0]
+
+
+def roll_dice_faces(notation: str) -> tuple[int, list[int]]:
+    # As roll_dice, also returning each die rolled (none for a flat number) -
+    # e.g. "D6+2" -> (6, [4]).
     match = _DICE_PATTERN.match(notation)
     if match["flat"] is not None:
-        return int(match["flat"])
+        return int(match["flat"]), []
     count = int(match["count"]) if match["count"] else 1
     die = int(match["die"])
     plus = int(match["plus"]) if match["plus"] else 0
-    return sum(random.randint(1, die) for _ in range(count)) + plus
+    faces = [random.randint(1, die) for _ in range(count)]
+    return sum(faces) + plus, faces
 
 
 def wound_threshold(strength: int, toughness: int) -> int:
@@ -128,12 +135,17 @@ class WeaponCombatResult:
     # profile (every weapon instance sharing one name, across every model in
     # the attacking unit that fired it) rather than the whole combat.
     name             : str
+    # The weapon's Damage characteristic, e.g. "D6+2".
+    damage           : str       = field(default="")
     attack_rolls     : list[int] = field(default_factory=list)
     attack_rerolls   : list[int] = field(default_factory=list)
     wound_rolls      : list[int] = field(default_factory=list)
     wound_rerolls    : list[int] = field(default_factory=list)
     save_rolls       : list[int] = field(default_factory=list)
     fnp_rolls        : list[int] = field(default_factory=list)
+    # The dice rolled for a random Damage characteristic (e.g. the D6 of
+    # "D6+2"), for each attack that got through its save - none if it's flat.
+    damage_rolls     : list[int] = field(default_factory=list)
     total_damage     : int       = field(default=0)
     models_destroyed : int       = field(default=0)
     hazardous_rolls  : list[int] = field(default_factory=list)
@@ -197,6 +209,8 @@ def resolve_combat(
     attacker_positions: set[str] | None = None,
     defender_positions: set[str] | None = None,
     charged: bool = False,
+    defender_battle_shocked: bool = False,
+    attacker_damaged: bool = False,
 ) -> CombatResult:
     # The defending unit is a queue of individual models, each with its own wound pool.
     # Each attack targets whichever model is at the front of the queue; once that
@@ -338,6 +352,8 @@ def resolve_combat(
             "attacker_positions": attacker_positions,
             "defender_positions": defender_positions,
             "charged": charged,
+            "defender_battle_shocked": defender_battle_shocked,
+            "attacker_damaged": attacker_damaged,
         },
         unit_wide_state,
         deque(),
@@ -528,6 +544,8 @@ def resolve_combat(
                     "attacker_positions": attacker_positions,
                     "defender_positions": defender_positions,
                     "charged": charged,
+                    "defender_battle_shocked": defender_battle_shocked,
+                    "attacker_damaged": attacker_damaged,
                     # The firing model's own keywords - e.g. for "weapons
                     # equipped by KASTELAN ROBOT models".
                     "attacker_model_keywords": enhancement_rules.model_keywords(
@@ -574,7 +592,7 @@ def resolve_combat(
                     continue
 
                 weapon_result = weapon_results_by_name.setdefault(
-                    weapon.name, WeaponCombatResult(name=weapon.name)
+                    weapon.name, WeaponCombatResult(name=weapon.name, damage=weapon.damage)
                 )
                 fired = {
                     "weapon": weapon,
@@ -894,8 +912,10 @@ def resolve_combat(
 
             # Damage roll: how many wounds this one failed save inflicts, plus any
             # bonus for the weapon (e.g. Melta within half range).
+            rolled_damage, damage_faces = roll_dice_faces(weapon.damage)
+            weapon_result.damage_rolls.extend(damage_faces)
             damage = (
-                roll_dice(weapon.damage)
+                rolled_damage
                 + fired["damage_bonus"]
                 + (1 if attack.get("plus_one_damage") else 0)
             )

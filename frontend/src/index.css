@@ -152,6 +152,12 @@ section form input[type='radio'] {
   font-size: 0.8rem;
 }
 
+/* In a column (e.g. one side's positions), a checkbox is only as tall as its
+   text - its flex basis is a width meant for rows. */
+.checkbox-group > .checkbox-field {
+  flex: 0 0 auto;
+}
+
 .checkbox-grid {
   display: flex;
   flex-direction: row;
@@ -442,14 +448,25 @@ section .app-dialog form {
   width: 100%;
 }
 
-/* Text whose description shows in a hover tooltip (see Described). */
-.described {
-  cursor: help;
-}
-
+/* The info icon after text whose description shows in its hover tooltip
+   (see Described). */
 .described-icon {
   font-size: 0.75em;
   opacity: 0.6;
+  cursor: help;
+}
+
+.described-icon:hover,
+.described-icon:focus-visible {
+  opacity: 1;
+}
+
+/* Attacker and defender options side by side, stacking when narrow. */
+.side-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.5rem 1rem;
+  flex: 1 1 100%;
 }
 
 /* The datasheet opens over what's below it rather than pushing it down: its

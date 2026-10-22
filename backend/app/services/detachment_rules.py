@@ -7,11 +7,14 @@ from app.models import (
     DatasheetAbility,
     DetachmentRule,
     DetachmentRuleDatasheetAbility,
+    DetachmentRuleKeyword,
     DetachmentRuleKeywordOption,
     DetachmentRulePerModel,
+    DetachmentRuleSelectionLimit,
     DetachmentRuleWeaponAbility,
     Unit,
     UnitModel,
+    UnitRuleSelection,
     WeaponAbility,
 )
 from app.services import enhancements as enhancement_rules
@@ -37,6 +40,9 @@ def applies_to(rule: DetachmentRule, unit: Unit) -> bool:
     # "SKITARII INFANTRY unit". Per-model rules (see DetachmentRule.per_model)
     # reach models, not units, so never a whole unit here.
     if rule.per_model:
+        return False
+    # A rule with a selection limit only reaches units selected for it.
+    if rule.selection_limit is not None and rule.id not in unit.selected_rule_ids:
         return False
     return bool(unit.unit_models) and all(
         model_matches(rule, enhancement_rules.model_keywords(unit, unit_model))
@@ -93,7 +99,10 @@ async def delete_rules(session: AsyncSession, ids: list[int]) -> None:
         DetachmentRuleKeywordOption,
         DetachmentRuleWeaponAbility,
         DetachmentRuleDatasheetAbility,
+        DetachmentRuleKeyword,
         DetachmentRulePerModel,
+        DetachmentRuleSelectionLimit,
+        UnitRuleSelection,
     ):
         await session.execute(delete(table).where(table.rule_id.in_(ids)))
     await session.execute(delete(DetachmentRule).where(DetachmentRule.id.in_(ids)))

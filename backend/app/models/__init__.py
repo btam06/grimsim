@@ -34,7 +34,9 @@ from app.models.detachment_rule import (
     DetachmentRule,
     DetachmentRuleDatasheetAbility,
     DetachmentRuleKeywordOption,
+    DetachmentRuleKeyword,
     DetachmentRulePerModel,
+    DetachmentRuleSelectionLimit,
     DetachmentRuleWeaponAbility,
 )
 from app.models.disposition import Disposition
@@ -61,7 +63,7 @@ from app.models.stratagem import (
     StratagemKeywordOption,
     StratagemTiming,
 )
-from app.models.unit import Unit
+from app.models.unit import Unit, UnitRuleSelection
 from app.models.unit_model import UnitModel
 from app.models.user import User
 from app.models.wargear import Wargear, WargearScope
@@ -88,11 +90,14 @@ __all__ = [
     "Condition",
     "Effect",
     "Unit",
+    "UnitRuleSelection",
     "UnitModel",
     "Detachment",
     "DetachmentRule",
     "DetachmentRuleKeywordOption",
+    "DetachmentRuleKeyword",
     "DetachmentRulePerModel",
+    "DetachmentRuleSelectionLimit",
     "DetachmentUniqueTag",
     "DetachmentRuleWeaponAbility",
     "DetachmentRuleDatasheetAbility",

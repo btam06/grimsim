@@ -107,7 +107,8 @@ async def used_in_list(session: AsyncSession, list_id: int, except_unit_id: int 
     )
 
 
-async def _list_detachment_ids(session: AsyncSession, list_id: int) -> set[int]:
+async def _list_detachments(session: AsyncSession, list_id: int) -> tuple[set[int], list]:
+    # The list's detachment ids, and their rules (e.g. for keywords they grant).
     army_list = (
         await session.execute(
             select(ArmyList)
@@ -117,7 +118,11 @@ async def _list_detachment_ids(session: AsyncSession, list_id: int) -> set[int]:
     ).scalar_one_or_none()
     if army_list is None:
         raise HTTPException(status_code=400, detail="invalid list_id")
-    return {d.id for d in army_list.detachments}
+    return {d.id for d in army_list.detachments}, enhancement_rules.list_rules(army_list)
+
+
+def _keyword_names(model: Model) -> set[str]:
+    return {k.name for k in model.keywords}
 
 
 async def _load_models(session: AsyncSession, ids: list[int]) -> dict[int, Model]:
@@ -144,13 +149,19 @@ async def available_enhancements(
     list_id: int,
     model_id: int,
     unit_id: int | None = None,
+    # Detachment rules the unit is selected for (e.g. one giving CHARACTER).
+    selected_rule_ids: list[int] = Query(default=[]),
     session: AsyncSession = Depends(get_session),
 ):
     # The enhancements a model could carry in a unit of this list (`unit_id`:
     # the unit being edited, if any), leaving out ones other units in the list
     # have already taken.
-    detachment_ids = await _list_detachment_ids(session, list_id)
+    detachment_ids, rules = await _list_detachments(session, list_id)
     model = (await _load_models(session, [model_id]))[model_id]
+    # Keywords the list's detachment rules give it (judged on the model alone).
+    granted = enhancement_rules.rule_granted_keywords(
+        rules, [_keyword_names(model)], selected_rule_ids
+    )[0]
     context = await list_building.load_list_context(session, list_id, unit_id)
     if not list_building.can_take_enhancements(context, model):
         return []  # e.g. a HARLEQUINS model in a Drukhari list
@@ -159,7 +170,7 @@ async def available_enhancements(
         _to_out(e)
         for e in await _all(session)
         if e.id not in used
-        and enhancement_rules.model_unavailable_reason(e, model, detachment_ids) is None
+        and enhancement_rules.model_unavailable_reason(e, model, detachment_ids, granted) is None
     ]
 
 
@@ -168,19 +179,24 @@ async def available_upgrades(
     list_id: int,
     model_ids: list[int] = Query(default=[]),
     unit_id: int | None = None,
+    selected_rule_ids: list[int] = Query(default=[]),
     session: AsyncSession = Depends(get_session),
 ):
     # The upgrades a unit made of these models (one id per model) could take
     # in this list, leaving out ones other units in the list have taken.
-    detachment_ids = await _list_detachment_ids(session, list_id)
+    detachment_ids, rules = await _list_detachments(session, list_id)
     models = await _load_models(session, list(set(model_ids)))
     unit_models = [models[i] for i in model_ids]
+    granted = enhancement_rules.rule_granted_keywords(
+        rules, [_keyword_names(m) for m in unit_models], selected_rule_ids
+    )
     used = await used_in_list(session, list_id, unit_id)
     return [
         _to_out(e)
         for e in await _all(session)
         if e.id not in used
-        and enhancement_rules.unit_unavailable_reason(e, unit_models, detachment_ids) is None
+        and enhancement_rules.unit_unavailable_reason(e, unit_models, detachment_ids, granted)
+        is None
     ]
 
 

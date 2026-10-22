@@ -539,3 +539,373 @@ async def test_seed_sets_per_model_on_an_existing_rule(
     write({"name": "R", "per_model": True})
     await run_all(session)
     assert (await client.get("/detachment-rules")).json()[0]["per_model"] is True
+
+
+# --- keywords a rule grants ---
+
+
+def _granting_rule(granted: tuple[str, ...], *options, per_model=False) -> DetachmentRule:
+    rule = _rule(*options)
+    rule.granted_keywords = [Keyword(name=k) for k in granted]
+    rule.per_model = per_model
+    return rule
+
+
+def test_unit_wide_rule_grants_keywords_when_every_model_matches():
+    from app.services.enhancements import rule_granted_keywords
+
+    rule = _granting_rule(("BATTLELINE",), ("WAR DOG",))
+    assert rule_granted_keywords([rule], [{"WAR DOG"}]) == [{"BATTLELINE"}]
+    # A unit with a model that doesn't match isn't reached at all.
+    assert rule_granted_keywords([rule], [{"WAR DOG"}, {"INFANTRY"}]) == [set(), set()]
+
+
+def test_per_model_rule_grants_keywords_to_matching_models_only():
+    from app.services.enhancements import rule_granted_keywords
+
+    rule = _granting_rule(("BATTLELINE",), ("WAR DOG",), per_model=True)
+    assert rule_granted_keywords([rule], [{"WAR DOG"}, {"INFANTRY"}]) == [{"BATTLELINE"}, set()]
+
+
+def test_rule_without_options_grants_keywords_to_every_model():
+    from app.services.enhancements import rule_granted_keywords
+
+    rule = _granting_rule(("CHAOS",))
+    assert rule_granted_keywords([rule], [{"A"}, {"B"}]) == [{"CHAOS"}, {"CHAOS"}]
+
+
+async def _keyword(client: AsyncClient, name: str) -> int:
+    return (await client.post("/keywords", json={"name": name})).json()["id"]
+
+
+async def _war_dog_list(client: AsyncClient, faction_id: int, granted: str, with_rule=True):
+    # A list with a detachment whose rule gives WAR DOG units `granted`, and a
+    # unit of one WAR DOG model in it. Returns (detachment, list, model, unit).
+    war_dog = await _keyword(client, "WAR DOG")
+    granted_id = await _keyword(client, granted)
+    detachment = await _detachment(client, faction_id, "Houndpack Lance")
+    if with_rule:
+        response = await client.post(
+            "/detachment-rules",
+            json={
+                "detachment_id": detachment,
+                "name": "Houndpack Keywords",
+                "keyword_option_ids": [[war_dog]],
+                "granted_keyword_ids": [granted_id],
+            },
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["granted_keyword_ids"] == [granted_id]
+    list_id = (
+        await client.post(
+            "/lists",
+            json={
+                "name": "Hounds",
+                "points_limit": 2000,
+                "faction_id": faction_id,
+                "detachment_ids": [detachment],
+            },
+        )
+    ).json()["id"]
+    model = (
+        await client.post(
+            "/models",
+            json={
+                "name": "War Dog",
+                "faction_id": faction_id,
+                "save": 3,
+                "toughness": 10,
+                "oc": 8,
+                "movement": 12,
+                "wounds": 12,
+                "leadership": 7,
+                "keyword_ids": [war_dog],
+            },
+        )
+    ).json()["id"]
+    faction_unit = (
+        await client.post("/faction-units", json={"name": "War Dogs", "faction_id": faction_id})
+    ).json()["id"]
+    unit = (
+        await client.post(
+            "/units",
+            json={
+                "faction_unit_id": faction_unit,
+                "points": 150,
+                "list_id": list_id,
+                "unit_models": [{"model_id": model}],
+            },
+        )
+    ).json()["id"]
+    return detachment, list_id, model, unit
+
+
+@pytest.mark.parametrize("with_rule", [True, False])
+async def test_granted_keyword_makes_a_stratagem_usable(
+    client: AsyncClient, faction_id: int, with_rule
+):
+    _, _, _, unit = await _war_dog_list(client, faction_id, "BATTLELINE", with_rule)
+    battleline = await _id(client, "/keywords", "BATTLELINE")
+    await client.post(
+        "/stratagems",
+        json={"name": "For Battleline", "cp": 1, "is_core": True, "keyword_ids": [battleline]},
+    )
+    response = await client.get(
+        "/combat/stratagems", params={"unit_id": unit, "side": "attacker"}
+    )
+    names = [s["name"] for s in response.json()]
+    assert ("For Battleline" in names) is with_rule
+
+
+@pytest.mark.parametrize("with_rule,status", [(True, 201), (False, 400)])
+async def test_granted_character_lets_a_model_carry_an_enhancement(
+    client: AsyncClient, faction_id: int, with_rule, status
+):
+    detachment, list_id, model, _ = await _war_dog_list(
+        client, faction_id, "CHARACTER", with_rule
+    )
+    enhancement = (
+        await client.post(
+            "/enhancements",
+            json={
+                "name": "Loping Predator",
+                "points": 10,
+                "kind": "enhancement",
+                "detachment_id": detachment,
+            },
+        )
+    ).json()["id"]
+    available = await client.get(
+        "/enhancements/available", params={"list_id": list_id, "model_id": model}
+    )
+    assert (enhancement in [e["id"] for e in available.json()]) is with_rule
+
+    faction_unit = (
+        await client.post("/faction-units", json={"name": "Alpha", "faction_id": faction_id})
+    ).json()["id"]
+    response = await client.post(
+        "/units",
+        json={
+            "faction_unit_id": faction_unit,
+            "points": 160,
+            "list_id": list_id,
+            "unit_models": [{"model_id": model, "enhancement_id": enhancement}],
+        },
+    )
+    assert response.status_code == status, response.text
+
+
+async def test_create_detachment_rule_rejects_unknown_granted_keyword(
+    client: AsyncClient, faction_id: int
+):
+    detachment = await _detachment(client, faction_id)
+    response = await client.post(
+        "/detachment-rules",
+        json={"detachment_id": detachment, "name": "Bad", "granted_keyword_ids": [9999]},
+    )
+    assert response.status_code == 400
+
+
+# --- rules units are selected for (e.g. Houndpack Alphas) ---
+
+
+class _Alphas:
+    # A Houndpack list whose "Alphas" rule gives CHARACTER to up to 3 WAR DOG
+    # units selected for it, a War Dog model and an enhancement needing
+    # CHARACTER, all made through the API.
+
+    def __init__(self, client: AsyncClient, faction_id: int):
+        self.client = client
+        self.faction_id = faction_id
+
+    async def setup(self):
+        client = self.client
+        war_dog = await _keyword(client, "WAR DOG")
+        character = await _keyword(client, "CHARACTER")
+        self.detachment = await _detachment(client, self.faction_id, "Houndpack Lance")
+        response = await client.post(
+            "/detachment-rules",
+            json={
+                "detachment_id": self.detachment,
+                "name": "Houndpack Alphas",
+                "keyword_option_ids": [[war_dog]],
+                "granted_keyword_ids": [character],
+                "selection_limit": 3,
+            },
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["selection_limit"] == 3
+        self.rule = response.json()["id"]
+        self.list_id = (
+            await client.post(
+                "/lists",
+                json={
+                    "name": "Hounds",
+                    "points_limit": 2000,
+                    "faction_id": self.faction_id,
+                    "detachment_ids": [self.detachment],
+                },
+            )
+        ).json()["id"]
+        self.war_dog = await self._model("War Dog", [war_dog])
+        self.trooper = await self._model("Trooper", [])
+        self.faction_unit = (
+            await client.post(
+                "/faction-units", json={"name": "War Dogs", "faction_id": self.faction_id}
+            )
+        ).json()["id"]
+        self.enhancement = (
+            await client.post(
+                "/enhancements",
+                json={
+                    "name": "Loping Predator",
+                    "points": 10,
+                    "kind": "enhancement",
+                    "detachment_id": self.detachment,
+                },
+            )
+        ).json()["id"]
+        return self
+
+    async def _model(self, name, keyword_ids):
+        return (
+            await self.client.post(
+                "/models",
+                json={
+                    "name": name,
+                    "faction_id": self.faction_id,
+                    "save": 3,
+                    "toughness": 10,
+                    "oc": 8,
+                    "movement": 12,
+                    "wounds": 12,
+                    "leadership": 7,
+                    "keyword_ids": keyword_ids,
+                },
+            )
+        ).json()["id"]
+
+    async def unit(self, model=None, selected=True, enhancement=None):
+        return await self.client.post(
+            "/units",
+            json={
+                "faction_unit_id": self.faction_unit,
+                "points": 150,
+                "list_id": self.list_id,
+                "unit_models": [
+                    {"model_id": model or self.war_dog, "enhancement_id": enhancement}
+                ],
+                "selected_rule_ids": [self.rule] if selected else [],
+            },
+        )
+
+
+async def test_up_to_the_selection_limit_of_units_can_be_selected(
+    client: AsyncClient, faction_id: int
+):
+    alphas = await _Alphas(client, faction_id).setup()
+    for _ in range(3):
+        response = await alphas.unit()
+        assert response.status_code == 201, response.text
+        assert response.json()["selected_rule_ids"] == [alphas.rule]
+    response = await alphas.unit()
+    assert response.status_code == 400
+    assert "at most 3" in response.json()["detail"]
+    # Unselected War Dogs are still fine.
+    assert (await alphas.unit(selected=False)).status_code == 201
+
+
+async def test_only_units_the_rule_reaches_can_be_selected(
+    client: AsyncClient, faction_id: int
+):
+    alphas = await _Alphas(client, faction_id).setup()
+    response = await alphas.unit(model=alphas.trooper)
+    assert response.status_code == 400
+    assert "can't be selected" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("selected,status", [(True, 201), (False, 400)])
+async def test_only_selected_units_gain_the_rules_keywords(
+    client: AsyncClient, faction_id: int, selected, status
+):
+    alphas = await _Alphas(client, faction_id).setup()
+    response = await alphas.unit(selected=selected, enhancement=alphas.enhancement)
+    assert response.status_code == status, response.text
+
+
+@pytest.mark.parametrize("selected", [True, False])
+async def test_enhancements_offered_depend_on_the_selection(
+    client: AsyncClient, faction_id: int, selected
+):
+    alphas = await _Alphas(client, faction_id).setup()
+    available = await client.get(
+        "/enhancements/available",
+        params={
+            "list_id": alphas.list_id,
+            "model_id": alphas.war_dog,
+            "selected_rule_ids": [alphas.rule] if selected else [],
+        },
+    )
+    assert (alphas.enhancement in [e["id"] for e in available.json()]) is selected
+
+
+async def test_selectable_rules_lists_rules_the_unit_can_be_selected_for(
+    client: AsyncClient, faction_id: int
+):
+    alphas = await _Alphas(client, faction_id).setup()
+    assert (await alphas.unit()).status_code == 201
+
+    async def selectable(model):
+        response = await client.get(
+            "/units/selectable-rules",
+            params={"list_id": alphas.list_id, "model_ids": [model]},
+        )
+        assert response.status_code == 200
+        return response.json()
+
+    assert [(r["id"], r["selected_elsewhere"]) for r in await selectable(alphas.war_dog)] == [
+        (alphas.rule, 1)
+    ]
+    assert await selectable(alphas.trooper) == []
+
+
+async def test_selected_unit_gains_keywords_in_combat(client: AsyncClient, faction_id: int):
+    alphas = await _Alphas(client, faction_id).setup()
+    character = await _id(client, "/keywords", "CHARACTER")
+    await client.post(
+        "/stratagems",
+        json={"name": "For Characters", "cp": 1, "is_core": True, "keyword_ids": [character]},
+    )
+    selected = (await alphas.unit()).json()["id"]
+    unselected = (await alphas.unit(selected=False)).json()["id"]
+
+    async def usable(unit):
+        response = await client.get(
+            "/combat/stratagems", params={"unit_id": unit, "side": "attacker"}
+        )
+        return "For Characters" in [s["name"] for s in response.json()]
+
+    assert await usable(selected)
+    assert not await usable(unselected)
+
+
+async def test_rule_cant_be_both_per_model_and_selected(client: AsyncClient, faction_id: int):
+    detachment = await _detachment(client, faction_id)
+    response = await client.post(
+        "/detachment-rules",
+        json={
+            "detachment_id": detachment,
+            "name": "Bad",
+            "per_model": True,
+            "selection_limit": 2,
+        },
+    )
+    assert response.status_code == 400
+
+
+async def test_deleting_a_selected_rule_clears_selections(client: AsyncClient, faction_id: int):
+    alphas = await _Alphas(client, faction_id).setup()
+    unit = (await alphas.unit()).json()["id"]
+    assert (await client.delete(f"/detachment-rules/{alphas.rule}")).status_code == 204
+    units = (await client.get("/units")).json()
+    assert next(u for u in units if u["id"] == unit)["selected_rule_ids"] == []

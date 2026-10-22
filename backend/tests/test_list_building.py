@@ -285,3 +285,114 @@ async def test_imperial_allies_cannot_be_given_enhancements(army: Army):
     assert (
         await army.unit(list_id, "Adeptus Mechanicus", dominus, enhancement_id=relic)
     ).status_code == 201
+
+
+# --- Chaos: the Chaos Knights' Dreadblades ---
+
+
+@pytest.mark.parametrize("host", ["Chaos Space Marines", "World Eaters", "Chaos Daemons"])
+async def test_dreadblades_one_titanic_chaos_knight(army: Army, host):
+    list_id = await army.list(host)
+    knight = await army.model("Chaos Knights", "Knight", "TITANIC", "CHAOS")
+    assert (await army.unit(list_id, "Chaos Knights", knight)).status_code == 201
+    response = await army.unit(list_id, "Chaos Knights", knight)
+    assert response.status_code == 400
+    assert "at most 1" in response.json()["detail"]
+
+
+async def test_dreadblades_up_to_three_war_dogs(army: Army):
+    list_id = await army.list("Death Guard")
+    war_dog = await army.model("Chaos Knights", "War Dog", "WAR DOG", "CHAOS")
+    for _ in range(3):
+        assert (await army.unit(list_id, "Chaos Knights", war_dog)).status_code == 201
+    response = await army.unit(list_id, "Chaos Knights", war_dog)
+    assert response.status_code == 400
+    assert "at most 3" in response.json()["detail"]
+
+
+async def test_dreadblades_is_either_a_titanic_knight_or_war_dogs(army: Army):
+    list_id = await army.list("Thousand Sons")
+    war_dog = await army.model("Chaos Knights", "War Dog", "WAR DOG", "CHAOS")
+    knight = await army.model("Chaos Knights", "Knight", "TITANIC", "CHAOS")
+    assert (await army.unit(list_id, "Chaos Knights", war_dog)).status_code == 201
+    response = await army.unit(list_id, "Chaos Knights", knight)
+    assert response.status_code == 400
+    assert "Dreadblades" in response.json()["detail"]
+
+
+async def test_dreadblades_only_join_chaos_lists(army: Army):
+    list_id = await army.list("Adeptus Mechanicus")
+    war_dog = await army.model("Chaos Knights", "War Dog", "WAR DOG", "CHAOS")
+    assert (await army.unit(list_id, "Chaos Knights", war_dog)).status_code == 400
+
+
+async def test_chaos_knights_own_lists_have_no_dreadblades_cap(army: Army):
+    list_id = await army.list("Chaos Knights")
+    knight = await army.model("Chaos Knights", "Knight", "TITANIC", "CHAOS")
+    for _ in range(2):
+        assert (await army.unit(list_id, "Chaos Knights", knight)).status_code == 201
+
+
+async def test_freeblades_one_titanic_imperial_knight(army: Army):
+    list_id = await army.list("Space Marines")
+    knight = await army.model("Imperial Knights", "Knight", "TITANIC", "IMPERIUM")
+    assert (await army.unit(list_id, "Imperial Knights", knight)).status_code == 201
+    response = await army.unit(list_id, "Imperial Knights", knight)
+    assert response.status_code == 400
+    assert "at most 1" in response.json()["detail"]
+
+
+async def test_freeblades_up_to_three_armigers(army: Army):
+    list_id = await army.list("Astra Militarum")
+    armiger = await army.model("Imperial Knights", "Armiger", "ARMIGER", "IMPERIUM")
+    for _ in range(3):
+        assert (await army.unit(list_id, "Imperial Knights", armiger)).status_code == 201
+    response = await army.unit(list_id, "Imperial Knights", armiger)
+    assert response.status_code == 400
+    assert "at most 3" in response.json()["detail"]
+
+
+async def test_freeblades_is_either_a_titanic_knight_or_armigers(army: Army):
+    list_id = await army.list("Adeptus Custodes")
+    armiger = await army.model("Imperial Knights", "Armiger", "ARMIGER", "IMPERIUM")
+    knight = await army.model("Imperial Knights", "Knight", "TITANIC", "IMPERIUM")
+    assert (await army.unit(list_id, "Imperial Knights", armiger)).status_code == 201
+    response = await army.unit(list_id, "Imperial Knights", knight)
+    assert response.status_code == 400
+    assert "Freeblades" in response.json()["detail"]
+
+
+async def test_freeblades_cap_leaves_imperial_agents_alone(army: Army):
+    list_id = await army.list("Adeptus Mechanicus")
+    agent = await army.model("Imperial Agents", "Inquisitor", "CHARACTER")
+    knight = await army.model("Imperial Knights", "Knight", "TITANIC", "IMPERIUM")
+    for _ in range(3):
+        assert (await army.unit(list_id, "Imperial Agents", agent)).status_code == 201
+    assert (await army.unit(list_id, "Imperial Knights", knight)).status_code == 201
+
+
+# --- Chaos Knights: Iconoclast Fiefdom's DAMNED units ---
+
+
+async def _detachment(army: Army, faction: str, name: str) -> int:
+    response = await army.client.post(
+        "/detachments", json={"name": name, "faction_id": await army.faction(faction), "dp": 1}
+    )
+    return response.json()["id"]
+
+
+async def test_iconoclast_fiefdom_lets_chaos_knights_take_damned(army: Army):
+    fiefdom = await _detachment(army, "Chaos Knights", "Iconoclast Fiefdom")
+    list_id = await army.list("Chaos Knights", detachment_ids=[fiefdom])
+    cultists = await army.model("Chaos Space Marines", "Cultists", "DAMNED", "INFANTRY")
+    assert (await army.unit(list_id, "Chaos Space Marines", cultists, points=300)).status_code == 201
+    response = await army.unit(list_id, "Chaos Space Marines", cultists, points=250)
+    assert response.status_code == 400
+    assert "500 pts" in response.json()["detail"]
+
+
+async def test_damned_need_the_iconoclast_fiefdom(army: Army):
+    other = await _detachment(army, "Chaos Knights", "Traitoris Lance")
+    list_id = await army.list("Chaos Knights", detachment_ids=[other])
+    cultists = await army.model("Chaos Space Marines", "Cultists", "DAMNED", "INFANTRY")
+    assert (await army.unit(list_id, "Chaos Space Marines", cultists)).status_code == 400

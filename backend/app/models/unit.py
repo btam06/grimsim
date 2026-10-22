@@ -32,3 +32,24 @@ class Unit(Base):
     upgrade: Mapped["Enhancement | None"] = relationship(
         secondary=unit_upgrades, uselist=False, lazy="selectin"
     )
+    # The detachment rules with a selection limit this unit was selected for.
+    rule_selection_links: Mapped[list["UnitRuleSelection"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin"
+    )
+
+    @property
+    def selected_rule_ids(self) -> list[int]:
+        return [link.rule_id for link in self.rule_selection_links]
+
+    @selected_rule_ids.setter
+    def selected_rule_ids(self, rule_ids: list[int]) -> None:
+        self.rule_selection_links = [UnitRuleSelection(rule_id=i) for i in rule_ids]
+
+
+class UnitRuleSelection(Base):
+    # A unit selected for a detachment rule with a selection limit (see
+    # DetachmentRule.selection_limit).
+    __tablename__ = "unit_rule_selections"
+
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id"), primary_key=True)
+    rule_id: Mapped[int] = mapped_column(ForeignKey("detachment_rules.id"), primary_key=True)
