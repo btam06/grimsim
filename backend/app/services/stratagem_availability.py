@@ -4,7 +4,7 @@ from typing import Literal
 
 from app.models import Stratagem, Unit
 from app.models.game import PHASES
-from app.services import enhancements as enhancement_rules
+from app.services.list_building import enhancements as enhancement_rules
 
 Side = Literal["attacker", "defender"]
 

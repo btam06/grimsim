@@ -17,8 +17,8 @@ from app.models import (
 )
 from app.routers.enhancements import used_in_list
 from app.schemas import SelectableRuleOut, UnitIn, UnitModelIn, UnitModelOut, UnitOut
-from app.services import enhancements as enhancement_rules
-from app.services import list_building
+from app.services.list_building import allies as list_building
+from app.services.list_building import enhancements as enhancement_rules
 
 router = APIRouter(prefix="/units", tags=["units"])
 

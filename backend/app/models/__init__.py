@@ -51,7 +51,23 @@ from app.models.enhancement import (
 from app.models.faction import Faction
 from app.models.faction_ability import FactionAbility
 from app.models.faction_unit import FactionUnit
-from app.models.game import Game, GamePlayer, GameScore, GameSecondary, GameStratagemUse
+from app.models.game import (
+    Game,
+    GameModelDamage,
+    GameModelPosition,
+    GamePileInDone,
+    GamePlayer,
+    GameScore,
+    GameSecondary,
+    GameStratagemUse,
+    GameUnitCharge,
+    GameUnitConsolidation,
+    GameUnitFight,
+    GameUnitMove,
+    GameUnitMoveDistance,
+    GameUnitPileIn,
+    GameUnitShot,
+)
 from app.models.keyword import Keyword
 from app.models.mission import PrimaryMission, SecondaryMission
 from app.models.model import Model, ModelMortalFeelNoPain, ModelRangedOnlyInvulnerable
@@ -64,6 +80,21 @@ from app.models.stratagem import (
     StratagemTiming,
 )
 from app.models.unit import Unit, UnitRuleSelection
+from app.models.terrain import (
+    GameTerrainLayout,
+    TerrainArea,
+    TerrainAreaShape,
+    TerrainAreaShapePoint,
+    TerrainDeployment,
+    TerrainDeploymentPoint,
+    TerrainFeature,
+    TerrainFeatureShape,
+    TerrainFeatureShapePart,
+    TerrainLayout,
+    TerrainLayoutDeployment,
+    TerrainObjective,
+    TerrainObjectiveArea,
+)
 from app.models.unit_model import UnitModel
 from app.models.user import User
 from app.models.wargear import Wargear, WargearScope
@@ -91,6 +122,19 @@ __all__ = [
     "Condition",
     "Effect",
     "Unit",
+    "GameTerrainLayout",
+    "TerrainArea",
+    "TerrainAreaShape",
+    "TerrainAreaShapePoint",
+    "TerrainDeployment",
+    "TerrainDeploymentPoint",
+    "TerrainFeature",
+    "TerrainFeatureShape",
+    "TerrainFeatureShapePart",
+    "TerrainLayout",
+    "TerrainLayoutDeployment",
+    "TerrainObjective",
+    "TerrainObjectiveArea",
     "UnitRuleSelection",
     "UnitModel",
     "Detachment",
@@ -117,10 +161,20 @@ __all__ = [
     "StratagemKeywordOption",
     "User",
     "Game",
+    "GamePileInDone",
     "GamePlayer",
+    "GameModelDamage",
+    "GameModelPosition",
     "GameScore",
     "GameSecondary",
     "GameStratagemUse",
+    "GameUnitCharge",
+    "GameUnitConsolidation",
+    "GameUnitFight",
+    "GameUnitMove",
+    "GameUnitMoveDistance",
+    "GameUnitPileIn",
+    "GameUnitShot",
     "PrimaryMission",
     "SecondaryMission",
     "list_owners",

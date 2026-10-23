@@ -48,6 +48,7 @@ export const listStratagems = () => request('/stratagems')
 // shooting phase or (in engagement range) the fight phase.
 // Positions worth asking about for a unit as the 'attacker' or 'defender'
 // (e.g. within 6" of a friendly ADEPTUS MECHANICUS BATTLELINE unit).
+export const getTerrainLayout = (id) => request(`/terrain-layouts/${id}`)
 export const listGrantedAbilities = (unitId) =>
   request(`/combat/granted-abilities?unit_id=${unitId}`)
 export const listRelevantPositions = (unitId, side) =>
@@ -183,6 +184,57 @@ export const createGame = (payload) =>
 export const deleteGame = (id) => request(`/games/${id}`, { method: 'DELETE' })
 export const startGame = (id) => request(`/games/${id}/start`, { method: 'POST' })
 export const advanceGame = (id) => request(`/games/${id}/advance`, { method: 'POST' })
+export const getDeployment = (id) => request(`/games/${id}/deployment`)
+export const getDeploymentFormation = (id, payload) =>
+  request(`/games/${id}/deployment/formation`, { method: 'POST', body: JSON.stringify(payload) })
+export const checkDeployment = (id, payload) =>
+  request(`/games/${id}/deployment/check`, { method: 'POST', body: JSON.stringify(payload) })
+export const getMovement = (id) => request(`/games/${id}/movement`)
+export const rollAdvance = (id, payload) =>
+  request(`/games/${id}/movement/advance`, { method: 'POST', body: JSON.stringify(payload) })
+export const checkMove = (id, payload) =>
+  request(`/games/${id}/movement/check`, { method: 'POST', body: JSON.stringify(payload) })
+export const moveUnit = (id, payload) =>
+  request(`/games/${id}/movement`, { method: 'POST', body: JSON.stringify(payload) })
+export const getShooting = (id) => request(`/games/${id}/shooting`)
+export const getShootingTargets = (id, unitId) =>
+  request(`/games/${id}/shooting/targets?unit_id=${unitId}`)
+export const getShootingBubble = (id, unitId) =>
+  request(`/games/${id}/shooting/bubble?unit_id=${unitId}`)
+export const shoot = (id, payload) =>
+  request(`/games/${id}/shooting`, { method: 'POST', body: JSON.stringify(payload) })
+export const getCharge = (id) => request(`/games/${id}/charge`)
+export const rollCharge = (id, payload) =>
+  request(`/games/${id}/charge/roll`, { method: 'POST', body: JSON.stringify(payload) })
+export const getChargeTargets = (id, unitId) =>
+  request(`/games/${id}/charge/targets?unit_id=${unitId}`)
+export const checkCharge = (id, payload) =>
+  request(`/games/${id}/charge/check`, { method: 'POST', body: JSON.stringify(payload) })
+export const makeCharge = (id, payload) =>
+  request(`/games/${id}/charge`, { method: 'POST', body: JSON.stringify(payload) })
+export const getPileIn = (id) => request(`/games/${id}/pile-in`)
+export const checkPileIn = (id, payload) =>
+  request(`/games/${id}/pile-in/check`, { method: 'POST', body: JSON.stringify(payload) })
+export const pileIn = (id, payload) =>
+  request(`/games/${id}/pile-in`, { method: 'POST', body: JSON.stringify(payload) })
+export const finishPilingIn = (id, payload) =>
+  request(`/games/${id}/pile-in/done`, { method: 'POST', body: JSON.stringify(payload) })
+export const getFight = (id) => request(`/games/${id}/fight`)
+export const getFightTargets = (id, unitId) =>
+  request(`/games/${id}/fight/targets?unit_id=${unitId}`)
+export const fight = (id, payload) =>
+  request(`/games/${id}/fight`, { method: 'POST', body: JSON.stringify(payload) })
+export const checkConsolidation = (id, payload) =>
+  request(`/games/${id}/fight/consolidate/check`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+export const consolidate = (id, payload) =>
+  request(`/games/${id}/fight/consolidate`, { method: 'POST', body: JSON.stringify(payload) })
+export const skipConsolidation = (id, payload) =>
+  request(`/games/${id}/fight/consolidate/skip`, { method: 'POST', body: JSON.stringify(payload) })
+export const deployUnit = (id, payload) =>
+  request(`/games/${id}/deployment`, { method: 'POST', body: JSON.stringify(payload) })
 export const listUsableStratagems = (id, seat) => request(`/games/${id}/stratagems?seat=${seat}`)
 export const playGameStratagem = (id, payload) =>
   request(`/games/${id}/stratagems`, { method: 'POST', body: JSON.stringify(payload) })

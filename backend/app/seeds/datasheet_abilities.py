@@ -102,7 +102,7 @@ CORE_CALCULATOR_NOTES = {
     "Deadly Demise D6": "Only whether it explodes is resolved, not the D6 mortal wounds.",
     "Infiltrators": "Descriptive only: a deployment rule.",
     "Deep Strike": "Descriptive only: a deployment rule.",
-    "Fights First": "Descriptive only: fight order isn't modelled.",
+    "Fights First": "Descriptive only here: in a game, it decides the fight order.",
     'Scouts 6"': "Descriptive only: a pre-battle move.",
 }
 

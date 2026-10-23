@@ -500,3 +500,308 @@ section .app-dialog form {
   left: auto;
   right: -1px;
 }
+
+/* The battlefield (see Gameboard): drawn at a fixed pixels-per-inch scale, so
+   it scrolls sideways rather than shrinking on a narrow screen. It's wider
+   than the page's column, so it breaks out of it: centred on the column, as
+   wide as the board (plus its border) or the window less a 16px gutter each
+   side, whichever is narrower. */
+.gameboard {
+  --board-span: min(calc(var(--board-width) + 2px), calc(100vw - 2rem));
+  width: var(--board-span);
+  position: relative;
+  left: 50%;
+  margin: 1rem 0 1rem calc(var(--board-span) / -2);
+  overflow-x: auto;
+}
+
+.gameboard-svg {
+  display: block;
+  border: 1px solid #8888;
+  border-radius: 2px;
+}
+
+.gameboard-surface {
+  fill: #8881;
+}
+
+/* Line widths in screen pixels, whatever the scale. */
+.gameboard-grid,
+.gameboard-centre {
+  vector-effect: non-scaling-stroke;
+  stroke-width: 1px;
+}
+
+.gameboard-grid {
+  stroke: #8882;
+}
+
+.gameboard-centre {
+  stroke: #8887;
+  stroke-dasharray: 4 4;
+}
+
+/* Deployment zones (see Gameboard): attacker red, defender blue, faint enough
+   to sit under the terrain in either theme. */
+.deployment-zone {
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+}
+
+.deployment-zone--attacker {
+  fill: #c0504a33;
+  stroke: #c0504acc;
+}
+
+.deployment-zone--defender {
+  fill: #3f6fa033;
+  stroke: #3f6fa0cc;
+}
+
+.deployment-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  align-items: center;
+  margin: 0.5rem 0 0;
+}
+
+.deployment-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.deployment-swatch {
+  display: inline-block;
+  width: 0.9rem;
+  height: 0.9rem;
+  border: 2px solid;
+  border-radius: 2px;
+}
+
+.deployment-swatch.deployment-zone--attacker {
+  background: #c0504a33;
+  border-color: #c0504acc;
+}
+
+.deployment-swatch.deployment-zone--defender {
+  background: #3f6fa033;
+  border-color: #3f6fa0cc;
+}
+
+/* Terrain on the board (see Gameboard): baseplates hatched, ruin walls green,
+   obstacles orange - as on the layout maps. */
+.terrain-area {
+  fill: url(#terrain-hatch);
+  stroke: #333c;
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Objectives (see Gameboard): their terrain areas outlined more heavily, and
+   their markers coloured as on the layout cards. */
+.terrain-area--objective {
+  stroke-width: 3.5px;
+}
+
+.objective {
+  pointer-events: none;
+}
+
+.objective circle {
+  fill: #fff;
+  stroke-width: 2.5px;
+  vector-effect: non-scaling-stroke;
+}
+
+.objective--attacker_home circle {
+  stroke: #9a2f2f;
+}
+
+.objective--attacker_home path {
+  fill: #9a2f2f;
+}
+
+.objective--defender_home circle {
+  stroke: #1c3a57;
+}
+
+.objective--defender_home path {
+  fill: #1c3a57;
+}
+
+.objective--expansion circle {
+  stroke: #1f7a80;
+}
+
+.objective--expansion path {
+  fill: #1f7a80;
+}
+
+.objective--centre circle {
+  stroke: #111;
+}
+
+.objective--centre path {
+  fill: #111;
+}
+
+.terrain-hatch-line {
+  stroke: #8886;
+  stroke-width: 0.12;
+}
+
+.terrain-feature rect {
+  stroke: #222c;
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+
+.terrain-feature--ruin_wall rect {
+  fill: #3b7553;
+}
+
+.terrain-feature--obstacle rect {
+  fill: #de8c22;
+}
+
+/* Models on the board (see Gameboard): bases coloured by side. The unit being
+   set up can be dragged, and is marked where it can't be deployed. */
+.gameboard-svg--placing {
+  cursor: crosshair;
+}
+
+.piece {
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
+}
+
+.piece--attacker {
+  fill: #b5433d;
+  stroke: #5a1f1c;
+}
+
+.piece--defender {
+  fill: #3a6896;
+  stroke: #182c40;
+}
+
+.piece--draft {
+  cursor: grab;
+  touch-action: none;
+  stroke: #f4f4f4;
+  stroke-width: 2px;
+}
+
+.piece--draft:active {
+  cursor: grabbing;
+}
+
+.piece--invalid {
+  stroke: #ffd400;
+  stroke-width: 3px;
+  stroke-dasharray: 3 2;
+}
+
+.piece--ghost {
+  opacity: 0.3;
+  pointer-events: none;
+  stroke-dasharray: 2 2;
+}
+
+/* The kinds of move a unit can make (see MovementPanel). */
+.move-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  align-items: center;
+  margin: 0.5rem 0;
+  font-size: 0.85rem;
+}
+
+.move-kinds .radio-option {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+/* Where a unit can move or shoot (see Gameboard's bubbles). */
+.bubble {
+  opacity: 0.16;
+  pointer-events: none;
+}
+
+.bubble--move {
+  fill: #2f9e5a;
+}
+
+.bubble--shoot {
+  fill: #ff8c00;
+}
+
+/* A shooting unit and its target (see ShootingPanel). */
+.piece--shooter {
+  stroke: #f4f4f4;
+  stroke-width: 2.5px;
+}
+
+.piece--target {
+  stroke: #ff8c00;
+  stroke-width: 3px;
+}
+
+.shooting-outcome {
+  border-top: 1px solid #8886;
+  margin-top: 0.75rem;
+}
+
+.move-range {
+  fill: none;
+  stroke: #8889;
+  stroke-width: 1px;
+  stroke-dasharray: 4 3;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.move-tether {
+  stroke: #888c;
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+/* Deployment and movement (see DeploymentPanel, MovementPanel). */
+.deployment-panel {
+  border: 1px solid #8886;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin: 1rem 0;
+}
+
+.deployment-panel h3 {
+  margin-top: 0;
+}
+
+.deployment-status {
+  height: 8.5rem;
+  overflow-y: auto;
+  margin-bottom: 0.5rem;
+}
+
+.deployment-status p {
+  margin: 0.25rem 0;
+}
+
+.deployment-problems {
+  color: #d9534f;
+  margin: 0.25rem 0;
+  padding-left: 1.25rem;
+}
+
+.deployment-ready {
+  color: #3c9a5f;
+  font-weight: 600;
+}

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -13,12 +13,15 @@ if TYPE_CHECKING:
     from app.models.disposition import Disposition
     from app.models.mission import PrimaryMission, SecondaryMission
     from app.models.stratagem import Stratagem
+    from app.models.terrain import GameTerrainLayout, TerrainLayout
     from app.models.user import User
 
 # A turn's phases, in order.
 PHASES = ("command", "movement", "shooting", "charge", "fight")
 BATTLE_ROUNDS = 5
-GAME_STATUSES = ("setup", "in_progress", "finished")
+# A game is set up, then its armies are deployed (if its terrain layout has
+# deployment zones - see app/services/in_game/deployment.py), then it's played.
+GAME_STATUSES = ("setup", "deployment", "in_progress", "finished")
 SECONDARY_MODES = ("fixed", "tactical")
 
 
@@ -39,6 +42,47 @@ class Game(Base):
     players: Mapped[list["GamePlayer"]] = relationship(
         back_populates="game", cascade="all, delete-orphan", order_by="GamePlayer.seat"
     )
+    layout_link: Mapped["GameTerrainLayout | None"] = relationship(
+        cascade="all, delete-orphan", uselist=False, lazy="selectin"
+    )
+    # Where each deployed model is on the battlefield.
+    model_positions: Mapped[list["GameModelPosition"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameModelPosition.id"
+    )
+    # How units have moved in movement phases.
+    unit_moves: Mapped[list["GameUnitMove"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameUnitMove.id"
+    )
+    # Wounds models have lost in this game, and which are destroyed.
+    model_damage: Mapped[list["GameModelDamage"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameModelDamage.id"
+    )
+    # Charges units have rolled for and made in charge phases.
+    unit_charges: Mapped[list["GameUnitCharge"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameUnitCharge.id"
+    )
+    # Units' pile-ins at the start of fight phases, and which players have
+    # finished piling in.
+    unit_pile_ins: Mapped[list["GameUnitPileIn"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameUnitPileIn.id"
+    )
+    pile_ins_done: Mapped[list["GamePileInDone"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GamePileInDone.id"
+    )
+    # Which units have fought in fight phases, at what, and in what order.
+    unit_fights: Mapped[list["GameUnitFight"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameUnitFight.id"
+    )
+    # Which units have shot in shooting phases, and at what.
+    unit_shots: Mapped[list["GameUnitShot"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameUnitShot.id"
+    )
+
+    @property
+    def layout(self) -> "TerrainLayout | None":
+        # The terrain layout it's played on, if one fits the players'
+        # dispositions (see app/services/in_game/terrain.py).
+        return self.layout_link.layout if self.layout_link else None
 
 
 class GamePlayer(Base):
@@ -129,3 +173,175 @@ class GameStratagemUse(Base):
 
     player: Mapped["GamePlayer"] = relationship(back_populates="stratagem_uses")
     stratagem: Mapped["Stratagem"] = relationship()
+
+
+class GameModelPosition(Base):
+    # A model on the battlefield: its base centred on (x, y) inches on the
+    # board (see app/models/terrain.py), turned `rotation` degrees clockwise.
+    __tablename__ = "game_model_positions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    # Gone with the model if it's taken out of its list.
+    unit_model_id: Mapped[int] = mapped_column(ForeignKey("unit_models.id", ondelete="CASCADE"))
+    x: Mapped[float] = mapped_column(Float)
+    y: Mapped[float] = mapped_column(Float)
+    rotation: Mapped[float] = mapped_column(Float, default=0)
+
+
+# How a unit moves in its movement phase (see app/services/in_game/movement.py). Not
+# moving at all is remaining stationary.
+MOVE_KINDS = ("normal", "advance", "fall_back")
+
+
+class GameUnitMove(Base):
+    # A unit's move in one movement phase (battle round and whose turn). An
+    # Advance's D6 is rolled before the unit moves, so the row can exist with
+    # `completed` False (and the roll) until it has; `kind` is then the move it
+    # made, which needn't be the Advance.
+    __tablename__ = "game_unit_moves"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    # Gone with the unit if it's taken out of its list.
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(32))
+    advance_roll: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    completed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    distance_link: Mapped["GameUnitMoveDistance | None"] = relationship(
+        cascade="all, delete-orphan", uselist=False, lazy="selectin"
+    )
+
+    @property
+    def distance(self) -> float | None:
+        # How far its furthest-moved model went, once it's moved (None for a
+        # move recorded before distances were).
+        return self.distance_link.distance if self.distance_link else None
+
+    @distance.setter
+    def distance(self, distance: float | None) -> None:
+        self.distance_link = None if distance is None else GameUnitMoveDistance(distance=distance)
+
+
+class GameUnitMoveDistance(Base):
+    # How far a unit's move took its furthest-moved model (e.g. for whether
+    # it moved less than 3" when it shoots). Its own table rather than a column,
+    # so existing databases pick it up without a migration.
+    __tablename__ = "game_unit_move_distances"
+
+    move_id: Mapped[int] = mapped_column(
+        ForeignKey("game_unit_moves.id", ondelete="CASCADE"), primary_key=True
+    )
+    distance: Mapped[float] = mapped_column(Float)
+
+
+class GameUnitShot(Base):
+    # A unit shooting in a shooting phase (battle round and whose turn): its
+    # target, and what it did (see app/services/in_game/shooting.py).
+    __tablename__ = "game_unit_shots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    # Gone with either unit if it's taken out of its list.
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    target_unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int] = mapped_column(Integer)
+    total_damage: Mapped[int] = mapped_column(Integer)
+    models_destroyed: Mapped[int] = mapped_column(Integer)
+
+
+class GameModelDamage(Base):
+    # Wounds a model has lost in a game - and whether it's destroyed: then
+    # it's taken off the battlefield (its position removed). Only this game:
+    # the model stays in its list.
+    __tablename__ = "game_model_damage"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    unit_model_id: Mapped[int] = mapped_column(ForeignKey("unit_models.id", ondelete="CASCADE"))
+    wounds_lost: Mapped[int] = mapped_column(Integer, default=0)
+    destroyed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class GameUnitCharge(Base):
+    # A unit's charge in one charge phase (battle round and whose turn): its
+    # 2D6 charge roll (rolled first, kept for the phase), and once it's made
+    # the charge, its target (see app/services/in_game/charging.py).
+    __tablename__ = "game_unit_charges"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int] = mapped_column(Integer)
+    first_die: Mapped[int] = mapped_column(Integer)
+    second_die: Mapped[int] = mapped_column(Integer)
+    target_unit_id: Mapped[int | None] = mapped_column(
+        ForeignKey("units.id", ondelete="CASCADE"), nullable=True
+    )
+    completed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    @property
+    def roll(self) -> int:
+        return self.first_die + self.second_die
+
+
+class GameUnitPileIn(Base):
+    # A unit piling in at the start of one fight phase (battle round and
+    # whose turn) - see app/services/in_game/fighting.py.
+    __tablename__ = "game_unit_pile_ins"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int] = mapped_column(Integer)
+
+
+class GamePileInDone(Base):
+    # A player has finished piling in at the start of one fight phase.
+    __tablename__ = "game_pile_ins_done"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int] = mapped_column(Integer)
+    seat: Mapped[int] = mapped_column(Integer)
+
+
+class GameUnitFight(Base):
+    # A unit fighting in one fight phase (battle round and whose turn): whose
+    # unit it is (activations alternate - see app/services/in_game/fighting.py),
+    # its target, and what it did. In the order they fought.
+    __tablename__ = "game_unit_fights"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    target_unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int] = mapped_column(Integer)
+    seat: Mapped[int] = mapped_column(Integer)
+    fights_first: Mapped[bool] = mapped_column(Boolean, default=False)
+    total_damage: Mapped[int] = mapped_column(Integer)
+    models_destroyed: Mapped[int] = mapped_column(Integer)
+
+    consolidation: Mapped["GameUnitConsolidation | None"] = relationship(
+        cascade="all, delete-orphan", uselist=False, lazy="selectin"
+    )
+
+
+class GameUnitConsolidation(Base):
+    # After a unit fights, its consolidation: made (`moved`) or skipped. Until
+    # there's one, the next unit can't be picked to fight. Its own table
+    # rather than a column, so existing databases pick it up.
+    __tablename__ = "game_unit_consolidations"
+
+    fight_id: Mapped[int] = mapped_column(
+        ForeignKey("game_unit_fights.id", ondelete="CASCADE"), primary_key=True
+    )
+    moved: Mapped[bool] = mapped_column(Boolean, default=False)

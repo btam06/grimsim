@@ -23,6 +23,7 @@ from app.routers import (
     missions,
     models,
     stratagems,
+    terrain,
     units,
     users,
     wargear,
@@ -68,6 +69,7 @@ app.include_router(datasheet_abilities.router)
 app.include_router(conditions.router)
 app.include_router(effects.router)
 app.include_router(combat.router)
+app.include_router(terrain.router)
 
 
 @app.get("/health")

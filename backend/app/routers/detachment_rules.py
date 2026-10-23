@@ -13,7 +13,7 @@ from app.models import (
     WeaponAbility,
 )
 from app.schemas import DetachmentRuleIn, DetachmentRuleOut, DetachmentRuleWeaponAbilitySchema
-from app.services.detachment_rules import delete_rules
+from app.services.list_building.detachment_rules import delete_rules
 
 router = APIRouter(prefix="/detachment-rules", tags=["detachment-rules"])
 

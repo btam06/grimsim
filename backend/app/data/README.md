@@ -23,6 +23,7 @@ factions/
     ...
 stratagems.json
 missions.json
+terrain_layouts.json
 ```
 
 Any of a faction's files can be left out.
@@ -232,3 +233,77 @@ dispositions by name.
 
 `fixed_points`/`tactical_points` is `null` if the card can't be used in that
 mode.
+
+## `terrain_layouts.json`
+
+The terrain kit, and the battlefield layouts that place it. Every layout uses
+the same kit - the same baseplates (terrain areas) and ruin walls and
+obstacles (terrain features) - each piece placed, turned and sometimes flipped
+differently, and not always all of them. A game is given a layout for its
+attacker's and defender's dispositions (picked at random if there are several).
+
+`area_shapes` and `feature_shapes` are the kit, each with how many of it the
+kit has (`count`). An area shape is a `width` x `height` rectangle centred on
+where it's placed, or a convex polygon of `points` relative to it (in order
+around it). A feature shape's `kind` is `ruin_wall` or `obstacle`, and it's
+made of rectangular `parts` whose `x`/`y` is their top-left corner relative to
+where it's placed (e.g. an L-shaped wall is two parts).
+
+Each layout places shapes by name: at `x`, `y`, turned `rotation` degrees
+clockwise about that point, and flipped first if `mirrored` (the shape's x
+negated). A layout can't use more of a shape than the kit has. Everything is
+in inches on the 60" x 44" board seen from above: `x` runs 0-60 left to right,
+`y` 0-44 top to bottom. A portrait layout map (44" across, 60" down) is turned
+a quarter anticlockwise onto it: the map's top edge becomes the board's left
+edge.
+
+Each layout lists its `objectives`. Objectives are terrain areas: each one
+has a `kind` (`attacker_home`, `defender_home`, `expansion` or `centre`),
+the `x`/`y` where its marker is drawn (board inches), and `areas`, the terrain
+areas it is, as indexes into the layout's `areas` (usually one; a Take and Hold
+layout's centre is both of its halves). An already-seeded layout without
+objectives gains them on the next seed.
+
+`deployments` are the deployment zones (e.g. Dawn of War): an `attacker_zone`
+and a `defender_zone`, each a polygon of at least 3 corners in order around it
+(in board inches; it can be concave). A layout names its `deployment`; an
+already-seeded layout without one gains it on the next seed.
+
+```json
+{
+  "area_shapes": [
+    {"name": "Large ruin", "count": 4, "width": 7, "height": 11.5},
+    {"name": "Centre half ruin", "count": 2,
+     "points": [[-5.7, -4], [5.7, -4], [5.7, -2], [-5.7, 4]]}
+  ],
+  "feature_shapes": [
+    {"name": "Ruin wall L (2.75 x 6.25)", "kind": "ruin_wall", "count": 2,
+     "parts": [{"x": 0, "y": 0, "width": 6.25, "height": 0.5},
+               {"x": 0, "y": 0, "width": 0.5, "height": 2.75}]}
+  ],
+  "deployments": [
+    {"name": "Dawn of War",
+     "attacker_zone": [[0, 44], [0, 32], [60, 32], [60, 44]],
+     "defender_zone": [[60, 0], [60, 12], [0, 12], [0, 0]]}
+  ],
+  "layouts": [
+    {
+      "name": "Take & Hold Mirror 01",
+      "attacker_disposition": "Take and Hold",
+      "defender_disposition": "Take and Hold",
+      "deployment": "Dawn of War",
+      "areas": [
+        {"shape": "Large ruin", "x": 11.75, "y": 26.5, "rotation": 90},
+        {"shape": "Centre half ruin", "x": 28.5, "y": 22, "rotation": -90, "mirrored": true}
+      ],
+      "features": [
+        {"shape": "Ruin wall L (2.75 x 6.25)", "x": 6.25, "y": 29.75, "rotation": -90}
+      ],
+      "objectives": [
+        {"kind": "attacker_home", "x": 11.7, "y": 26.5, "areas": [0]},
+        {"kind": "centre", "x": 30, "y": 22, "areas": [1]}
+      ]
+    }
+  ]
+}
+```

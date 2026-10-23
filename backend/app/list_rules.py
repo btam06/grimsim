@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 # its own. Each is defined in the info.py of the faction whose lists it applies
 # to (ALLY_RULES) - e.g. Drukhari's Corsairs and Travelling Players, or an
 # Imperium faction's Imperial Agents and Imperial Knights - and applied by
-# app/services/list_building.py.
+# app/services/list_building/allies.py.
 
 
 @dataclass(frozen=True)

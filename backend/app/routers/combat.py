@@ -32,9 +32,9 @@ from app.seeds import factions as faction_seeds
 from app.seeds import stratagems as stratagem_seeds
 from app.routers.stratagems import _to_out as stratagem_to_out
 from app.services import combat as combat_service
-from app.services import detachment_rules as detachment_rule_service
-from app.services import enhancements as enhancement_rules
 from app.services import stratagem_availability
+from app.services.list_building import detachment_rules as detachment_rule_service
+from app.services.list_building import enhancements as enhancement_rules
 
 router = APIRouter(prefix="/combat", tags=["combat"])
 
@@ -427,6 +427,20 @@ async def relevant_positions(
 
 @router.post("", response_model=CombatOut)
 async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_session)):
+    return await calculate(session, payload)
+
+
+async def calculate(
+    session: AsyncSession,
+    payload: CombatIn,
+    firing: dict[int, dict] | None = None,
+    defender_wounds: dict[int, int] | None = None,
+    attacker_wounds: dict[int, int] | None = None,
+) -> CombatOut:
+    # Resolves an attack (see app/services/combat.py). `firing` is which
+    # weapons each attacking model can fire and at half range or not, when
+    # that's known from the battlefield (see app/services/in_game/shooting.py); the
+    # wounds are each model's left in a game (see app/services/in_game/casualties.py).
     attacker = await _load_unit(session, payload.attacking_unit_id)
     if attacker is None:
         raise HTTPException(status_code=400, detail="invalid attacking_unit_id")
@@ -521,6 +535,9 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
         charged=payload.charged,
         defender_battle_shocked=payload.defender_battle_shocked,
         attacker_damaged=payload.attacker_damaged,
+        firing=firing,
+        defender_wounds=defender_wounds,
+        attacker_wounds=attacker_wounds,
     )
 
     return CombatOut(
@@ -563,4 +580,6 @@ async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_sess
             )
             for wr in result.weapon_results
         ],
+        defender_wounds_remaining=result.defender_wounds_remaining,
+        attacker_damage=result.attacker_damage,
     )

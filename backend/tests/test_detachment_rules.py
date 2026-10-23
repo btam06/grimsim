@@ -27,7 +27,7 @@ from app.seeds import factions as faction_seeds
 from app.seeds import run_all
 from app.seeds import weapon_abilities as weapon_abilities_seed
 from app.services import combat
-from app.services import detachment_rules
+from app.services.list_building import detachment_rules
 
 # --- which units a rule reaches ---
 
@@ -552,7 +552,7 @@ def _granting_rule(granted: tuple[str, ...], *options, per_model=False) -> Detac
 
 
 def test_unit_wide_rule_grants_keywords_when_every_model_matches():
-    from app.services.enhancements import rule_granted_keywords
+    from app.services.list_building.enhancements import rule_granted_keywords
 
     rule = _granting_rule(("BATTLELINE",), ("WAR DOG",))
     assert rule_granted_keywords([rule], [{"WAR DOG"}]) == [{"BATTLELINE"}]
@@ -561,14 +561,14 @@ def test_unit_wide_rule_grants_keywords_when_every_model_matches():
 
 
 def test_per_model_rule_grants_keywords_to_matching_models_only():
-    from app.services.enhancements import rule_granted_keywords
+    from app.services.list_building.enhancements import rule_granted_keywords
 
     rule = _granting_rule(("BATTLELINE",), ("WAR DOG",), per_model=True)
     assert rule_granted_keywords([rule], [{"WAR DOG"}, {"INFANTRY"}]) == [{"BATTLELINE"}, set()]
 
 
 def test_rule_without_options_grants_keywords_to_every_model():
-    from app.services.enhancements import rule_granted_keywords
+    from app.services.list_building.enhancements import rule_granted_keywords
 
     rule = _granting_rule(("CHAOS",))
     assert rule_granted_keywords([rule], [{"A"}, {"B"}]) == [{"CHAOS"}, {"CHAOS"}]

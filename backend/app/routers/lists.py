@@ -7,7 +7,7 @@ from sqlalchemy.orm import selectinload
 from app.db import get_session
 from app.models import ArmyList, Detachment, FactionUnit, Model, Unit, User
 from app.schemas import ArmyListIn, ArmyListOut, ListEligibleOut
-from app.services import list_building
+from app.services.list_building import allies as list_building
 
 router = APIRouter(prefix="/lists", tags=["lists"])
 

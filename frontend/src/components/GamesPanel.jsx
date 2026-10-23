@@ -7,6 +7,7 @@ import NewGamePage from './NewGamePage'
 
 const statusLabel = (game) => {
   if (game.status === 'setup') return 'not started'
+  if (game.status === 'deployment') return 'deploying'
   if (game.status === 'finished') return 'finished'
   return `battle round ${game.battle_round}`
 }

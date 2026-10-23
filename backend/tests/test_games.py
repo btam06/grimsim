@@ -1,7 +1,7 @@
 import pytest
 from httpx import AsyncClient
 
-from app.services import game as game_service
+from app.services.in_game import game as game_service
 
 PHASES = ["command", "movement", "shooting", "charge", "fight"]
 

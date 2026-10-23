@@ -17,7 +17,7 @@ from app.models import (
     UnitRuleSelection,
     WeaponAbility,
 )
-from app.services import enhancements as enhancement_rules
+from app.services.list_building import enhancements as enhancement_rules
 
 # Which units a detachment rule reaches, and what it grants them in combat.
 

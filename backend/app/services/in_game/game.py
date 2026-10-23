@@ -15,6 +15,7 @@ from app.models import (
     GameScore,
     GameSecondary,
     GameStratagemUse,
+    GameTerrainLayout,
     PrimaryMission,
     SecondaryMission,
     Stratagem,
@@ -22,6 +23,8 @@ from app.models import (
 )
 from app.models.game import BATTLE_ROUNDS, PHASES
 from app.schemas import GameIn
+from app.services.in_game import deployment as deployment_service
+from app.services.in_game import terrain as terrain_service
 
 # How many new tactical secondary cards a player draws in each of their
 # command phases (11th edition: on top of any still held - no hand limit).
@@ -144,6 +147,14 @@ async def create_game(session: AsyncSession, payload: GameIn) -> Game:
         battle_round=0,
         players=players,
     )
+    # Its terrain: a layout for the attacker's and defender's dispositions.
+    attacker = next(p for p in players if p.seat == payload.attacker_seat)
+    defender = next(p for p in players if p.seat != payload.attacker_seat)
+    layout = await terrain_service.pick_layout(
+        session, attacker.disposition_id, defender.disposition_id
+    )
+    if layout is not None:
+        game.layout_link = GameTerrainLayout(layout=layout)
     session.add(game)
     return game
 
@@ -194,13 +205,37 @@ async def _begin_command_phase(session: AsyncSession, game: Game) -> None:
     await _draw_tactical(session, game, player_at(game, game.turn_seat))
 
 
-async def start_game(session: AsyncSession, game: Game) -> None:
-    if game.status != "setup":
-        raise _bad_request("the game has already started")
+def enter_deployment(game: Game) -> None:
+    # A new game goes straight to deployment, if its battlefield has
+    # deployment zones and there's anything to set up in them.
+    if game.status == "setup" and deployment_service.can_deploy(game):
+        game.status = "deployment"
+
+
+async def _begin_battle(session: AsyncSession, game: Game) -> None:
     game.status = "in_progress"
     game.battle_round = 1
     game.turn_seat = game.first_seat
     await _begin_command_phase(session, game)
+
+
+async def start_game(session: AsyncSession, game: Game) -> None:
+    # Deployment first, if there's any (see enter_deployment); otherwise the
+    # first battle round.
+    if game.status != "setup":
+        raise _bad_request("the game has already started")
+    enter_deployment(game)
+    if game.status == "setup":
+        await _begin_battle(session, game)
+
+
+async def deploy_unit(
+    session: AsyncSession, game: Game, unit, placement: dict[int, tuple[float, float, float]]
+) -> None:
+    # Sets a unit up; once every unit is, the first battle round begins.
+    deployment_service.deploy(game, unit, placement)
+    if deployment_service.deploying_seat(game) is None:
+        await _begin_battle(session, game)
 
 
 async def advance(session: AsyncSession, game: Game) -> None:

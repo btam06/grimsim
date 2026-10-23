@@ -9,6 +9,7 @@ from app.seeds import (
     factions,
     missions,
     stratagems,
+    terrain_layouts,
     wargear_abilities,
     weapon_abilities,
 )
@@ -40,11 +41,16 @@ from app.seeds import (
 # uncommitted data file if present (see app/seeds/stratagems.py); it must run
 # after keywords, conditions, effects and detachments are seeded.
 #
+# terrain_layouts.seed loads battlefield terrain from a local, uncommitted data
+# file if present (see app/seeds/terrain_layouts.py); it must run after
+# dispositions.seed.
+#
 # missions.seed loads primary/secondary mission cards from a local, uncommitted
 # data file if present (see app/seeds/missions.py); it must run after
 # dispositions.seed.
 SEED_FUNCS = [
     dispositions.seed,
+    terrain_layouts.seed,
     base_sizes.seed,
     missions.seed,
     factions.seed,

@@ -9,8 +9,8 @@ from types import SimpleNamespace
 from app.combat_rules import CONDITIONS, EFFECTS, Rule
 from app.combat_rules.effects import OWN_UNIT_EFFECTS
 from app.models import DetachmentRule, Model, Stratagem, Unit, WargearAbility, WeaponAbility
-from app.services import detachment_rules as detachment_rule_service
-from app.services import enhancements as enhancement_rules
+from app.services.list_building import detachment_rules as detachment_rule_service
+from app.services.list_building import enhancements as enhancement_rules
 
 _DICE_PATTERN = re.compile(
     r"^(?:(?P<flat>[0-9]+)|(?P<count>[0-9]*)D(?P<die>[36])(?:\+(?P<plus>[0-9]+))?)$"
@@ -118,6 +118,8 @@ class _Target:
     # e.g. War-Form Mantles: TECH-PRIEST models have a 4+ invulnerable save),
     # applied to an attack once it's allocated to this model.
     rules            : tuple = ()
+    # Which of the defending unit's models it is.
+    unit_model_id    : int | None = None
 
 
 def _precision_target(targets: deque[_Target]) -> _Target:
@@ -182,6 +184,10 @@ class CombatResult:
     # The same totals above, broken down per weapon profile (grouped by
     # weapon name) instead of pooled across the whole attacking unit.
     weapon_results: list[WeaponCombatResult] = field(default_factory=list)
+    # Each defending model's wounds left afterwards (0: destroyed), and the
+    # hazardous wounds each attacking model took - by unit model id.
+    defender_wounds_remaining: dict[int, int] = field(default_factory=dict)
+    attacker_damage: dict[int, int] = field(default_factory=dict)
 
 
 def resolve_combat(
@@ -211,15 +217,37 @@ def resolve_combat(
     charged: bool = False,
     defender_battle_shocked: bool = False,
     attacker_damaged: bool = False,
+    firing: dict[int, dict] | None = None,
+    defender_wounds: dict[int, int] | None = None,
+    attacker_wounds: dict[int, int] | None = None,
 ) -> CombatResult:
+    # `firing`, if given, is which weapons each attacking model can fire on
+    # the battlefield and whether each is within half range: {unit model id:
+    # {weapon id: half range}} (see app/services/in_game/shooting.py). A model only
+    # fires the selected weapons it lists, and `half_range` is then per weapon.
+    # `defender_wounds` and `attacker_wounds`, if given, are the wounds each
+    # model has left in a game ({unit model id: wounds}): a defending model
+    # not in it is already destroyed, and isn't attacked.
     # The defending unit is a queue of individual models, each with its own wound pool.
     # Each attack targets whichever model is at the front of the queue; once that
     # model is destroyed it's popped, and the *next* attack targets the model now
     # at the front - a single attack's damage never spills onto a second model.
     # The queue is pre-sorted so supports/leaders die last, and otherwise worst
     # saves (including invulnerable) die before better ones.
+    # In a game, a model that's already lost wounds takes the next attack.
+    def wounded(unit_model) -> bool:
+        return (
+            defender_wounds is not None
+            and defender_wounds[unit_model.id] < unit_model.model.wounds
+        )
+
     ordered_unit_models = sorted(
-        defender.unit_models, key=lambda unit_model: _target_priority(unit_model.model)
+        (
+            unit_model
+            for unit_model in defender.unit_models
+            if defender_wounds is None or unit_model.id in defender_wounds
+        ),
+        key=lambda unit_model: (not wounded(unit_model), _target_priority(unit_model.model)),
     )
     # The full set of keywords across every model in the defending unit's
     # original composition - used by conditions like "target has INFANTRY"
@@ -398,7 +426,12 @@ def resolve_combat(
             ),
             feel_no_pain_mortal=unit_model.model.feel_no_pain_mortal,
             invulnerable_ranged_only=unit_model.model.invulnerable_ranged_only,
-            remaining_wounds=unit_model.model.wounds,
+            remaining_wounds=(
+                unit_model.model.wounds
+                if defender_wounds is None
+                else defender_wounds[unit_model.id]
+            ),
+            unit_model_id=unit_model.id,
             is_leader=bool(unit_model.model.is_leader),
             is_support=bool(unit_model.model.is_support),
             deadly_demise=any(
@@ -418,6 +451,8 @@ def resolve_combat(
         )
         for unit_model in ordered_unit_models
     )
+    # Every model attacked, destroyed or not (the queue loses them as they die).
+    all_targets = list(targets)
 
     result = CombatResult()
     # Accumulates the same breakdown as `result`, but bucketed per weapon name
@@ -505,6 +540,14 @@ def resolve_combat(
                 # Only weapons the caller chose to fire/swing with this attack count.
                 if weapon.id not in selected_weapon_ids:
                     continue
+                # Only those it can fire where it is (in range of a target it
+                # can see), if that's known.
+                weapon_half_range = half_range
+                if firing is not None:
+                    can_fire = firing.get(unit_model.id, {})
+                    if weapon.id not in can_fire:
+                        continue
+                    weapon_half_range = can_fire[weapon.id]
 
                 is_ranged = weapon.weapon_type != "melee"
                 weapon_type = "ranged" if is_ranged else "melee"
@@ -602,6 +645,7 @@ def resolve_combat(
                     # Precision only changes targeting when the attacker opts in.
                     "uses_precision": apply_precision and eligibility_state.get("precision", False),
                     "result": weapon_result,
+                    "half_range": weapon_half_range,
                 }
 
                 # Attacks characteristic: how many attacks this weapon makes,
@@ -617,7 +661,7 @@ def resolve_combat(
                 pre_weapon_state: dict = {}
                 _apply_triggered_effects(
                     abilities,
-                    {"step": "pre_weapon", "half_range": half_range, **weapon_context},
+                    {"step": "pre_weapon", "half_range": weapon_half_range, **weapon_context},
                     pre_weapon_state,
                     pending_attacks,
                 )
@@ -661,7 +705,10 @@ def resolve_combat(
 
             # End of combat for this attacking model: if the hazardous wounds it
             # took while firing added up to (or past) its own wounds, it died.
-            if model_hazardous_damage >= unit_model.model.wounds:
+            if model_hazardous_damage:
+                result.attacker_damage[unit_model.id] = model_hazardous_damage
+            wounds = (attacker_wounds or {}).get(unit_model.id, unit_model.model.wounds)
+            if model_hazardous_damage >= wounds:
                 result.hazardous_models_destroyed += 1
 
     def target_for(fired: dict) -> _Target:
@@ -695,7 +742,7 @@ def resolve_combat(
                 {
                     "step": "pre_hit",
                     "moved_less_than_3": moved_less_than_3,
-                    "half_range": half_range,
+                    "half_range": fired["half_range"],
                     **weapon_context,
                 },
                 attack,
@@ -959,4 +1006,7 @@ def resolve_combat(
 
     result.defending_models_remaining = len(targets)
     result.weapon_results = list(weapon_results_by_name.values())
+    result.defender_wounds_remaining = {
+        target.unit_model_id: max(0, target.remaining_wounds) for target in all_targets
+    }
     return result

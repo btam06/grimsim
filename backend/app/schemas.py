@@ -598,6 +598,10 @@ class CombatOut(BaseModel):
     deadly_demise_rolls: list[int]
     deadly_demise_explosions: int
     weapon_results: list[WeaponCombatResultOut]
+    # Each defending model's wounds left afterwards (0: destroyed), and the
+    # hazardous wounds each attacking model took - by unit model id.
+    defender_wounds_remaining: dict[int, int] = {}
+    attacker_damage: dict[int, int] = {}
 
 
 class ArmyListIn(BaseModel):
@@ -749,6 +753,14 @@ class GameOut(BaseModel):
     turn_seat: int | None
     phase: str | None
     players: list[GamePlayerOut]
+    # Its terrain (see GET /terrain-layouts/{id}), if one fits the players'
+    # dispositions.
+    terrain_layout_id: int | None = None
+    terrain_layout_name: str | None = None
+    # Whose turn it is to deploy a unit, while the game's in deployment.
+    deploying_seat: int | None = None
+    # Whose turn it is to pile in, at the start of the fight phase.
+    piling_in_seat: int | None = None
 
 
 class GameStratagemIn(BaseModel):
@@ -767,3 +779,435 @@ class GameAchieveIn(BaseModel):
 class GameScoreIn(BaseModel):
     seat: Literal[1, 2]
     points: int = Field(ge=0)
+
+
+class TerrainPointOut(BaseModel):
+    x: float
+    y: float
+
+
+class TerrainAreaOut(BaseModel):
+    # A terrain area: a kit baseplate (shape) placed at (x, y) and turned
+    # `rotation` degrees clockwise about it - a width x height rectangle
+    # centred there, or the convex polygon its points make, relative to (x, y)
+    # (already flipped if it's mirrored; see app/models/terrain.py).
+    id: int
+    shape_id: int
+    shape_name: str
+    x: float
+    y: float
+    width: float
+    height: float
+    rotation: float
+    mirrored: bool
+    points: list[TerrainPointOut] = []
+
+
+class TerrainFeaturePartOut(BaseModel):
+    # One rectangle of a terrain feature: its top-left corner relative to the
+    # feature's position (before the feature's rotation), and its size.
+    x: float
+    y: float
+    width: float
+    height: float
+
+
+class TerrainFeatureOut(BaseModel):
+    # A terrain feature: a kit ruin wall or obstacle (shape) placed at (x, y)
+    # and turned about it; its parts are relative to (x, y) (already flipped if
+    # it's mirrored).
+    id: int
+    shape_id: int
+    shape_name: str
+    kind: Literal["ruin_wall", "obstacle"]
+    x: float
+    y: float
+    rotation: float
+    mirrored: bool
+    parts: list[TerrainFeaturePartOut]
+
+
+class TerrainDeploymentOut(BaseModel):
+    # A deployment's zones, each a polygon on the board (corners in order).
+    name: str
+    attacker_zone: list[TerrainPointOut]
+    defender_zone: list[TerrainPointOut]
+
+
+class TerrainObjectiveOut(BaseModel):
+    # An objective: its kind ("attacker_home", "defender_home", "expansion"
+    # or "centre"), where its marker goes, and the terrain areas it is.
+    id: int
+    kind: str
+    x: float
+    y: float
+    area_ids: list[int]
+
+
+class TerrainLayoutOut(BaseModel):
+    id: int
+    name: str
+    attacker_disposition_id: int
+    defender_disposition_id: int
+    deployment: TerrainDeploymentOut | None = None
+    areas: list[TerrainAreaOut]
+    features: list[TerrainFeatureOut]
+    objectives: list[TerrainObjectiveOut] = []
+
+
+class BasePositionIn(BaseModel):
+    # A model's base on the board: centred on (x, y) inches, turned `rotation`
+    # degrees clockwise. Its size is a base size (by id, e.g. "32mm" or
+    # "105 x 70mm"), or given in mm (height_mm defaults to width_mm: round).
+    x: float
+    y: float
+    rotation: float = 0
+    base_size_id: int | None = None
+    width_mm: float | None = Field(default=None, gt=0)
+    height_mm: float | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def check_size(self):
+        if (self.base_size_id is None) == (self.width_mm is None):
+            raise ValueError("give either base_size_id or width_mm")
+        if self.height_mm is not None and self.width_mm is None:
+            raise ValueError("height_mm needs width_mm")
+        return self
+
+
+class TerrainPositionOut(BaseModel):
+    # Whether any of the base (within) or all of it (wholly within) is over a
+    # terrain area or feature.
+    id: int
+    within: bool
+    wholly_within: bool
+
+
+class BasePositionOut(BaseModel):
+    areas: list[TerrainPositionOut]
+    features: list[TerrainPositionOut]
+
+
+class ModelPositionIn(BaseModel):
+    # A model's base on the board (see GameModelPosition).
+    unit_model_id: int
+    x: float
+    y: float
+    rotation: float = 0
+
+
+class ModelPositionOut(ModelPositionIn):
+    pass
+
+
+class DeploymentFormationIn(BaseModel):
+    # Where to set a unit down: its formation is centred on (x, y) inches.
+    unit_id: int
+    x: float
+    y: float
+
+
+class DeployUnitIn(BaseModel):
+    # A unit's models, each placed on the board.
+    unit_id: int
+    positions: list[ModelPositionIn]
+
+
+class DeploymentModelOut(BaseModel):
+    unit_model_id: int
+    name: str
+    # Its base: the base size's name (None if not entered), and its width and
+    # height in inches - a placeholder size if it has no measurements
+    # (measured False, e.g. "Use model").
+    base_size: str | None
+    width: float
+    height: float
+    measured: bool
+    # Where it is, once deployed (None again once it's destroyed).
+    position: ModelPositionOut | None = None
+    # Its Wounds characteristic, how many it has left in this game, and
+    # whether it's been destroyed.
+    wounds: int = 0
+    wounds_remaining: int = 0
+    destroyed: bool = False
+
+
+class DeploymentUnitOut(BaseModel):
+    unit_id: int
+    seat: int
+    name: str
+    # Every model has Infiltrators: it can be set up outside its deployment
+    # zone, more than 9" from the enemy's and from enemy models.
+    infiltrators: bool
+    deployed: bool
+    # Every model in it has been destroyed in this game.
+    destroyed: bool = False
+    models: list[DeploymentModelOut]
+
+
+class DeploymentOut(BaseModel):
+    deploying_seat: int | None
+    units: list[DeploymentUnitOut]
+
+
+class ModelProblemsOut(BaseModel):
+    unit_model_id: int
+    problems: list[str]
+
+
+class DeploymentCheckOut(BaseModel):
+    # Whether a unit could be deployed as placed, and if not why: for the
+    # unit as a whole, and for each model with a problem.
+    valid: bool
+    problems: list[str]
+    models: list[ModelProblemsOut]
+
+
+class UnitMoveIn(BaseModel):
+    # A unit's move: what kind, and where each of its models ends up (every
+    # model, moved or not).
+    unit_id: int
+    kind: Literal["normal", "advance", "fall_back"]
+    positions: list[ModelPositionIn]
+
+
+class UnitIdIn(BaseModel):
+    unit_id: int
+
+
+class MovementModelOut(BaseModel):
+    unit_model_id: int
+    # Its Movement characteristic, in inches.
+    movement: int
+
+
+class MovementUnitOut(BaseModel):
+    unit_id: int
+    name: str
+    # The moves it can still make this phase (none once it's moved): Fall
+    # Back if it's within Engagement Range, otherwise a Normal move or
+    # Advance.
+    allowed_kinds: list[str]
+    in_engagement_range: bool
+    # The move it made this phase, once it has; and its Advance roll, if it's
+    # rolled one (kept for the phase, whether or not it Advances).
+    kind: str | None = None
+    advance_roll: int | None = None
+    moved: bool = False
+    models: list[MovementModelOut]
+
+
+class MovementOut(BaseModel):
+    # The units the player whose turn it is can move, in their movement phase
+    # (empty otherwise).
+    units: list[MovementUnitOut]
+
+
+class ShotOut(BaseModel):
+    target_unit_id: int
+    target_name: str
+    total_damage: int
+    models_destroyed: int
+
+
+class ShootingUnitOut(BaseModel):
+    # A unit of the player whose turn it is, in their shooting phase: whether
+    # it can shoot (and if not, why), how it moved this turn, and what it
+    # shot, once it has.
+    unit_id: int
+    name: str
+    can_shoot: bool
+    reason: str | None = None
+    advanced: bool
+    remained_stationary: bool
+    moved_less_than_3: bool
+    # How far its furthest-moved model went this turn, if known.
+    distance: float | None = None
+    shot: ShotOut | None = None
+
+
+class ShootingOut(BaseModel):
+    units: list[ShootingUnitOut]
+
+
+class ShootingWeaponOut(BaseModel):
+    # A ranged weapon the unit has (an enhancement's if `enhancement`): how
+    # many of its models carry it, how many could fire it at the target (a
+    # visible target model within range), and whether any at half range.
+    id: int
+    enhancement: bool
+    name: str
+    range: int
+    carried_by: int
+    in_range: int
+    half_range: bool
+    # Whether it has Assault; and whether it can't be fired at all this phase
+    # (the unit Advanced and it isn't Assault).
+    assault: bool = False
+    unusable: bool = False
+    # Chosen to start with (for melee: each model's first weapon).
+    default: bool = False
+
+
+class ShootingTargetOut(BaseModel):
+    unit_id: int
+    name: str
+    # Whether any of the unit's models can see it (dense terrain blocks
+    # sight), and whether it's in cover.
+    visible: bool
+    in_cover: bool
+    weapons: list[ShootingWeaponOut]
+
+
+class ShootIn(BaseModel):
+    unit_id: int
+    target_unit_id: int
+    weapon_ids: list[int] = []
+    enhancement_weapon_ids: list[int] = []
+
+
+class ShootOut(BaseModel):
+    # What the battlefield gave the calculator, and its result - and the
+    # models it destroyed (the target's, or the shooters' own, e.g. to
+    # Hazardous), by unit model id: taken off the battlefield.
+    in_cover: bool
+    advanced: bool
+    remained_stationary: bool
+    moved_less_than_3: bool
+    combat: CombatOut
+    destroyed_unit_model_ids: list[int] = []
+
+
+class SightBubbleOut(BaseModel):
+    # Where a unit's guns reach (see GET /games/{id}/shooting/bubble): its
+    # longest range it can fire this phase, and the regions it can see within
+    # it - drawn together, one shape.
+    range: int | None
+    regions: list[list[TerrainPointOut]]
+
+
+class ChargeUnitOut(BaseModel):
+    # A unit of the player whose turn it is, in their charge phase: its charge
+    # roll (once rolled - the two dice, and their total), whether the charge
+    # failed (nothing in reach), and its target once it's charged.
+    unit_id: int
+    name: str
+    dice: list[int] = []
+    roll: int | None = None
+    failed: bool = False
+    charged: bool = False
+    target_unit_id: int | None = None
+    target_name: str | None = None
+
+
+class ChargeOut(BaseModel):
+    units: list[ChargeUnitOut]
+
+
+class ChargeTargetOut(BaseModel):
+    # An enemy unit: how close the charging unit is to it (base to base), and
+    # whether its roll reaches.
+    unit_id: int
+    name: str
+    distance: float
+    in_reach: bool
+
+
+class ChargeIn(BaseModel):
+    # A charge: the target, and where each of the unit's models ends up
+    # (every one it has left, moved or not).
+    unit_id: int
+    target_unit_id: int
+    positions: list[ModelPositionIn]
+
+
+class PileInUnitOut(BaseModel):
+    # A unit of the player piling in: whether it can (and if not, why),
+    # whether it has, and its models in base contact with an enemy model
+    # (they can't move).
+    unit_id: int
+    name: str
+    engaged: bool
+    can_pile_in: bool
+    reason: str | None = None
+    piled_in: bool
+    locked_unit_model_ids: list[int] = []
+
+
+class PileInOut(BaseModel):
+    # At the start of the fight phase: whose turn it is to pile in (None once
+    # both players are done), and their units.
+    seat: int | None
+    units: list[PileInUnitOut]
+
+
+class UnitPlacementIn(BaseModel):
+    # Where each of a unit's models ends up (every one it has left).
+    unit_id: int
+    positions: list[ModelPositionIn]
+
+
+class SeatIn(BaseModel):
+    seat: Literal[1, 2]
+
+
+class FightUnitOut(BaseModel):
+    # A unit on the battlefield, in the fight phase: whether it has Fights
+    # First (and whether that's from charging), whether it's fought, and
+    # whether it can fight now (and if not, why).
+    unit_id: int
+    seat: int
+    name: str
+    fights_first: bool
+    charged: bool
+    fought: bool
+    can_fight: bool
+    reason: str | None = None
+
+
+class FightLogOut(BaseModel):
+    # A unit that's fought this phase, in order.
+    unit_id: int
+    unit_name: str
+    seat: int
+    target_name: str
+    fights_first: bool
+    total_damage: int
+    models_destroyed: int
+
+
+class ConsolidatingOut(BaseModel):
+    # The unit that's just fought, which can consolidate now: the unit it
+    # fought, and whether that's been destroyed.
+    unit_id: int
+    unit_name: str
+    target_name: str
+    target_destroyed: bool
+
+
+class FightOut(BaseModel):
+    # The fight phase's step ("pile_in", "consolidate", "fights_first",
+    # "remaining" or "done"), who's to act (pick the next unit to fight, or
+    # consolidate), both players' units, and what's fought so far.
+    step: str | None
+    seat: int | None
+    units: list[FightUnitOut]
+    fights: list[FightLogOut]
+    consolidating: ConsolidatingOut | None = None
+
+
+class FightTargetOut(BaseModel):
+    # An enemy unit within Engagement Range, and the unit's melee weapons
+    # against it (in_range: how many of its models can fight with each).
+    unit_id: int
+    name: str
+    weapons: list[ShootingWeaponOut]
+
+
+class FightResultOut(BaseModel):
+    # The calculator's result, and the models it destroyed (taken off the
+    # battlefield).
+    charged: bool
+    fights_first: bool
+    combat: CombatOut
+    destroyed_unit_model_ids: list[int] = []

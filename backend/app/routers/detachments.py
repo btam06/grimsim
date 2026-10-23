@@ -7,8 +7,8 @@ from sqlalchemy.orm import selectinload
 from app.db import get_session
 from app.models import Detachment, DetachmentRule, Disposition, Enhancement
 from app.schemas import DetachmentIn, DetachmentOut
-from app.services.detachment_rules import delete_rules
-from app.services.enhancements import delete_enhancements
+from app.services.list_building.detachment_rules import delete_rules
+from app.services.list_building.enhancements import delete_enhancements
 
 router = APIRouter(prefix="/detachments", tags=["detachments"])
 

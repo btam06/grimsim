@@ -29,8 +29,8 @@ from app.schemas import (
     EnhancementWeaponAbilitySchema,
     EnhancementWeaponOut,
 )
-from app.services import enhancements as enhancement_rules
-from app.services import list_building
+from app.services.list_building import allies as list_building
+from app.services.list_building import enhancements as enhancement_rules
 
 router = APIRouter(prefix="/enhancements", tags=["enhancements"])
 
