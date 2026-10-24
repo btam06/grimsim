@@ -172,6 +172,19 @@ OPTION_OWNERS: dict[str, tuple[str, str]] = {
 }
 
 
+# (faction name, ability name) for every faction ability whose options are
+# required (abilities.py REQUIRED_OPTIONS): one is always chosen - no "none".
+REQUIRED_OPTIONS: set[tuple[str, str]] = {
+    (faction.info.FACTION_NAME, ability_name)
+    for faction in FACTIONS
+    for ability_name in getattr(faction.abilities, "REQUIRED_OPTIONS", set())
+}
+
+
+def required(faction_name: str, ability_name: str) -> bool:
+    return (faction_name, ability_name) in REQUIRED_OPTIONS
+
+
 def rule_options(faction_name: str, ability_name: str) -> dict[str, list[Rule]]:
     # The selectable rule options a faction ability grants, if any.
     return RULE_OPTIONS.get((faction_name, ability_name), {})

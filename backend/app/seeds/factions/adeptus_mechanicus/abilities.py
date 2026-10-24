@@ -22,9 +22,30 @@ DOCTRINA_IMPERATIVES = "Doctrina Imperatives"
 ENTRIES = [
     (
         DOCTRINA_IMPERATIVES,
-        "While a Doctrina Imperative (Protector or Conqueror) is active, units with this ability gain its abilities.",
+        "At the start of the battle round, you can select one of the Doctrina Imperatives "
+        "below. Until the end of the battle round, that Doctrina Imperative is active for "
+        "your army, and all units from your army that have the Doctrina Imperatives ability "
+        "gain the relevant abilities shown below.\n"
+        "Protector Imperative:\n"
+        "- Ranged weapons equipped by models in this unit have the [HEAVY] ability.\n"
+        "- Improve the Ballistic Skill characteristic of ranged weapons equipped by models in "
+        "this unit by 1.\n"
+        "- Each time a melee attack targets this unit, if this unit has the BATTLELINE keyword "
+        "and/or it is within 6\" of one or more friendly ADEPTUS MECHANICUS BATTLELINE units, "
+        "subtract 1 from the Hit roll.\n"
+        "Conqueror Imperative:\n"
+        "- Ranged weapons equipped by models in this unit have the [ASSAULT] ability.\n"
+        "- Improve the Weapon Skill characteristic of melee weapons equipped by models in this "
+        "unit by 1.\n"
+        "- Each time a model in this unit makes an attack, if this unit has the BATTLELINE "
+        "keyword and/or it is within 6\" of one or more friendly ADEPTUS MECHANICUS BATTLELINE "
+        "units, improve the Armour Penetration characteristic of that attack by 1.",
     ),
 ]
+
+# Abilities above whose options are required: one is always chosen - there's
+# no "none" (Doctrina Imperatives: Protector or Conqueror).
+REQUIRED_OPTIONS = {DOCTRINA_IMPERATIVES}
 
 # Rule options for abilities above: {ability name: {option name: [Rule, ...]}}.
 # A unit with one of these faction abilities gains the rules of whichever of

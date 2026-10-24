@@ -19,10 +19,12 @@ import {
   getFight,
   getMovement,
   getPileIn,
+  getReach,
   getShooting,
   getShootingBubble,
   makeCharge,
   moveUnit,
+  resetMove as resetMoveApi,
   pileIn as pileInUnit,
   rollCharge,
   skipConsolidation,
@@ -32,6 +34,7 @@ import {
   startGame,
   playGameStratagem,
 } from '../api'
+import { basesOverlap, freeSpot, slide } from '../collision'
 import CardTextAccordion from './CardTextAccordion'
 import ChargePanel from './ChargePanel'
 import DeploymentPanel from './DeploymentPanel'
@@ -39,6 +42,7 @@ import FightPanel from './FightPanel'
 import Gameboard from './Gameboard'
 import MovementPanel from './MovementPanel'
 import PileInPanel from './PileInPanel'
+import RoundStartPanel from './RoundStartPanel'
 import ShootingPanel from './ShootingPanel'
 import Select from './Select'
 import { PHASES } from './StratagemsPanel'
@@ -281,6 +285,8 @@ function PlayerCard({ game, player, onAction }) {
 // `allowance`, and the target; 'pile_in' likewise, with the models that
 // can't move, `locked`).
 const NO_DRAFT = { unitId: null, positions: null, check: null, kind: null }
+// The kinds of move made in the movement phase.
+const MOVE_KINDS = ['normal', 'advance', 'fall_back']
 
 // The models on the board: every deployed one, and the unit being placed
 // (draft - draggable, marked where the backend's check found a problem). A
@@ -297,7 +303,8 @@ function boardPieces(game, deployment, draft, focus = {}) {
     for (const model of unit.models) {
       const position = isDraft ? draft.positions[model.unit_model_id] : model.position
       if (!position) continue
-      const start = model.position
+      // Where it started: the start of the phase, when moving (`starts`).
+      const start = (isDraft && draft.starts?.[model.unit_model_id]) || model.position
       if (isDraft && draft.kind && start && (start.x !== position.x || start.y !== position.y)) {
         pieces.push({
           id: `ghost-${model.unit_model_id}`,
@@ -313,6 +320,7 @@ function boardPieces(game, deployment, draft, focus = {}) {
       }
       pieces.push({
         id: model.unit_model_id,
+        unitId: unit.unit_id,
         x: position.x,
         y: position.y,
         rotation: position.rotation,
@@ -358,19 +366,40 @@ function moveRings(deployment, movement, draft) {
     .filter((m) => m.position)
     .map((m) => ({
       id: m.unit_model_id,
-      x: m.position.x,
-      y: m.position.y,
+      x: (draft.starts?.[m.unit_model_id] ?? m.position).x,
+      y: (draft.starts?.[m.unit_model_id] ?? m.position).y,
       r: allowance(m.unit_model_id),
       to: draft.positions[m.unit_model_id] ?? m.position,
+      path: wayRound(draft, m.unit_model_id),
     }))
     .filter((ring) => ring.r > 0)
 }
 
+// The way a model went round walls, per the latest check - if it ends where
+// the model is now (not mid-drag since).
+function wayRound(draft, id) {
+  const path = draft.check?.paths?.find((p) => p.unit_model_id === id)?.points
+  const at = draft.positions?.[id]
+  if (!path || !at) return null
+  const last = path[path.length - 1]
+  return Math.abs(last.x - at.x) < 1e-3 && Math.abs(last.y - at.y) < 1e-3 ? path : null
+}
+
 // Where the moving unit's bases can reach: round each model's start, its
 // ring plus its base - drawn together as one bubble.
-function moveBubble(deployment, movement, draft) {
+// `reach` is the backend's areas each model can get to round walls (see POST
+// /games/{id}/reach), for these rings - until it comes, plain circles.
+function moveBubble(deployment, movement, draft, reach = null) {
   const rings = moveRings(deployment, movement, draft)
   if (rings.length === 0) return null
+  if (reach && reach.key === reachKey(draft.unitId, rings)) {
+    return {
+      kind: 'move',
+      regions: reach.models.flatMap((m) =>
+        m.regions.map((points) => ({ points, inflate: m.clearance }))
+      ),
+    }
+  }
   const unit = deployment.units.find((u) => u.unit_id === draft.unitId)
   const size = Object.fromEntries(
     unit.models.map((m) => [m.unit_model_id, Math.max(m.width, m.height) / 2])
@@ -379,6 +408,11 @@ function moveBubble(deployment, movement, draft) {
     kind: 'move',
     circles: rings.map((r) => ({ id: r.id, x: r.x, y: r.y, r: r.r + (size[r.id] ?? 0) })),
   }
+}
+
+// What a reach is for: the unit, and each model's start and distance.
+function reachKey(unitId, rings) {
+  return JSON.stringify([unitId, rings.map((r) => [r.id, r.x, r.y, r.r])])
 }
 
 // A point pulled back onto a ring if it's outside it.
@@ -534,6 +568,26 @@ function GameView({ gameId, onBack }) {
     runCheckRef.current?.(consolidatingId, positions, 'consolidate')
   }, [consolidationKey, deployment])
 
+  // Where the drafted unit's models can reach, going round walls (for the
+  // movement bubble): asked for whenever their starts or distances change.
+  const [reach, setReach] = useState(null)
+  const draftRings = moveRings(deployment, movement, draft)
+  const currentReachKey = draftRings.length > 0 ? reachKey(draft.unitId, draftRings) : null
+  useEffect(() => {
+    if (currentReachKey === null || !game) return
+    let cancelled = false
+    getReach(game.id, {
+      unit_id: draft.unitId,
+      models: draftRings.map((r) => ({ unit_model_id: r.id, x: r.x, y: r.y, distance: r.r })),
+    })
+      .then((r) => !cancelled && setReach({ key: currentReachKey, models: r.models }))
+      .catch((err) => setError(err.message))
+    return () => {
+      cancelled = true
+    }
+    // Only when what it's for changes (the key says).
+  }, [currentReachKey])
+
   // A new phase or turn: nothing's being placed, or shooting.
   const stage = game ? `${game.status}-${game.battle_round}-${game.turn_seat}-${game.phase}` : ''
   useEffect(() => {
@@ -597,8 +651,8 @@ function GameView({ gameId, onBack }) {
 
   // Asks the backend whether the draft can be deployed - or, with a kind of
   // move, moved, or charge `targetId` - as placed (only the latest answer
-  // counts).
-  const runCheck = async (unitId, positions, kind = null, targetId = null) => {
+  // counts). A move that's fine is saved straight away if `save`.
+  const runCheck = async (unitId, positions, kind = null, targetId = null, save = false) => {
     if (kind === 'charge' && targetId === null) return
     const seq = ++checkSeq.current
     setChecking(true)
@@ -616,7 +670,11 @@ function GameView({ gameId, onBack }) {
       } else {
         check = await checkDeployment(game.id, asPayload(unitId, positions))
       }
-      if (seq === checkSeq.current) setDraft((d) => (d.unitId === unitId ? { ...d, check } : d))
+      if (seq !== checkSeq.current) return
+      setDraft((d) => (d.unitId === unitId ? { ...d, check } : d))
+      if (save && check.valid && MOVE_KINDS.includes(kind)) {
+        await saveMove(unitId, positions, kind)
+      }
     } catch (err) {
       if (seq === checkSeq.current) setError(err.message)
     } finally {
@@ -641,17 +699,85 @@ function GameView({ gameId, onBack }) {
 
   // A dragged model follows the pointer - while moving, only as far as its
   // ring (the backend still checks the distance).
+  // A dragged model follows the pointer - only as far as its ring while
+  // moving, and never onto another base: it's pushed out to just touching
+  // the base under the pointer, or if there's no room there, it slides
+  // towards the pointer until it touches one. The backend still checks it all.
   const movePiece = (id, x, y) => {
-    const ring = moveRings(deployment, movement, draftRef.current).find((r) => r.id === id)
-    const to = ring ? tethered(ring, x, y) : { x, y }
-    setDraft((d) => ({ ...d, positions: { ...d.positions, [id]: { ...d.positions[id], ...to } } }))
+    const current = draftRef.current
+    const ring = moveRings(deployment, movement, current).find((r) => r.id === id)
+    const limit = (px, py) => {
+      const to = ring ? tethered(ring, px, py) : { x: px, y: py }
+      return [to.x, to.y]
+    }
+    const pieces = boardPieces(game, deployment, current).filter((p) => !p.ghost)
+    const base = pieces.find((p) => p.id === id)
+    if (!base) return
+    const others = pieces.filter((p) => p.id !== id)
+    const [nx, ny] =
+      freeSpot(base, x, y, others, limit) ?? slide(base, base.x, base.y, x, y, others, limit)
+    setDraft((d) => ({
+      ...d,
+      positions: { ...d.positions, [id]: { ...d.positions[id], x: nx, y: ny } },
+    }))
+  }
+
+  // Turning a dragged oval base by a corner handle - unless that would put
+  // it over another base. (The backend still checks it all.)
+  const rotatePiece = (id, rotation) => {
+    const pieces = boardPieces(game, deployment, draftRef.current).filter((p) => !p.ghost)
+    const base = pieces.find((p) => p.id === id)
+    if (!base) return
+    const turned = { ...base, rotation }
+    if (pieces.some((p) => p.id !== id && basesOverlap(turned, p))) return
+    setDraft((d) => ({
+      ...d,
+      positions: { ...d.positions, [id]: { ...d.positions[id], rotation } },
+    }))
+  }
+
+  // Clicking a model picks its unit in the phase's panel, as its radio would:
+  // one of the acting player's units to act with - or, with one picked, an
+  // enemy unit to shoot or fight (the panel ignores one that isn't a valid
+  // target). Clicking the unit already picked does nothing (a drag ends in a
+  // click).
+  const pickUnit = (unitId) => {
+    if (moving && movement) {
+      const unit = movement.units.find((u) => u.unit_id === unitId)
+      if (unit && unit.unit_id !== draftRef.current.unitId) selectMoveUnit(unit)
+    } else if (chargePhase && charge) {
+      const unit = charge.units.find((u) => u.unit_id === unitId)
+      if (unit && unit.unit_id !== draftRef.current.unitId) startCharge(unit)
+    } else if (fightPhase && fightState?.step === 'pile_in' && pileIn) {
+      const unit = pileIn.units.find((u) => u.unit_id === unitId)
+      if (unit?.can_pile_in && unit.unit_id !== draftRef.current.unitId) startPileIn(unit)
+    } else if (shootingPhase && shooting) {
+      pickFocus(shooting.units.some((u) => u.unit_id === unitId), unitId)
+    } else if (fighting && fightState) {
+      const unit = fightState.units.find((u) => u.unit_id === unitId)
+      if (!unit) return
+      // The picking player's unit: only one that can fight now.
+      if (unit.seat === fightState.seat && !unit.can_fight) return
+      pickFocus(unit.seat === fightState.seat, unitId)
+    }
+  }
+
+  // Shooting and fighting: a unit of the acting player's to act with, or -
+  // once one's picked - an enemy target.
+  const pickFocus = (ownUnit, unitId) => {
+    if (ownUnit) {
+      if (unitId !== shootingFocus.unitId) setShootingFocus({ unitId, targetId: null })
+    } else if (shootingFocus.unitId !== null) {
+      setShootingFocus({ ...shootingFocus, targetId: unitId })
+    }
   }
 
   runCheckRef.current = runCheck
 
   const dropPiece = () => {
     const { unitId, positions, kind, targetId } = draftRef.current
-    if (positions) runCheck(unitId, positions, kind, targetId ?? null)
+    // In the movement phase, a valid move is saved as soon as it's made.
+    if (positions) runCheck(unitId, positions, kind, targetId ?? null, moving)
   }
 
   const deployDraft = async () => {
@@ -674,19 +800,34 @@ function GameView({ gameId, onBack }) {
     )
   }
 
+  // Where a unit's models were at the start of the movement phase.
+  const phaseStarts = (unit) =>
+    Object.fromEntries(
+      unit.models.filter((m) => m.start).map((m) => [m.unit_model_id, m.start])
+    )
+
+  // Any unit can be picked - and moved again until the phase ends.
   const selectMoveUnit = (unit) => {
     checkSeq.current++
-    if (unit.moved) {
-      setDraft({ ...NO_DRAFT, unitId: unit.unit_id })
-      return
-    }
-    // Within Engagement Range it Falls Back; otherwise it moves normally, or
-    // Advances if it's rolled to.
+    // As it moved; or within Engagement Range it Falls Back; otherwise it
+    // moves normally, or Advances if it's rolled to.
     let kind = unit.advance_roll ? 'advance' : 'normal'
     if (unit.allowed_kinds.includes('fall_back')) kind = 'fall_back'
+    if (unit.moved) kind = unit.kind
     const positions = startPositions(unit.unit_id)
-    setDraft({ unitId: unit.unit_id, positions, check: null, kind })
+    setDraft({ unitId: unit.unit_id, positions, check: null, kind, starts: phaseStarts(unit) })
     runCheck(unit.unit_id, positions, kind)
+  }
+
+  // Saves a valid move (when a model's dropped, or a moved unit's move
+  // changes kind): no Move button - it's locked when the phase ends.
+  const saveMove = async (unitId, positions, kind) => {
+    try {
+      await moveUnit(game.id, { ...asPayload(unitId, positions), kind })
+      setGame(await getGame(game.id))
+    } catch (err) {
+      setError(err.message)
+    }
   }
 
   const chooseKind = (kind) => {
@@ -704,14 +845,16 @@ function GameView({ gameId, onBack }) {
       )
     }
     setDraft((d) => ({ ...d, kind, positions, check: null }))
-    runCheck(current.unitId, positions, kind)
+    // A unit that's already moved keeps its move, now of this kind.
+    const moved = movement?.units.find((u) => u.unit_id === current.unitId)?.moved
+    runCheck(current.unitId, positions, kind, null, Boolean(moved))
   }
 
-  // Ticking Advance rolls the unit's D6 the first time (the backend keeps
-  // it for the phase); unticking makes it a Normal move.
+  // Ticking Advance rolls the unit's D6 (the backend keeps it for the
+  // phase), and from then on it Advances: it can't be unticked.
   const toggleAdvance = async (unit, on) => {
     if (!on) {
-      chooseKind('normal')
+      if (!unit.advance_roll) chooseKind('normal')
       return
     }
     if (!unit.advance_roll) {
@@ -726,18 +869,19 @@ function GameView({ gameId, onBack }) {
     chooseKind('advance')
   }
 
-  const resetMove = () => {
-    const { unitId, kind } = draftRef.current
-    const positions = startPositions(unitId)
+  const resetMove = async () => {
+    const { unitId, kind, starts } = draftRef.current
+    checkSeq.current++
+    const moved = movement?.units.find((u) => u.unit_id === unitId)?.moved
+    if (moved && !(await act(() => resetMoveApi(game.id, { unit_id: unitId })))) return
+    const positions = Object.fromEntries(
+      Object.entries(starts ?? startPositions(unitId)).map(([id, p]) => [
+        id,
+        { x: p.x, y: p.y, rotation: p.rotation },
+      ])
+    )
     setDraft((d) => ({ ...d, positions, check: null }))
     runCheck(unitId, positions, kind)
-  }
-
-  const moveDraft = async () => {
-    const { unitId, positions, kind } = draftRef.current
-    if (await act(() => moveUnit(game.id, { ...asPayload(unitId, positions), kind }))) {
-      setDraft(NO_DRAFT)
-    }
   }
 
   // --- consolidating ---
@@ -859,7 +1003,10 @@ function GameView({ gameId, onBack }) {
   const attacker = game.players.find((p) => p.seat === game.attacker_seat)
   const defender = game.players.find((p) => p.seat !== game.attacker_seat)
   const isSecondTurn = game.turn_seat !== null && game.turn_seat !== game.first_seat
+  // Before a battle round's first turn, if any rules happen at its start.
+  const roundStart = game.phase === 'start_of_round'
   let advanceLabel = 'Next phase'
+  if (roundStart) advanceLabel = 'Begin the first turn'
   if (game.phase === 'fight') {
     if (!isSecondTurn) advanceLabel = 'End turn'
     else if (game.battle_round >= BATTLE_ROUNDS) advanceLabel = 'End game'
@@ -905,6 +1052,7 @@ function GameView({ gameId, onBack }) {
             <strong>{turnPlayer?.user_name}</strong>'s turn
           </p>
           <ol className="phase-steps">
+            {roundStart && <li className="current">Start of round</li>}
             {PHASES.map((p) => (
               <li key={p.id} className={p.id === game.phase ? 'current' : ''}>
                 {p.name}
@@ -925,9 +1073,9 @@ function GameView({ gameId, onBack }) {
           onSelectUnit={selectMoveUnit}
           onToggleAdvance={toggleAdvance}
           onReset={resetMove}
-          onMove={moveDraft}
         />
       )}
+      {roundStart && <RoundStartPanel game={game} onError={setError} />}
       {fighting && (
         <FightPanel
           game={game}
@@ -1016,7 +1164,8 @@ function GameView({ gameId, onBack }) {
         )}
         rings={moveRings(deployment, movement, draft)}
         bubbles={[
-          (moving || chargePhase || fightPhase) && moveBubble(deployment, movement, draft),
+          (moving || chargePhase || fightPhase) &&
+            moveBubble(deployment, movement, draft, reach),
           sightBubble && { kind: 'shoot', regions: sightBubble.regions },
         ].filter(Boolean)}
         onBoardClick={
@@ -1025,6 +1174,8 @@ function GameView({ gameId, onBack }) {
             : null
         }
         onPieceMove={movePiece}
+        onPieceRotate={rotatePiece}
+        onPieceClick={moving || chargePhase || fightPhase || shootingPhase ? pickUnit : null}
         onPieceDrop={dropPiece}
       />
       {layoutId === null && (

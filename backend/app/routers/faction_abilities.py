@@ -23,6 +23,7 @@ def _to_out(faction_ability: FactionAbility, faction_name: str) -> FactionAbilit
             faction_name, faction_ability.name
         ),
         calculator_notes=faction_seeds.calculator_notes(faction_name, faction_ability.name),
+        required=faction_seeds.required(faction_name, faction_ability.name),
     )
 
 

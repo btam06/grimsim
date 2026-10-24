@@ -348,7 +348,7 @@ async def test_valid_placement(client: AsyncClient, session, tmp_path):
     game = await _game(client, session, tmp_path)
     attackers = _unit_named(await _deployment(client, game["id"]), "Attackers")
     check = await _check(client, game["id"], attackers, _row(attackers, 5, 38))
-    assert check == {"valid": True, "problems": [], "models": []}
+    assert check == {"valid": True, "problems": [], "models": [], "paths": []}
 
 
 async def test_outside_the_deployment_zone(client: AsyncClient, session, tmp_path):

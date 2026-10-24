@@ -1,9 +1,10 @@
 // Moving units in the movement phase (see app/services/in_game/movement.py, which
 // decides what each unit can do and whether a move is allowed). The player
-// picks a unit, ticks Advance if it's advancing (its D6 is rolled the first
-// time, and kept: unticking makes it a Normal move, ticking again uses the
-// same roll) - or, within Engagement Range, it Falls Back - drags any of its
-// models, and moves it. Units left alone remain stationary.
+// picks a unit, ticks Advance if it's advancing (its D6 is rolled then, and
+// from then on it Advances this phase - no going back to a Normal move, even
+// after a reset) - or, within Engagement Range, it Falls Back - and drags any of
+// its models: each valid move is saved as it's made, and can be changed (or
+// reset) until the phase ends. Units left alone remain stationary.
 
 // How a unit stands this phase.
 function unitStatus(unit) {
@@ -25,11 +26,11 @@ function MovementPanel({
   onSelectUnit,
   onToggleAdvance,
   onReset,
-  onMove,
 }) {
   if (!movement) return null
   const selected = movement.units.find((u) => u.unit_id === draft.unitId) ?? null
-  const canMove = selected && !selected.moved
+  // Any unit can be moved - again, until the phase ends.
+  const canMove = Boolean(selected)
   const check = draft.check
   const kinds = selected?.allowed_kinds ?? []
 
@@ -64,15 +65,17 @@ function MovementPanel({
             </span>
           ) : (
             <label className="radio-option">
+              {/* Once it's rolled, it Advances this phase: no unticking. */}
               <input
                 type="checkbox"
-                checked={draft.kind === 'advance'}
+                checked={draft.kind === 'advance' || Boolean(selected.advance_roll)}
+                disabled={Boolean(selected.advance_roll)}
                 onChange={(e) => onToggleAdvance(selected, e.target.checked)}
               />
               Advance
               <span className="hint">
                 {selected.advance_roll
-                  ? ` (rolled ${selected.advance_roll}: M + ${selected.advance_roll}")`
+                  ? ` (rolled ${selected.advance_roll}: M + ${selected.advance_roll}" - now Advancing)`
                   : ' (rolls a D6)'}
               </span>
             </label>
@@ -83,11 +86,12 @@ function MovementPanel({
       {/* A fixed height, so the board below doesn't jump. */}
       <div className="deployment-status">
         {!selected && <p className="hint">Choose a unit to move.</p>}
-        {selected?.moved && <p className="hint">{selected.name} has already moved this phase.</p>}
         {canMove && (
           <p className="hint">
-            Drag any of its models - each up to the dashed ring around where it started -
-            keeping them within 9" of every other model in the unit and within 2" of at least one.
+            Drag any of its models - each up to the dashed ring around where it started the
+            phase - keeping them within 9" of every other model in the unit and within 2" of at
+            least one. Moves are saved as you make them; you can change them until the phase
+            ends.
           </p>
         )}
         {canMove && check && !check.valid && (
@@ -97,12 +101,11 @@ function MovementPanel({
             ))}
           </ul>
         )}
-        {canMove && check?.valid && <p className="deployment-ready">Ready to move.</p>}
+        {canMove && check?.valid && selected.moved && (
+          <p className="deployment-ready">Moved.</p>
+        )}
       </div>
       <div className="inline-controls">
-        <button type="button" disabled={!canMove || !check?.valid || checking} onClick={onMove}>
-          {selected ? `Move ${selected.name}` : 'Move'}
-        </button>
         <button type="button" disabled={!canMove} onClick={onReset}>
           Reset
         </button>

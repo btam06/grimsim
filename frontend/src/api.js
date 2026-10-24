@@ -196,6 +196,8 @@ export const checkMove = (id, payload) =>
   request(`/games/${id}/movement/check`, { method: 'POST', body: JSON.stringify(payload) })
 export const moveUnit = (id, payload) =>
   request(`/games/${id}/movement`, { method: 'POST', body: JSON.stringify(payload) })
+export const resetMove = (id, payload) =>
+  request(`/games/${id}/movement/reset`, { method: 'POST', body: JSON.stringify(payload) })
 export const getShooting = (id) => request(`/games/${id}/shooting`)
 export const getShootingTargets = (id, unitId) =>
   request(`/games/${id}/shooting/targets?unit_id=${unitId}`)
@@ -233,6 +235,11 @@ export const consolidate = (id, payload) =>
   request(`/games/${id}/fight/consolidate`, { method: 'POST', body: JSON.stringify(payload) })
 export const skipConsolidation = (id, payload) =>
   request(`/games/${id}/fight/consolidate/skip`, { method: 'POST', body: JSON.stringify(payload) })
+export const getRoundStart = (id) => request(`/games/${id}/round-start`)
+export const chooseRuleOption = (id, payload) =>
+  request(`/games/${id}/round-start/choice`, { method: 'POST', body: JSON.stringify(payload) })
+export const getReach = (id, payload) =>
+  request(`/games/${id}/reach`, { method: 'POST', body: JSON.stringify(payload) })
 export const deployUnit = (id, payload) =>
   request(`/games/${id}/deployment`, { method: 'POST', body: JSON.stringify(payload) })
 export const listUsableStratagems = (id, seat) => request(`/games/${id}/stratagems?seat=${seat}`)

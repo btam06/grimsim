@@ -6,6 +6,7 @@ from sqlalchemy.orm import selectinload
 from app.db import get_session
 from app.models import (
     ArmyList,
+    FactionAbility,
     Game,
     GamePlayer,
     GameSecondary,
@@ -29,6 +30,13 @@ from app.schemas import (
     FightResultOut,
     FightTargetOut,
     FightUnitOut,
+    ReachIn,
+    ReachModelOut,
+    ReachOut,
+    RoundStartOut,
+    RoundStartPlayerOut,
+    RoundStartRuleOut,
+    RuleChoiceIn,
     DeploymentFormationIn,
     DeploymentModelOut,
     DeploymentOut,
@@ -45,6 +53,7 @@ from app.schemas import (
     GameStratagemUseOut,
     ModelPositionIn,
     ModelPositionOut,
+    ModelPathOut,
     ModelProblemsOut,
     PileInOut,
     PileInUnitOut,
@@ -67,12 +76,14 @@ from app.schemas import (
     UnitMoveIn,
 )
 from app.routers.stratagems import _to_out as stratagem_to_out
+from app.services.in_game import battle_round as battle_round_service
 from app.services.in_game import casualties as casualties_service
 from app.services.in_game import charging as charging_service
 from app.services.in_game import deployment as deployment_service
 from app.services.in_game import fighting as fighting_service
 from app.services.in_game import game as game_service
 from app.services.in_game import movement as movement_service
+from app.services.in_game import pathing as pathing_service
 from app.services.in_game import shooting as shooting_service
 from app.routers import combat as combat_router
 from app.routers.combat import calculate as calculate_combat
@@ -180,6 +191,13 @@ def _game_options():
         .selectinload(Unit.unit_models)
         .selectinload(UnitModel.model)
         .selectinload(Model.keywords),
+        # For the start of the battle round: their army rules.
+        players.selectinload(GamePlayer.army_list)
+        .selectinload(ArmyList.units)
+        .selectinload(Unit.unit_models)
+        .selectinload(UnitModel.model)
+        .selectinload(Model.faction_abilities)
+        .selectinload(FactionAbility.faction),
         players.selectinload(GamePlayer.disposition),
         players.selectinload(GamePlayer.primary_mission),
         players.selectinload(GamePlayer.secondaries).selectinload(GameSecondary.mission),
@@ -340,6 +358,22 @@ async def score_primary(
 # --- deployment (see app/services/in_game/deployment.py) ---
 
 
+def _check_out(result) -> DeploymentCheckOut:
+    # A placement check's output (see deployment_service.Placement).
+    return DeploymentCheckOut(
+        valid=result.valid,
+        problems=result.problems,
+        models=[ModelProblemsOut(unit_model_id=i, problems=p) for i, p in result.models.items()],
+        paths=[
+            ModelPathOut(
+                unit_model_id=i,
+                points=[TerrainPointOut(x=round(x, 3), y=round(y, 3)) for x, y in points],
+            )
+            for i, points in result.paths.items()
+        ],
+    )
+
+
 def _placement(positions: list[ModelPositionIn]) -> dict[int, tuple[float, float, float]]:
     return {p.unit_model_id: (p.x, p.y, p.rotation) for p in positions}
 
@@ -425,11 +459,7 @@ async def check_deployment(
     unit = deployment_service.find_unit(game, payload.unit_id)
     deployment_service.check_turn(game, unit)
     result = deployment_service.check_placement(game, unit, _placement(payload.positions))
-    return DeploymentCheckOut(
-        valid=result.valid,
-        problems=result.problems,
-        models=[ModelProblemsOut(unit_model_id=i, problems=p) for i, p in result.models.items()],
-    )
+    return _check_out(result)
 
 
 @router.post("/{game_id}/deployment", response_model=GameOut)
@@ -451,6 +481,7 @@ def _movement_out(game: Game) -> MovementOut:
     units = []
     for unit in movement_service.movable_units(game):
         move = movement_service.unit_move(game, unit)
+        starts = movement_service.start_positions(game, unit)
         units.append(
             MovementUnitOut(
                 unit_id=unit.id,
@@ -461,7 +492,20 @@ def _movement_out(game: Game) -> MovementOut:
                 advance_roll=move.advance_roll if move else None,
                 moved=bool(move and move.completed),
                 models=[
-                    MovementModelOut(unit_model_id=m.id, movement=m.model.movement)
+                    MovementModelOut(
+                        unit_model_id=m.id,
+                        movement=m.model.movement,
+                        start=(
+                            ModelPositionOut(
+                                unit_model_id=m.id,
+                                x=starts[m.id][0],
+                                y=starts[m.id][1],
+                                rotation=starts[m.id][2],
+                            )
+                            if m.id in starts
+                            else None
+                        ),
+                    )
                     for m in deployment_service.unit_models(unit)
                 ],
             )
@@ -497,11 +541,17 @@ async def check_move(
     game = await _load_game(session, game_id)
     unit = deployment_service.find_unit(game, payload.unit_id)
     result = movement_service.check_move(game, unit, payload.kind, _placement(payload.positions))
-    return DeploymentCheckOut(
-        valid=result.valid,
-        problems=result.problems,
-        models=[ModelProblemsOut(unit_model_id=i, problems=p) for i, p in result.models.items()],
-    )
+    return _check_out(result)
+
+
+@router.post("/{game_id}/movement/reset", response_model=GameOut)
+async def reset_move(
+    game_id: int, payload: UnitIdIn, session: AsyncSession = Depends(get_session)
+):
+    # Puts the unit back where it started the movement phase.
+    game = await _load_game(session, game_id)
+    movement_service.reset_move(game, deployment_service.find_unit(game, payload.unit_id))
+    return await _commit_and_reload(session, game_id)
 
 
 @router.post("/{game_id}/movement", response_model=GameOut)
@@ -647,6 +697,14 @@ async def shoot(game_id: int, payload: ShootIn, session: AsyncSession = Depends(
             in_cover=reach.in_cover,
             moved_less_than_3=status.moved_less_than_3,
             advanced=status.advanced,
+            # The options each side chose for its army rules this round (e.g.
+            # its Doctrina Imperative).
+            attacker_rule_options=battle_round_service.active_options(
+                game, deployment_service.owner(game, unit).seat
+            ),
+            defender_rule_options=battle_round_service.active_options(
+                game, deployment_service.owner(game, target).seat
+            ),
             defender_visible=True,
             defender_in_range=True,
         ),
@@ -785,11 +843,7 @@ async def check_charge(
         deployment_service.find_unit(game, payload.target_unit_id),
         _placement(payload.positions),
     )
-    return DeploymentCheckOut(
-        valid=result.valid,
-        problems=result.problems,
-        models=[ModelProblemsOut(unit_model_id=i, problems=p) for i, p in result.models.items()],
-    )
+    return _check_out(result)
 
 
 @router.post("/{game_id}/charge", response_model=GameOut)
@@ -846,11 +900,7 @@ async def check_pile_in(
     result = fighting_service.check_pile_in(
         game, deployment_service.find_unit(game, payload.unit_id), _placement(payload.positions)
     )
-    return DeploymentCheckOut(
-        valid=result.valid,
-        problems=result.problems,
-        models=[ModelProblemsOut(unit_model_id=i, problems=p) for i, p in result.models.items()],
-    )
+    return _check_out(result)
 
 
 @router.post("/{game_id}/pile-in", response_model=GameOut)
@@ -981,6 +1031,14 @@ async def fight(game_id: int, payload: ShootIn, session: AsyncSession = Depends(
             selected_enhancement_weapon_ids=payload.enhancement_weapon_ids,
             in_engagement_range=True,
             charged=charged,
+            # The options each side chose for its army rules this round (e.g.
+            # its Doctrina Imperative).
+            attacker_rule_options=battle_round_service.active_options(
+                game, deployment_service.owner(game, unit).seat
+            ),
+            defender_rule_options=battle_round_service.active_options(
+                game, deployment_service.owner(game, target).seat
+            ),
             defender_visible=True,
             defender_in_range=True,
         ),
@@ -1018,11 +1076,7 @@ async def check_consolidation(
     result = fighting_service.check_consolidation(
         game, deployment_service.find_unit(game, payload.unit_id), _placement(payload.positions)
     )
-    return DeploymentCheckOut(
-        valid=result.valid,
-        problems=result.problems,
-        models=[ModelProblemsOut(unit_model_id=i, problems=p) for i, p in result.models.items()],
-    )
+    return _check_out(result)
 
 
 @router.post("/{game_id}/fight/consolidate", response_model=GameOut)
@@ -1044,3 +1098,88 @@ async def skip_consolidation(
     game = await _load_game(session, game_id)
     fighting_service.skip_consolidation(game, deployment_service.find_unit(game, payload.unit_id))
     return await _commit_and_reload(session, game_id)
+
+
+# --- the start of the battle round (see app/services/in_game/battle_round.py) ---
+
+
+@router.get("/{game_id}/round-start", response_model=RoundStartOut)
+async def round_start(game_id: int, session: AsyncSession = Depends(get_session)):
+    # The rules each player has at the start of the current battle round.
+    game = await _load_game(session, game_id)
+    rules = battle_round_service.round_start_rules(game, game.battle_round)
+    chosen = {p.seat: battle_round_service.choices(game, p.seat) for p in game.players}
+    return RoundStartOut(
+        battle_round=game.battle_round,
+        players=[
+            RoundStartPlayerOut(
+                seat=player.seat,
+                user_name=player.user.name,
+                rules=[
+                    RoundStartRuleOut(
+                        kind=r.kind,
+                        name=r.name,
+                        description=r.description,
+                        units=r.units,
+                        faction_ability_id=r.faction_ability_id,
+                        options=r.options,
+                        option_descriptions=r.option_descriptions,
+                        required=r.required,
+                        decision=r.decision,
+                        chosen=chosen[player.seat].get(r.faction_ability_id),
+                    )
+                    for r in rules[player.seat]
+                ],
+            )
+            for player in game.players
+        ],
+    )
+
+
+@router.post("/{game_id}/round-start/choice", response_model=RoundStartOut)
+async def choose_rule_option(
+    game_id: int, payload: RuleChoiceIn, session: AsyncSession = Depends(get_session)
+):
+    # A player picks an option for one of their army rules this battle round
+    # (e.g. which Doctrina Imperative is active), at its start.
+    game = await _load_game(session, game_id)
+    battle_round_service.choose(game, payload.seat, payload.faction_ability_id, payload.option)
+    await session.commit()
+    return await round_start(game_id, session)
+
+
+# --- where models can reach (see app/services/in_game/pathing.py) ---
+
+
+@router.post("/{game_id}/reach", response_model=ReachOut)
+async def reach(game_id: int, payload: ReachIn, session: AsyncSession = Depends(get_session)):
+    # Where each of a unit's models can get from where it sets off within its
+    # distance, going round dense terrain unless it can go through it - for
+    # showing how far a unit can move or charge.
+    game = await _load_game(session, game_id)
+    unit = deployment_service.find_unit(game, payload.unit_id)
+    models = {m.id: m for m in unit.unit_models}
+    starts = {
+        m.unit_model_id: deployment_service.base_at(models[m.unit_model_id], m.x, m.y)
+        for m in payload.models
+        if m.unit_model_id in models
+    }
+    pather = pathing_service.for_unit(
+        game, unit, starts, max((m.distance for m in payload.models), default=0)
+    )
+    out = []
+    for m in payload.models:
+        if m.unit_model_id not in starts:
+            continue
+        start = starts[m.unit_model_id]
+        out.append(
+            ReachModelOut(
+                unit_model_id=m.unit_model_id,
+                clearance=max(start.semi_axes),
+                regions=[
+                    [TerrainPointOut(x=round(x, 2), y=round(y, 2)) for x, y in region]
+                    for region in pather.reach(start, m.distance)
+                ],
+            )
+        )
+    return ReachOut(models=out)

@@ -30,7 +30,8 @@ function ShootingPanel({ game, player, shooting, focus, onFocus, onShot, onError
   const [outcome, setOutcome] = useState(null)
   const [busy, setBusy] = useState(false)
   const selected = shooting?.units.find((u) => u.unit_id === focus.unitId) ?? null
-  const target = targets.find((t) => t.unit_id === focus.targetId) ?? null
+  // Only one it can see (a click on the board can pick any unit).
+  const target = targets.find((t) => t.unit_id === focus.targetId && t.visible) ?? null
   const key = (w) => `${w.enhancement ? 'e' : 'w'}${w.id}`
 
   // The selected unit's possible targets.

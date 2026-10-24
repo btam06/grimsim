@@ -23,6 +23,7 @@ from app.models import (
 )
 from app.models.game import BATTLE_ROUNDS, PHASES
 from app.schemas import GameIn
+from app.services.in_game import battle_round as battle_round_service
 from app.services.in_game import deployment as deployment_service
 from app.services.in_game import terrain as terrain_service
 
@@ -212,11 +213,25 @@ def enter_deployment(game: Game) -> None:
         game.status = "deployment"
 
 
+# Before a battle round's first turn, if a rule at its start needs a decision
+# (see app/services/in_game/battle_round.py) - not one of a turn's PHASES.
+START_OF_ROUND = battle_round_service.START_OF_ROUND
+
+
+async def _begin_battle_round(session: AsyncSession, game: Game) -> None:
+    # The round's first turn: after the start of the round, if a rule then
+    # needs a decision; otherwise straight to its command phase.
+    game.turn_seat = game.first_seat
+    if battle_round_service.needs_decisions(game, game.battle_round):
+        game.phase = START_OF_ROUND
+    else:
+        await _begin_command_phase(session, game)
+
+
 async def _begin_battle(session: AsyncSession, game: Game) -> None:
     game.status = "in_progress"
     game.battle_round = 1
-    game.turn_seat = game.first_seat
-    await _begin_command_phase(session, game)
+    await _begin_battle_round(session, game)
 
 
 async def start_game(session: AsyncSession, game: Game) -> None:
@@ -240,9 +255,15 @@ async def deploy_unit(
 
 async def advance(session: AsyncSession, game: Game) -> None:
     # On to the next phase; after the fight phase, the next turn - the second
-    # player's, or the next battle round's first. The game ends after the
-    # last battle round's second turn.
+    # player's, or the next battle round's first (after the start of that
+    # round, if any rules happen then). The game ends after the last battle
+    # round's second turn.
     _require_in_progress(game)
+    if game.phase == START_OF_ROUND:
+        if missing := battle_round_service.missing_choices(game):
+            raise _bad_request("choose an option first for " + ", ".join(missing))
+        await _begin_command_phase(session, game)
+        return
     index = PHASES.index(game.phase)
     if index + 1 < len(PHASES):
         game.phase = PHASES[index + 1]
@@ -256,7 +277,8 @@ async def advance(session: AsyncSession, game: Game) -> None:
         return
     else:
         game.battle_round += 1
-        game.turn_seat = game.first_seat
+        await _begin_battle_round(session, game)
+        return
     await _begin_command_phase(session, game)
 
 

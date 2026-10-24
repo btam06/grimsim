@@ -688,6 +688,11 @@ section .app-dialog form {
   stroke: #182c40;
 }
 
+/* A model whose unit a click picks (see GameView's pickUnit). */
+.piece--clickable {
+  cursor: pointer;
+}
+
 .piece--draft {
   cursor: grab;
   touch-action: none;
@@ -703,6 +708,20 @@ section .app-dialog form {
   stroke: #ffd400;
   stroke-width: 3px;
   stroke-dasharray: 3 2;
+}
+
+/* An oval base's rotation handles (see Gameboard): faint until hovered. */
+.rotate-handle {
+  fill: #fff;
+  stroke: #555;
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+  opacity: 0.55;
+  touch-action: none;
+}
+
+.rotate-handle:hover {
+  opacity: 1;
 }
 
 .piece--ghost {
@@ -737,6 +756,13 @@ section .app-dialog form {
   fill: #2f9e5a;
 }
 
+/* A reach area widened by a base's size: its outline drawn as thick as the
+   base is wide, in the same colour. */
+.bubble--move .bubble-inflated {
+  stroke: #2f9e5a;
+  stroke-linejoin: round;
+}
+
 .bubble--shoot {
   fill: #ff8c00;
 }
@@ -767,6 +793,7 @@ section .app-dialog form {
 }
 
 .move-tether {
+  fill: none;
   stroke: #888c;
   stroke-width: 1.5px;
   vector-effect: non-scaling-stroke;
@@ -804,4 +831,24 @@ section .app-dialog form {
 .deployment-ready {
   color: #3c9a5f;
   font-weight: 600;
+}
+
+/* The start of a battle round (see RoundStartPanel). */
+.round-start-rules {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.25rem 0 0.75rem;
+}
+
+.round-start-rules li {
+  margin-bottom: 0.5rem;
+}
+
+.round-start-decision {
+  margin-left: 0.5rem;
+  padding: 0 0.4rem;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  color: #b8860b;
 }

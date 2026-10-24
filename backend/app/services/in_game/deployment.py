@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from fastapi import HTTPException
 
@@ -320,9 +320,12 @@ def distance_to_polygon(base: Base, polygon: list[Point]) -> float:
 @dataclass
 class Placement:
     # Whether a unit could be set up as placed: what's wrong with the unit as
-    # a whole, and with each model (by unit model id).
+    # a whole, and with each model (by unit model id) - and, for a move, the
+    # way each model goes where it bends round a wall (see
+    # app/services/in_game/pathing.py).
     problems: list[str]
     models: dict[int, list[str]]
+    paths: dict[int, list[Point]] = field(default_factory=dict)
 
     @property
     def valid(self) -> bool:

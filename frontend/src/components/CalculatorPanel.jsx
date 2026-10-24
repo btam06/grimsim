@@ -1,6 +1,5 @@
-import { faArrowRightArrowLeft, faCircleInfo } from '@fortawesome/free-solid-svg-icons'
+import { faArrowRightArrowLeft } from '@fortawesome/free-solid-svg-icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import Tooltip from '@mui/material/Tooltip'
 import { useEffect, useMemo, useState } from 'react'
 import {
   listDatasheetAbilities,
@@ -22,50 +21,10 @@ import {
   runCombat,
 } from '../api'
 import Field from './Field'
+import { Described, RuleOptionPicker } from './RuleOptionPicker'
 import CombatResults from './CombatResults'
 import Select from './Select'
 import UnitDatasheet from './UnitDatasheet'
-
-// Text followed by an info icon whose hover (or focus) tooltip holds its
-// description - or just the text, if there's no description.
-function Described({ description, children }) {
-  if (!description) return children
-  return (
-    <>
-      {children}{' '}
-      <Tooltip title={description} placement="top" arrow>
-        <span className="described-icon" tabIndex={0} aria-label={description}>
-          <FontAwesomeIcon icon={faCircleInfo} />
-        </span>
-      </Tooltip>
-    </>
-  )
-}
-
-// One radio group per faction ability with rule options (e.g. Doctrina
-// Imperatives), for picking which option is active for one side - or none.
-function RuleOptionPicker({ side, abilities, choices, onChange }) {
-  return abilities.map((ability) => (
-    <div key={ability.key} className="radio-group">
-      <Described description={ability.description}>
-        {side} — {ability.name}
-      </Described>
-      {['', ...ability.rule_options].map((option) => (
-        <label key={option || 'none'} className="radio-option">
-          <input
-            type="radio"
-            name={`${side}-rule-${ability.key}`}
-            checked={(choices[ability.key] ?? '') === option}
-            onChange={() => onChange({ ...choices, [ability.key]: option })}
-          />
-          <Described description={ability.option_descriptions?.[option]}>
-            {option || 'None'}
-          </Described>
-        </label>
-      ))}
-    </div>
-  ))
-}
 
 // The stratagems usable on a unit as the 'attacker' or 'defender', from the
 // server, for the shooting phase (ranged) or the fight phase (melee).
@@ -418,6 +377,7 @@ function CalculatorPanel() {
         description: a.description,
         rule_options: a.rule_options,
         option_descriptions: a.rule_option_descriptions,
+        required: a.required,
       }))
 
     const armyUnits =
@@ -479,9 +439,20 @@ function CalculatorPanel() {
     setDefenderRuleChoices({})
   }, [defendingUnitId])
 
+  // What's picked for each ability the unit has - and, for one whose options
+  // are required (e.g. Doctrina Imperatives), its first option until another's
+  // picked.
+  const effectiveChoices = (abilities, choices) =>
+    Object.fromEntries(
+      abilities.map((a) => [
+        a.key,
+        choices[a.key] || (a.required ? a.rule_options[0] : ''),
+      ])
+    )
+
   // Only send choices for abilities the unit currently has.
   const selectedRuleOptions = (abilities, choices) =>
-    abilities.map((a) => choices[a.key]).filter(Boolean)
+    Object.values(effectiveChoices(abilities, choices)).filter(Boolean)
 
   // Precision is only worth offering when something about to attack has the
   // precision effect - a selected weapon's ability, or a selected stratagem.
@@ -696,13 +667,13 @@ function CalculatorPanel() {
             <RuleOptionPicker
               side="Attacker"
               abilities={attackerRuleAbilities}
-              choices={attackerRuleChoices}
+              choices={effectiveChoices(attackerRuleAbilities, attackerRuleChoices)}
               onChange={setAttackerRuleChoices}
             />
             <RuleOptionPicker
               side="Defender"
               abilities={defenderRuleAbilities}
-              choices={defenderRuleChoices}
+              choices={effectiveChoices(defenderRuleAbilities, defenderRuleChoices)}
               onChange={setDefenderRuleChoices}
             />
           </fieldset>

@@ -44,6 +44,8 @@ class FactionAbilityOut(FactionAbilityIn):
     rule_option_descriptions: dict[str, str] = {}
     # How the calculator handles the ability, where that needs saying.
     calculator_notes: list[str] = []
+    # Required: one of its options is always chosen (there's no "none").
+    required: bool = False
 
 
 class KeywordIn(BaseModel):
@@ -955,12 +957,21 @@ class ModelProblemsOut(BaseModel):
     problems: list[str]
 
 
+class ModelPathOut(BaseModel):
+    # The way a model goes from where it started to where it is, where it
+    # bends round a wall: the points it goes through.
+    unit_model_id: int
+    points: list[TerrainPointOut]
+
+
 class DeploymentCheckOut(BaseModel):
-    # Whether a unit could be deployed as placed, and if not why: for the
-    # unit as a whole, and for each model with a problem.
+    # Whether a unit could be deployed (or moved) as placed, and if not why:
+    # for the unit as a whole, and for each model with a problem - and, for a
+    # move, the way each model goes where it bends round a wall.
     valid: bool
     problems: list[str]
     models: list[ModelProblemsOut]
+    paths: list[ModelPathOut] = []
 
 
 class UnitMoveIn(BaseModel):
@@ -979,14 +990,17 @@ class MovementModelOut(BaseModel):
     unit_model_id: int
     # Its Movement characteristic, in inches.
     movement: int
+    # Where it was at the start of the phase (its moves are measured from
+    # there, and resetting puts it back) - None if it's off the battlefield.
+    start: ModelPositionOut | None = None
 
 
 class MovementUnitOut(BaseModel):
     unit_id: int
     name: str
-    # The moves it can still make this phase (none once it's moved): Fall
-    # Back if it's within Engagement Range, otherwise a Normal move or
-    # Advance.
+    # The moves it can make this phase: Fall Back if it started within
+    # Engagement Range, otherwise a Normal move or Advance. (It can be moved
+    # again until the phase ends.)
     allowed_kinds: list[str]
     in_engagement_range: bool
     # The move it made this phase, once it has; and its Advance roll, if it's
@@ -1151,6 +1165,47 @@ class SeatIn(BaseModel):
     seat: Literal[1, 2]
 
 
+class RoundStartRuleOut(BaseModel):
+    # A rule that happens at the start of the battle round: its kind
+    # ("ability", "army rule", "enhancement" or "detachment rule"), name and
+    # text, and the units it's from. An army rule with options (e.g. Doctrina
+    # Imperatives) also has which one it is, its options (with what each does
+    # in combat), and the one chosen this round (None: none).
+    kind: str
+    name: str
+    description: str
+    units: list[str]
+    faction_ability_id: int | None = None
+    options: list[str] = []
+    option_descriptions: dict[str, str] = {}
+    # Required: one of its options must be chosen (there's no "none").
+    required: bool = False
+    chosen: str | None = None
+    # It needs the player to decide something (it has options, or its text
+    # gives them a choice).
+    decision: bool = False
+
+
+class RuleChoiceIn(BaseModel):
+    # A player's option for one of their army rules this battle round (None:
+    # none).
+    seat: Literal[1, 2]
+    faction_ability_id: int
+    option: str | None = None
+
+
+class RoundStartPlayerOut(BaseModel):
+    seat: int
+    user_name: str
+    rules: list[RoundStartRuleOut]
+
+
+class RoundStartOut(BaseModel):
+    # The rules each player has at the start of this battle round.
+    battle_round: int
+    players: list[RoundStartPlayerOut]
+
+
 class FightUnitOut(BaseModel):
     # A unit on the battlefield, in the fight phase: whether it has Fights
     # First (and whether that's from charging), whether it's fought, and
@@ -1211,3 +1266,29 @@ class FightResultOut(BaseModel):
     fights_first: bool
     combat: CombatOut
     destroyed_unit_model_ids: list[int] = []
+
+
+class ReachModelIn(BaseModel):
+    # A model setting off from (x, y), able to move `distance`.
+    unit_model_id: int
+    x: float
+    y: float
+    distance: float
+
+
+class ReachIn(BaseModel):
+    unit_id: int
+    models: list[ReachModelIn]
+
+
+class ReachModelOut(BaseModel):
+    # Where the model's base centre can get within its distance, going round
+    # what it has to: polygons, together the area. `clearance` is how far its
+    # base reaches beyond its centre (to show where the base can get).
+    unit_model_id: int
+    clearance: float
+    regions: list[list[TerrainPointOut]]
+
+
+class ReachOut(BaseModel):
+    models: list[ReachModelOut]

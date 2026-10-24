@@ -6,7 +6,7 @@ import random
 from fastapi import HTTPException
 
 from app.models import Game, GameUnitCharge, Unit
-from app.services.in_game import deployment
+from app.services.in_game import deployment, pathing
 from app.services.in_game.deployment import TOLERANCE, Base, Placement, gap
 from app.services.in_game.movement import ENGAGEMENT_RANGE
 
@@ -171,13 +171,12 @@ def check_charge(
         game, models, bases, deployment.placed_bases(game, unit)
     )
     engaged = 0
+    # Round dense terrain, unless it can go through it.
+    pather = pathing.for_unit(game, unit, start, charge.roll)
     for model in models:
         found = []
-        moved = math.hypot(
-            bases[model.id].x - start[model.id].x, bases[model.id].y - start[model.id].y
-        )
-        if moved > charge.roll + TOLERANCE:
-            found.append(f'would move {moved:.1f}" (it can move {charge.roll}")')
+        if problem := pathing.too_far(pather, start[model.id], bases[model.id], charge.roll):
+            found.append(problem)
         before = _nearest(start[model.id], targets)
         after = _nearest(bases[model.id], targets)
         if after <= ENGAGEMENT_RANGE + TOLERANCE:
@@ -188,6 +187,7 @@ def check_charge(
             found.append(f"must end closer to {target.faction_unit.name}")
         problems[model.id] = found + problems[model.id]
     result = deployment.summarise(models, problems)
+    result.paths = pather.bends(start, bases)
     if not engaged:
         result.problems.append(
             f"No model ends within Engagement Range (2\") of {target.faction_unit.name}"

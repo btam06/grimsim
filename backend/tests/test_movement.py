@@ -110,11 +110,81 @@ async def test_normal_move(client: AsyncClient, session, tmp_path):
         m["position"]["y"] + 6 for m in d["models"]
     ]
     [unit] = (await _movement(client, game_id))["units"]
-    assert (unit["moved"], unit["kind"], unit["allowed_kinds"]) == (True, "normal", [])
-    # Once a phase.
+    assert (unit["moved"], unit["kind"]) == (True, "normal")
+    # Where it started the phase.
+    assert [m["start"]["y"] for m in unit["models"]] == [
+        m["position"]["y"] for m in d["models"]
+    ]
+
+    # It can move again this phase - measured from where it started: another
+    # 1" would be 7" in all.
+    check = await _check(client, game_id, moved, "normal", _shifted(moved, dy=1))
+    assert 'D would move 7.0" (it can move 6") (x5)' in check["problems"]
+    response = await _move(client, game_id, moved, "normal", _shifted(moved, dy=-3))
+    assert response.status_code == 200, response.text
+    moved = _unit_named(await _deployment(client, game_id), "D")
+    assert [m["position"]["y"] for m in moved["models"]] == [
+        m["position"]["y"] + 3 for m in d["models"]
+    ]
+
+
+async def test_reset_puts_it_back(client: AsyncClient, session, tmp_path):
+    game, deployment = await _battle(client, session, tmp_path)
+    game_id = game["id"]
+    d = _unit_named(deployment, "D")
+    assert (await _move(client, game_id, d, "normal", _shifted(d, dy=4))).status_code == 200
+    url = f"/games/{game_id}/movement/reset"
+    response = await client.post(url, json={"unit_id": d["unit_id"]})
+    assert response.status_code == 200, response.text
+    back = _unit_named(await _deployment(client, game_id), "D")
+    assert [m["position"] for m in back["models"]] == [m["position"] for m in d["models"]]
+    [unit] = (await _movement(client, game_id))["units"]
+    assert (unit["moved"], unit["kind"]) == (False, None)
+
+
+async def test_reset_keeps_the_advance_roll(
+    client: AsyncClient, session, tmp_path, monkeypatch
+):
+    monkeypatch.setattr("app.services.in_game.movement.random.randint", lambda a, b: 4)
+    game, deployment = await _battle(client, session, tmp_path)
+    game_id = game["id"]
+    d = _unit_named(deployment, "D")
+    await client.post(f"/games/{game_id}/movement/advance", json={"unit_id": d["unit_id"]})
+    assert (await _move(client, game_id, d, "advance", _shifted(d, dy=9))).status_code == 200
+    await client.post(f"/games/{game_id}/movement/reset", json={"unit_id": d["unit_id"]})
+    [unit] = (await _movement(client, game_id))["units"]
+    assert (unit["moved"], unit["advance_roll"]) == (False, 4)
+
+
+async def test_advance_after_a_normal_move(client: AsyncClient, session, tmp_path, monkeypatch):
+    # Moved normally, then decides to Advance after all: it rolls then.
+    monkeypatch.setattr("app.services.in_game.movement.random.randint", lambda a, b: 2)
+    game, deployment = await _battle(client, session, tmp_path)
+    game_id = game["id"]
+    d = _unit_named(deployment, "D")
+    assert (await _move(client, game_id, d, "normal", _shifted(d, dy=5))).status_code == 200
+    response = await client.post(
+        f"/games/{game_id}/movement/advance", json={"unit_id": d["unit_id"]}
+    )
+    assert response.json()["units"][0]["advance_roll"] == 2
+    moved = _unit_named(await _deployment(client, game_id), "D")
+    # 8" from where it started: M 6" + 2.
+    response = await _move(client, game_id, moved, "advance", _shifted(moved, dy=3))
+    assert response.status_code == 200, response.text
+
+
+async def test_moves_lock_when_the_phase_ends(client: AsyncClient, session, tmp_path):
+    game, deployment = await _battle(client, session, tmp_path)
+    game_id = game["id"]
+    d = _unit_named(deployment, "D")
+    assert (await _move(client, game_id, d, "normal", _shifted(d, dy=2))).status_code == 200
+    await client.post(f"/games/{game_id}/advance")
+    moved = _unit_named(await _deployment(client, game_id), "D")
     response = await _move(client, game_id, moved, "normal", _shifted(moved, dy=1))
-    assert response.status_code == 400
-    assert "already moved" in response.json()["detail"]
+    assert "movement phase" in response.json()["detail"]
+    url = f"/games/{game_id}/movement/reset"
+    response = await client.post(url, json={"unit_id": d["unit_id"]})
+    assert "movement phase" in response.json()["detail"]
 
 
 async def test_not_every_model_has_to_move(client: AsyncClient, session, tmp_path):
@@ -153,8 +223,8 @@ async def test_advance(client: AsyncClient, session, tmp_path, monkeypatch):
     assert response.status_code == 200, response.text
     [unit] = response.json()["units"]
     assert (unit["kind"], unit["advance_roll"], unit["moved"]) == (None, 3, False)
-    # It can still choose either.
-    assert unit["allowed_kinds"] == ["normal", "advance"]
+    # From now on it Advances.
+    assert unit["allowed_kinds"] == ["advance"]
 
     # M 6" + 3.
     check = await _check(client, game_id, d, "advance", _shifted(d, dy=9.5))
@@ -177,17 +247,23 @@ async def test_advance_roll_stands(client: AsyncClient, session, tmp_path, monke
     assert first["units"][0]["advance_roll"] == again["units"][0]["advance_roll"] == 2
 
 
-async def test_rolled_unit_can_still_move_normally(client: AsyncClient, session, tmp_path):
+async def test_once_rolled_it_always_advances(client: AsyncClient, session, tmp_path):
     game, deployment = await _battle(client, session, tmp_path)
     game_id = game["id"]
     d = _unit_named(deployment, "D")
     await client.post(f"/games/{game_id}/movement/advance", json={"unit_id": d["unit_id"]})
-    # A Normal move: just M.
-    check = await _check(client, game_id, d, "normal", _shifted(d, dy=6.5))
-    assert 'D would move 6.5" (it can move 6") (x5)' in check["problems"]
-    assert (await _move(client, game_id, d, "normal", _shifted(d, dy=6))).status_code == 200
+    # No going back to a Normal move - before or after moving.
+    response = await _move(client, game_id, d, "normal", _shifted(d, dy=1))
+    assert response.status_code == 400
+    assert "rolled to Advance" in response.json()["detail"]
+    assert (await _move(client, game_id, d, "advance", _shifted(d, dy=1))).status_code == 200
+    moved = _unit_named(await _deployment(client, game_id), "D")
+    response = await _move(client, game_id, moved, "normal", _shifted(moved, dy=1))
+    assert "rolled to Advance" in response.json()["detail"]
+    # Nor after resetting it.
+    await client.post(f"/games/{game_id}/movement/reset", json={"unit_id": d["unit_id"]})
     [unit] = (await _movement(client, game_id))["units"]
-    assert (unit["kind"], unit["moved"]) == ("normal", True)
+    assert (unit["moved"], unit["allowed_kinds"]) == (False, ["advance"])
 
 
 async def _engage(session, unit, x, y):

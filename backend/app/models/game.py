@@ -73,6 +73,11 @@ class Game(Base):
     unit_fights: Mapped[list["GameUnitFight"]] = relationship(
         cascade="all, delete-orphan", lazy="selectin", order_by="GameUnitFight.id"
     )
+    # Options chosen for army rules each battle round (e.g. which Doctrina
+    # Imperative is active).
+    rule_choices: Mapped[list["GameRuleChoice"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameRuleChoice.id"
+    )
     # Which units have shot in shooting phases, and at what.
     unit_shots: Mapped[list["GameUnitShot"]] = relationship(
         cascade="all, delete-orphan", lazy="selectin", order_by="GameUnitShot.id"
@@ -214,6 +219,11 @@ class GameUnitMove(Base):
     distance_link: Mapped["GameUnitMoveDistance | None"] = relationship(
         cascade="all, delete-orphan", uselist=False, lazy="selectin"
     )
+    # Where its models were at the start of the phase, once it's moved - its
+    # moves are measured from there, and resetting it puts them back.
+    starts: Mapped[list["GameUnitMoveStart"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameUnitMoveStart.id"
+    )
 
     @property
     def distance(self) -> float | None:
@@ -224,6 +234,21 @@ class GameUnitMove(Base):
     @distance.setter
     def distance(self, distance: float | None) -> None:
         self.distance_link = None if distance is None else GameUnitMoveDistance(distance=distance)
+
+
+class GameUnitMoveStart(Base):
+    # Where one of a moved unit's models was at the start of the movement
+    # phase.
+    __tablename__ = "game_unit_move_starts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    move_id: Mapped[int] = mapped_column(ForeignKey("game_unit_moves.id", ondelete="CASCADE"))
+    unit_model_id: Mapped[int] = mapped_column(
+        ForeignKey("unit_models.id", ondelete="CASCADE")
+    )
+    x: Mapped[float] = mapped_column(Float)
+    y: Mapped[float] = mapped_column(Float)
+    rotation: Mapped[float] = mapped_column(Float, default=0)
 
 
 class GameUnitMoveDistance(Base):
@@ -345,3 +370,20 @@ class GameUnitConsolidation(Base):
         ForeignKey("game_unit_fights.id", ondelete="CASCADE"), primary_key=True
     )
     moved: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class GameRuleChoice(Base):
+    # A player's choice for an army rule with options, for one battle round
+    # (e.g. Doctrina Imperatives: the Protector Imperative) - made at the start
+    # of the round (see app/services/in_game/battle_round.py), and active for
+    # their units with that rule when they attack or are attacked.
+    __tablename__ = "game_rule_choices"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    seat: Mapped[int] = mapped_column(Integer)
+    faction_ability_id: Mapped[int] = mapped_column(
+        ForeignKey("faction_abilities.id", ondelete="CASCADE")
+    )
+    option: Mapped[str] = mapped_column(String(255))

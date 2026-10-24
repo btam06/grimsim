@@ -57,13 +57,30 @@ async def test_pile_in_starts_the_fight_phase(client: AsyncClient, session, tmp_
     assert unit["locked_unit_model_ids"] == []
 
 
-async def test_only_engaged_units_pile_in(client: AsyncClient, session, tmp_path):
+async def test_no_pile_in_with_nothing_engaged(client: AsyncClient, session, tmp_path):
+    # Nobody's within Engagement Range: piling in is skipped altogether.
     game, d, a = await _fight_game(client, session, tmp_path, gap=5)
-    [unit] = (await _pile_in_state(client, game["id"]))["units"]
-    assert (unit["engaged"], unit["can_pile_in"]) == (False, False)
-    assert unit["reason"] == "it isn't within Engagement Range of an enemy unit"
+    assert game["piling_in_seat"] is None
+    assert (await _pile_in_state(client, game["id"])) == {"seat": None, "units": []}
+    assert (await _fight_state(client, game["id"]))["step"] != "pile_in"
     response = await _pile_in(client, game["id"], d, _shifted(d, dy=1))
     assert response.status_code == 400
+
+
+async def test_only_engaged_units_pile_in(client: AsyncClient, session, tmp_path):
+    # D (engaged) can; E (nowhere near) can't.
+    units = {1: [("A", 1, {})], 2: [("D", 1, {}), ("E", 1, {})]}
+    game, deployment = await _battle(
+        client, session, tmp_path, units=units,
+        spots={"A": (20, 38), "D": (20, 4), "E": (40, 4)},
+    )
+    a = _unit_named(deployment, "A")
+    await _place(session, a, [(20, 4 + 2 * R32 + 1.5)])
+    for _ in ("shooting", "charge", "fight"):
+        await client.post(f"/games/{game['id']}/advance")
+    state = await _pile_in_state(client, game["id"])
+    units = {u["name"]: (u["engaged"], u["can_pile_in"]) for u in state["units"]}
+    assert units == {"D": (True, True), "E": (False, False)}
 
 
 async def test_pile_in(client: AsyncClient, session, tmp_path):
@@ -75,8 +92,9 @@ async def test_pile_in(client: AsyncClient, session, tmp_path):
     assert response.status_code == 200, response.text
     model = _unit_named(await _deployment(client, game_id), "D")["models"][0]
     assert model["position"]["y"] == d["models"][0]["position"]["y"] + 1
-    [unit] = (await _pile_in_state(client, game_id))["units"]
-    assert (unit["piled_in"], unit["reason"]) == (True, "it has already piled in")
+    # D was its only unit to pile in: on to the other player.
+    state = await _pile_in_state(client, game_id)
+    assert (state["seat"], [u["name"] for u in state["units"]]) == (1, ["A"])
 
 
 async def test_pile_in_limits(client: AsyncClient, session, tmp_path):
@@ -115,9 +133,8 @@ async def test_players_take_turns_to_pile_in(client: AsyncClient, session, tmp_p
     assert game["piling_in_seat"] == 1
     [unit] = (await _pile_in_state(client, game_id))["units"]
     assert (unit["name"], unit["can_pile_in"]) == ("A", True)
-    assert (await _pile_in(client, game_id, a, _shifted(a, dy=-0.5))).status_code == 200
-
-    game = (await _done(client, game_id, 1)).json()
+    # A was its only unit to pile in: piling in's over, no "done" needed.
+    game = (await _pile_in(client, game_id, a, _shifted(a, dy=-0.5))).json()
     assert game["piling_in_seat"] is None
     assert (await _pile_in_state(client, game_id)) == {"seat": None, "units": []}
 
@@ -459,3 +476,21 @@ async def test_consolidating_onto_an_objective(
         json={"unit_id": d["unit_id"], "positions": positions},
     )
     assert response.status_code == 200, response.text
+
+
+async def test_no_consolidation_with_nothing_to_consolidate_to(
+    client: AsyncClient, session, tmp_path, monkeypatch
+):
+    # D destroys A, far from any other enemy and from the objective (the
+    # Medium ruin, x 7-13): consolidating is skipped.
+    from tests.test_casualties import _set_models
+
+    units = {1: [("A", 1, BLADE)], 2: [("D", 1, BLADE)]}
+    places = {"D": [(40, 4)], "A": [(40, 4 + 2 * R32 + 0.5)]}
+    game_id, deployment = await _to_fight(client, session, tmp_path, monkeypatch, units, places)
+    d, a = _unit_named(deployment, "D"), _unit_named(deployment, "A")
+    await _set_models(session, a, wounds=1)
+    body = (await _fight(client, game_id, d, a, skip=False)).json()
+    assert body["destroyed_unit_model_ids"] == [a["models"][0]["unit_model_id"]]
+    state = await _fight_state(client, game_id)
+    assert (state["step"], state["consolidating"]) == ("done", None)
