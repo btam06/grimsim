@@ -767,6 +767,41 @@ section .app-dialog form {
   fill: #ff8c00;
 }
 
+/* How far an aura reaches from a model (see Gameboard's auras): a coloured
+   outline, lightly filled, with its name. */
+.aura {
+  pointer-events: none;
+}
+
+.aura ellipse {
+  fill: currentColor;
+  fill-opacity: 0.07;
+  stroke: currentColor;
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
+  stroke-dasharray: 6 3;
+}
+
+.aura text {
+  fill: currentColor;
+  font-size: 0.7px;
+  paint-order: stroke;
+  stroke: #fffb;
+  stroke-width: 0.12px;
+}
+
+.aura--0 {
+  color: #8e44ad;
+}
+
+.aura--1 {
+  color: #1f78b4;
+}
+
+.aura--2 {
+  color: #c2185b;
+}
+
 /* A shooting unit and its target (see ShootingPanel). */
 .piece--shooter {
   stroke: #f4f4f4;
@@ -851,4 +886,38 @@ section .app-dialog form {
   border-radius: 3px;
   font-size: 0.75rem;
   color: #b8860b;
+}
+
+/* The unit a Command phase ability applies to (see CommandPanel). */
+.command-target {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.35rem 0;
+}
+
+.command-target .select-wrapper {
+  flex: 1;
+  max-width: 20rem;
+}
+
+/* Declaring battle formations (see FormationsPanel). */
+.formation-units {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.25rem 0 0.5rem;
+}
+
+.formation-units li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.formation-units .select-wrapper {
+  flex: 0 1 16rem;
+  min-width: 12rem;
 }

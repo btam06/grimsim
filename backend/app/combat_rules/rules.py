@@ -37,3 +37,28 @@ class RuleOption:
     # ability they belong to (e.g. The Fires of Mars: both Doctrina
     # Imperatives).
     grants_options: tuple[str, ...] = ()
+    # In a game: what the unit it applies to can still shoot and declare a
+    # charge after doing in its turn - "advanced", "fell_back" (e.g.
+    # Fanatical Devotion, Adaptive Tactics).
+    eligible_after: tuple[str, ...] = ()
+    # In a game: an aura's range (inches) - the option applies to friendly
+    # units with a model within it of the model with the ability, rather than
+    # to every unit it reaches in the list (see app/services/in_game/auras.py).
+    aura_range: float | None = None
+
+
+@dataclass(frozen=True)
+class CommandChoice:
+    # In a game, a datasheet ability whose option (see RuleOption) its owner
+    # selects in their Command phase (see app/services/in_game/command_phase.py).
+    # Normally until the start of their next Command phase, and one must be
+    # selected (`required`); a `persistent` one stays until another is
+    # selected, starting as `default`. With `target_keywords`, the option
+    # applies to one friendly unit with one of those keywords within
+    # `target_range` of the model with the ability (e.g. Rod of the War
+    # Forge), selected with it.
+    required: bool = True
+    persistent: bool = False
+    default: str | None = None
+    target_keywords: tuple[str, ...] = ()
+    target_range: float | None = None

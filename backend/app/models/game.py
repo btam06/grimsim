@@ -45,6 +45,31 @@ class Game(Base):
     layout_link: Mapped["GameTerrainLayout | None"] = relationship(
         cascade="all, delete-orphan", uselist=False, lazy="selectin"
     )
+    # Units set aside when battle formations are declared (in Strategic
+    # Reserves, or embarked in a transport), and the players who've declared.
+    battle_formations: Mapped[list["GameBattleFormation"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameBattleFormation.id"
+    )
+    formations_done: Mapped[list["GameFormationsDone"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameFormationsDone.id"
+    )
+    # Movement phases the player whose turn it was has finished (for Rapid
+    # Ingress at the end of them).
+    movements_ended: Mapped[list["GameMovementEnded"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameMovementEnded.id"
+    )
+    # Options selected for abilities in command phases, and wounds healed at
+    # their start.
+    command_choices: Mapped[list["GameCommandChoice"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameCommandChoice.id"
+    )
+    command_heals: Mapped[list["GameCommandHeal"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameCommandHeal.id"
+    )
+    # Reanimation Protocols activated at the end of command phases.
+    reanimations: Mapped[list["GameReanimation"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameReanimation.id"
+    )
     # Where each deployed model is on the battlefield.
     model_positions: Mapped[list["GameModelPosition"]] = relationship(
         cascade="all, delete-orphan", lazy="selectin", order_by="GameModelPosition.id"
@@ -387,3 +412,98 @@ class GameRuleChoice(Base):
         ForeignKey("faction_abilities.id", ondelete="CASCADE")
     )
     option: Mapped[str] = mapped_column(String(255))
+
+
+# Where a unit starts the battle, if not on the battlefield: in Strategic
+# Reserves, or embarked in a transport (see
+# app/services/in_game/battle_formations.py).
+FORMATION_PLACES = ("reserves", "embarked")
+# A Strategic Reserves unit that didn't arrive by the end of the third battle
+# round: destroyed.
+RESERVES_DESTROYED = "destroyed"
+
+
+class GameBattleFormation(Base):
+    # A unit that isn't deployed: in Strategic Reserves, or embarked in a
+    # friendly transport (`transport_unit_id`). Units without one are deployed.
+    __tablename__ = "game_battle_formations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    place: Mapped[str] = mapped_column(String(32))
+    transport_unit_id: Mapped[int | None] = mapped_column(
+        ForeignKey("units.id", ondelete="CASCADE"), nullable=True
+    )
+
+
+class GameFormationsDone(Base):
+    # A player has declared their battle formations.
+    __tablename__ = "game_formations_done"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    seat: Mapped[int] = mapped_column(Integer)
+
+
+class GameMovementEnded(Base):
+    # The player whose turn it is has finished moving in this movement phase:
+    # its end, when their opponent can use Rapid Ingress (see
+    # app/services/in_game/reinforcements.py).
+    __tablename__ = "game_movements_ended"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int] = mapped_column(Integer)
+
+
+class GameReanimation(Base):
+    # A unit's Reanimation Protocols activating at the end of its owner's
+    # command phase (battle round and whose turn): its D3 roll, and how many
+    # wounds that restored to wounded models and how many destroyed models it
+    # returned (see app/services/in_game/reanimation.py).
+    __tablename__ = "game_reanimations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int] = mapped_column(Integer)
+    roll: Mapped[int] = mapped_column(Integer)
+    healed: Mapped[int] = mapped_column(Integer, default=0)
+    returned: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class GameCommandChoice(Base):
+    # An option a player selected for one of their units' abilities in their
+    # Command phase (battle round, seat): the unit with the ability, which
+    # ability and option - and, for one that applies to another unit (e.g.
+    # Rod of the War Forge), that unit (see app/services/in_game/command_phase.py).
+    __tablename__ = "game_command_choices"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    seat: Mapped[int] = mapped_column(Integer)
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    ability: Mapped[str] = mapped_column(String(255))
+    option: Mapped[str] = mapped_column(String(255))
+    target_unit_id: Mapped[int | None] = mapped_column(
+        ForeignKey("units.id", ondelete="CASCADE"), nullable=True
+    )
+
+
+class GameCommandHeal(Base):
+    # A model regaining lost wounds at the start of its owner's Command phase
+    # (e.g. Self-repair Mechanisms): its roll, and how many it regained.
+    __tablename__ = "game_command_heals"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    seat: Mapped[int] = mapped_column(Integer)
+    unit_model_id: Mapped[int] = mapped_column(ForeignKey("unit_models.id", ondelete="CASCADE"))
+    ability: Mapped[str] = mapped_column(String(255))
+    roll: Mapped[int] = mapped_column(Integer)
+    healed: Mapped[int] = mapped_column(Integer, default=0)

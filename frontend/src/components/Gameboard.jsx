@@ -211,12 +211,22 @@ function Pieces({ pieces, onPointerDown, onClick }) {
   )
 }
 
+// Where an aura's label goes across: over its model, but kept on the board
+// (about 0.38" a character at its size).
+function auraLabelX(aura) {
+  const half = ((aura.name.length + 4) * 0.38) / 2
+  return Math.min(Math.max(aura.x, half), BOARD_WIDTH_INCHES - half)
+}
+
 // `attacker` and `defender` name whose zone is whose in the legend.
 // `bubbles` shade where a unit can reach - {kind: 'move', circles: [{id, x,
 // y, r}]} or {kind: 'shoot', regions: [[{x, y}]]} - each drawn as one shape.
 // `rings` ({id, x, y, r} in inches) mark how far each moving model can go
 // from where it started, with a tether to where it is now (`to`, if moved) -
 // along `path` (points) where it goes round walls.
+// `auras` ({id, x, y, rx, ry, rotation, range, name, colour} in inches) draw
+// how far an aura reaches from a model's base: its base grown by `range` all
+// round, labelled.
 // `onBoardClick(x, y)`, if given, is called with the inches clicked;
 // `onPieceMove(id, x, y)` while a draft piece is dragged, `onPieceRotate(id,
 // rotation)` while it's turned by a corner handle (degrees clockwise), and
@@ -229,6 +239,7 @@ function Gameboard({
   pieces = [],
   rings = [],
   bubbles = [],
+  auras = [],
   onBoardClick = null,
   onPieceMove = null,
   onPieceRotate = null,
@@ -391,6 +402,26 @@ function Gameboard({
                 />
               )
             })}
+          </g>
+        ))}
+        {auras.map((a) => (
+          <g key={`aura-${a.id}`} className={`aura aura--${a.colour}`}>
+            <ellipse
+              cx={a.x}
+              cy={a.y}
+              rx={a.rx + a.range}
+              ry={a.ry + a.range}
+              transform={`rotate(${a.rotation ?? 0} ${a.x} ${a.y})`}
+            >
+              <title>{`${a.name}: ${a.range}"`}</title>
+            </ellipse>
+            <text
+              x={auraLabelX(a)}
+              y={Math.max(0.8, a.y - Math.max(a.rx, a.ry) - a.range - 0.3)}
+              textAnchor="middle"
+            >
+              {`${a.name} ${a.range}"`}
+            </text>
           </g>
         ))}
         {rings.map((r) => (

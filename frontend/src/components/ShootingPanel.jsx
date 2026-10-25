@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getShootingTargets, shoot } from '../api'
+import { fireOverwatch, getOverwatchTargets, getShootingTargets, shoot } from '../api'
 import CombatResults from './CombatResults'
 
 // Shooting in the shooting phase (see app/services/in_game/shooting.py, which decides
@@ -7,6 +7,11 @@ import CombatResults from './CombatResults'
 // resolves it). The player picks a unit, a target it can see, and the weapons
 // that can reach it, and shoots - how the unit moved this turn and whether
 // the target's in cover come from the battlefield.
+//
+// With `overwatch` (GET /games/{id}/overwatch), it's Fire Overwatch instead,
+// at the end of the opponent's movement phase (see
+// app/services/in_game/overwatch.py): one unit snap shoots (hits only on
+// unmodified 6s) at an enemy unit visible within 24", for the stratagem's CP.
 
 function moveText(unit) {
   if (unit.advanced) return 'Advanced'
@@ -24,7 +29,9 @@ function unitStatus(unit) {
   return moveText(unit)
 }
 
-function ShootingPanel({ game, player, shooting, focus, onFocus, onShot, onError }) {
+function ShootingPanel({ game, player, shooting, overwatch, focus, onFocus, onShot, onError }) {
+  const loadTargets = overwatch ? getOverwatchTargets : getShootingTargets
+  const fireAt = overwatch ? fireOverwatch : shoot
   const [targets, setTargets] = useState([])
   const [weaponKeys, setWeaponKeys] = useState(new Set())
   const [outcome, setOutcome] = useState(null)
@@ -39,7 +46,7 @@ function ShootingPanel({ game, player, shooting, focus, onFocus, onShot, onError
     setTargets([])
     if (!selected?.can_shoot) return
     let cancelled = false
-    getShootingTargets(game.id, selected.unit_id)
+    loadTargets(game.id, selected.unit_id)
       .then((t) => !cancelled && setTargets(t))
       .catch((err) => onError(err.message))
     return () => {
@@ -58,7 +65,7 @@ function ShootingPanel({ game, player, shooting, focus, onFocus, onShot, onError
     onError(null)
     try {
       const chosen = target.weapons.filter((w) => weaponKeys.has(key(w)))
-      const result = await shoot(game.id, {
+      const result = await fireAt(game.id, {
         unit_id: selected.unit_id,
         target_unit_id: target.unit_id,
         weapon_ids: chosen.filter((w) => !w.enhancement).map((w) => w.id),
@@ -84,11 +91,30 @@ function ShootingPanel({ game, player, shooting, focus, onFocus, onShot, onError
 
   return (
     <div className="deployment-panel">
-      <h3>Shooting</h3>
-      <p>
-        <strong>{player?.user_name}</strong> shoots.{' '}
-        <span className="hint">Each unit can shoot once, at a unit it can see.</span>
-      </p>
+      {overwatch ? (
+        <>
+          <h3>End of movement: Fire Overwatch</h3>
+          <p>
+            <strong>{player?.user_name}</strong> can use Fire Overwatch ({overwatch.cp}CP): one
+            unit shoots an enemy unit it can see within 24".{' '}
+            <span className="hint">
+              Snap shooting: only unmodified 6s hit, with no re-rolls and no Hit roll abilities
+              (Sustained or Lethal Hits). Torrent and Rapid Fire still work.
+            </span>
+          </p>
+          {!overwatch.available && overwatch.reason && (
+            <p className="hint">Can't use it: {overwatch.reason}.</p>
+          )}
+        </>
+      ) : (
+        <>
+          <h3>Shooting</h3>
+          <p>
+            <strong>{player?.user_name}</strong> shoots.{' '}
+            <span className="hint">Each unit can shoot once, at a unit it can see.</span>
+          </p>
+        </>
+      )}
       <div className="radio-group">
         {shooting.units.map((unit) => (
           <label key={unit.unit_id} className="radio-option">
@@ -102,7 +128,9 @@ function ShootingPanel({ game, player, shooting, focus, onFocus, onShot, onError
               }}
             />
             {unit.name}
-            <span className="hint"> · {unitStatus(unit)}</span>
+            {(!overwatch || unit.shot || (overwatch.available && !unit.can_shoot)) && (
+              <span className="hint"> · {unitStatus(unit)}</span>
+            )}
           </label>
         ))}
       </div>
@@ -123,7 +151,7 @@ function ShootingPanel({ game, player, shooting, focus, onFocus, onShot, onError
                 />
                 {t.name}
                 <span className="hint">
-                  {!t.visible && ' · not visible'}
+                  {!t.visible && (overwatch ? ' · not visible within 24"' : ' · not visible')}
                   {t.visible && !t.weapons.some((w) => w.in_range) && ' · out of range'}
                   {t.in_cover && ' · in cover'}
                 </span>
@@ -156,15 +184,19 @@ function ShootingPanel({ game, player, shooting, focus, onFocus, onShot, onError
               </label>
             ))}
           </div>
-          <p className="hint">
-            {moveText(selected)}
-            {selected.advanced && ' - only Assault weapons fire'}
-            {!selected.advanced && selected.moved_less_than_3 && ' (moved less than 3")'}
-            {target.in_cover ? ` · ${target.name} has the Benefit of Cover` : ''}
-          </p>
+          {!overwatch && (
+            <p className="hint">
+              {moveText(selected)}
+              {selected.advanced && ' - only Assault weapons fire'}
+              {!selected.advanced && selected.moved_less_than_3 && ' (moved less than 3")'}
+              {target.in_cover ? ` · ${target.name} has the Benefit of Cover` : ''}
+            </p>
+          )}
           <div className="inline-controls">
             <button type="button" disabled={busy || weaponKeys.size === 0} onClick={fire}>
-              Shoot {target.name}
+              {overwatch
+                ? `Fire Overwatch at ${target.name} (${overwatch.cp}CP)`
+                : `Shoot ${target.name}`}
             </button>
           </div>
         </>
@@ -173,7 +205,7 @@ function ShootingPanel({ game, player, shooting, focus, onFocus, onShot, onError
       {outcome && (
         <div className="shooting-outcome">
           <h4>
-            {outcome.unit} shot {outcome.target}
+            {outcome.unit} {overwatch ? 'fired Overwatch at' : 'shot'} {outcome.target}
           </h4>
           <CombatResults
             result={outcome.combat}

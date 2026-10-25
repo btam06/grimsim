@@ -6,7 +6,7 @@ import random
 from fastapi import HTTPException
 
 from app.models import Game, GameUnitMove, GameUnitMoveStart, Unit, UnitModel
-from app.services.in_game import deployment, pathing
+from app.services.in_game import deployment, pathing, reinforcements
 from app.services.in_game.deployment import TOLERANCE, Placement
 
 # Moving units in the movement phase. In their turn's movement phase a player
@@ -129,6 +129,11 @@ def _check_unit(game: Game, unit: Unit) -> None:
         raise _bad_request("only the player whose turn it is can move their units")
     if not deployment.is_deployed(unit, deployment.positions(game)):
         raise _bad_request("that unit isn't on the battlefield")
+    if reinforcements.movement_ended(game):
+        raise _bad_request("the movement phase is over")
+    move = unit_move(game, unit)
+    if move is not None and move.kind == reinforcements.ARRIVED:
+        raise _bad_request("it arrived from Reserves this phase: it can't move again")
 
 
 def roll_advance(game: Game, unit: Unit) -> GameUnitMove:

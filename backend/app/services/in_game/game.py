@@ -23,8 +23,13 @@ from app.models import (
 )
 from app.models.game import BATTLE_ROUNDS, PHASES
 from app.schemas import GameIn
+from app.services.in_game import battle_formations as battle_formations_service
 from app.services.in_game import battle_round as battle_round_service
+from app.services.in_game import command_phase as command_phase_service
 from app.services.in_game import deployment as deployment_service
+from app.services.in_game import overwatch as overwatch_service
+from app.services.in_game import reanimation as reanimation_service
+from app.services.in_game import reinforcements as reinforcements_service
 from app.services.in_game import terrain as terrain_service
 
 # How many new tactical secondary cards a player draws in each of their
@@ -199,11 +204,14 @@ async def _draw_tactical(
 
 
 async def _begin_command_phase(session: AsyncSession, game: Game) -> None:
-    # Both players gain 1 CP; the player whose turn it is draws secondaries.
+    # Both players gain 1 CP; the player whose turn it is draws secondaries,
+    # and their models that heal at its start do (e.g. Self-repair
+    # Mechanisms).
     game.phase = "command"
     for player in game.players:
         player.cp += 1
     await _draw_tactical(session, game, player_at(game, game.turn_seat))
+    command_phase_service.heal(game)
 
 
 def enter_deployment(game: Game) -> None:
@@ -244,6 +252,17 @@ async def start_game(session: AsyncSession, game: Game) -> None:
         await _begin_battle(session, game)
 
 
+async def declare_formations(session: AsyncSession, game: Game, seat: int) -> None:
+    # The player has declared their battle formations; once both have, the
+    # units go on the battlefield - or, if there are none to, the first battle
+    # round begins.
+    battle_formations_service.declare(game, seat)
+    if deployment_service.formations_declared(game) and (
+        deployment_service.deploying_seat(game) is None
+    ):
+        await _begin_battle(session, game)
+
+
 async def deploy_unit(
     session: AsyncSession, game: Game, unit, placement: dict[int, tuple[float, float, float]]
 ) -> None:
@@ -264,6 +283,25 @@ async def advance(session: AsyncSession, game: Game) -> None:
             raise _bad_request("choose an option first for " + ", ".join(missing))
         await _begin_command_phase(session, game)
         return
+    if game.phase == "command":
+        # Abilities that must have an option selected in it first (e.g.
+        # Canticles of the Omnissiah).
+        if missing := command_phase_service.missing_choices(game):
+            raise _bad_request("select an option first for " + ", ".join(missing))
+        # The end of the command phase: Reanimation Protocols activate - and
+        # if that returns destroyed models, it waits for them to be set up.
+        if reanimation_service.placing(game):
+            raise _bad_request("set up the reanimated models first")
+        if not reanimation_service.reanimations(game):
+            reanimation_service.reanimate(game)
+            if reanimation_service.placing(game):
+                return
+    if game.phase == "movement" and not reinforcements_service.movement_ended(game):
+        # The end of the movement phase: if the opponent could use Rapid
+        # Ingress or Fire Overwatch, it pauses here for them to.
+        if await rapid_ingress_open(session, game) or await overwatch_open(session, game):
+            reinforcements_service.end_movement(game)
+            return
     index = PHASES.index(game.phase)
     if index + 1 < len(PHASES):
         game.phase = PHASES[index + 1]
@@ -276,10 +314,61 @@ async def advance(session: AsyncSession, game: Game) -> None:
         game.turn_seat = None
         return
     else:
+        if game.battle_round == reinforcements_service.LAST_ROUND:
+            # Strategic Reserves that haven't arrived are destroyed.
+            reinforcements_service.destroy_unarrived(game)
         game.battle_round += 1
         await _begin_battle_round(session, game)
         return
     await _begin_command_phase(session, game)
+
+
+async def core_stratagem(session: AsyncSession, name: str) -> Stratagem | None:
+    return (
+        await session.execute(
+            select(Stratagem)
+            .options(
+                selectinload(Stratagem.detachments),
+                selectinload(Stratagem.timings),
+                selectinload(Stratagem.game_action_link),
+            )
+            .where(Stratagem.name == name, Stratagem.is_core)
+        )
+    ).scalar_one_or_none()
+
+
+async def rapid_ingress_stratagem(session: AsyncSession) -> Stratagem | None:
+    return await core_stratagem(session, reinforcements_service.RAPID_INGRESS)
+
+
+async def overwatch_stratagem(session: AsyncSession) -> Stratagem | None:
+    return await core_stratagem(session, overwatch_service.OVERWATCH)
+
+
+async def rapid_ingress_open(session: AsyncSession, game: Game) -> bool:
+    # Whether, at the end of this movement phase, the opponent of the player
+    # whose turn it is could use Rapid Ingress: units can arrive this round,
+    # they have a unit in Strategic Reserves, and they can use the stratagem
+    # (CP, and not already this phase).
+    if not reinforcements_service.arrival_round(game):
+        return False
+    opponent = player_at(game, other_seat(game.turn_seat))
+    if not reinforcements_service.reserve_units(game, opponent.seat):
+        return False
+    stratagem = await rapid_ingress_stratagem(session)
+    return stratagem is not None and stratagem_unavailable_reason(game, opponent, stratagem) is None
+
+
+async def overwatch_open(session: AsyncSession, game: Game) -> bool:
+    # Whether, at the end of this movement phase, the opponent of the player
+    # whose turn it is could Fire Overwatch: they can use the stratagem (CP,
+    # and not already this phase), and one of their units has an enemy unit
+    # visible within 24" to shoot at.
+    opponent = player_at(game, other_seat(game.turn_seat))
+    stratagem = await overwatch_stratagem(session)
+    if stratagem is None or stratagem_unavailable_reason(game, opponent, stratagem) is not None:
+        return False
+    return overwatch_service.can_overwatch(game, opponent.seat)
 
 
 def stratagem_unavailable_reason(

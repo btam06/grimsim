@@ -538,6 +538,7 @@ async def calculate(
         firing=firing,
         defender_wounds=defender_wounds,
         attacker_wounds=attacker_wounds,
+        snap_shots=payload.snap_shots,
     )
 
     return CombatOut(

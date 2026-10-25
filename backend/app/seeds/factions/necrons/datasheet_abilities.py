@@ -434,13 +434,14 @@ CALCULATOR_NOTES = {
 }
 
 # Selectable options for abilities above: {ability name: {option name:
-# RuleOption}}. Aura ranges aren't modelled: picking one means the unit is
-# within range.
+# RuleOption}}. In the calculator, picking one means the unit is within
+# range; in a game, it applies by itself to units within its aura_range.
 OPTIONS = {
     "Infectious Murder-madness (Aura)": {
         "Infectious Murder-madness": RuleOption(
             rules=(Rule(conditions=(MURDER_MADNESS_CRITICAL_HIT,), effects=(ADD_EXTRA_HIT,)),),
             army_wide=True,
+            aura_range=6.0,
             description=(
                 "This unit, or another NECRONS unit in the army list, is within 6\": attacks by "
                 "DESTROYER CULT models, or against a target ticked as the closest eligible "
@@ -454,6 +455,7 @@ OPTIONS = {
                 Rule(conditions=(ALWAYS,), effects=(FEEL_NO_PAIN_MORTAL_5,), side="defender"),
             ),
             army_wide=True,
+            aura_range=6.0,
             description=(
                 "This unit, or another NECRONS unit in the army list, is within 6\": Feel No "
                 "Pain 5+ against mortal wounds (Psychic Attacks aren't modelled)."

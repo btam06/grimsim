@@ -10,8 +10,11 @@ function DeploymentPanel({ game, deployment, draft, checking, onSelectUnit, onPi
   if (!deployment) return null
   const seat = deployment.deploying_seat
   const player = game.players.find((p) => p.seat === seat)
-  const left = (s) => deployment.units.filter((u) => u.seat === s && !u.deployed).length
-  const units = deployment.units.filter((u) => u.seat === seat && !u.deployed)
+  const left = (s) =>
+    deployment.units.filter((u) => u.seat === s && !u.deployed && !u.formation).length
+  // Not in Strategic Reserves or embarked (they aren't deployed).
+  const units = deployment.units.filter((u) => u.seat === seat && !u.deployed && !u.formation)
+  const setAside = deployment.units.filter((u) => u.seat === seat && u.formation)
   const selected = units.find((u) => u.unit_id === draft.unitId) ?? null
   const placed = selected && draft.positions !== null
   const check = draft.check
@@ -45,6 +48,19 @@ function DeploymentPanel({ game, deployment, draft, checking, onSelectUnit, onPi
           </label>
         ))}
       </div>
+
+      {setAside.length > 0 && (
+        <p className="hint">
+          Not deployed:{' '}
+          {setAside
+            .map((u) => {
+              if (u.formation === 'reserves') return `${u.name} (Strategic Reserves)`
+              const transport = deployment.units.find((t) => t.unit_id === u.transport_unit_id)
+              return `${u.name} (embarked in ${transport?.name ?? 'a transport'})`
+            })
+            .join(', ')}
+        </p>
+      )}
 
       {/* A fixed height (scrolling if need be), so the board below doesn't
           jump as the check's problems come and go. */}

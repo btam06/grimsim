@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.combat_rules.effects import ASSAULT
 from app.models import DetachmentRule, Effect, Game, GameUnitMove, Unit, UnitModel, WeaponAbility
-from app.services.in_game import deployment
+from app.services.in_game import command_phase, deployment
 from app.services.in_game import movement
 from app.services.in_game.deployment import TOLERANCE, Base, Point, gap, outline
 from app.services.in_game.terrain import area_polygon, feature_polygons, within
@@ -25,7 +25,8 @@ from app.services.list_building.enhancements import granted_weapons
 #   or Remained Stationary (didn't move, or none of its models went anywhere),
 #   or moved less than 3" (its furthest-moved model). A unit that Fell Back,
 #   or is within Engagement Range of an enemy, can't shoot; one that Advanced
-#   can only shoot Assault weapons.
+#   can only shoot Assault weapons - unless an ability selected in the
+#   Command phase lets it (see app/services/in_game/command_phase.py).
 # - What each model can see: a line from some point of its base to some point
 #   of a target model's base not passing through anything solid. Ruin walls
 #   (green) are dense: always solid. Terrain areas (the ruins' footprints) are
@@ -253,12 +254,15 @@ class WeaponReach:
 class TargetReach:
     # What the unit can do to an enemy unit: whether any of its models can see
     # it, whether it's in cover, each weapon's reach, and which weapons each
-    # model can fire ({unit model id: {weapon id: half range}}).
+    # model can fire ({unit model id: {weapon id: half range}}) - and how far
+    # its nearest visible model is from the nearest of the unit's (None if it
+    # can't see any).
     unit: Unit
     visible: bool
     in_cover: bool
     weapons: list[WeaponReach]
     firing: dict[int, dict] = field(default_factory=dict)
+    distance: float | None = None
 
 
 def _bases(game: Game, unit: Unit) -> dict[int, Base]:
@@ -292,6 +296,7 @@ def reach(game: Game, unit: Unit, target: Unit, assault: set | None = None) -> T
     reaches: dict[object, WeaponReach] = {}
     firing: dict[int, dict] = {}
     visible = False
+    closest = None
     for unit_model in deployment.unit_models(unit):
         base = shooters.get(unit_model.id)
         weapons = ranged_weapons(unit_model)
@@ -301,6 +306,8 @@ def reach(game: Game, unit: Unit, target: Unit, assault: set | None = None) -> T
         gaps = [gap(base, t) for t in targets if can_see(base, t, walls)]
         visible = visible or bool(gaps)
         nearest = min(gaps, default=None)
+        if nearest is not None:
+            closest = nearest if closest is None else min(closest, nearest)
         for weapon in weapons:
             entry = reaches.setdefault(
                 weapon.id,
@@ -326,6 +333,7 @@ def reach(game: Game, unit: Unit, target: Unit, assault: set | None = None) -> T
         in_cover=in_cover(game, target),
         weapons=list(reaches.values()),
         firing=firing,
+        distance=closest,
     )
 
 
@@ -399,11 +407,14 @@ class Bubble:
     regions: list[list[Point]]
 
 
-def sight_bubble(game: Game, unit: Unit, assault: set | None = None) -> Bubble:
+def sight_bubble(
+    game: Game, unit: Unit, assault: set | None = None, max_range: float | None = None
+) -> Bubble:
     # Where the unit's models could shoot something: within its longest range
     # (base to base), and not hidden by ruin walls or by terrain areas it isn't
     # touching (see reach). Seen from each model's centre and points round its
-    # base. If it Advanced, only its Assault weapons count (`assault`).
+    # base. If it Advanced, only its Assault weapons count (`assault`); no
+    # further than `max_range`, if given (e.g. Fire Overwatch's 24").
     assault = assault or set()
     advanced = move_status(game, unit).advanced
     bases = _bases(game, unit)
@@ -420,7 +431,7 @@ def sight_bubble(game: Game, unit: Unit, assault: set | None = None) -> Bubble:
         ]
         if base is None or not ranges:
             continue
-        weapon_range = max(ranges)
+        weapon_range = max(ranges) if max_range is None else min(max(ranges), max_range)
         longest = max(longest or 0, weapon_range)
         radius = max(base.semi_axes)
         viewpoints = [((base.x, base.y), weapon_range + radius)] + [
@@ -464,7 +475,9 @@ def cant_shoot_reason(game: Game, unit: Unit, assault: set | None = None) -> str
         return "it isn't on the battlefield"
     if unit_shot(game, unit) is not None:
         return "it has already shot this phase"
-    if move_status(game, unit).fell_back:
+    if move_status(game, unit).fell_back and not command_phase.eligible_after(
+        game, unit, "fell_back"
+    ):
         return "it Fell Back this turn"
     if movement.in_engagement_range(game, unit):
         return "it's within Engagement Range of an enemy unit"

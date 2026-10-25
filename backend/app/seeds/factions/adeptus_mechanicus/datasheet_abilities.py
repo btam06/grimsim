@@ -1,4 +1,4 @@
-from app.combat_rules import Rule, RuleOption
+from app.combat_rules import CommandChoice, Rule, RuleOption
 from app.combat_rules.conditions import (
     ALWAYS,
     TARGET_HAS_CHARACTER,
@@ -237,7 +237,8 @@ CALCULATOR_NOTES = {
     ),
     "Supreme Commander": "Descriptive only: an army-building restriction.",
     "Self-repair Mechanisms": (
-        "Descriptive only: healing between turns is outside the combat engine."
+        "Descriptive only in the calculator; in a game, the model regains D3 lost wounds at "
+        "the start of its owner's Command phase."
     ),
     "Baffling Data Screed": "Descriptive only: Battle-shock and hiding are outside the calculator.",
     "Data-severed": (
@@ -351,9 +352,10 @@ OPTIONS = {
         "Shroudpsalm": RuleOption(
             rules=tuple(CORE_RULES["Stealth"]),
             army_wide=True,
+            aura_range=6.0,
             description=(
                 "This model's unit, and other units of its faction in its army list, have "
-                "Stealth (the 6\" range isn't modelled)."
+                "Stealth (in a game, only those within 6\" of this model)."
             ),
         ),
     },
@@ -361,6 +363,7 @@ OPTIONS = {
         "Fanatical Devotion": RuleOption(
             rules=(Rule(conditions=(ALWAYS,), effects=(ASSAULT,)),),
             army_wide=True,
+            eligible_after=("advanced",),
             description=(
                 "A SKITARII or THULIA GHULD unit within 6\" can shoot after Advancing - "
                 "modelled as its ranged weapons having [ASSAULT] (the 6\" isn't modelled)."
@@ -368,9 +371,10 @@ OPTIONS = {
         ),
         "Adaptive Tactics": RuleOption(
             army_wide=True,
+            eligible_after=("fell_back",),
             description=(
-                "Not modelled: shooting and charging after Falling Back are outside the "
-                "calculator."
+                "Not modelled in the calculator: in a game, the unit can shoot and declare a "
+                "charge after Falling Back."
             ),
         ),
         "The Fires of Mars": RuleOption(
@@ -403,4 +407,23 @@ OPTIONS = {
             description="+1 Toughness for KASTELAN ROBOT models when this unit is attacked.",
         ),
     },
+}
+
+
+# Abilities above whose option is selected in the Command phase, in a game
+# (see CommandChoice): {ability name: CommandChoice}.
+COMMAND_CHOICES = {
+    "Canticles of the Omnissiah": CommandChoice(),
+    "Rod of the War Forge": CommandChoice(
+        target_keywords=("SKITARII", "THULIA GHULD"), target_range=6.0
+    ),
+    "Battle Protocols": CommandChoice(
+        required=False, persistent=True, default="Aegis Protocol"
+    ),
+}
+
+# Abilities above with which a model regains lost wounds at the start of its
+# owner's Command phase, in a game: {ability name: the die rolled (D3)}.
+COMMAND_HEALS = {
+    "Self-repair Mechanisms": 3,
 }

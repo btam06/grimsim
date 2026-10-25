@@ -6570,3 +6570,48 @@ async def test_fires_of_mars_makes_both_imperatives_active_for_another_unit(
     )
     assert response.status_code == 200, response.text
     assert response.json()["total_damage"] == expected_damage
+
+
+# --- snap shooting (e.g. Fire Overwatch) ---
+
+
+def test_snap_shots_only_hit_on_an_unmodified_six(monkeypatch):
+    rolls = iter([5, 6, 6, 6])  # hit rolls 5 (a miss, even at 2+) and 6; then wound, save
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls))
+    weapon = _weapon(attacks="2", skill=2, strength=10, ap=-10, weapon_type="ranged")
+    result = _fire(weapon, [_model(toughness=1, wounds=10, save=7)], snap_shots=True)
+    assert result.attack_rolls == [5, 6]
+    assert len(result.wound_rolls) == 1
+
+
+def test_snap_shots_are_not_rerolled(monkeypatch):
+    rolls = iter([5, 6, 6, 6])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls))
+    weapon = _weapon(attacks="1", skill=2, strength=10, ap=-10, weapon_type="ranged")
+    weapon.abilities = [_ability([_condition("always")], [_effect("reroll_failed_hits")])]
+    result = _fire(weapon, [_model(toughness=1, wounds=10, save=7)], snap_shots=True)
+    assert (result.attack_rolls, result.attack_rerolls, result.wound_rolls) == ([5], [], [])
+
+
+def test_snap_shots_trigger_no_hit_abilities(monkeypatch):
+    # A 6 hits, but Sustained Hits adds nothing.
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    weapon = _weapon(attacks="1", skill=2, strength=10, ap=-10, weapon_type="ranged")
+    weapon.abilities = [_ability([_condition("critical_hit")], [_effect("add_extra_hit")])]
+    result = _fire(weapon, [_model(toughness=1, wounds=10, save=7)], snap_shots=True)
+    assert (result.attack_rolls, len(result.wound_rolls)) == ([6], 1)
+
+
+def test_snap_shots_keep_torrent_and_rapid_fire(monkeypatch):
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: 1)  # would miss
+    torrent = next(e for e in weapon_ability_seeds.ENTRIES if e[0] == "Torrent")
+    weapon = _weapon(attacks="1", skill=2, strength=10, ap=-10, weapon_type="ranged")
+    weapon.abilities = [
+        _ability([_condition(c) for c in torrent[2]], [_effect(e) for e in torrent[3]]),
+        _ability([_condition("within_half_range")], [_effect("add_extra_attack")]),
+    ]
+    result = _fire(
+        weapon, [_model(toughness=1, wounds=10, save=7)], snap_shots=True, half_range=True
+    )
+    # Both attacks (its own and Rapid Fire's) hit automatically.
+    assert (result.attack_rolls, len(result.wound_rolls)) == ([], 2)

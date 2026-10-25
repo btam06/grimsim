@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import {
   achieveSecondary,
   advanceGame,
+  bringIn,
+  checkArrival,
   checkCharge,
   checkConsolidation,
   checkDeployment,
@@ -9,6 +11,7 @@ import {
   checkPileIn,
   consolidate,
   rollAdvance,
+  declareFormations,
   deployUnit,
   discardSecondary,
   finishPilingIn,
@@ -19,6 +22,12 @@ import {
   getFight,
   getMovement,
   getPileIn,
+  getOverwatch,
+  getReanimation,
+  checkReanimation,
+  placeReanimated,
+  getReserves,
+  getReservesFormation,
   getReach,
   getShooting,
   getShootingBubble,
@@ -39,9 +48,13 @@ import CardTextAccordion from './CardTextAccordion'
 import ChargePanel from './ChargePanel'
 import DeploymentPanel from './DeploymentPanel'
 import FightPanel from './FightPanel'
+import FormationsPanel from './FormationsPanel'
 import Gameboard from './Gameboard'
 import MovementPanel from './MovementPanel'
 import PileInPanel from './PileInPanel'
+import CommandPanel from './CommandPanel'
+import ReanimationPanel from './ReanimationPanel'
+import ReservesPanel from './ReservesPanel'
 import RoundStartPanel from './RoundStartPanel'
 import ShootingPanel from './ShootingPanel'
 import Select from './Select'
@@ -301,7 +314,10 @@ function boardPieces(game, deployment, draft, focus = {}) {
     const isDraft = unit.unit_id === draft.unitId && draft.positions !== null
     const locked = new Set(draft.locked ?? [])
     for (const model of unit.models) {
-      const position = isDraft ? draft.positions[model.unit_model_id] : model.position
+      // A draft can be just some of the unit's models (e.g. reanimated ones):
+      // the rest stay where they are.
+      const draftPosition = isDraft ? draft.positions[model.unit_model_id] : undefined
+      const position = draftPosition ?? model.position
       if (!position) continue
       // Where it started: the start of the phase, when moving (`starts`).
       const start = (isDraft && draft.starts?.[model.unit_model_id]) || model.position
@@ -327,7 +343,7 @@ function boardPieces(game, deployment, draft, focus = {}) {
         rx: model.width / 2,
         ry: model.height / 2,
         side,
-        draft: isDraft && !locked.has(model.unit_model_id),
+        draft: draftPosition !== undefined && !locked.has(model.unit_model_id),
         invalid: isDraft && problems.has(model.unit_model_id),
         shooter: unit.unit_id === focus.unitId,
         target: unit.unit_id === focus.targetId,
@@ -340,6 +356,34 @@ function boardPieces(game, deployment, draft, focus = {}) {
     }
   }
   return pieces
+}
+
+// How far the auras of the unit being moved (or placed) reach from its
+// models where they are now (see the deployment's `auras`): one colour per
+// aura name.
+function auraCircles(deployment, draft) {
+  if (!deployment || draft.positions === null || draft.unitId === null) return []
+  const unit = deployment.units.find((u) => u.unit_id === draft.unitId)
+  if (!unit?.auras?.length) return []
+  const names = [...new Set(unit.auras.map((a) => a.name))]
+  return unit.auras.flatMap((aura) => {
+    const model = unit.models.find((m) => m.unit_model_id === aura.unit_model_id)
+    const position = draft.positions[aura.unit_model_id] ?? model?.position
+    if (!model || !position) return []
+    return [
+      {
+        id: `${aura.unit_model_id}-${aura.name}`,
+        x: position.x,
+        y: position.y,
+        rotation: position.rotation,
+        rx: model.width / 2,
+        ry: model.height / 2,
+        range: aura.range,
+        name: aura.name,
+        colour: names.indexOf(aura.name) % 3,
+      },
+    ]
+  })
 }
 
 // How far each model of the moving unit can go: a ring around where it
@@ -457,12 +501,69 @@ function GameView({ gameId, onBack }) {
     }
   }, [game, moving])
 
+  // In the command phase: Reanimation Protocols at its end, and any returned
+  // models to set up (see GET /games/{id}/reanimation).
+  const commandPhase = game?.status === 'in_progress' && game?.phase === 'command'
+  const [reanimation, setReanimation] = useState(null)
+  useEffect(() => {
+    if (!game || !commandPhase) {
+      setReanimation(null)
+      return
+    }
+    let cancelled = false
+    getReanimation(game.id)
+      .then((r) => !cancelled && setReanimation(r))
+      .catch((err) => setError(err.message))
+    return () => {
+      cancelled = true
+    }
+  }, [game, commandPhase])
+
+  // In the movement phase: who can bring units in from Reserves, and which
+  // (see GET /games/{id}/reserves).
+  const [reserves, setReserves] = useState(null)
+  useEffect(() => {
+    if (!game || !moving) {
+      setReserves(null)
+      return
+    }
+    let cancelled = false
+    getReserves(game.id)
+      .then((r) => !cancelled && setReserves(r))
+      .catch((err) => setError(err.message))
+    return () => {
+      cancelled = true
+    }
+  }, [game, moving])
+  // The end of the movement phase: only the opponent's Rapid Ingress and
+  // Fire Overwatch now.
+  const endOfMovement = moving && reserves?.step === 'rapid_ingress'
+
   // In the shooting phase, the player whose turn it is's units; and the one
   // shooting and its target, marked on the board.
   const [shooting, setShooting] = useState(null)
   const [shootingFocus, setShootingFocus] = useState({ unitId: null, targetId: null })
   const [shots, setShots] = useState(0)
   const shootingPhase = game?.status === 'in_progress' && game?.phase === 'shooting'
+
+  // At the end of the movement phase: whether the opponent can Fire
+  // Overwatch, and with what (see GET /games/{id}/overwatch).
+  const [overwatch, setOverwatch] = useState(null)
+  useEffect(() => {
+    if (!game || !endOfMovement) {
+      setOverwatch(null)
+      return
+    }
+    let cancelled = false
+    getOverwatch(game.id)
+      .then((o) => !cancelled && setOverwatch(o.seat === null ? null : o))
+      .catch((err) => setError(err.message))
+    return () => {
+      cancelled = true
+    }
+  }, [game, endOfMovement, shots])
+  // Picking a unit to fire and its target, as when shooting.
+  const overwatching = overwatch !== null
 
   useEffect(() => {
     if (!game || !shootingPhase) {
@@ -481,8 +582,11 @@ function GameView({ gameId, onBack }) {
   // Where the selected shooting unit's guns reach (see GET
   // /games/{id}/shooting/bubble).
   const [sightBubble, setSightBubble] = useState(null)
-  const shootingUnit = shooting?.units.find((u) => u.unit_id === shootingFocus.unitId)
-  const bubbleUnitId = shootingPhase && shootingUnit?.can_shoot ? shootingUnit.unit_id : null
+  const shootingUnit = (overwatching ? overwatch : shooting)?.units.find(
+    (u) => u.unit_id === shootingFocus.unitId
+  )
+  const bubbleUnitId =
+    (shootingPhase || overwatching) && shootingUnit?.can_shoot ? shootingUnit.unit_id : null
   useEffect(() => {
     setSightBubble(null)
     if (bubbleUnitId === null) return
@@ -658,7 +762,11 @@ function GameView({ gameId, onBack }) {
     setChecking(true)
     try {
       let check
-      if (kind === 'consolidate') {
+      if (kind === 'reinforce') {
+        check = await checkArrival(game.id, asPayload(unitId, positions))
+      } else if (kind === 'reanimate') {
+        check = await checkReanimation(game.id, asPayload(unitId, positions))
+      } else if (kind === 'consolidate') {
         check = await checkConsolidation(game.id, asPayload(unitId, positions))
       } else if (kind === 'pile_in') {
         check = await checkPileIn(game.id, asPayload(unitId, positions))
@@ -683,15 +791,17 @@ function GameView({ gameId, onBack }) {
   }
 
   const setDown = async (x, y) => {
-    const { unitId } = draftRef.current
+    const { unitId, kind } = draftRef.current
     setError(null)
     try {
-      const formation = await getDeploymentFormation(game.id, { unit_id: unitId, x, y })
+      // Deploying, or a unit arriving from Reserves (kind 'reinforce').
+      const getFormation = kind === 'reinforce' ? getReservesFormation : getDeploymentFormation
+      const formation = await getFormation(game.id, { unit_id: unitId, x, y })
       const positions = Object.fromEntries(
         formation.map((p) => [p.unit_model_id, { x: p.x, y: p.y, rotation: p.rotation }])
       )
-      setDraft({ unitId, positions, check: null })
-      runCheck(unitId, positions)
+      setDraft({ unitId, positions, check: null, kind: kind ?? null })
+      runCheck(unitId, positions, kind ?? null)
     } catch (err) {
       setError(err.message)
     }
@@ -742,7 +852,9 @@ function GameView({ gameId, onBack }) {
   // target). Clicking the unit already picked does nothing (a drag ends in a
   // click).
   const pickUnit = (unitId) => {
-    if (moving && movement) {
+    if (overwatching) {
+      pickFocus(overwatch.units.some((u) => u.unit_id === unitId), unitId)
+    } else if (moving && movement) {
       const unit = movement.units.find((u) => u.unit_id === unitId)
       if (unit && unit.unit_id !== draftRef.current.unitId) selectMoveUnit(unit)
     } else if (chargePhase && charge) {
@@ -1028,7 +1140,14 @@ function GameView({ gameId, onBack }) {
           {layout?.deployment ? 'Start deployment' : 'Start first battle round'}
         </button>
       )}
-      {game.status === 'deployment' && (
+      {game.status === 'deployment' && game.deployment_step === 'formations' && (
+        <FormationsPanel
+          game={game}
+          onDeclared={(seat) => act(() => declareFormations(game.id, { seat }))}
+          onError={setError}
+        />
+      )}
+      {game.status === 'deployment' && game.deployment_step !== 'formations' && (
         <DeploymentPanel
           game={game}
           deployment={deployment}
@@ -1065,6 +1184,70 @@ function GameView({ gameId, onBack }) {
         </div>
       )}
       {moving && (
+        <ReservesPanel
+          game={game}
+          reserves={reserves}
+          draft={draft}
+          checking={checking}
+          onSelectUnit={(unitId) => {
+            checkSeq.current++
+            setDraft({ ...NO_DRAFT, unitId, kind: 'reinforce' })
+          }}
+          onPickUp={() => {
+            checkSeq.current++
+            setDraft((d) => ({ ...NO_DRAFT, unitId: d.unitId, kind: 'reinforce' }))
+          }}
+          onBringIn={async () => {
+            const { unitId, positions } = draftRef.current
+            if (await act(() => bringIn(game.id, asPayload(unitId, positions)))) {
+              setDraft(NO_DRAFT)
+            }
+          }}
+        />
+      )}
+      {commandPhase && !reanimation?.placing && <CommandPanel game={game} onError={setError} />}
+      {commandPhase && (
+        <ReanimationPanel
+          game={game}
+          reanimation={reanimation}
+          draft={draft}
+          checking={checking}
+          onSelectUnit={(unit) => {
+            checkSeq.current++
+            // Its returned models start where the backend suggests.
+            const positions = Object.fromEntries(
+              unit.to_place.map((p) => [p.unit_model_id, { x: p.x, y: p.y, rotation: p.rotation }])
+            )
+            setDraft({ ...NO_DRAFT, unitId: unit.unit_id, positions, kind: 'reanimate' })
+            runCheck(unit.unit_id, positions, 'reanimate')
+          }}
+          onPlace={async () => {
+            const { unitId, positions } = draftRef.current
+            if (await act(() => placeReanimated(game.id, asPayload(unitId, positions)))) {
+              setDraft(NO_DRAFT)
+            }
+          }}
+        />
+      )}
+      {overwatching && (
+        <ShootingPanel
+          game={game}
+          player={game.players.find((p) => p.seat === overwatch.seat)}
+          shooting={overwatch}
+          overwatch={overwatch}
+          focus={shootingFocus}
+          onFocus={setShootingFocus}
+          onShot={() => {
+            // The game again: CP spent, destroyed models off the battlefield.
+            setShots((n) => n + 1)
+            getGame(game.id)
+              .then(setGame)
+              .catch((err) => setError(err.message))
+          }}
+          onError={setError}
+        />
+      )}
+      {moving && !endOfMovement && (
         <MovementPanel
           player={turnPlayer}
           movement={movement}
@@ -1156,20 +1339,23 @@ function GameView({ gameId, onBack }) {
           game,
           deployment,
           draft,
-          shootingPhase || fighting
+          shootingPhase || fighting || overwatching
             ? shootingFocus
             : chargePhase
               ? { targetId: draft.targetId }
               : {}
         )}
         rings={moveRings(deployment, movement, draft)}
+        auras={auraCircles(deployment, draft)}
         bubbles={[
           (moving || chargePhase || fightPhase) &&
             moveBubble(deployment, movement, draft, reach),
           sightBubble && { kind: 'shoot', regions: sightBubble.regions },
         ].filter(Boolean)}
         onBoardClick={
-          game.status === 'deployment' && draft.unitId !== null && draft.positions === null
+          (game.status === 'deployment' || draft.kind === 'reinforce') &&
+          draft.unitId !== null &&
+          draft.positions === null
             ? setDown
             : null
         }

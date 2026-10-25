@@ -56,12 +56,19 @@ async def _unit(
     assault_range=None,
     melee=False,
     fights_first=False,
+    deep_strike=False,
 ):
     # A unit of `count` identical models in a list - each with a gun of
     # `weapon_range` (1 attack, always hits on 2+) if given, an Assault gun of
     # `assault_range` likewise, a melee blade likewise if `melee`, the Fights
     # First ability if `fights_first`, and `keywords`.
     abilities = []
+    if deep_strike:
+        query = select(DatasheetAbility).where(DatasheetAbility.name == "Deep Strike")
+        abilities.append(
+            (await session.execute(query)).scalar_one_or_none()
+            or DatasheetAbility(name="Deep Strike")
+        )
     if fights_first:
         query = select(DatasheetAbility).where(DatasheetAbility.name == "Fights First")
         abilities.append(
@@ -125,9 +132,11 @@ async def _unit(
     return unit.id
 
 
-async def _game(client, session, tmp_path, units=None):
+async def _game(client, session, tmp_path, units=None, declare=True):
     # A game on the test layout, attacker seat 1. `units` is
     # {seat: [(name, count, kwargs)]}; by default each side has one unit of 5.
+    # Both players have declared their battle formations (every unit on the
+    # battlefield), unless not `declare`.
     ids = await _setup(client)
     await terrain_seed.seed(session, _layout_file(tmp_path))
     units = units or {1: [("Attackers", 5, {})], 2: [("Defenders", 5, {})]}
@@ -136,7 +145,14 @@ async def _game(client, session, tmp_path, units=None):
             await _unit(session, ids[f"list{seat}"], ids[f"faction{seat}"], name, count, **kwargs)
     response = await client.post("/games", json=_game_payload(ids, attacker=1, first=2))
     assert response.status_code == 201, response.text
-    return response.json()
+    game = response.json()
+    if declare and game["status"] == "deployment":
+        for seat in (1, 2):
+            url = f"/games/{game['id']}/formations/done"
+            response = await client.post(url, json={"seat": seat})
+            assert response.status_code == 200, response.text
+        game = response.json()
+    return game
 
 
 async def _deployment(client, game_id):
@@ -285,7 +301,8 @@ async def test_starting_a_game_in_setup_begins_deployment(client: AsyncClient, s
     game = (await client.post("/games", json=_game_payload(ids))).json()
     await _unit(session, ids["list1"], ids["faction1"], "Late", 1)
     game = (await client.post(f"/games/{game['id']}/start")).json()
-    assert (game["status"], game["deploying_seat"]) == ("deployment", 1)
+    # Declaring battle formations first.
+    assert (game["status"], game["deployment_step"]) == ("deployment", "formations")
 
 
 async def test_players_take_turns_then_the_battle_begins(client: AsyncClient, session, tmp_path):
@@ -589,3 +606,130 @@ async def test_model_without_a_measured_base_uses_a_placeholder(
     assert (tank["base_size"], tank["measured"]) == ("Use model", False)
     assert tank["width"] == pytest.approx(32 / 25.4)
     assert math.isclose(tank["height"], tank["width"])
+
+
+
+# --- declaring battle formations ---
+
+
+async def _formations(client, game_id):
+    return (await client.get(f"/games/{game_id}/formations")).json()
+
+
+async def _set(client, game_id, seat, unit, place, transport=None):
+    return await client.post(
+        f"/games/{game_id}/formations",
+        json={
+            "seat": seat,
+            "unit_id": unit["unit_id"],
+            "place": place,
+            "transport_unit_id": transport["unit_id"] if transport else None,
+        },
+    )
+
+
+async def _declare(client, game_id, seat):
+    return await client.post(f"/games/{game_id}/formations/done", json={"seat": seat})
+
+
+async def test_deployment_starts_with_battle_formations(client: AsyncClient, session, tmp_path):
+    game = await _game(client, session, tmp_path, declare=False)
+    assert (game["status"], game["deployment_step"], game["deploying_seat"]) == (
+        "deployment", "formations", None
+    )
+    state = await _formations(client, game["id"])
+    [attacker] = [p for p in state["players"] if p["seat"] == 1]
+    assert (attacker["done"], attacker["reserves_points"]) == (False, 0)
+    # Every unit's points are 100 (see _unit): 50 can go into reserves.
+    assert (attacker["army_points"], attacker["reserves_limit"]) == (100, 50)
+    # No deploying until both have declared.
+    attackers = _unit_named(await _deployment(client, game["id"]), "Attackers")
+    response = await _deploy(client, game["id"], attackers, _row(attackers, 5, 40))
+    assert "battle formations first" in response.json()["detail"]
+    await _declare(client, game["id"], 1)
+    game = (await _declare(client, game["id"], 2)).json()
+    assert (game["deployment_step"], game["deploying_seat"]) == ("deploying", 1)
+
+
+async def test_strategic_reserves_up_to_half_the_army(client: AsyncClient, session, tmp_path):
+    units = {1: [("A", 1, {}), ("B", 1, {}), ("C", 1, {}), ("E", 1, {})], 2: [("D", 1, {})]}
+    game = await _game(client, session, tmp_path, units=units, declare=False)
+    game_id = game["id"]
+    deployment = await _deployment(client, game_id)
+    a, b, c = (_unit_named(deployment, n) for n in "ABC")
+    # 400 points: 200 can be in reserves.
+    assert (await _set(client, game_id, 1, a, "reserves")).status_code == 200
+    response = await _set(client, game_id, 1, b, "reserves")
+    assert response.json()["players"][0]["reserves_points"] == 200
+    response = await _set(client, game_id, 1, c, "reserves")
+    assert response.status_code == 400
+    assert "at most 200" in response.json()["detail"]
+    # Back on the battlefield.
+    response = await _set(client, game_id, 1, b, None)
+    assert response.json()["players"][0]["reserves_points"] == 100
+    # Only their own units.
+    d = _unit_named(deployment, "D")
+    assert (await _set(client, game_id, 1, d, "reserves")).status_code == 400
+
+
+async def test_units_in_reserves_arent_deployed(client: AsyncClient, session, tmp_path):
+    units = {1: [("A", 1, {}), ("B", 1, {})], 2: [("D", 1, {})]}
+    game = await _game(client, session, tmp_path, units=units, declare=False)
+    game_id = game["id"]
+    deployment = await _deployment(client, game_id)
+    a, b, d = (_unit_named(deployment, n) for n in "ABD")
+    await _set(client, game_id, 1, b, "reserves")
+    await _declare(client, game_id, 1)
+    await _declare(client, game_id, 2)
+    assert _unit_named(await _deployment(client, game_id), "B")["formation"] == "reserves"
+    response = await _deploy(client, game_id, b, _row(b, 5, 40))
+    assert "in Strategic Reserves" in response.json()["detail"]
+    # A and D are all there is to deploy: then the battle begins.
+    assert (await _deploy(client, game_id, a, _row(a, 5, 40))).status_code == 200
+    game = (await _deploy(client, game_id, d, _row(d, 5, 4))).json()
+    assert (game["status"], game["battle_round"]) == ("in_progress", 1)
+
+
+async def test_embarking_in_a_transport(client: AsyncClient, session, tmp_path):
+    units = {
+        1: [("Rhino", 1, {"keywords": ["TRANSPORT"]}), ("Squad", 1, {}), ("Big", 1, {})],
+        2: [("D", 1, {})],
+    }
+    game = await _game(client, session, tmp_path, units=units, declare=False)
+    game_id = game["id"]
+    deployment = await _deployment(client, game_id)
+    rhino, squad, big = (_unit_named(deployment, n) for n in ("Rhino", "Squad", "Big"))
+    state = await _formations(client, game_id)
+    transports = {u["name"]: u["transport"] for u in state["players"][0]["units"]}
+    assert transports == {"Rhino": True, "Squad": False, "Big": False}
+
+    response = await _set(client, game_id, 1, squad, "embarked", rhino)
+    assert response.status_code == 200, response.text
+    player = response.json()["players"][0]
+    squad_out = next(u for u in player["units"] if u["name"] == "Squad")
+    assert (squad_out["place"], squad_out["transport_unit_id"]) == ("embarked", rhino["unit_id"])
+    # Embarked isn't in reserves.
+    assert player["reserves_points"] == 0
+    # Only in a TRANSPORT; a transport can't embark.
+    assert (await _set(client, game_id, 1, big, "embarked", squad)).status_code == 400
+    assert (await _set(client, game_id, 1, rhino, "embarked", rhino)).status_code == 400
+
+    await _declare(client, game_id, 1)
+    await _declare(client, game_id, 2)
+    response = await _deploy(client, game_id, squad, _row(squad, 5, 40))
+    assert "embarked" in response.json()["detail"]
+    # The Squad isn't counted for the turns: Rhino, D, Big.
+    assert (await _deploy(client, game_id, rhino, _row(rhino, 5, 40))).status_code == 200
+    d = _unit_named(deployment, "D")
+    assert (await _deploy(client, game_id, d, _row(d, 5, 4))).status_code == 200
+    game = (await _deploy(client, game_id, big, _row(big, 15, 40))).json()
+    assert game["status"] == "in_progress"
+
+
+async def test_formations_lock_once_declared(client: AsyncClient, session, tmp_path):
+    game = await _game(client, session, tmp_path, declare=False)
+    game_id = game["id"]
+    attackers = _unit_named(await _deployment(client, game_id), "Attackers")
+    await _declare(client, game_id, 1)
+    assert (await _set(client, game_id, 1, attackers, "reserves")).status_code == 400
+    assert (await _declare(client, game_id, 1)).status_code == 400

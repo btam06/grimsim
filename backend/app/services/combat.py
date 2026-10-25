@@ -220,6 +220,7 @@ def resolve_combat(
     firing: dict[int, dict] | None = None,
     defender_wounds: dict[int, int] | None = None,
     attacker_wounds: dict[int, int] | None = None,
+    snap_shots: bool = False,
 ) -> CombatResult:
     # `firing`, if given, is which weapons each attacking model can fire on
     # the battlefield and whether each is within half range: {unit model id:
@@ -228,6 +229,10 @@ def resolve_combat(
     # `defender_wounds` and `attacker_wounds`, if given, are the wounds each
     # model has left in a game ({unit model id: wounds}): a defending model
     # not in it is already destroyed, and isn't attacked.
+    # `snap_shots` (e.g. Fire Overwatch): every Hit roll needs an unmodified 6,
+    # can't be re-rolled, and triggers nothing (no Sustained or Lethal Hits) -
+    # attacks that hit automatically (Torrent) still do, and extra attacks
+    # (Rapid Fire) are still made.
     # The defending unit is a queue of individual models, each with its own wound pool.
     # Each attack targets whichever model is at the front of the queue; once that
     # model is destroyed it's popped, and the *next* attack targets the model now
@@ -794,6 +799,11 @@ def resolve_combat(
             hit_roll = random.randint(1, 6)
             result.attack_rolls.append(hit_roll)
             weapon_result.attack_rolls.append(hit_roll)
+            if snap_shots:
+                # Only an unmodified 6 hits; nothing else happens.
+                if hit_roll == 6:
+                    successful_hits.append((attack, fired))
+                continue
             _apply_triggered_effects(
                 abilities, {"step": "hit", "roll": hit_roll, **hit_context}, attack, spawned
             )

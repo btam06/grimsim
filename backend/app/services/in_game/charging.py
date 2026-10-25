@@ -6,12 +6,14 @@ import random
 from fastapi import HTTPException
 
 from app.models import Game, GameUnitCharge, Unit
-from app.services.in_game import deployment, pathing
+from app.services.in_game import command_phase, deployment, pathing
 from app.services.in_game.deployment import TOLERANCE, Base, Placement, gap
 from app.services.in_game.movement import ENGAGEMENT_RANGE
 
 # Charging in the charge phase. In their turn's charge phase a player can
-# charge with each of their units once - any unit on the battlefield can:
+# charge with each of their units once - any unit on the battlefield can,
+# but one that Advanced or Fell Back this turn (unless an ability selected in
+# the Command phase lets it - see app/services/in_game/command_phase.py):
 #
 # - Roll the charge first: 2D6, kept for the phase (rolling again gives the
 #   same roll).
@@ -71,9 +73,24 @@ def _bases(game: Game, unit: Unit) -> dict[int, Base]:
     }
 
 
+def cant_charge_reason(game: Game, unit: Unit) -> str | None:
+    # Why the unit can't declare a charge this turn because of how it moved
+    # (it Advanced or Fell Back), or None.
+    # (Imported here: shooting imports movement, which charging's callers use.)
+    from app.services.in_game.shooting import move_status
+
+    status = move_status(game, unit)
+    if status.advanced and not command_phase.eligible_after(game, unit, "advanced"):
+        return "it Advanced this turn"
+    if status.fell_back and not command_phase.eligible_after(game, unit, "fell_back"):
+        return "it Fell Back this turn"
+    return None
+
+
 def _check_unit(game: Game, unit: Unit) -> None:
     # That the unit can charge now: the charge phase of its owner's turn, it's
-    # on the battlefield, and it hasn't charged yet this phase.
+    # on the battlefield, it didn't Advance or Fall Back this turn, and it
+    # hasn't charged yet this phase.
     if not is_charge_phase(game):
         raise _bad_request("units can only charge in the charge phase")
     if deployment.owner(game, unit).seat != game.turn_seat:
@@ -83,6 +100,8 @@ def _check_unit(game: Game, unit: Unit) -> None:
     charge = unit_charge(game, unit)
     if charge is not None and charge.completed:
         raise _bad_request("that unit has already charged this phase")
+    if (reason := cant_charge_reason(game, unit)) is not None:
+        raise _bad_request(f"it can't charge: {reason}")
 
 
 def roll_charge(game: Game, unit: Unit) -> GameUnitCharge:

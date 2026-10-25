@@ -193,7 +193,16 @@ CORE_OPTIONS: dict = {}
 # rather than at import, since faction files import this one (e.g. for
 # CORE_RULES["Stealth"]).
 
-COMBINED = ("ENTRIES", "CALCULATOR_NOTES", "RULES", "ARMY_RULES", "OPTIONS", "OPTION_OWNERS")
+COMBINED = (
+    "ENTRIES",
+    "CALCULATOR_NOTES",
+    "RULES",
+    "ARMY_RULES",
+    "OPTIONS",
+    "OPTION_OWNERS",
+    "COMMAND_CHOICES",
+    "COMMAND_HEALS",
+)
 _combined: dict | None = None
 
 
@@ -209,6 +218,8 @@ def _combine() -> dict:
                 "RULES": CORE_RULES,
                 "OPTIONS": CORE_OPTIONS,
                 "ARMY_RULES": {},
+                "COMMAND_CHOICES": {},
+                "COMMAND_HEALS": {},
             }
         ] + [
             {
@@ -219,6 +230,8 @@ def _combine() -> dict:
                     ("RULES", {}),
                     ("OPTIONS", {}),
                     ("ARMY_RULES", {}),
+                    ("COMMAND_CHOICES", {}),
+                    ("COMMAND_HEALS", {}),
                 )
             }
             for faction in FACTIONS
@@ -240,6 +253,14 @@ def _combine() -> dict:
             # Rules an ability gives the *other* units of its faction in the
             # same army list (e.g. Prophet of Destruction), by ability name.
             "ARMY_RULES": {k: v for source in sources for k, v in source["ARMY_RULES"].items()},
+            # In a game: abilities whose option is selected in the Command
+            # phase, and abilities that heal then (see each faction's file).
+            "COMMAND_CHOICES": {
+                k: v for source in sources for k, v in source["COMMAND_CHOICES"].items()
+            },
+            "COMMAND_HEALS": {
+                k: v for source in sources for k, v in source["COMMAND_HEALS"].items()
+            },
             # {option name: ability name}. Option names are unique across every
             # ability (and every faction ability's options).
             "OPTION_OWNERS": {

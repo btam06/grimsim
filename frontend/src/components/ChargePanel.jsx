@@ -11,6 +11,7 @@ function unitStatus(unit) {
   if (unit.charged) return `Charged ${unit.target_name} (rolled ${unit.roll})`
   if (unit.failed) return `Charge failed: rolled ${unit.roll}, nothing in reach`
   if (unit.roll !== null) return `Rolled ${unit.roll} (${unit.dice.join(' + ')})`
+  if (unit.reason) return `Can't charge: ${unit.reason}`
   return 'Not charged'
 }
 
@@ -53,7 +54,9 @@ function ChargePanel({
       <h3>Charge</h3>
       <p>
         <strong>{player?.user_name}</strong> charges.{' '}
-        <span className="hint">Any unit can charge, once a phase.</span>
+        <span className="hint">
+          Any unit can charge once a phase, unless it Advanced or Fell Back.
+        </span>
       </p>
       <div className="radio-group">
         {charge.units.map((unit) => (
@@ -61,6 +64,7 @@ function ChargePanel({
             <input
               type="radio"
               name="charge-unit"
+              disabled={Boolean(unit.reason) && unit.roll === null}
               checked={draft.unitId === unit.unit_id}
               onChange={() => onSelectUnit(unit)}
             />

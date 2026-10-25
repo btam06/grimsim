@@ -559,6 +559,9 @@ class CombatIn(BaseModel):
     advanced: bool = False
     defender_visible: bool = True
     defender_in_range: bool = True
+    # Snap shooting (e.g. Fire Overwatch): hits only on an unmodified 6, with
+    # no re-rolls and no Hit roll abilities (Sustained Hits, Lethal Hits).
+    snap_shots: bool = False
 
 
 class WeaponCombatResultOut(BaseModel):
@@ -759,7 +762,9 @@ class GameOut(BaseModel):
     # dispositions.
     terrain_layout_id: int | None = None
     terrain_layout_name: str | None = None
-    # Whose turn it is to deploy a unit, while the game's in deployment.
+    # Where deployment is ("formations": declaring battle formations, then
+    # "deploying"), and whose turn it is to deploy a unit.
+    deployment_step: str | None = None
     deploying_seat: int | None = None
     # Whose turn it is to pile in, at the start of the fight phase.
     piling_in_seat: int | None = None
@@ -934,6 +939,14 @@ class DeploymentModelOut(BaseModel):
     destroyed: bool = False
 
 
+class AuraOut(BaseModel):
+    # An aura (or similar reach) from one of a unit's models: the option or
+    # ability's name, and its range in inches (base to base).
+    unit_model_id: int
+    name: str
+    range: float
+
+
 class DeploymentUnitOut(BaseModel):
     unit_id: int
     seat: int
@@ -942,9 +955,16 @@ class DeploymentUnitOut(BaseModel):
     # zone, more than 9" from the enemy's and from enemy models.
     infiltrators: bool
     deployed: bool
+    # Where it starts if not on the battlefield ("reserves" or "embarked"),
+    # and the transport it's embarked in.
+    formation: str | None = None
+    transport_unit_id: int | None = None
     # Every model in it has been destroyed in this game.
     destroyed: bool = False
     models: list[DeploymentModelOut]
+    # In a battle: what reaches out from its models - auras, and how far a
+    # Command phase ability can pick a unit (see app/services/in_game/auras.py).
+    auras: list[AuraOut] = []
 
 
 class DeploymentOut(BaseModel):
@@ -1008,6 +1028,8 @@ class MovementUnitOut(BaseModel):
     kind: str | None = None
     advance_roll: int | None = None
     moved: bool = False
+    # It arrived from Reserves this phase (it can't move again).
+    arrived: bool = False
     models: list[MovementModelOut]
 
 
@@ -1041,6 +1063,18 @@ class ShootingUnitOut(BaseModel):
 
 
 class ShootingOut(BaseModel):
+    units: list[ShootingUnitOut]
+
+
+class OverwatchOut(BaseModel):
+    # At the end of the movement phase (see GET /games/{id}/overwatch): who
+    # can Fire Overwatch (`seat`, None if no one can now), whether they can
+    # use the stratagem (and if not, why), its CP, and their units on the
+    # battlefield.
+    seat: int | None
+    available: bool
+    reason: str | None = None
+    cp: int
     units: list[ShootingUnitOut]
 
 
@@ -1112,6 +1146,8 @@ class ChargeUnitOut(BaseModel):
     charged: bool = False
     target_unit_id: int | None = None
     target_name: str | None = None
+    # Why it can't charge this turn (it Advanced or Fell Back), if it can't.
+    reason: str | None = None
 
 
 class ChargeOut(BaseModel):
@@ -1292,3 +1328,133 @@ class ReachModelOut(BaseModel):
 
 class ReachOut(BaseModel):
     models: list[ReachModelOut]
+
+
+class FormationUnitOut(BaseModel):
+    # One of a player's units, as declared: on the battlefield (place None),
+    # in Strategic Reserves, or embarked in `transport_unit_id`.
+    unit_id: int
+    name: str
+    points: int
+    transport: bool
+    place: str | None = None
+    transport_unit_id: int | None = None
+
+
+class FormationPlayerOut(BaseModel):
+    seat: int
+    user_name: str
+    done: bool
+    army_points: int
+    reserves_points: int
+    reserves_limit: int
+    units: list[FormationUnitOut]
+
+
+class FormationsOut(BaseModel):
+    # Declaring battle formations (at the start of deployment): each player's
+    # units and where they start.
+    step: str | None
+    players: list[FormationPlayerOut]
+
+
+class FormationIn(BaseModel):
+    seat: Literal[1, 2]
+    unit_id: int
+    # "reserves", "embarked" (in transport_unit_id), or None: the battlefield.
+    place: str | None = None
+    transport_unit_id: int | None = None
+
+
+class ReserveUnitOut(BaseModel):
+    unit_id: int
+    name: str
+    # Every model has Deep Strike: it can arrive anywhere (8" from enemies).
+    deep_strike: bool
+
+
+class ReservesOut(BaseModel):
+    # Bringing units in from Strategic Reserves, in the movement phase: whose
+    # turn it is to (`seat`) - the player whose turn it is, or at the end of
+    # the phase ("rapid_ingress") their opponent, with the stratagem - and
+    # their units in Reserves. `seat` is None when none can arrive (the first
+    # battle round, or outside the movement phase).
+    step: str | None
+    seat: int | None
+    battle_round: int
+    units: list[ReserveUnitOut]
+
+
+class ReanimationUnitOut(BaseModel):
+    # A unit's Reanimation Protocols this turn: its D3 roll, the wounds that
+    # restored to wounded models and the destroyed models it returned - and
+    # where to start those still to be set up (none once they are).
+    unit_id: int
+    name: str
+    roll: int
+    healed: int
+    returned: int
+    to_place: list[ModelPositionOut] = []
+
+
+class ReanimationOut(BaseModel):
+    # At the end of the command phase (see GET /games/{id}/reanimation): the
+    # player whose turn it is's Reanimation Protocols, and whether the game
+    # is waiting for them to set up returned models.
+    placing: bool
+    seat: int | None
+    units: list[ReanimationUnitOut]
+
+
+class UnitIdNameOut(BaseModel):
+    unit_id: int
+    name: str
+
+
+class CommandAbilityOut(BaseModel):
+    # One of the player whose turn it is's units' abilities whose option is
+    # selected in their Command phase (see GET /games/{id}/command): its
+    # options (with what each does), whether one must be selected, whether it
+    # stays until another is (`persistent`), the option active now and
+    # whether it was selected this phase - and, for one that applies to
+    # another unit, the units it could (`targets`) and the one it does.
+    unit_id: int
+    unit_name: str
+    ability: str
+    description: str
+    options: list[str]
+    option_descriptions: dict[str, str] = {}
+    required: bool
+    persistent: bool
+    active: str | None = None
+    chosen: bool = False
+    targets: list[UnitIdNameOut] = []
+    target_unit_id: int | None = None
+    needs_target: bool = False
+
+
+class CommandHealOut(BaseModel):
+    # A model that healed at the start of the Command phase: its roll and the
+    # wounds it regained.
+    unit_name: str
+    model_name: str
+    ability: str
+    roll: int
+    healed: int
+
+
+class CommandOut(BaseModel):
+    # The player whose turn it is's Command phase abilities (None: it isn't a
+    # Command phase).
+    seat: int | None
+    abilities: list[CommandAbilityOut]
+    heals: list[CommandHealOut]
+
+
+class CommandChoiceIn(BaseModel):
+    seat: Literal[1, 2]
+    unit_id: int
+    ability: str
+    # None: none (only for one that needn't have one).
+    option: str | None = None
+    target_unit_id: int | None = None

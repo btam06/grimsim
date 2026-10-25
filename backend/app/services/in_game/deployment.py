@@ -20,8 +20,11 @@ from app.services.in_game.terrain import (
     wholly_within,
 )
 
-# Deploying the armies, before the first battle round. The attacker sets up a
-# unit first, then the players take turns; once one has none left, the other
+# Deploying the armies, before the first battle round. First each player
+# declares their battle formations: which units start in Strategic Reserves or
+# embarked in a transport rather than on the battlefield (see
+# app/services/in_game/battle_formations.py) - those aren't deployed. Then the
+# attacker sets up a unit first, then the players take turns; once one has none left, the other
 # sets up the rest of theirs. Each unit is set up wholly within its owner's
 # deployment zone - or, if every model in it has Infiltrators, anywhere more
 # than 9" from the enemy's zone and from every enemy model. Its models mustn't
@@ -130,16 +133,43 @@ def can_deploy(game: Game) -> bool:
     )
 
 
+def battle_formation(game: Game, unit: Unit):
+    # Where the unit starts if not on the battlefield (its GameBattleFormation:
+    # in Strategic Reserves, or embarked), or None.
+    return next((f for f in game.battle_formations if f.unit_id == unit.id), None)
+
+
+def formations_declared(game: Game) -> bool:
+    # Whether both players have declared their battle formations.
+    done = {d.seat for d in game.formations_done}
+    return all(p.seat in done for p in game.players)
+
+
+def units_to_deploy(game: Game, player: GamePlayer) -> list[Unit]:
+    # The player's units that go on the battlefield (not in Strategic Reserves
+    # or embarked).
+    return [u for u in deployable_units(player) if battle_formation(game, u) is None]
+
+
+def deployment_step(game: Game) -> str | None:
+    # Where deployment is: declaring battle formations, then setting up units
+    # ("formations", "deploying"); None outside it.
+    if game.status != "deployment":
+        return None
+    return "deploying" if formations_declared(game) else "formations"
+
+
 def deploying_seat(game: Game) -> int | None:
     # Whose turn it is to set up a unit: the attacker's first, then turn
     # about by how many each has set up - or whoever has any left. None
-    # outside deployment, or once everything is set up.
-    if game.status != "deployment":
+    # outside deployment, while battle formations are being declared, or once
+    # everything is set up.
+    if deployment_step(game) != "deploying":
         return None
     placed = positions(game)
     counts = {}
     for player in (_attacker(game), _defender(game)):
-        units = deployable_units(player)
+        units = units_to_deploy(game, player)
         done = sum(1 for u in units if is_deployed(u, placed))
         counts[player.seat] = (done, len(units) - done)
     attacker, defender = game.attacker_seat, _defender(game).seat
@@ -560,7 +590,12 @@ def check_turn(game: Game, unit: Unit) -> None:
     # That it's the unit's owner's turn to deploy, and it isn't yet.
     if game.status != "deployment":
         raise _bad_request("the game isn't in deployment")
+    if not formations_declared(game):
+        raise _bad_request("both players have to declare their battle formations first")
     player = owner(game, unit)
+    if (placed_elsewhere := battle_formation(game, unit)) is not None:
+        where = "in Strategic Reserves" if placed_elsewhere.place == "reserves" else "embarked"
+        raise _bad_request(f"that unit is {where}: it isn't deployed")
     if is_deployed(unit, positions(game)):
         raise _bad_request("that unit is already deployed")
     if deploying_seat(game) != player.seat:
