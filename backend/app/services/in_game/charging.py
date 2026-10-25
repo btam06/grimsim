@@ -6,7 +6,7 @@ import random
 from fastapi import HTTPException
 
 from app.models import Game, GameUnitCharge, Unit
-from app.services.in_game import command_phase, deployment, pathing
+from app.services.in_game import actions, command_phase, deployment, mission_state, pathing
 from app.services.in_game.deployment import TOLERANCE, Base, Placement, gap
 from app.services.in_game.movement import ENGAGEMENT_RANGE
 
@@ -74,11 +74,13 @@ def _bases(game: Game, unit: Unit) -> dict[int, Base]:
 
 
 def cant_charge_reason(game: Game, unit: Unit) -> str | None:
-    # Why the unit can't declare a charge this turn because of how it moved
-    # (it Advanced or Fell Back), or None.
+    # Why the unit can't declare a charge this turn because of what it did
+    # (an action, or it Advanced or Fell Back), or None.
     # (Imported here: shooting imports movement, which charging's callers use.)
     from app.services.in_game.shooting import move_status
 
+    if (reason := actions.blocks(game, unit, "charge")) is not None:
+        return reason
     status = move_status(game, unit)
     if status.advanced and not command_phase.eligible_after(game, unit, "advanced"):
         return "it Advanced this turn"
@@ -228,3 +230,4 @@ def make_charge(
     charge = unit_charge(game, unit)
     charge.target_unit_id = target.id
     charge.completed = True
+    mission_state.after_move(game, unit)

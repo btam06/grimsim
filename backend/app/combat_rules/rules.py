@@ -45,6 +45,10 @@ class RuleOption:
     # units with a model within it of the model with the ability, rather than
     # to every unit it reaches in the list (see app/services/in_game/auras.py).
     aura_range: float | None = None
+    # In a game: picking it means selecting one enemy unit on the battlefield
+    # (anywhere, seen or not), and it only applies to attacks against that
+    # unit (e.g. Invocation of Machine Vengeance).
+    targets_enemy: bool = False
 
 
 @dataclass(frozen=True)

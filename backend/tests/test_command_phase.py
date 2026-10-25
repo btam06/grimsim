@@ -309,3 +309,32 @@ async def test_an_aura_with_no_choice_is_always_on_within_range(
     assert "Nullstone Field" not in await _options(session, game_id, named["Far"])
     # Not the enemy's.
     assert "Nullstone Field" not in await _options(session, game_id, named["A"])
+
+
+async def test_machine_vengeance_targets_one_enemy_unit(
+    client: AsyncClient, session, tmp_path, monkeypatch
+):
+    game_id, units = await _command_game(client, session, tmp_path, monkeypatch)
+    await _advance_to(client, game_id, 1, 1, "command")
+    canticles = _ability(await _command(client, game_id), "Canticles of the Omnissiah")
+    # Any enemy unit on the battlefield can be its target.
+    option = "Invocation of Machine Vengeance"
+    assert [t["name"] for t in canticles["option_targets"][option]] == ["D"]
+    response = await _choose(client, game_id, units["Cawl"], "Canticles of the Omnissiah", option)
+    assert "needs an enemy unit" in response.json()["detail"]
+    response = await _choose(
+        client, game_id, units["Cawl"], "Canticles of the Omnissiah", option, units["Skitarii"]
+    )
+    assert "needs an enemy unit" in response.json()["detail"]
+    response = await _choose(
+        client, game_id, units["Cawl"], "Canticles of the Omnissiah", option, units["D"]
+    )
+    canticles = _ability(response.json(), "Canticles of the Omnissiah")
+    assert (canticles["active"], canticles["target_unit_id"]) == (option, units["D"]["unit_id"])
+
+    # Only when attacking D - from anywhere in seat 1's army (it's global).
+    game = await _load_game(session, game_id)
+    far, d = (deployment.find_unit(game, units[n]["unit_id"]) for n in ("Far", "D"))
+    assert option in _rule_options(game, far, d)
+    assert option not in _rule_options(game, far)
+    assert option not in _rule_options(game, far, far)

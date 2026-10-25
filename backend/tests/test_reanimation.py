@@ -3,7 +3,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import selectinload
 
 from app.models import FactionAbility, GameModelDamage, GameModelPosition, Model, UnitModel
-from app.services.in_game import reanimation
+from app.seeds.factions.necrons import reanimation
 from tests.test_deployment import _deploy, _deployment, _game, _row, _unit_named
 from tests.test_reinforcements import _advance_to
 
@@ -89,7 +89,7 @@ async def test_reanimation_heals_then_returns_a_model_to_set_up(
     [start] = unit["to_place"]
     assert start["unit_model_id"] == first
     response = await client.post(f"/games/{game_id}/advance")
-    assert "set up the reanimated models first" in response.json()["detail"]
+    assert "set up the returned models first" in response.json()["detail"]
 
     # Not in Engagement Range of D, and in coherency.
     payload = {"unit_id": n["unit_id"], "positions": [{**start, "x": 21, "y": 6.5}]}
@@ -134,7 +134,7 @@ async def test_only_the_turn_player_sets_up_reanimated_models(
     await _advance_to(client, game_id, 1, 2, "movement")
     payload = {"unit_id": n["unit_id"], "positions": [{"unit_model_id": first, "x": 25, "y": 38}]}
     response = await client.post(f"/games/{game_id}/reanimation", json=payload)
-    assert "no reanimated models" in response.json()["detail"]
+    assert "no returned models" in response.json()["detail"]
 
 
 async def test_left_over_wounds_spill_into_another_model(
@@ -147,6 +147,12 @@ async def test_left_over_wounds_spill_into_another_model(
     await _hurt(session, game_id, first, 2, destroyed=True)
     await _hurt(session, game_id, second, 2, destroyed=True)
     await _advance_to(client, game_id, 1, 1, "command")
+    # At 1 of 3 models it takes a Battle-shock test first (the Battle-shock
+    # step comes before the end of the Command phase).
+    for test in (await client.get(f"/games/{game_id}/battle-shock")).json()["pending"]:
+        await client.post(
+            f"/games/{game_id}/battle-shock/{test['id']}/take", json={"insane_bravery": False}
+        )
     await client.post(f"/games/{game_id}/advance")
     [unit] = (await client.get(f"/games/{game_id}/reanimation")).json()["units"]
     assert (unit["healed"], unit["returned"]) == (1, 2)

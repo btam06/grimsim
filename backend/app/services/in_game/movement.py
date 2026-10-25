@@ -6,7 +6,7 @@ import random
 from fastapi import HTTPException
 
 from app.models import Game, GameUnitMove, GameUnitMoveStart, Unit, UnitModel
-from app.services.in_game import deployment, pathing, reinforcements
+from app.services.in_game import deployment, embarked, mission_state, pathing, reinforcements
 from app.services.in_game.deployment import TOLERANCE, Placement
 
 # Moving units in the movement phase. In their turn's movement phase a player
@@ -32,6 +32,9 @@ from app.services.in_game.deployment import TOLERANCE, Placement
 
 # Within 2" (base to base) of an enemy model.
 ENGAGEMENT_RANGE = 2.0
+# A Super-heavy Walker's roll for crossing tall terrain, this phase (kept as
+# a marked unit - see app/services/in_game/mission_state.py).
+SUPER_HEAVY_ROLL = "super_heavy_roll"
 KIND_NAMES = {"normal": "Normal move", "advance": "Advance", "fall_back": "Fall Back"}
 
 
@@ -134,6 +137,10 @@ def _check_unit(game: Game, unit: Unit) -> None:
     move = unit_move(game, unit)
     if move is not None and move.kind == reinforcements.ARRIVED:
         raise _bad_request("it arrived from Reserves this phase: it can't move again")
+    if move is not None and move.kind == embarked.DISEMBARKED:
+        raise _bad_request(
+            "it disembarked from a transport that had moved this phase: it can't move again"
+        )
 
 
 def roll_advance(game: Game, unit: Unit) -> GameUnitMove:
@@ -249,6 +256,41 @@ def move_unit(
     move.kind = kind
     move.distance = round(distance, 3)
     move.completed = True
+    mission_state.after_move(game, unit)
+    _super_heavy_walker(game, unit, start, placement)
+
+
+def _super_heavy_walker(game: Game, unit: Unit, start: dict, placement: dict) -> None:
+    # A Super-heavy Walker that moved through a section of terrain over 4"
+    # tall (a ruin wall - terrain heights aren't in the layouts; walls are
+    # taken to be the tall ones) rolls a D6 after it's moved: on a 1, it's
+    # Battle-shocked. Once a phase (moving it again doesn't roll again).
+    # (Imported here: shooting and battle_shock import this module's users.)
+    from app.services.in_game import battle_shock
+    from app.services.in_game.shooting import _blocks, dense_terrain
+
+    if not pathing.is_super_heavy_walker(unit):
+        return
+    seat = deployment.owner(game, unit).seat
+    rolled = [
+        m
+        for m in mission_state.marked(game, SUPER_HEAVY_ROLL, seat)
+        if m.unit_id == unit.id and m.battle_round == game.battle_round
+    ]
+    if any(m.turn_seat == game.turn_seat for m in rolled):
+        return
+    walls = dense_terrain(game)
+    crossed = any(
+        _blocks(start[i][:2], (x, y), wall)
+        for i, (x, y, _) in placement.items()
+        for wall in walls
+    )
+    if not crossed:
+        return
+    mission_state.mark(game, seat, SUPER_HEAVY_ROLL, unit.id)
+    roll = random.randint(1, 6)
+    if roll == 1:
+        battle_shock.battle_shock_outright(game, unit, pathing.SUPER_HEAVY_WALKER, roll)
 
 
 def reset_move(game: Game, unit: Unit) -> None:

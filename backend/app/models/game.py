@@ -66,6 +66,53 @@ class Game(Base):
     command_heals: Mapped[list["GameCommandHeal"]] = relationship(
         cascade="all, delete-orphan", lazy="selectin", order_by="GameCommandHeal.id"
     )
+    # What happened each turn, for missions (see
+    # app/services/in_game/turn_record.py): models destroyed, and how things
+    # stood at the start of each turn.
+    models_destroyed: Mapped[list["GameModelDestroyed"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameModelDestroyed.id"
+    )
+    turn_start_control: Mapped[list["GameTurnStartControl"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameTurnStartControl.id"
+    )
+    turn_start_objectives: Mapped[list["GameTurnStartOnObjective"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameTurnStartOnObjective.id"
+    )
+    turn_start_areas: Mapped[list["GameTurnStartInArea"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameTurnStartInArea.id"
+    )
+    # Choices made for secondary cards when drawn (see
+    # app/services/in_game/mission_state.py).
+    card_choices: Mapped[list["GameCardChoice"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameCardChoice.id"
+    )
+    # Missions' operation markers, the choices they prompt players for, the
+    # units they mark (see app/services/in_game/mission_state.py).
+    operation_markers: Mapped[list["GameOperationMarker"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameOperationMarker.id"
+    )
+    mission_prompts: Mapped[list["GameMissionPrompt"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameMissionPrompt.id"
+    )
+    marked_units: Mapped[list["GameMarkedUnit"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameMarkedUnit.id"
+    )
+    # Actions units have done (see app/services/in_game/actions.py).
+    actions: Mapped[list["GameAction"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameAction.id"
+    )
+    # Automatic scoring (see app/services/in_game/scoring.py): the scoring
+    # moments evaluated, and tactical secondaries offered to be claimed.
+    scoring_steps: Mapped[list["GameScoringStep"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameScoringStep.id"
+    )
+    claim_offers: Mapped[list["GameClaimOffer"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameClaimOffer.id"
+    )
+    # Battle-shock tests taken (or to take) - see app/services/in_game/battle_shock.py.
+    battle_shock_tests: Mapped[list["GameBattleShockTest"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameBattleShockTest.id"
+    )
     # Reanimation Protocols activated at the end of command phases.
     reanimations: Mapped[list["GameReanimation"]] = relationship(
         cascade="all, delete-orphan", lazy="selectin", order_by="GameReanimation.id"
@@ -187,6 +234,20 @@ class GameScore(Base):
     )
 
     player: Mapped["GamePlayer"] = relationship(back_populates="scores")
+    # Why it was scored, for VP scored automatically: each mission line met.
+    reasons: Mapped[list["GameScoreReason"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameScoreReason.id"
+    )
+
+
+class GameScoreReason(Base):
+    # A line of a mission card that scored, and its VP.
+    __tablename__ = "game_score_reasons"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_score_id: Mapped[int] = mapped_column(ForeignKey("game_scores.id"))
+    text: Mapped[str] = mapped_column(String)
+    points: Mapped[int] = mapped_column(Integer)
 
 
 class GameStratagemUse(Base):
@@ -462,7 +523,7 @@ class GameReanimation(Base):
     # A unit's Reanimation Protocols activating at the end of its owner's
     # command phase (battle round and whose turn): its D3 roll, and how many
     # wounds that restored to wounded models and how many destroyed models it
-    # returned (see app/services/in_game/reanimation.py).
+    # returned (see app/seeds/factions/necrons/reanimation.py).
     __tablename__ = "game_reanimations"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -507,3 +568,265 @@ class GameCommandHeal(Base):
     ability: Mapped[str] = mapped_column(String(255))
     roll: Mapped[int] = mapped_column(Integer)
     healed: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class GameBattleShockTest(Base):
+    # A Battle-shock test a unit takes (battle round, whose turn, phase): why
+    # ("battle_shock_step", or a rule or stratagem's name), any modifier to
+    # the roll - and once taken, its 2D6 (none if Insane Bravery passed it)
+    # and whether it passed. A unit is Battle-shocked while its latest test
+    # taken failed (see app/services/in_game/battle_shock.py).
+    __tablename__ = "game_battle_shock_tests"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int] = mapped_column(Integer)
+    phase: Mapped[str] = mapped_column(String(32))
+    reason: Mapped[str] = mapped_column(String(255))
+    modifier: Mapped[int] = mapped_column(Integer, default=0)
+    first_die: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    second_die: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    insane_bravery: Mapped[bool] = mapped_column(Boolean, default=False)
+    passed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Mortal wounds it suffered for failing (e.g. Delirium), if any (its own
+    # table: see GameBattleShockWounds).
+    wounds: Mapped["GameBattleShockWounds | None"] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", uselist=False
+    )
+
+
+class GameBattleShockWounds(Base):
+    # Mortal wounds a unit suffered for failing a Battle-shock test (e.g.
+    # Delirium's D3): the roll - its own table, so existing databases pick it
+    # up without a migration.
+    __tablename__ = "game_battle_shock_wounds"
+
+    test_id: Mapped[int] = mapped_column(
+        ForeignKey("game_battle_shock_tests.id"), primary_key=True
+    )
+    source: Mapped[str] = mapped_column(String(64))
+    roll: Mapped[int] = mapped_column(Integer)
+
+
+class GameModelDestroyed(Base):
+    # A model destroyed (battle round, whose turn, phase): its unit, the unit
+    # whose attacks destroyed it (None: none - e.g. its own Hazardous weapon,
+    # or not arriving from Reserves), and whether that destroyed its unit
+    # (it was the last of it on the battlefield).
+    __tablename__ = "game_models_destroyed"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int] = mapped_column(Integer)
+    phase: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    unit_model_id: Mapped[int] = mapped_column(ForeignKey("unit_models.id", ondelete="CASCADE"))
+    destroyed_by_unit_id: Mapped[int | None] = mapped_column(
+        ForeignKey("units.id", ondelete="SET NULL"), nullable=True
+    )
+    unit_destroyed: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Its unit was destroyed by a unit within range of an objective then (its
+    # own table: see GameKillOnObjective).
+    on_objective: Mapped["GameKillOnObjective | None"] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", uselist=False
+    )
+
+
+class GameKillOnObjective(Base):
+    # A unit destroyed by a unit that was within range of one or more
+    # objectives at the time (e.g. for Purge and Secure) - its own table, so
+    # existing databases pick it up without a migration.
+    __tablename__ = "game_kills_on_objective"
+
+    model_destroyed_id: Mapped[int] = mapped_column(
+        ForeignKey("game_models_destroyed.id"), primary_key=True
+    )
+
+
+class GameTurnStartControl(Base):
+    # Who controlled an objective at the start of a turn (None: no one).
+    __tablename__ = "game_turn_start_control"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int] = mapped_column(Integer)
+    objective_id: Mapped[int] = mapped_column(ForeignKey("terrain_objectives.id"))
+    controller: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class GameTurnStartOnObjective(Base):
+    # A unit within range of an objective (a model on one of its terrain
+    # areas) at the start of a turn.
+    __tablename__ = "game_turn_start_on_objective"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int] = mapped_column(Integer)
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    objective_id: Mapped[int] = mapped_column(ForeignKey("terrain_objectives.id"))
+
+
+class GameTurnStartInArea(Base):
+    # A unit within a terrain area (a model over it) at the start of a turn.
+    __tablename__ = "game_turn_start_in_area"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int] = mapped_column(Integer)
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    area_id: Mapped[int] = mapped_column(ForeignKey("terrain_areas.id"))
+
+
+class GameScoringStep(Base):
+    # A scoring moment that's been evaluated (battle round, whose turn, and
+    # which: "command_end", "turn_end" or "battle_end").
+    __tablename__ = "game_scoring_steps"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int] = mapped_column(Integer)
+    timing: Mapped[str] = mapped_column(String(32))
+
+
+class GameClaimOffer(Base):
+    # A tactical secondary that was completed at a scoring moment: its VP
+    # then, and why - for its holder to claim (scored, and the card done) or
+    # hold (it stays in their hand, to be checked again at later moments).
+    __tablename__ = "game_claim_offers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    game_secondary_id: Mapped[int] = mapped_column(ForeignKey("game_secondaries.id"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int] = mapped_column(Integer)
+    timing: Mapped[str] = mapped_column(String(32))
+    points: Mapped[int] = mapped_column(Integer)
+    reasons: Mapped[str] = mapped_column(String)
+    # "pending", "claimed" or "held".
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+
+
+class GameAction(Base):
+    # An action a unit started (battle round, whose turn, phase): which, on
+    # which objective or terrain area, and how it went - "started" (it
+    # completes later), "completed" or "failed".
+    __tablename__ = "game_actions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int] = mapped_column(Integer)
+    phase: Mapped[str] = mapped_column(String(32))
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    action: Mapped[str] = mapped_column(String(64))
+    objective_id: Mapped[int | None] = mapped_column(
+        ForeignKey("terrain_objectives.id"), nullable=True
+    )
+    area_id: Mapped[int | None] = mapped_column(ForeignKey("terrain_areas.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="started")
+    # The enemy unit it's done on, for one done on a unit (its own table: see
+    # GameActionUnitTarget).
+    unit_target: Mapped["GameActionUnitTarget | None"] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", uselist=False
+    )
+
+    @property
+    def target_unit_id(self) -> int | None:
+        return self.unit_target.unit_id if self.unit_target else None
+
+
+class GameActionUnitTarget(Base):
+    # The unit an action is done on (e.g. Surveil the Foe's enemy unit) - its
+    # own table, so existing databases pick it up without a migration.
+    __tablename__ = "game_action_unit_targets"
+
+    action_id: Mapped[int] = mapped_column(ForeignKey("game_actions.id"), primary_key=True)
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+
+
+class GameOperationMarker(Base):
+    # One of a player's operation markers: within range of an objective, or
+    # within a terrain area - placed by a mission (`source`: an action's name,
+    # "Locate and Deny" or "Consecrate"), when, and when it was removed from
+    # the battlefield (none: it's still there).
+    __tablename__ = "game_operation_markers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    seat: Mapped[int] = mapped_column(Integer)
+    source: Mapped[str] = mapped_column(String(64))
+    objective_id: Mapped[int | None] = mapped_column(
+        ForeignKey("terrain_objectives.id"), nullable=True
+    )
+    area_id: Mapped[int | None] = mapped_column(ForeignKey("terrain_areas.id"), nullable=True)
+    placed_round: Mapped[int] = mapped_column(Integer)
+    placed_turn_seat: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    removed_round: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    removed_turn_seat: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class GameMissionPrompt(Base):
+    # A choice a mission needs a player to make (battle round, whose turn):
+    # `kind` - "place_markers" (Locate and Deny, at the start of the battle),
+    # "consecrate" (end of their turn), "condemn" (Punishment, start of their
+    # turn) or "remove_marker" (a sensor sweep: `action_id` is its action) -
+    # and whether it's answered.
+    __tablename__ = "game_mission_prompts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    seat: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(32))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    action_id: Mapped[int | None] = mapped_column(
+        ForeignKey("game_actions.id", ondelete="CASCADE"), nullable=True
+    )
+    answered: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class GameMarkedUnit(Base):
+    # A unit a mission marks (by `seat`'s mission): "condemned" (Punishment,
+    # until the start of that player's next turn), "surveilled" (Surveil the
+    # Foe, until the end of the turn) or "consecration" (Consecrate, until it
+    # consecrates an objective) - from when (battle round, whose turn).
+    __tablename__ = "game_marked_units"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    seat: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(32))
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ended: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class GameCardChoice(Base):
+    # A choice made for a secondary card (battle round, whose turn): its
+    # beacon unit (Beacon), a unit guarding an objective (Burden of Trust,
+    # until the start of its holder's next turn), or its tempting target (A
+    # Tempting Target, chosen by its holder's opponent).
+    __tablename__ = "game_card_choices"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    game_secondary_id: Mapped[int] = mapped_column(
+        ForeignKey("game_secondaries.id", ondelete="CASCADE")
+    )
+    kind: Mapped[str] = mapped_column(String(32))
+    unit_id: Mapped[int | None] = mapped_column(
+        ForeignKey("units.id", ondelete="CASCADE"), nullable=True
+    )
+    objective_id: Mapped[int | None] = mapped_column(
+        ForeignKey("terrain_objectives.id"), nullable=True
+    )
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int | None] = mapped_column(Integer, nullable=True)

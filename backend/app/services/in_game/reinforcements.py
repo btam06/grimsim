@@ -188,6 +188,8 @@ def destroy_unarrived(game: Game) -> None:
     for player in game.players:
         for unit in reserve_units(game, player.seat):
             deployment.battle_formation(game, unit).place = RESERVES_DESTROYED
+            # Destroyed off the battlefield: not a kill for missions (it isn't
+            # in the turn record - see app/services/in_game/turn_record.py).
             for unit_model in unit.unit_models:
                 game.model_damage.append(
                     GameModelDamage(

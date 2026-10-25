@@ -185,6 +185,29 @@ def required(faction_name: str, ability_name: str) -> bool:
     return (faction_name, ability_name) in REQUIRED_OPTIONS
 
 
+# In a game: faction abilities whose round-start choices aren't (just) their
+# calculator options (abilities.py ROUND_START_CHOICES, with
+# ROUND_START_DESCRIPTIONS), and those whose choices last the rest of the
+# battle (LASTING_CHOICES) - e.g. Harbingers of Dread.
+ROUND_START_CHOICES: dict[tuple[str, str], list[str]] = {
+    (faction.info.FACTION_NAME, ability_name): choices
+    for faction in FACTIONS
+    for ability_name, choices in getattr(faction.abilities, "ROUND_START_CHOICES", {}).items()
+}
+ROUND_START_DESCRIPTIONS: dict[tuple[str, str], dict[str, str]] = {
+    (faction.info.FACTION_NAME, ability_name): descriptions
+    for faction in FACTIONS
+    for ability_name, descriptions in getattr(
+        faction.abilities, "ROUND_START_DESCRIPTIONS", {}
+    ).items()
+}
+LASTING_CHOICES: set[tuple[str, str]] = {
+    (faction.info.FACTION_NAME, ability_name)
+    for faction in FACTIONS
+    for ability_name in getattr(faction.abilities, "LASTING_CHOICES", set())
+}
+
+
 def rule_options(faction_name: str, ability_name: str) -> dict[str, list[Rule]]:
     # The selectable rule options a faction ability grants, if any.
     return RULE_OPTIONS.get((faction_name, ability_name), {})

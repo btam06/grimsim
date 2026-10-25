@@ -13,7 +13,7 @@ from app.models import (
     Unit,
     UnitModel,
 )
-from app.services.in_game import deployment, pathing
+from app.services.in_game import actions, deployment, mission_state, pathing
 from app.services.in_game.deployment import TOLERANCE, Base, Placement, Point, gap
 from app.services.in_game.movement import ENGAGEMENT_RANGE
 from app.services.in_game.game import other_seat
@@ -217,6 +217,7 @@ def pile_in(game: Game, unit: Unit, placement: dict[int, tuple[float, float, flo
     game.unit_pile_ins.append(
         GameUnitPileIn(unit_id=unit.id, battle_round=game.battle_round, turn_seat=game.turn_seat)
     )
+    mission_state.after_move(game, unit)
 
 
 def finish_piling_in(game: Game, seat: int) -> None:
@@ -282,12 +283,15 @@ def has_fights_first(game: Game, unit: Unit) -> bool:
 
 def _eligible(game: Game) -> list[Unit]:
     # Every unit on the battlefield, of either player, that can still fight:
-    # it hasn't, and it's within Engagement Range of an enemy.
+    # it hasn't, it's within Engagement Range of an enemy, and it didn't do
+    # an action this turn.
     return [
         unit
         for seat in (1, 2)
         for unit in player_units(game, seat)
-        if not fought(game, unit) and engaged(game, unit)
+        if not fought(game, unit)
+        and engaged(game, unit)
+        and actions.blocks(game, unit, "fight") is None
     ]
 
 
@@ -341,6 +345,8 @@ def cant_fight_reason(game: Game, unit: Unit) -> str | None:
         return "the unit that just fought has to consolidate (or not) first"
     if fought(game, unit):
         return "it has already fought this phase"
+    if (reason := actions.blocks(game, unit, "fight")) is not None:
+        return reason
     if not engaged(game, unit):
         return "it isn't within Engagement Range of an enemy unit"
     if unit.id not in {u.id for u in step_units(game)}:
@@ -586,6 +592,7 @@ def consolidate(game: Game, unit: Unit, placement: dict[int, tuple[float, float,
         position = placed[unit_model_id]
         position.x, position.y, position.rotation = x, y, rotation
     consolidating(game).consolidation = GameUnitConsolidation(moved=True)
+    mission_state.after_move(game, unit)
 
 
 def skip_consolidation(game: Game, unit: Unit) -> None:

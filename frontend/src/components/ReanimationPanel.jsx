@@ -1,6 +1,7 @@
 // Reanimation Protocols, at the end of the command phase (see
-// app/services/in_game/reanimation.py, which heals each unit and decides
-// where returned models can go). Each unit with the ability healed D3 wounds:
+// app/seeds/factions/necrons/reanimation.py, which heals each unit, and
+// app/services/in_game/heal.py, which decides where returned models can go).
+// Each unit with the ability healed D3 wounds:
 // a wounded model regains a wound, or a destroyed one returns with 1 wound -
 // and the player whose turn it is sets each returned model up, in coherency
 // with its unit and out of Engagement Range, before moving on.

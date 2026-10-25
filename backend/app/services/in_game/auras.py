@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from app.models import Game, Unit, UnitModel
 from app.seeds import datasheet_abilities as datasheet_ability_seeds
+from app.seeds.factions.chaos_knights import dread
 from app.services.in_game import command_phase, deployment
 from app.services.in_game.deployment import TOLERANCE, gap
 
@@ -94,4 +95,6 @@ def ranges(game: Game, unit: Unit) -> list[tuple[UnitModel, str, float]]:
     for ability in command_phase.command_abilities(game, seat):
         if ability.unit.id == unit.id and ability.config.target_range:
             found.append((ability.model, ability.ability, ability.config.target_range))
+    # Harbingers of Dread's auras (see app/seeds/factions/chaos_knights/dread.py).
+    found += [(m, "Dread auras", reach) for m, reach in dread.aura_models(game, unit)]
     return found

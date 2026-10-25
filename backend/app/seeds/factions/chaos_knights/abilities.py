@@ -77,7 +77,36 @@ OPTIONS = {
 CALCULATOR_NOTES = {
     HARBINGERS_OF_DREAD: (
         "Pick Doom for an attacking unit, or Darkness for a defending one, under Faction "
-        "Rules; the rest are Leadership and Battle-shock effects outside the calculator."
+        "Rules; the rest are Leadership and Battle-shock effects outside the calculator (in a "
+        "game, they're applied)."
     ),
-    "Super-heavy Walker": "Descriptive only: movement isn't modelled.",
+    "Super-heavy Walker": (
+        "Descriptive only in the calculator; in a game, it moves through terrain, and rolls for "
+        "Battle-shock after crossing a ruin wall."
+    ),
 }
+
+
+# In a game (see app/services/in_game/battle_round.py and dread.py): what
+# Harbingers of Dread offers at the start of the first, third and fifth
+# battle rounds - one Dread ability (in D6 order), or two rolled at random -
+# and what each does.
+DREAD_ABILITIES = ["Despair", "Doom", "Darkness", "Dismay", "Delirium", "Dominion"]
+ROLL_TWO_DREAD = "Roll two D6"
+ROUND_START_CHOICES = {HARBINGERS_OF_DREAD: DREAD_ABILITIES + [ROLL_TWO_DREAD]}
+ROUND_START_DESCRIPTIONS = {
+    HARBINGERS_OF_DREAD: {
+        "Despair": 'Worsen the Leadership of enemy units within 9" by 1 more.',
+        "Doom": "+1 to wound against a Battle-shocked target.",
+        "Darkness": "Stealth.",
+        "Dismay": 'Enemy units below Starting Strength within 9" take a Battle-shock test in '
+        "your opponent's Battle-shock step.",
+        "Delirium": 'Enemy units Below Half-strength within 9" suffer D3 mortal wounds each time '
+        "they fail a Battle-shock test.",
+        "Dominion": 'Add 3" to the range of Dread auras.',
+        ROLL_TWO_DREAD: "Roll two D6: the Dread abilities rolled (1 Despair ... 6 Dominion).",
+    }
+}
+# Faction abilities whose options, once chosen, stay chosen for the rest of
+# the battle (and can't be chosen again).
+LASTING_CHOICES = {HARBINGERS_OF_DREAD}

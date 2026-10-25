@@ -28,7 +28,10 @@ from app.services.in_game.deployment import TOLERANCE, gap
 #
 # An ability whose option applies to another unit (Rod of the War Forge: a
 # SKITARII or THULIA GHULD unit within 6") has that unit selected with it -
-# then the option is only that unit's.
+# then the option is only that unit's. An option that targets an enemy unit
+# (Invocation of Machine Vengeance: any enemy unit on the battlefield, seen
+# or not) has it selected with it - then the option only applies to attacks
+# against that unit.
 #
 # Other abilities heal a model at the start of its owner's Command phase
 # (datasheet_abilities COMMAND_HEALS - e.g. Self-repair Mechanisms: D3 lost
@@ -127,15 +130,29 @@ def _applies_to(choice: ActiveChoice, unit: Unit) -> bool:
     return choice.target_unit_id is None or choice.target_unit_id == unit.id
 
 
-def options_for(game: Game, seat: int, unit: Unit) -> list[str]:
+def _targets_enemy(choice: ActiveChoice) -> bool:
+    option = options(choice.ability).get(choice.option)
+    return option is not None and option.targets_enemy
+
+
+def options_for(
+    game: Game, seat: int, unit: Unit, attacking: Unit | None = None
+) -> list[str]:
     # The active options that can apply to the unit (one that applies to
     # another unit doesn't, nor an aura - see app/services/in_game/auras.py,
-    # which checks its range) - the calculator works out which it gains.
-    return [
-        c.option
-        for c in active_choices(game, seat)
-        if _applies_to(c, unit) and not _aura(c)
-    ]
+    # which checks its range) - the calculator works out which it gains. One
+    # with an enemy target (e.g. Invocation of Machine Vengeance) only when
+    # the unit is attacking that target.
+    found = []
+    for choice in active_choices(game, seat):
+        if _aura(choice):
+            continue
+        if _targets_enemy(choice):
+            if attacking is not None and attacking.id == choice.target_unit_id:
+                found.append(choice.option)
+        elif _applies_to(choice, unit):
+            found.append(choice.option)
+    return found
 
 
 def _aura(choice: ActiveChoice) -> bool:
@@ -187,6 +204,20 @@ def targets(game: Game, ability: CommandAbility) -> list[Unit]:
     return found
 
 
+def enemy_targets(game: Game, ability: CommandAbility) -> list[Unit]:
+    # The enemy units an option that targets one could pick: any on the
+    # battlefield (visible or not, however far).
+    seat = deployment.owner(game, ability.unit).seat
+    placed = deployment.positions(game)
+    return [
+        unit
+        for player in game.players
+        if player.seat != seat
+        for unit in deployment.deployable_units(player)
+        if deployment.is_deployed(unit, placed)
+    ]
+
+
 def this_phase(game: Game, seat: int) -> list[GameCommandChoice]:
     # The options the player has selected in this Command phase.
     return [
@@ -221,7 +252,10 @@ def choose(
             raise _bad_request(f"{ability_name} must have one of its options selected")
     elif option not in options(ability_name):
         raise _bad_request(f"{ability_name} has no option {option!r}")
-    if option is not None and ability.config.target_keywords:
+    if option is not None and options(ability_name)[option].targets_enemy:
+        if target_unit_id not in {u.id for u in enemy_targets(game, ability)}:
+            raise _bad_request(f"{option} needs an enemy unit on the battlefield as its target")
+    elif option is not None and ability.config.target_keywords:
         if target_unit_id not in {u.id for u in targets(game, ability)}:
             words = " or ".join(ability.config.target_keywords)
             raise _bad_request(

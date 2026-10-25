@@ -23,19 +23,27 @@ from app.models import (
 )
 from app.models.game import BATTLE_ROUNDS, PHASES
 from app.schemas import GameIn
+from app.services.in_game import actions as actions_service
 from app.services.in_game import battle_formations as battle_formations_service
+from app.services.in_game import battle_shock as battle_shock_service
 from app.services.in_game import battle_round as battle_round_service
 from app.services.in_game import command_phase as command_phase_service
 from app.services.in_game import deployment as deployment_service
 from app.services.in_game import overwatch as overwatch_service
-from app.services.in_game import reanimation as reanimation_service
+from app.seeds.factions.necrons import reanimation as reanimation_service
+from app.services.in_game import heal as heal_service
+from app.services.in_game import mission_state as mission_state_service
 from app.services.in_game import reinforcements as reinforcements_service
+from app.services.in_game import scoring as scoring_service
 from app.services.in_game import terrain as terrain_service
+from app.services.in_game import turn_record as turn_record_service
 
 # How many new tactical secondary cards a player draws in each of their
 # command phases (11th edition: on top of any still held - no hand limit).
 TACTICAL_DRAW = 2
 FIXED_SECONDARY_COUNT = 2
+# CP for discarding a tactical secondary (at the end of your turn).
+DISCARD_CP = 1
 
 
 def _bad_request(detail: str) -> HTTPException:
@@ -172,13 +180,16 @@ def _require_in_progress(game: Game) -> None:
 
 async def _draw_tactical(
     session: AsyncSession, game: Game, player: GamePlayer, count: int = TACTICAL_DRAW
-) -> None:
+) -> list[GameSecondary]:
     # A tactical player draws `count` new cards (TACTICAL_DRAW in their command
-    # phase), keeping any they still hold - from the tactical secondaries they
-    # haven't drawn yet this game.
+    # phase), keeping any they still hold - from the tactical secondaries
+    # still in their deck: not drawn yet this game, or shuffled back into it.
+    # The cards drawn. A card that must be replaced when drawn (Defend
+    # Stronghold in the first battle round) is: a new card is drawn and it's
+    # shuffled back.
     if player.secondary_mode != "tactical":
-        return
-    seen = {c.secondary_mission_id for c in player.secondaries}
+        return []
+    seen = {c.secondary_mission_id for c in player.secondaries if c.status != SHUFFLED}
     deck = [
         m
         for m in (
@@ -188,30 +199,72 @@ async def _draw_tactical(
         ).scalars()
         if m.id not in seen
     ]
-    for _ in range(count):
-        if not deck:
-            break
+    drawn = []
+    replacing = 0
+    while len(drawn) < count + replacing and deck:
         mission = deck.pop(random.randrange(len(deck)))
-        player.secondaries.append(
-            GameSecondary(
-                secondary_mission_id=mission.id,
-                mission=mission,
-                fixed=False,
-                status="active",
-                drawn_round=game.battle_round,
-            )
+        card = GameSecondary(
+            secondary_mission_id=mission.id,
+            mission=mission,
+            fixed=False,
+            status="active",
+            drawn_round=game.battle_round,
         )
+        player.secondaries.append(card)
+        drawn.append(card)
+        if mission.name in MUST_REPLACE_IN_FIRST_ROUND and game.battle_round == 1:
+            # Shuffled back after its replacement is drawn (it's out of this
+            # draw's deck already).
+            card.status = SHUFFLED
+            replacing += 1
+    return [c for c in drawn if c.status == "active"]
+
+
+# Shuffled back into its holder's deck: it can be drawn again.
+SHUFFLED = "shuffled"
+# Cards that must be replaced when drawn in the first battle round.
+MUST_REPLACE_IN_FIRST_ROUND = {"Defend Stronghold"}
+
+
+async def redraw(session: AsyncSession, game: Game, prompt, card_ids: list[int]) -> None:
+    # The player redraws those cards they've just drawn that they picked
+    # (their WHEN DRAWN options - see app/services/in_game/mission_state.py):
+    # each is discarded or shuffled back, and a new card drawn in its place
+    # (which may be redrawable in turn).
+    seat = prompt.seat
+    player = player_at(game, seat)
+    offered = mission_state_service.redraw_offers(game, seat)
+    cards = [c for c in player.secondaries if c.id in set(card_ids)]
+    if len(cards) != len(set(card_ids)) or any(c.id not in offered for c in cards):
+        raise _bad_request("those cards can't be redrawn")
+    mission_state_service.close_redraw(game, prompt)
+    for card in cards:
+        how = offered[card.id]
+        if how == "discard":
+            card.status = "discarded"
+        drawn = await _draw_tactical(session, game, player, count=1)
+        if how == "shuffle":
+            card.status = SHUFFLED
+        mission_state_service.cards_drawn(game, seat, drawn)
+    mission_state_service.lapse_stale_prompts(game)
 
 
 async def _begin_command_phase(session: AsyncSession, game: Game) -> None:
-    # Both players gain 1 CP; the player whose turn it is draws secondaries,
+    # The start of a turn (how things stand recorded - see
+    # app/services/in_game/turn_record.py), then its Command phase: both
+    # players gain 1 CP; the player whose turn it is draws secondaries,
     # and their models that heal at its start do (e.g. Self-repair
-    # Mechanisms).
+    # Mechanisms); then its Battle-shock step: their units that must take a
+    # Battle-shock test.
+    turn_record_service.snapshot_turn_start(game)
+    mission_state_service.start_of_turn(game)
     game.phase = "command"
     for player in game.players:
         player.cp += 1
-    await _draw_tactical(session, game, player_at(game, game.turn_seat))
+    drawn = await _draw_tactical(session, game, player_at(game, game.turn_seat))
+    mission_state_service.cards_drawn(game, game.turn_seat, drawn)
     command_phase_service.heal(game)
+    battle_shock_service.battle_shock_step(game)
 
 
 def enter_deployment(game: Game) -> None:
@@ -237,8 +290,11 @@ async def _begin_battle_round(session: AsyncSession, game: Game) -> None:
 
 
 async def _begin_battle(session: AsyncSession, game: Game) -> None:
+    # The start of the battle: missions that set up then prompt for it (e.g.
+    # Locate and Deny's operation markers); then the first battle round.
     game.status = "in_progress"
     game.battle_round = 1
+    mission_state_service.start_of_battle(game)
     await _begin_battle_round(session, game)
 
 
@@ -278,6 +334,12 @@ async def advance(session: AsyncSession, game: Game) -> None:
     # round, if any rules happen then). The game ends after the last battle
     # round's second turn.
     _require_in_progress(game)
+    if battle_shock_service.pending(game):
+        raise _bad_request("take the Battle-shock tests first")
+    if scoring_service.pending_offers(game):
+        raise _bad_request("claim or hold the completed secondaries first")
+    if mission_state_service.pending(game):
+        raise _bad_request("make the missions' choices first")
     if game.phase == START_OF_ROUND:
         if missing := battle_round_service.missing_choices(game):
             raise _bad_request("choose an option first for " + ", ".join(missing))
@@ -288,13 +350,17 @@ async def advance(session: AsyncSession, game: Game) -> None:
         # Canticles of the Omnissiah).
         if missing := command_phase_service.missing_choices(game):
             raise _bad_request("select an option first for " + ", ".join(missing))
+        # Its scoring moment (and a pause for any tactical secondary to claim).
+        scoring_service.score(game, scoring_service.COMMAND_END)
+        if scoring_service.pending_offers(game):
+            return
         # The end of the command phase: Reanimation Protocols activate - and
         # if that returns destroyed models, it waits for them to be set up.
-        if reanimation_service.placing(game):
-            raise _bad_request("set up the reanimated models first")
+        if heal_service.placing(game):
+            raise _bad_request("set up the returned models first")
         if not reanimation_service.reanimations(game):
             reanimation_service.reanimate(game)
-            if reanimation_service.placing(game):
+            if heal_service.placing(game):
                 return
     if game.phase == "movement" and not reinforcements_service.movement_ended(game):
         # The end of the movement phase: if the opponent could use Rapid
@@ -305,6 +371,23 @@ async def advance(session: AsyncSession, game: Game) -> None:
     index = PHASES.index(game.phase)
     if index + 1 < len(PHASES):
         game.phase = PHASES[index + 1]
+        if game.phase == "fight":
+            # Its start: rules that make units take Battle-shock tests then
+            # (e.g. Voices in the Code).
+            battle_shock_service.start_of_fight(game)
+        return
+    # The end of the turn: actions that complete then do (or fail), then its
+    # scoring moment - and after the last turn, the battle's - with a pause
+    # for any tactical secondary to claim.
+    if not scoring_service.evaluated(game, scoring_service.TURN_END):
+        actions_service.end_of_turn(game)
+        mission_state_service.end_of_turn(game)
+        if mission_state_service.pending(game):
+            return
+    scoring_service.score(game, scoring_service.TURN_END)
+    if game.battle_round >= BATTLE_ROUNDS and game.turn_seat != game.first_seat:
+        scoring_service.score(game, scoring_service.BATTLE_END)
+    if scoring_service.pending_offers(game):
         return
     if game.turn_seat == game.first_seat:
         game.turn_seat = other_seat(game.first_seat)
@@ -447,7 +530,8 @@ async def use_stratagem(
     if target is not None:
         # Discard the target and draw one new card in its place.
         target.status = "discarded"
-        await _draw_tactical(session, game, player, count=1)
+        drawn = await _draw_tactical(session, game, player, count=1)
+        mission_state_service.cards_drawn(game, player.seat, drawn)
 
 
 def achieve_secondary(game: Game, card: GameSecondary, points: int | None = None) -> None:
@@ -457,6 +541,9 @@ def achieve_secondary(game: Game, card: GameSecondary, points: int | None = None
     player = card.player
     if card.status != "active":
         raise _bad_request("that secondary isn't active")
+    if scoring_service.automatic(card.mission.name):
+        how = "it's scored automatically" if card.fixed else "claim it when it's completed"
+        raise _bad_request(f"{card.mission.name} isn't scored by hand: {how}")
     completes_on = card.mission.completes_on
     if completes_on != "either":
         completes_on_your_turn = completes_on == "your_turn"
@@ -471,12 +558,16 @@ def achieve_secondary(game: Game, card: GameSecondary, points: int | None = None
     ):
         raise _bad_request(f"{card.mission.name} has already been scored this turn")
 
+    wanted = mission_points(card) if points is None else points
+    allowed = min(wanted, scoring_service.room(player, game.battle_round, "secondary"))
+    if allowed < wanted and allowed == 0:
+        raise _bad_request("they've already scored 15VP from secondaries this battle round")
     player.scores.append(
         GameScore(
             battle_round=game.battle_round,
             turn_seat=game.turn_seat,
             kind="secondary",
-            points=mission_points(card) if points is None else points,
+            points=allowed,
             game_secondary_id=card.id,
         )
     )
@@ -486,21 +577,31 @@ def achieve_secondary(game: Game, card: GameSecondary, points: int | None = None
 
 
 def discard_secondary(game: Game, card: GameSecondary) -> None:
+    # A tactical secondary is discarded at the end of its holder's turn (in
+    # its last phase, the fight phase), for 1 CP.
     _require_in_progress(game)
     if card.fixed:
         raise _bad_request("fixed secondaries can't be discarded")
     if card.status != "active":
         raise _bad_request("that secondary isn't active")
+    if game.turn_seat != card.player.seat or game.phase != PHASES[-1]:
+        raise _bad_request("secondaries are discarded at the end of their holder's turn")
     card.status = "discarded"
+    card.player.cp += DISCARD_CP
 
 
 def score_primary(game: Game, player: GamePlayer, points: int) -> None:
+    # VP from primary missions scored by hand - within the 15VP a battle
+    # round.
     _require_in_progress(game)
+    allowed = min(points, scoring_service.room(player, game.battle_round, "primary"))
+    if allowed < points and allowed == 0:
+        raise _bad_request("they've already scored 15VP from primary missions this battle round")
     player.scores.append(
         GameScore(
             battle_round=game.battle_round,
             turn_seat=game.turn_seat,
             kind="primary",
-            points=points,
+            points=allowed,
         )
     )

@@ -19,15 +19,25 @@ from app.services.in_game.deployment import TOLERANCE, Base, Point
 # doesn't count - a model standing against one can still move away from it.
 
 THROUGH_ANY_TERRAIN = {"INFANTRY", "BEAST", "SWARM"}
+# Abilities that let a unit move through terrain (and roll for it - see
+# app/services/in_game/movement.py).
+SUPER_HEAVY_WALKER = "Super-heavy Walker"
 # Round each grown wall corner: this many segments, each just outside the
 # true rounded corner (so a route never clips it).
 CORNER_SEGMENTS = 2
 
 
 def moves_through_terrain(unit: Unit) -> bool:
-    # Whether the unit moves through any terrain (INFANTRY, BEAST, SWARM).
-    return any(
+    # Whether the unit moves through any terrain (INFANTRY, BEAST, SWARM, or
+    # a Super-heavy Walker).
+    return is_super_heavy_walker(unit) or any(
         k.name in THROUGH_ANY_TERRAIN for m in unit.unit_models for k in m.model.keywords
+    )
+
+
+def is_super_heavy_walker(unit: Unit) -> bool:
+    return any(
+        a.name == SUPER_HEAVY_WALKER for m in unit.unit_models for a in m.model.faction_abilities
     )
 
 

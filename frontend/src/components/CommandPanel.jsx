@@ -8,7 +8,8 @@ import Select from './Select'
 // the player whose turn it is selects an option for each of their units'
 // abilities that have one then (e.g. Canticles of the Omnissiah, Rod of the
 // War Forge, Battle Protocols) - with the combat calculator's picker - and,
-// for one that applies to another unit, which unit. Most must be selected
+// for one that applies to another unit, which unit; for an option against
+// one enemy unit (Invocation of Machine Vengeance), which enemy unit. Most must be selected
 // before the phase ends and last until their next Command phase; Battle
 // Protocols stay until changed. Models that healed at the start of the phase
 // (e.g. Self-repair Mechanisms) are listed too.
@@ -36,7 +37,22 @@ function CommandPanel({ game, onError }) {
   const targetOf = (ability) =>
     targets[abilityKey(ability)] ?? ability.target_unit_id ?? ability.targets[0]?.unit_id ?? null
 
-  const choose = async (ability, option, target = targetOf(ability)) => {
+  // The enemy unit for an option that targets one: picked, or its current
+  // target, or the first there is.
+  const enemyTargetOf = (ability, option) => {
+    const enemies = ability.option_targets?.[option] ?? []
+    const picked = targets[`${abilityKey(ability)}-${option}`]
+    const current = ability.active === option ? ability.target_unit_id : null
+    return picked ?? current ?? enemies[0]?.unit_id ?? null
+  }
+
+  const targetFor = (ability, option) => {
+    if (!option) return null
+    if (ability.option_targets?.[option]) return enemyTargetOf(ability, option)
+    return ability.needs_target ? targetOf(ability) : null
+  }
+
+  const choose = async (ability, option, target = targetFor(ability, option)) => {
     onError(null)
     try {
       setCommand(
@@ -45,7 +61,7 @@ function CommandPanel({ game, onError }) {
           unit_id: ability.unit_id,
           ability: ability.ability,
           option: option || null,
-          target_unit_id: ability.needs_target && option ? target : null,
+          target_unit_id: option ? target : null,
         })
       )
     } catch (err) {
@@ -125,6 +141,25 @@ function CommandPanel({ game, onError }) {
                   choices={{ [key]: ability.chosen || ability.persistent ? ability.active : '' }}
                   onChange={(choices) => choose(ability, choices[key])}
                 />
+              )}
+              {ability.active && ability.option_targets?.[ability.active] && (
+                <div className="command-target">
+                  <span className="hint">{ability.active} target:</span>
+                  <Select
+                    options={ability.option_targets[ability.active].map((t) => ({
+                      id: t.unit_id,
+                      name: t.name,
+                    }))}
+                    value={String(enemyTargetOf(ability, ability.active) ?? '')}
+                    placeholder="Choose an enemy unit"
+                    onChange={(value) => {
+                      if (!value) return
+                      const target = Number(value)
+                      setTargets((t) => ({ ...t, [`${key}-${ability.active}`]: target }))
+                      choose(ability, ability.active, target)
+                    }}
+                  />
+                </div>
               )}
               {noTargets && (
                 <p className="hint">No unit it could apply to is in range: nothing to select.</p>

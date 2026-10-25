@@ -4,6 +4,10 @@ import {
   advanceGame,
   bringIn,
   checkArrival,
+  checkDisembark,
+  disembark,
+  getDisembarkFormation,
+  getEmbarked,
   checkCharge,
   checkConsolidation,
   checkDeployment,
@@ -22,6 +26,8 @@ import {
   getFight,
   getMovement,
   getPileIn,
+  getBattleShock,
+  getMissionState,
   getOverwatch,
   getReanimation,
   checkReanimation,
@@ -52,11 +58,17 @@ import FormationsPanel from './FormationsPanel'
 import Gameboard from './Gameboard'
 import MovementPanel from './MovementPanel'
 import PileInPanel from './PileInPanel'
+import BattleShockPanel from './BattleShockPanel'
 import CommandPanel from './CommandPanel'
+import MissionPanel from './MissionPanel'
 import ReanimationPanel from './ReanimationPanel'
 import ReservesPanel from './ReservesPanel'
+import EmbarkedPanel from './EmbarkedPanel'
 import RoundStartPanel from './RoundStartPanel'
+import ScoringPanel from './ScoringPanel'
 import ShootingPanel from './ShootingPanel'
+import TurnRecord from './TurnRecord'
+import ScoreHistory from './ScoreHistory'
 import Select from './Select'
 import { PHASES } from './StratagemsPanel'
 
@@ -173,7 +185,13 @@ function PlayerCard({ game, player, onAction }) {
       {player.primary_mission_description && (
         <p className="hint card-text">{player.primary_mission_description}</p>
       )}
-      {inProgress && (
+      {player.primary_automatic && (
+        <p className="hint">
+          Scored automatically.
+          {player.primary_manual && ` By hand: ${player.primary_manual}.`}
+        </p>
+      )}
+      {inProgress && (!player.primary_automatic || player.primary_manual) && (
         <div className="inline-controls">
           <input
             type="number"
@@ -207,7 +225,15 @@ function PlayerCard({ game, player, onAction }) {
             {completesOnLabel(card.completes_on)}
             {card.fixed && ' (fixed)'}
             <CardTextAccordion text={card.description} />
-            {inProgress && (
+            {card.automatic && (
+              <p className="hint">
+                {card.fixed
+                  ? 'Scored automatically.'
+                  : "Offered to claim (or hold) whenever it's completed."}
+              </p>
+            )}
+            {card.manual && <p className="hint">Scored by hand: {card.manual}.</p>}
+            {inProgress && !card.automatic && (
               <div className="inline-controls">
                 <input
                   type="number"
@@ -229,11 +255,23 @@ function PlayerCard({ game, player, onAction }) {
                 {!card.fixed && (
                   <button
                     type="button"
+                    title="At the end of your turn: +1 CP"
                     onClick={() => onAction(() => discardSecondary(game.id, card.id))}
                   >
-                    Discard
+                    Discard (+1 CP)
                   </button>
                 )}
+              </div>
+            )}
+            {inProgress && card.automatic && !card.fixed && (
+              <div className="inline-controls">
+                <button
+                  type="button"
+                  title="At the end of your turn: +1 CP"
+                  onClick={() => onAction(() => discardSecondary(game.id, card.id))}
+                >
+                  Discard (+1 CP)
+                </button>
               </div>
             )}
           </li>
@@ -346,16 +384,40 @@ function boardPieces(game, deployment, draft, focus = {}) {
         draft: draftPosition !== undefined && !locked.has(model.unit_model_id),
         invalid: isDraft && problems.has(model.unit_model_id),
         shooter: unit.unit_id === focus.unitId,
+        shocked: unit.battle_shocked,
         target: unit.unit_id === focus.targetId,
         title:
           `${unit.name}: ${model.name} (${model.base_size ?? 'no base size'})` +
           (model.wounds_remaining < model.wounds
             ? ` - ${model.wounds_remaining} of ${model.wounds} wounds left`
-            : ''),
+            : '') +
+          (unit.battle_shocked ? ' - Battle-shocked' : ''),
       })
     }
   }
   return pieces
+}
+
+// Who controls each objective (see the deployment's `objectives`), by the
+// terrain areas it is: the controller's side (none in a tie) and each
+// player's OC there, for the board to shade and show.
+function objectiveControl(game, deployment) {
+  const found = {}
+  for (const objective of deployment?.objectives ?? []) {
+    const side =
+      objective.controller === null
+        ? null
+        : objective.controller === game.attacker_seat
+          ? 'attacker'
+          : 'defender'
+    const oc = game.players
+      .map((p) => `${p.user_name} OC ${objective.oc[p.seat] ?? 0}`)
+      .join(' · ')
+    const holder = game.players.find((p) => p.seat === objective.controller)
+    const title = `${holder ? `Controlled by ${holder.user_name}` : 'Not controlled'} (${oc})`
+    for (const id of objective.area_ids) found[id] = { side, title }
+  }
+  return found
 }
 
 // How far the auras of the unit being moved (or placed) reach from its
@@ -501,6 +563,40 @@ function GameView({ gameId, onBack }) {
     }
   }, [game, moving])
 
+  // Missions' operation markers, marked units, and the choices they're
+  // waiting for (see GET /games/{id}/mission).
+  const [mission, setMission] = useState(null)
+  useEffect(() => {
+    if (!game || game.status !== 'in_progress') {
+      setMission(null)
+      return
+    }
+    let cancelled = false
+    getMissionState(game.id)
+      .then((m) => !cancelled && setMission(m))
+      .catch((err) => setError(err.message))
+    return () => {
+      cancelled = true
+    }
+  }, [game, deployment])
+
+  // Battle-shock: tests to take, and Battle-shocked units (see GET
+  // /games/{id}/battle-shock).
+  const [battleShock, setBattleShock] = useState(null)
+  useEffect(() => {
+    if (!game || game.status !== 'in_progress') {
+      setBattleShock(null)
+      return
+    }
+    let cancelled = false
+    getBattleShock(game.id)
+      .then((b) => !cancelled && setBattleShock(b))
+      .catch((err) => setError(err.message))
+    return () => {
+      cancelled = true
+    }
+  }, [game])
+
   // In the command phase: Reanimation Protocols at its end, and any returned
   // models to set up (see GET /games/{id}/reanimation).
   const commandPhase = game?.status === 'in_progress' && game?.phase === 'command'
@@ -538,6 +634,23 @@ function GameView({ gameId, onBack }) {
   // The end of the movement phase: only the opponent's Rapid Ingress and
   // Fire Overwatch now.
   const endOfMovement = moving && reserves?.step === 'rapid_ingress'
+
+  // In the movement phase: units that can disembark from their transports
+  // (see GET /games/{id}/embarked).
+  const [embarked, setEmbarked] = useState(null)
+  useEffect(() => {
+    if (!game || !moving) {
+      setEmbarked(null)
+      return
+    }
+    let cancelled = false
+    getEmbarked(game.id)
+      .then((e) => !cancelled && setEmbarked(e))
+      .catch((err) => setError(err.message))
+    return () => {
+      cancelled = true
+    }
+  }, [game, moving])
 
   // In the shooting phase, the player whose turn it is's units; and the one
   // shooting and its target, marked on the board.
@@ -764,6 +877,8 @@ function GameView({ gameId, onBack }) {
       let check
       if (kind === 'reinforce') {
         check = await checkArrival(game.id, asPayload(unitId, positions))
+      } else if (kind === 'disembark') {
+        check = await checkDisembark(game.id, asPayload(unitId, positions))
       } else if (kind === 'reanimate') {
         check = await checkReanimation(game.id, asPayload(unitId, positions))
       } else if (kind === 'consolidate') {
@@ -794,8 +909,14 @@ function GameView({ gameId, onBack }) {
     const { unitId, kind } = draftRef.current
     setError(null)
     try {
-      // Deploying, or a unit arriving from Reserves (kind 'reinforce').
-      const getFormation = kind === 'reinforce' ? getReservesFormation : getDeploymentFormation
+      // Deploying, a unit arriving from Reserves (kind 'reinforce') or one
+      // disembarking (kind 'disembark').
+      const getFormation =
+        kind === 'reinforce'
+          ? getReservesFormation
+          : kind === 'disembark'
+            ? getDisembarkFormation
+            : getDeploymentFormation
       const formation = await getFormation(game.id, { unit_id: unitId, x, y })
       const positions = Object.fromEntries(
         formation.map((p) => [p.unit_model_id, { x: p.x, y: p.y, rotation: p.rotation }])
@@ -1205,6 +1326,59 @@ function GameView({ gameId, onBack }) {
           }}
         />
       )}
+      {moving && !endOfMovement && (
+        <EmbarkedPanel
+          game={game}
+          embarked={embarked}
+          draft={draft}
+          checking={checking}
+          onSelectUnit={(unitId) => {
+            checkSeq.current++
+            setDraft({ ...NO_DRAFT, unitId, kind: 'disembark' })
+          }}
+          onPickUp={() => {
+            checkSeq.current++
+            setDraft((d) => ({ ...NO_DRAFT, unitId: d.unitId, kind: 'disembark' }))
+          }}
+          onDisembark={async () => {
+            const { unitId, positions } = draftRef.current
+            if (await act(() => disembark(game.id, asPayload(unitId, positions)))) {
+              setDraft(NO_DRAFT)
+            }
+          }}
+        />
+      )}
+      <MissionPanel
+        game={game}
+        mission={mission}
+        onAnswered={(m) => {
+          setMission(m)
+          getGame(game.id)
+            .then(setGame)
+            .catch((err) => setError(err.message))
+        }}
+        onError={setError}
+      />
+      <ScoringPanel game={game} onAction={act} onError={setError} />
+      {battleShock &&
+        (battleShock.pending.length > 0 ||
+          battleShock.taken.length > 0 ||
+          battleShock.battle_shocked.length > 0 ||
+          commandPhase) && (
+          <BattleShockPanel
+            game={game}
+            battleShock={battleShock}
+            deployment={deployment}
+            onChange={(b) => {
+              setBattleShock(b)
+              // The game again: CP spent, OC changed.
+              getGame(game.id)
+                .then(setGame)
+                .catch((err) => setError(err.message))
+            }}
+            onError={setError}
+          />
+        )}
       {commandPhase && !reanimation?.placing && <CommandPanel game={game} onError={setError} />}
       {commandPhase && (
         <ReanimationPanel
@@ -1347,13 +1521,29 @@ function GameView({ gameId, onBack }) {
         )}
         rings={moveRings(deployment, movement, draft)}
         auras={auraCircles(deployment, draft)}
+        objectiveControl={objectiveControl(game, deployment)}
+        territoryLine={deployment?.territory?.line ?? null}
+        markers={(mission?.markers ?? []).map((m) => ({
+          id: m.id,
+          x: m.x,
+          y: m.y,
+          side: m.seat === game.attacker_seat ? 'attacker' : 'defender',
+          title: `${game.players.find((p) => p.seat === m.seat)?.user_name}'s operation marker (${m.source}) - ${m.label}`,
+        }))}
+        areaLabels={Object.fromEntries(
+          (mission?.prompts ?? [])
+            .filter((p) => p.kind === 'place_markers')
+            .flatMap((p) => p.options.map((o) => [o.id, o.label.split(' ')[0]]))
+        )}
         bubbles={[
           (moving || chargePhase || fightPhase) &&
             moveBubble(deployment, movement, draft, reach),
           sightBubble && { kind: 'shoot', regions: sightBubble.regions },
         ].filter(Boolean)}
         onBoardClick={
-          (game.status === 'deployment' || draft.kind === 'reinforce') &&
+          (game.status === 'deployment' ||
+            draft.kind === 'reinforce' ||
+            draft.kind === 'disembark') &&
           draft.unitId !== null &&
           draft.positions === null
             ? setDown
@@ -1369,6 +1559,13 @@ function GameView({ gameId, onBack }) {
           No terrain layout for {attacker?.disposition_name ?? '—'} (attacker) vs{' '}
           {defender?.disposition_name ?? '—'} (defender) yet.
         </p>
+      )}
+
+      {game.status === 'in_progress' && (
+        <TurnRecord game={game} deployment={deployment} onError={setError} />
+      )}
+      {(game.status === 'in_progress' || game.status === 'finished') && (
+        <ScoreHistory game={game} />
       )}
 
       <div className="game-players">

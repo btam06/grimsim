@@ -336,10 +336,12 @@ OPTIONS = {
                 Rule(conditions=(ALWAYS,), effects=(REROLL_FAILED_HITS,)),
             ),
             army_wide=True,
+            targets_enemy=True,
             description=(
                 "The defending unit is taken to be the Machine Vengeance target, so attacks "
                 "against it by this model's unit, and other units of its faction in its army "
-                "list, can re-roll the Hit roll (its range isn't modelled)."
+                "list, can re-roll the Hit roll. In a game, the target is the enemy unit "
+                "selected with it (anywhere on the battlefield; it needn't be visible)."
             ),
         ),
         "Mantra of Discipline": RuleOption(

@@ -541,6 +541,14 @@ section .app-dialog form {
   stroke-dasharray: 4 4;
 }
 
+/* The line between the players' territories: darker than the centre lines. */
+.gameboard-territory {
+  vector-effect: non-scaling-stroke;
+  stroke: #555b;
+  stroke-width: 1.5px;
+  stroke-dasharray: 6 4;
+}
+
 /* Deployment zones (see Gameboard): attacker red, defender blue, faint enough
    to sit under the terrain in either theme. */
 .deployment-zone {
@@ -604,6 +612,21 @@ section .app-dialog form {
    their markers coloured as on the layout cards. */
 .terrain-area--objective {
   stroke-width: 3.5px;
+}
+
+/* An objective a player controls (see Gameboard's Terrain): its areas lightly
+   shaded in their colour - lighter than their deployment zone. */
+.objective-held {
+  stroke: none;
+  pointer-events: none;
+}
+
+.objective-held--attacker {
+  fill: #c0504a26;
+}
+
+.objective-held--defender {
+  fill: #3f6fa026;
 }
 
 .objective {
@@ -808,6 +831,32 @@ section .app-dialog form {
   stroke-width: 2.5px;
 }
 
+/* A Battle-shocked unit's models (see BattleShockPanel): faded, with a dashed
+   outline. */
+.piece--shocked {
+  fill-opacity: 0.55;
+  stroke-dasharray: 3 2;
+}
+
+.battle-shock-failed {
+  color: #c0392b;
+}
+
+.battle-shock-require {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.battle-shock-require .select-wrapper {
+  min-width: 14rem;
+}
+
+.battle-shock-modifier {
+  width: 3.5rem;
+}
+
 .piece--target {
   stroke: #ff8c00;
   stroke-width: 3px;
@@ -845,6 +894,82 @@ section .app-dialog form {
 
 .deployment-panel h3 {
   margin-top: 0;
+}
+
+/* Operation markers on the board (see Gameboard): small diamonds in their
+   player's colour. */
+.operation-marker polygon {
+  stroke: #fff;
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+
+.operation-marker--attacker polygon {
+  fill: #c0504a;
+}
+
+.operation-marker--defender polygon {
+  fill: #3f6fa0;
+}
+
+.area-label {
+  font-size: 1.4px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  fill: #b8860b;
+  paint-order: stroke;
+  stroke: #fffc;
+  stroke-width: 0.25px;
+  pointer-events: none;
+}
+
+/* The score history (see ScoreHistory): VP per battle round. */
+.score-history {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.5rem 0;
+  font-size: 0.9rem;
+}
+
+.score-history th,
+.score-history td {
+  border: 1px solid #8884;
+  padding: 0.25rem 0.5rem;
+  text-align: center;
+}
+
+.score-history tbody tr {
+  cursor: pointer;
+}
+
+.score-history tbody tr:hover,
+.score-history .score-history-open {
+  background: #8881;
+}
+
+.score-history .score-history-total {
+  cursor: default;
+  font-weight: 600;
+}
+
+.score-history-detail h4 {
+  margin: 0.5rem 0 0.25rem;
+}
+
+/* The mission lines behind a score (see ScoringPanel). */
+.score-reasons {
+  margin: 0.15rem 0 0.35rem;
+  padding-left: 1.2rem;
+}
+
+/* The turn record under the board (see TurnRecord). */
+.card-accordion.turn-record.MuiAccordion-root {
+  margin: 1rem 0;
+}
+
+.turn-record h4 {
+  margin: 0.5rem 0 0.25rem;
 }
 
 .deployment-status {

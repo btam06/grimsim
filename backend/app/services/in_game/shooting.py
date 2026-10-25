@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.combat_rules.effects import ASSAULT
 from app.models import DetachmentRule, Effect, Game, GameUnitMove, Unit, UnitModel, WeaponAbility
-from app.services.in_game import command_phase, deployment
+from app.services.in_game import actions, command_phase, deployment
 from app.services.in_game import movement
 from app.services.in_game.deployment import TOLERANCE, Base, Point, gap, outline
 from app.services.in_game.terrain import area_polygon, feature_polygons, within
@@ -475,6 +475,8 @@ def cant_shoot_reason(game: Game, unit: Unit, assault: set | None = None) -> str
         return "it isn't on the battlefield"
     if unit_shot(game, unit) is not None:
         return "it has already shot this phase"
+    if (reason := actions.blocks(game, unit, "shoot")) is not None:
+        return reason
     if move_status(game, unit).fell_back and not command_phase.eligible_after(
         game, unit, "fell_back"
     ):

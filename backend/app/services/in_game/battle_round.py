@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 import re
 from dataclasses import dataclass, field
 
@@ -23,7 +24,11 @@ from app.services.in_game import deployment
 # An army rule with options (e.g. Doctrina Imperatives: the Protector or
 # Conqueror Imperative - the same options as the combat calculator's) is chosen
 # then, for the round: the player's units with that rule have the chosen
-# option when they attack or are attacked that round.
+# option when they attack or are attacked that round. Some rules offer
+# choices of their own (faction ROUND_START_CHOICES), and some choices last
+# the rest of the battle and can't be made again (LASTING_CHOICES) - e.g.
+# Harbingers of Dread's Dread abilities, chosen in the first, third and
+# fifth battle rounds, one at a time or two rolled at random.
 
 # The game's phase during this step - not one of a turn's PHASES.
 START_OF_ROUND = "start_of_round"
@@ -90,12 +95,17 @@ def player_rules(game: Game, player: GamePlayer, battle_round: int) -> list[Roun
                 kind=kind, name=name, description=description or ""
             )
             if ability is not None:
+                key = (ability.faction.name, name)
                 rule.faction_ability_id = ability.id
-                rule.options = list(faction_seeds.rule_options(ability.faction.name, name))
-                rule.option_descriptions = faction_seeds.option_descriptions(
-                    ability.faction.name, name
-                )
-                rule.required = faction_seeds.required(ability.faction.name, name)
+                rule.options = list(faction_seeds.rule_options(*key))
+                rule.option_descriptions = faction_seeds.option_descriptions(*key)
+                if key in faction_seeds.ROUND_START_CHOICES:
+                    taken = set(chosen_options(game, player.seat, ability.id, earlier=True))
+                    rule.options = [
+                        o for o in faction_seeds.ROUND_START_CHOICES[key] if o not in taken
+                    ]
+                    rule.option_descriptions = faction_seeds.ROUND_START_DESCRIPTIONS.get(key, {})
+                rule.required = faction_seeds.required(*key)
         if unit and unit not in rule.units:
             rule.units.append(unit)
 
@@ -147,15 +157,70 @@ def _round_choices(game: Game, seat: int) -> list[GameRuleChoice]:
     ]
 
 
+# A round-start choice of "two at random": two D6 select from the rule's
+# other choices, in order (e.g. Harbingers of Dread: 1 Despair ... 6 Dominion).
+ROLL_TWO = "Roll two D6"
+
+
 def choices(game: Game, seat: int) -> dict[int, str]:
-    # The options the player chose this battle round, by faction ability id.
-    return {c.faction_ability_id: c.option for c in _round_choices(game, seat)}
+    # The options the player chose this battle round, by faction ability id
+    # (several, together, for a roll).
+    found: dict[int, list[str]] = {}
+    for c in _round_choices(game, seat):
+        found.setdefault(c.faction_ability_id, []).append(c.option)
+    return {ability_id: " + ".join(options) for ability_id, options in found.items()}
+
+
+def _ability(game: Game, faction_ability_id: int):
+    return next(
+        (
+            a
+            for p in game.players
+            for u in p.army_list.units
+            for m in u.unit_models
+            for a in m.model.faction_abilities
+            if a.id == faction_ability_id
+        ),
+        None,
+    )
+
+
+def lasting(game: Game, faction_ability_id: int) -> bool:
+    # Whether the ability's choices last the rest of the battle.
+    ability = _ability(game, faction_ability_id)
+    return ability is not None and (
+        (ability.faction.name, ability.name) in faction_seeds.LASTING_CHOICES
+    )
+
+
+def chosen_options(
+    game: Game, seat: int, faction_ability_id: int, earlier: bool = False
+) -> list[str]:
+    # The options the player has chosen for the ability: this battle round's
+    # - and, for one whose choices last, every battle round's (only earlier
+    # ones, if `earlier`).
+    if lasting(game, faction_ability_id):
+        rounds = (lambda r: r < game.battle_round) if earlier else (lambda r: True)
+    else:
+        rounds = (lambda r: False) if earlier else (lambda r: r == game.battle_round)
+    return [
+        c.option
+        for c in game.rule_choices
+        if c.seat == seat and c.faction_ability_id == faction_ability_id and rounds(c.battle_round)
+    ]
 
 
 def active_options(game: Game, seat: int) -> list[str]:
-    # The options active for the player's army this battle round (for the
-    # combat calculator's rule options).
-    return list(choices(game, seat).values())
+    # The options active for the player's army now (for the combat
+    # calculator's rule options - only those it knows): this battle round's,
+    # and those that last the battle.
+    ability_ids = {c.faction_ability_id for c in game.rule_choices if c.seat == seat}
+    return [
+        option
+        for ability_id in ability_ids
+        for option in chosen_options(game, seat, ability_id)
+        if option in faction_seeds.OPTION_OWNERS
+    ]
 
 
 def choose(game: Game, seat: int, faction_ability_id: int, option: str | None) -> None:
@@ -181,13 +246,26 @@ def choose(game: Game, seat: int, faction_ability_id: int, option: str | None) -
     for existing in _round_choices(game, seat):
         if existing.faction_ability_id == faction_ability_id:
             game.rule_choices.remove(existing)
-    if option is not None:
+    if option is None:
+        return
+    picked = [option]
+    if option == ROLL_TWO:
+        # Two D6: what they select - each only once, and not what was chosen
+        # before (duplicates have no effect).
+        ability = _ability(game, faction_ability_id)
+        key = (ability.faction.name, ability.name)
+        table = [o for o in faction_seeds.ROUND_START_CHOICES[key] if o != ROLL_TWO]
+        dice = sorted(random.randint(1, 6) for _ in range(2))
+        earlier = set(chosen_options(game, seat, faction_ability_id, earlier=True))
+        rolled = [table[d - 1] for d in dict.fromkeys(dice)]
+        picked = [f"{ROLL_TWO}: {dice[0]} and {dice[1]}"] + [o for o in rolled if o not in earlier]
+    for name in picked:
         game.rule_choices.append(
             GameRuleChoice(
                 battle_round=game.battle_round,
                 seat=seat,
                 faction_ability_id=faction_ability_id,
-                option=option,
+                option=name,
             )
         )
 

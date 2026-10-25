@@ -68,6 +68,32 @@ from app.schemas import (
     MovementModelOut,
     MovementOut,
     OverwatchOut,
+    EmbarkedOut,
+    EmbarkedUnitOut,
+    MarkedUnitOut,
+    MissionAnswerIn,
+    MissionPromptOut,
+    MissionStateOut,
+    OperationMarkerOut,
+    PromptOptionOut,
+    ActionIn,
+    ActionOptionOut,
+    ActionsOut,
+    ActionTargetOut,
+    UnitActionOut,
+    ClaimOfferOut,
+    ScoreReasonOut,
+    ScoringOut,
+    DestroyedModelOut,
+    TurnRecordOut,
+    TurnStartObjectiveOut,
+    BattleShockOut,
+    BattleShockRequireIn,
+    BattleShockTakeIn,
+    BattleShockTestOut,
+    BattleShockUnitOut,
+    ObjectiveControlOut,
+    TerritoryOut,
     AuraOut,
     CommandAbilityOut,
     CommandChoiceIn,
@@ -92,25 +118,52 @@ from app.schemas import (
 )
 from app.routers.stratagems import _to_out as stratagem_to_out
 from app.services.in_game import auras as auras_service
+from app.services.in_game import actions as actions_service
 from app.services.in_game import battle_formations as battle_formations_service
+from app.services.in_game import battle_shock as battle_shock_service
 from app.services.in_game import battle_round as battle_round_service
 from app.services.in_game import casualties as casualties_service
 from app.services.in_game import charging as charging_service
 from app.services.in_game import command_phase as command_phase_service
 from app.services.in_game import deployment as deployment_service
+from app.services.in_game import embarked as embarked_service
 from app.services.in_game import fighting as fighting_service
 from app.services.in_game import game as game_service
 from app.services.in_game import movement as movement_service
+from app.services.in_game import objectives as objectives_service
 from app.services.in_game import overwatch as overwatch_service
 from app.services.in_game import pathing as pathing_service
-from app.services.in_game import reanimation as reanimation_service
+from app.seeds.factions.necrons import reanimation as reanimation_service
+from app.services.in_game import heal as heal_service
+from app.services.in_game import regions as regions_service
+from app.services.in_game import mission_cards
+from app.services.in_game import mission_state as mission_state_service
 from app.services.in_game import reinforcements as reinforcements_service
+from app.services.in_game import scoring as scoring_service
 from app.services.in_game import shooting as shooting_service
+from app.services.in_game import turn_record as turn_record_service
 from app.routers import combat as combat_router
 from app.routers.combat import calculate as calculate_combat
+from app.combat_rules.conditions import (
+    BELOW_HALF_STRENGTH,
+    BELOW_STARTING_STRENGTH,
+    IN_RANGE_OF_OBJECTIVE,
+)
 from app.services.in_game.terrain import MM_PER_INCH
 
 router = APIRouter(prefix="/games", tags=["games"])
+
+
+def _score_out(score) -> GameScoreOut:
+    return GameScoreOut(
+        id=score.id,
+        battle_round=score.battle_round,
+        turn_seat=score.turn_seat,
+        kind=score.kind,
+        points=score.points,
+        game_secondary_id=score.game_secondary_id,
+        reasons=[ScoreReasonOut(text=r.text, points=r.points) for r in score.reasons],
+    )
 
 
 def _player_out(player: GamePlayer) -> GamePlayerOut:
@@ -129,6 +182,14 @@ def _player_out(player: GamePlayer) -> GamePlayerOut:
         primary_mission_description=(
             player.primary_mission.description if player.primary_mission else None
         ),
+        primary_automatic=bool(
+            player.primary_mission and scoring_service.automatic(player.primary_mission.name)
+        ),
+        primary_manual=(
+            mission_cards.MANUAL.get(player.primary_mission.name)
+            if player.primary_mission
+            else None
+        ),
         cp=player.cp,
         vp=sum(score.points for score in player.scores),
         secondaries=[
@@ -142,20 +203,12 @@ def _player_out(player: GamePlayer) -> GamePlayerOut:
                 status=card.status,
                 fixed=card.fixed,
                 drawn_round=card.drawn_round,
+                automatic=scoring_service.automatic(card.mission.name),
+                manual=mission_cards.MANUAL.get(card.mission.name),
             )
             for card in player.secondaries
         ],
-        scores=[
-            GameScoreOut(
-                id=s.id,
-                battle_round=s.battle_round,
-                turn_seat=s.turn_seat,
-                kind=s.kind,
-                points=s.points,
-                game_secondary_id=s.game_secondary_id,
-            )
-            for s in player.scores
-        ],
+        scores=[_score_out(s) for s in player.scores],
         stratagem_uses=[
             GameStratagemUseOut(
                 id=u.id,
@@ -285,6 +338,14 @@ async def get_game(game_id: int, session: AsyncSession = Depends(get_session)):
 @router.delete("/{game_id}", status_code=204)
 async def delete_game(game_id: int, session: AsyncSession = Depends(get_session)):
     game = await _load_game(session, game_id)
+    # Scores and claim offers first: they point at the secondaries (and
+    # mission prompts, which point at actions).
+    game.claim_offers.clear()
+    game.mission_prompts.clear()
+    game.card_choices.clear()
+    for player in game.players:
+        player.scores.clear()
+    await session.flush()
     await session.delete(game)
     await session.commit()
 
@@ -452,6 +513,7 @@ async def get_deployment(game_id: int, session: AsyncSession = Depends(get_sessi
                     transport_unit_id=f.transport_unit_id if f else None,
                     destroyed=all(m.destroyed for m in models),
                     models=models,
+                    battle_shocked=battle_shock_service.is_battle_shocked(game, unit),
                     auras=(
                         [
                             AuraOut(unit_model_id=m.id, name=name, range=reach)
@@ -462,7 +524,36 @@ async def get_deployment(game_id: int, session: AsyncSession = Depends(get_sessi
                     ),
                 )
             )
-    return DeploymentOut(deploying_seat=deployment_service.deploying_seat(game), units=units)
+    split = regions_service.split(game)
+    return DeploymentOut(
+        deploying_seat=deployment_service.deploying_seat(game),
+        units=units,
+        objectives=[
+            ObjectiveControlOut(
+                objective_id=c.objective.id,
+                kind=c.objective.kind,
+                area_ids=[a.id for a in c.objective.areas],
+                oc=c.oc,
+                controller=c.controller,
+            )
+            for c in objectives_service.control(game)
+        ],
+        territory=(
+            TerritoryOut(
+                split=split,
+                line=[TerrainPointOut(x=x, y=y) for x, y in regions_service.split_line(game)],
+                territories={
+                    p.seat: [
+                        TerrainPointOut(x=x, y=y)
+                        for x, y in regions_service.territory(game, p.seat)
+                    ]
+                    for p in game.players
+                },
+            )
+            if split
+            else None
+        ),
+    )
 
 
 @router.post("/{game_id}/deployment/formation", response_model=list[ModelPositionOut])
@@ -597,16 +688,32 @@ async def move_unit(
     return await _commit_and_reload(session, game_id)
 
 
-def _rule_options(game: Game, unit: Unit) -> list[str]:
+def _defender_positions(game: Game, target: Unit) -> list[str]:
+    # What the battlefield says about the target that the calculator asks
+    # about (see app/combat_rules/positions.py): whether it's below its
+    # Starting Strength, Below Half-strength, or within range of an
+    # objective.
+    found = []
+    if battle_shock_service.below_starting_strength(game, target):
+        found.append(BELOW_STARTING_STRENGTH)
+    if battle_shock_service.below_half_strength_strict(game, target):
+        found.append(BELOW_HALF_STRENGTH)
+    if mission_state_service.unit_objectives(game, target):
+        found.append(IN_RANGE_OF_OBJECTIVE)
+    return found
+
+
+def _rule_options(game: Game, unit: Unit, attacking: Unit | None = None) -> list[str]:
     # The rule options active for the unit in combat: its owner's army rule
     # options this round (e.g. Doctrina Imperatives), those of abilities
     # selected in their Command phase that can apply to it (see
     # app/services/in_game/command_phase.py), and the auras it's within range
-    # of (see app/services/in_game/auras.py).
+    # of (see app/services/in_game/auras.py). `attacking`: the unit it's
+    # attacking, if it is (for options against one enemy unit).
     seat = deployment_service.owner(game, unit).seat
     return (
         battle_round_service.active_options(game, seat)
-        + command_phase_service.options_for(game, seat, unit)
+        + command_phase_service.options_for(game, seat, unit, attacking)
         + auras_service.aura_options(game, unit)
     )
 
@@ -763,12 +870,14 @@ async def _fire(
             selected_weapon_ids=payload.weapon_ids,
             selected_enhancement_weapon_ids=payload.enhancement_weapon_ids,
             attacker_positions=["remained_stationary"] if status.remained_stationary else [],
+            defender_positions=_defender_positions(game, target),
+            defender_battle_shocked=battle_shock_service.is_battle_shocked(game, target),
             in_cover=reach.in_cover,
             moved_less_than_3=status.moved_less_than_3,
             advanced=status.advanced,
             # The options each side chose for its army rules this round (e.g.
             # its Doctrina Imperative) and its abilities in its Command phase.
-            attacker_rule_options=_rule_options(game, unit),
+            attacker_rule_options=_rule_options(game, unit, target),
             defender_rule_options=_rule_options(game, target),
             defender_visible=True,
             defender_in_range=True,
@@ -1199,9 +1308,11 @@ async def fight(game_id: int, payload: ShootIn, session: AsyncSession = Depends(
             selected_enhancement_weapon_ids=payload.enhancement_weapon_ids,
             in_engagement_range=True,
             charged=charged,
+            defender_positions=_defender_positions(game, target),
+            defender_battle_shocked=battle_shock_service.is_battle_shocked(game, target),
             # The options each side chose for its army rules this round (e.g.
             # its Doctrina Imperative) and its abilities in its Command phase.
-            attacker_rule_options=_rule_options(game, unit),
+            attacker_rule_options=_rule_options(game, unit, target),
             defender_rule_options=_rule_options(game, target),
             defender_visible=True,
             defender_in_range=True,
@@ -1517,7 +1628,8 @@ async def bring_in(
     return await _commit_and_reload(session, game_id)
 
 
-# --- Reanimation Protocols (see app/services/in_game/reanimation.py) ---
+# --- Reanimation Protocols (see app/seeds/factions/necrons/reanimation.py), and
+# setting up the models healing returns (app/services/in_game/heal.py) ---
 
 
 @router.get("/{game_id}/reanimation", response_model=ReanimationOut)
@@ -1532,8 +1644,8 @@ async def get_reanimation(game_id: int, session: AsyncSession = Depends(get_sess
     for record in reanimation_service.reanimations(game):
         unit = deployment_service.find_unit(game, record.unit_id)
         start = (
-            reanimation_service.suggested(game, unit)
-            if reanimation_service.to_place(game, unit)
+            heal_service.suggested(game, unit)
+            if heal_service.to_place(game, unit)
             else {}
         )
         units.append(
@@ -1550,7 +1662,7 @@ async def get_reanimation(game_id: int, session: AsyncSession = Depends(get_sess
             )
         )
     return ReanimationOut(
-        placing=reanimation_service.placing(game), seat=game.turn_seat, units=units
+        placing=heal_service.placing(game), seat=game.turn_seat, units=units
     )
 
 
@@ -1562,9 +1674,9 @@ async def check_reanimation(
     # not, why.
     game = await _load_game(session, game_id)
     unit = deployment_service.find_unit(game, payload.unit_id)
-    reanimation_service.check_turn(game, unit)
+    heal_service.check_turn(game, unit)
     return _check_out(
-        reanimation_service.check_return(game, unit, _placement(payload.positions))
+        heal_service.check_return(game, unit, _placement(payload.positions))
     )
 
 
@@ -1575,7 +1687,7 @@ async def place_reanimated(
     # Sets up a unit's reanimated models.
     game = await _load_game(session, game_id)
     unit = deployment_service.find_unit(game, payload.unit_id)
-    reanimation_service.place(game, unit, _placement(payload.positions))
+    heal_service.place(game, unit, _placement(payload.positions))
     return await _commit_and_reload(session, game_id)
 
 
@@ -1620,6 +1732,14 @@ def _command_out(game: Game) -> CommandOut:
                     for u in command_phase_service.targets(game, ability)
                 ],
                 target_unit_id=current.target_unit_id if current else None,
+                option_targets={
+                    name: [
+                        UnitIdNameOut(unit_id=u.id, name=u.faction_unit.name)
+                        for u in command_phase_service.enemy_targets(game, ability)
+                    ]
+                    for name, option in options.items()
+                    if option.targets_enemy
+                },
             )
         )
     units = {
@@ -1659,3 +1779,551 @@ async def choose_command_option(
     )
     await session.commit()
     return _command_out(await _load_game(session, game_id))
+
+
+# --- Battle-shock (see app/services/in_game/battle_shock.py) ---
+
+
+def _test_out(game: Game, test) -> BattleShockTestOut:
+    unit = deployment_service.find_unit(game, test.unit_id)
+    return BattleShockTestOut(
+        id=test.id,
+        unit_id=unit.id,
+        unit_name=unit.faction_unit.name,
+        seat=deployment_service.owner(game, unit).seat,
+        reason=test.reason,
+        modifier=test.modifier,
+        leadership=battle_shock_service.needed(game, unit),
+        starting_strength=battle_shock_service.starting_strength(unit),
+        current_strength=battle_shock_service.current_strength(game, unit),
+        dice=[d for d in (test.first_die, test.second_die) if d is not None],
+        insane_bravery=test.insane_bravery,
+        passed=test.passed,
+        mortal_wounds=(
+            f"{test.wounds.source}: {test.wounds.roll} mortal wounds" if test.wounds else None
+        ),
+    )
+
+
+async def _battle_shock_out(session: AsyncSession, game: Game) -> BattleShockOut:
+    stratagem = await game_service.core_stratagem(session, battle_shock_service.INSANE_BRAVERY)
+    shocked = battle_shock_service.battle_shocked_ids(game)
+    placed = deployment_service.positions(game)
+    return BattleShockOut(
+        pending=[_test_out(game, t) for t in battle_shock_service.pending(game)],
+        taken=[
+            _test_out(game, t)
+            for t in game.battle_shock_tests
+            if t.passed is not None
+            and t.battle_round == game.battle_round
+            and t.turn_seat == game.turn_seat
+            and t.phase == game.phase
+        ],
+        battle_shocked=[
+            BattleShockUnitOut(unit_id=u.id, name=u.faction_unit.name, seat=p.seat)
+            for p in game.players
+            for u in deployment_service.deployable_units(p)
+            if u.id in shocked and deployment_service.is_deployed(u, placed)
+        ],
+        insane_bravery_cp=stratagem.cp if stratagem else None,
+        insane_bravery={
+            p.seat: battle_shock_service.insane_bravery_reason(game, p.seat, stratagem)
+            for p in game.players
+        },
+    )
+
+
+@router.get("/{game_id}/battle-shock", response_model=BattleShockOut)
+async def get_battle_shock(game_id: int, session: AsyncSession = Depends(get_session)):
+    return await _battle_shock_out(session, await _load_game(session, game_id))
+
+
+@router.post("/{game_id}/battle-shock/test", response_model=BattleShockOut)
+async def require_battle_shock_test(
+    game_id: int, payload: BattleShockRequireIn, session: AsyncSession = Depends(get_session)
+):
+    # A rule or stratagem makes a unit take a Battle-shock test (for its
+    # controller to take).
+    game = await _load_game(session, game_id)
+    unit = deployment_service.find_unit(game, payload.unit_id)
+    battle_shock_service.require(game, unit, payload.reason, payload.modifier)
+    await session.commit()
+    return await _battle_shock_out(session, await _load_game(session, game_id))
+
+
+@router.post("/{game_id}/battle-shock/{test_id}/take", response_model=BattleShockOut)
+async def take_battle_shock_test(
+    game_id: int,
+    test_id: int,
+    payload: BattleShockTakeIn,
+    session: AsyncSession = Depends(get_session),
+):
+    # Takes a pending test: rolled, or passed with Insane Bravery.
+    game = await _load_game(session, game_id)
+    test = next((t for t in battle_shock_service.pending(game) if t.id == test_id), None)
+    if test is None:
+        raise HTTPException(status_code=400, detail="no such Battle-shock test to take")
+    stratagem = None
+    if payload.insane_bravery:
+        stratagem = await game_service.core_stratagem(
+            session, battle_shock_service.INSANE_BRAVERY
+        )
+        if stratagem is None:
+            raise HTTPException(status_code=400, detail="there's no Insane Bravery stratagem")
+    battle_shock_service.take(game, test, stratagem)
+    await session.commit()
+    return await _battle_shock_out(session, await _load_game(session, game_id))
+
+
+# --- the turn record (see app/services/in_game/turn_record.py) ---
+
+
+@router.get("/{game_id}/turn-record", response_model=TurnRecordOut)
+async def get_turn_record(
+    game_id: int,
+    battle_round: int | None = None,
+    turn_seat: int | None = None,
+    session: AsyncSession = Depends(get_session),
+):
+    # What happened in a turn (this one, unless another is asked for): the
+    # models destroyed, and the objectives at its start.
+    game = await _load_game(session, game_id)
+    battle_round = battle_round if battle_round is not None else game.battle_round
+    turn_seat = turn_seat if turn_seat is not None else game.turn_seat
+    if turn_seat is None:
+        raise HTTPException(status_code=400, detail="the game isn't in a turn")
+    models = {m.id: m for p in game.players for u in p.army_list.units for m in u.unit_models}
+    on = turn_record_service.started_on_objectives(game, battle_round, turn_seat)
+    kinds = {o.id: o.kind for o in (game.layout.objectives if game.layout else [])}
+    return TurnRecordOut(
+        battle_round=battle_round,
+        turn_seat=turn_seat,
+        destroyed=[
+            DestroyedModelOut(
+                phase=d.phase,
+                seat=turn_record_service.owner_seat(game, d.unit_id),
+                unit_id=d.unit_id,
+                unit_name=_unit_name(game, d.unit_id),
+                model_name=models[d.unit_model_id].model.name,
+                destroyed_by_unit_id=d.destroyed_by_unit_id,
+                destroyed_by=(
+                    _unit_name(game, d.destroyed_by_unit_id) if d.destroyed_by_unit_id else None
+                ),
+                unit_destroyed=d.unit_destroyed,
+            )
+            for d in turn_record_service.models_destroyed(game, battle_round, turn_seat)
+        ],
+        start=[
+            TurnStartObjectiveOut(
+                objective_id=objective_id,
+                kind=kinds.get(objective_id, ""),
+                controller=controller,
+                unit_ids=sorted(u for u, objs in on.items() if objective_id in objs),
+            )
+            for objective_id, controller in turn_record_service.controlled_at_start(
+                game, battle_round, turn_seat
+            ).items()
+        ],
+    )
+
+
+# --- automatic scoring (see app/services/in_game/scoring.py) ---
+
+
+def _scoring_out(game: Game) -> ScoringOut:
+    cards = {s.id: (s, p) for p in game.players for s in p.secondaries}
+    return ScoringOut(
+        offers=[
+            ClaimOfferOut(
+                id=o.id,
+                seat=cards[o.game_secondary_id][1].seat,
+                game_secondary_id=o.game_secondary_id,
+                name=cards[o.game_secondary_id][0].mission.name,
+                timing=o.timing,
+                points=o.points,
+                reasons=[
+                    ScoreReasonOut(text=t, points=p) for t, p in scoring_service.offer_lines(o)
+                ],
+            )
+            for o in scoring_service.pending_offers(game)
+        ],
+        scored={
+            p.seat: [
+                _score_out(s)
+                for s in p.scores
+                if s.battle_round == game.battle_round and s.turn_seat == game.turn_seat
+            ]
+            for p in game.players
+        },
+    )
+
+
+@router.get("/{game_id}/scoring", response_model=ScoringOut)
+async def get_scoring(game_id: int, session: AsyncSession = Depends(get_session)):
+    return _scoring_out(await _load_game(session, game_id))
+
+
+@router.post("/{game_id}/scoring/offers/{offer_id}/claim", response_model=GameOut)
+async def claim_offer(game_id: int, offer_id: int, session: AsyncSession = Depends(get_session)):
+    game = await _load_game(session, game_id)
+    scoring_service.claim(game, offer_id)
+    return await _commit_and_reload(session, game_id)
+
+
+@router.post("/{game_id}/scoring/offers/{offer_id}/hold", response_model=GameOut)
+async def hold_offer(game_id: int, offer_id: int, session: AsyncSession = Depends(get_session)):
+    game = await _load_game(session, game_id)
+    scoring_service.hold(game, offer_id)
+    return await _commit_and_reload(session, game_id)
+
+
+# --- actions (see app/services/in_game/actions.py) ---
+
+
+def _action_target(game: Game, record) -> str:
+    layout = game.layout
+    if record.target_unit_id is not None:
+        return _unit_name(game, record.target_unit_id)
+    if record.objective_id is not None:
+        objective = next(o for o in layout.objectives if o.id == record.objective_id)
+        return actions_service._objective_label(objective)
+    area = next(a for a in layout.areas if a.id == record.area_id)
+    return actions_service._area_label(game, area)
+
+
+def _actions_out(game: Game) -> ActionsOut:
+    options = {}
+    if game.status == "in_progress" and game.phase == "shooting":
+        for unit in shooting_service.shooting_units(game):
+            options[unit.id] = [
+                ActionOptionOut(
+                    action=a.action.name,
+                    card=actions_service.card_for(
+                        game, deployment_service.owner(game, unit).seat, a.action
+                    ),
+                    completes=a.action.completes,
+                    targets=[
+                        ActionTargetOut(kind=t.kind, id=t.id, label=t.label) for t in a.targets
+                    ],
+                    reason=a.reason,
+                )
+                for a in actions_service.available(game, unit)
+            ]
+    return ActionsOut(
+        options=options,
+        started=[
+            UnitActionOut(
+                unit_id=a.unit_id,
+                unit_name=_unit_name(game, a.unit_id),
+                action=a.action,
+                target=_action_target(game, a),
+                status=a.status,
+            )
+            for a in game.actions
+            if a.battle_round == game.battle_round and a.turn_seat == game.turn_seat
+        ],
+    )
+
+
+@router.get("/{game_id}/actions", response_model=ActionsOut)
+async def get_actions(game_id: int, session: AsyncSession = Depends(get_session)):
+    # In the Shooting phase: the actions each of the player whose turn it
+    # is's units could start, and those started this turn.
+    return _actions_out(await _load_game(session, game_id))
+
+
+@router.post("/{game_id}/actions", response_model=ActionsOut)
+async def start_action(
+    game_id: int, payload: ActionIn, session: AsyncSession = Depends(get_session)
+):
+    # The unit starts an action instead of shooting.
+    game = await _load_game(session, game_id)
+    unit = deployment_service.find_unit(game, payload.unit_id)
+    actions_service.start(game, unit, payload.action, payload.target_id)
+    await session.commit()
+    return _actions_out(await _load_game(session, game_id))
+
+
+# --- missions' markers, marked units and prompts (see
+# app/services/in_game/mission_state.py) ---
+
+PROMPT_TEXT = {
+    "place_markers": "Place your operation markers: pick {n} terrain areas not within your "
+    "deployment zone.",
+    "consecrate": "Consecration units can each consecrate an objective they're within range of "
+    "(placing an operation marker there) - or not.",
+    "condemn": "Condemn 1 to {n} enemy units (within range of objectives, or that destroyed "
+    "your units last turn) until the start of your next turn.",
+    "condemn_any": "Condemn one enemy unit until the start of your next turn.",
+    "remove_marker": "Sensor sweep: remove one operation marker from the battlefield.",
+    "beacon": "Select one of your units on the battlefield (or embarked in a transport there) "
+    "to be your beacon unit.",
+    "guards": "For each objective, you can select one of your units to guard it until the start "
+    "of your next turn (guarded while it's within range and you control the objective).",
+    "tempting_target": "Select one objective within No Man's Land (not a home objective) to be "
+    "your opponent's tempting target.",
+    "redraw": "WHEN DRAWN: you can redraw these cards (pick any).",
+}
+PROMPT_MISSIONS = {
+    "place_markers": "Locate and Deny",
+    "consecrate": "Consecrate",
+    "condemn": "Punishment",
+    "beacon": "Beacon",
+    "guards": "Burden of Trust",
+    "tempting_target": "A Tempting Target",
+}
+
+
+def _marker_out(game: Game, marker, index: int) -> OperationMarkerOut:
+    layout = game.layout
+    if marker.objective_id is not None:
+        objective = next(o for o in layout.objectives if o.id == marker.objective_id)
+        x, y = objective.x, objective.y
+        label = actions_service._objective_label(objective)
+    else:
+        area = next(a for a in layout.areas if a.id == marker.area_id)
+        x, y = area.x, area.y
+        label = actions_service._area_label(game, area)
+    # Several on one place: spread a little.
+    return OperationMarkerOut(
+        id=marker.id,
+        seat=marker.seat,
+        source=marker.source,
+        objective_id=marker.objective_id,
+        area_id=marker.area_id,
+        x=round(x + 1.2 * (index % 3) - 1.2, 2),
+        y=round(y + 1.8 + 1.2 * (index // 3), 2),
+        label=label,
+    )
+
+
+def _prompt_out(game: Game, prompt) -> MissionPromptOut:
+    seat, kind = prompt.seat, prompt.kind
+    mission = PROMPT_MISSIONS.get(kind, "")
+    if kind == "place_markers":
+        areas, count = mission_state_service.place_marker_options(game, seat)
+        options = [
+            PromptOptionOut(id=a.id, label=f"#{i + 1} {actions_service._area_label(game, a)}")
+            for i, a in enumerate(areas)
+        ]
+        return MissionPromptOut(
+            id=prompt.id, seat=seat, kind=kind, mission=mission,
+            text=PROMPT_TEXT[kind].format(n=count), options=options,
+            pick_min=count, pick_max=count,
+        )
+    if kind == "consecrate":
+        options = [
+            PromptOptionOut(
+                id=o.id,
+                label=f"{_unit_name(game, unit_id)}: {actions_service._objective_label(o)}",
+                unit_id=unit_id,
+            )
+            for unit_id, objs in mission_state_service.consecrate_options(game, seat).items()
+            for o in objs
+        ]
+        return MissionPromptOut(
+            id=prompt.id, seat=seat, kind=kind, mission=mission, text=PROMPT_TEXT[kind],
+            options=options, pick_min=0, pick_max=len(options),
+        )
+    if kind == "condemn":
+        units, eligible = mission_state_service.condemn_options(game, seat)
+        most = mission_state_service.MAX_CONDEMNED if eligible else 1
+        return MissionPromptOut(
+            id=prompt.id, seat=seat, kind=kind, mission=mission,
+            text=PROMPT_TEXT["condemn" if eligible else "condemn_any"].format(n=most),
+            options=[PromptOptionOut(id=u.id, label=u.faction_unit.name) for u in units],
+            pick_min=1, pick_max=most,
+        )
+    if kind in ("beacon", "guards"):
+        candidates = (
+            mission_state_service.beacon_candidates
+            if kind == "beacon"
+            else mission_state_service.beacon_options
+        )
+        units = [
+            PromptOptionOut(id=u.id, label=u.faction_unit.name)
+            for u in candidates(game, seat)
+        ]
+        if kind == "beacon":
+            return MissionPromptOut(
+                id=prompt.id, seat=seat, kind=kind, mission=mission, text=PROMPT_TEXT[kind],
+                options=units, pick_min=1, pick_max=1,
+            )
+        objectives = game.layout.objectives if game.layout else []
+        return MissionPromptOut(
+            id=prompt.id, seat=seat, kind=kind, mission=mission, text=PROMPT_TEXT[kind],
+            options=[
+                PromptOptionOut(id=o.id, label=actions_service._objective_label(o))
+                for o in objectives
+            ],
+            pick_min=0, pick_max=len(objectives), units=units,
+        )
+    if kind == "redraw":
+        cards = {c.id: c for c in game_service.player_at(game, seat).secondaries}
+        how = {
+            "discard": "discard it and draw a new card",
+            "shuffle": "draw a new card and shuffle it back into your deck",
+        }
+        return MissionPromptOut(
+            id=prompt.id, seat=seat, kind=kind, mission="Secondary missions",
+            text=PROMPT_TEXT[kind],
+            options=[
+                PromptOptionOut(id=card_id, label=f"{cards[card_id].mission.name}: {how[way]}")
+                for card_id, way in mission_state_service.redraw_offers(game, seat).items()
+            ],
+            pick_min=0, pick_max=len(mission_state_service.redraw_offers(game, seat)),
+        )
+    if kind == "tempting_target":
+        holder = game_service.other_seat(seat)
+        return MissionPromptOut(
+            id=prompt.id, seat=seat, kind=kind, mission=mission, text=PROMPT_TEXT[kind],
+            options=[
+                PromptOptionOut(id=o.id, label=actions_service._objective_label(o))
+                for o in mission_state_service.tempting_options(game, holder)
+            ],
+            pick_min=1, pick_max=1,
+        )
+    markers = mission_state_service.markers(game)
+    player = next(p for p in game.players if p.seat == seat)
+    return MissionPromptOut(
+        id=prompt.id, seat=seat, kind=kind,
+        mission=player.primary_mission.name if player.primary_mission else "",
+        text=PROMPT_TEXT[kind],
+        options=[
+            PromptOptionOut(
+                id=m.id,
+                label=f"{game_service.player_at(game, m.seat).user.name}'s marker - "
+                f"{_marker_out(game, m, 0).label}",
+            )
+            for m in markers
+        ],
+        pick_min=1, pick_max=1,
+    )
+
+
+def _mission_state_out(game: Game) -> MissionStateOut:
+    on_battlefield = mission_state_service.markers(game)
+    counts: dict[tuple, int] = {}
+    markers = []
+    for m in on_battlefield:
+        key = (m.objective_id, m.area_id)
+        markers.append(_marker_out(game, m, counts.get(key, 0)))
+        counts[key] = counts.get(key, 0) + 1
+    return MissionStateOut(
+        prompts=[_prompt_out(game, p) for p in mission_state_service.pending(game)],
+        markers=markers,
+        marked=[
+            MarkedUnitOut(
+                unit_id=m.unit_id, unit_name=_unit_name(game, m.unit_id), seat=m.seat, kind=m.kind
+            )
+            for kind in ("condemned", "surveilled", "consecration")
+            for m in mission_state_service.marked(game, kind)
+        ],
+    )
+
+
+@router.get("/{game_id}/mission", response_model=MissionStateOut)
+async def get_mission_state(game_id: int, session: AsyncSession = Depends(get_session)):
+    # The operation markers on the battlefield, the units missions mark, and
+    # the choices missions are waiting for.
+    return _mission_state_out(await _load_game(session, game_id))
+
+
+@router.post("/{game_id}/mission/prompts/{prompt_id}", response_model=MissionStateOut)
+async def answer_mission_prompt(
+    game_id: int,
+    prompt_id: int,
+    payload: MissionAnswerIn,
+    session: AsyncSession = Depends(get_session),
+):
+    game = await _load_game(session, game_id)
+    prompt = next((p for p in mission_state_service.pending(game) if p.id == prompt_id), None)
+    if prompt is None:
+        raise HTTPException(status_code=400, detail="no such choice waiting to be made")
+    if prompt.kind == "redraw":
+        await game_service.redraw(session, game, prompt, payload.ids)
+        await session.commit()
+        return _mission_state_out(await _load_game(session, game_id))
+    given = mission_state_service.Answer(
+        consecrations=payload.consecrations, guards=payload.guards
+    )
+    if prompt.kind == "place_markers":
+        given.area_ids = payload.ids
+    elif prompt.kind in ("condemn", "beacon"):
+        given.unit_ids = payload.ids
+    elif prompt.kind == "tempting_target":
+        given.objective_id = payload.ids[0] if payload.ids else None
+    elif prompt.kind == "remove_marker":
+        given.marker_id = payload.ids[0] if payload.ids else None
+    mission_state_service.answer(game, prompt_id, given)
+    await session.commit()
+    return _mission_state_out(await _load_game(session, game_id))
+
+
+# --- disembarking from transports (see app/services/in_game/embarked.py) ---
+
+
+def _embarked_out(game: Game) -> EmbarkedOut:
+    from app.services.in_game import reinforcements
+
+    if (
+        game.status != "in_progress"
+        or game.phase != "movement"
+        or reinforcements.movement_ended(game)
+    ):
+        return EmbarkedOut(seat=None, units=[])
+    return EmbarkedOut(
+        seat=game.turn_seat,
+        units=[
+            EmbarkedUnitOut(
+                unit_id=unit.id,
+                name=unit.faction_unit.name,
+                transport_unit_id=carrier.id,
+                transport_name=carrier.faction_unit.name,
+            )
+            for unit, carrier in embarked_service.embarked_units(game, game.turn_seat)
+        ],
+    )
+
+
+@router.get("/{game_id}/embarked", response_model=EmbarkedOut)
+async def get_embarked(game_id: int, session: AsyncSession = Depends(get_session)):
+    # Which units the player whose turn it is can disembark now.
+    return _embarked_out(await _load_game(session, game_id))
+
+
+@router.post("/{game_id}/embarked/formation", response_model=list[ModelPositionOut])
+async def disembark_formation(
+    game_id: int, payload: DeploymentFormationIn, session: AsyncSession = Depends(get_session)
+):
+    # Where a disembarking unit's models start when it's set down at (x, y),
+    # for the player to arrange.
+    game = await _load_game(session, game_id)
+    unit = deployment_service.find_unit(game, payload.unit_id)
+    embarked_service.check_turn(game, unit)
+    return [
+        ModelPositionOut(unit_model_id=i, x=x, y=y, rotation=rotation)
+        for i, (x, y, rotation) in deployment_service.formation(
+            game, unit, payload.x, payload.y
+        ).items()
+    ]
+
+
+@router.post("/{game_id}/embarked/check", response_model=DeploymentCheckOut)
+async def check_disembark(
+    game_id: int, payload: DeployUnitIn, session: AsyncSession = Depends(get_session)
+):
+    game = await _load_game(session, game_id)
+    unit = deployment_service.find_unit(game, payload.unit_id)
+    embarked_service.check_turn(game, unit)
+    return _check_out(embarked_service.check_disembark(game, unit, _placement(payload.positions)))
+
+
+@router.post("/{game_id}/embarked", response_model=GameOut)
+async def disembark(
+    game_id: int, payload: DeployUnitIn, session: AsyncSession = Depends(get_session)
+):
+    game = await _load_game(session, game_id)
+    unit = deployment_service.find_unit(game, payload.unit_id)
+    embarked_service.disembark(game, unit, _placement(payload.positions))
+    return await _commit_and_reload(session, game_id)

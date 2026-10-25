@@ -708,6 +708,16 @@ class GameSecondaryOut(BaseModel):
     status: str
     fixed: bool
     drawn_round: int
+    # Scored automatically (see app/services/in_game/scoring.py) - a tactical
+    # one by claiming it when it's completed; `manual`: what's scored by hand
+    # instead, if anything.
+    automatic: bool = False
+    manual: str | None = None
+
+
+class ScoreReasonOut(BaseModel):
+    text: str
+    points: int
 
 
 class GameScoreOut(BaseModel):
@@ -717,6 +727,8 @@ class GameScoreOut(BaseModel):
     kind: str
     points: int
     game_secondary_id: int | None
+    # For VP scored automatically: the mission lines met.
+    reasons: list[ScoreReasonOut] = []
 
 
 class GameStratagemUseOut(BaseModel):
@@ -742,6 +754,10 @@ class GamePlayerOut(BaseModel):
     primary_mission_id: int | None
     primary_mission_name: str | None
     primary_mission_description: str | None
+    # Whether the primary mission is scored automatically, and what of it is
+    # scored by hand (if anything).
+    primary_automatic: bool = False
+    primary_manual: str | None = None
     cp: int
     vp: int
     secondaries: list[GameSecondaryOut]
@@ -962,14 +978,40 @@ class DeploymentUnitOut(BaseModel):
     # Every model in it has been destroyed in this game.
     destroyed: bool = False
     models: list[DeploymentModelOut]
+    # It's Battle-shocked (its models have 0 OC).
+    battle_shocked: bool = False
     # In a battle: what reaches out from its models - auras, and how far a
     # Command phase ability can pick a unit (see app/services/in_game/auras.py).
     auras: list[AuraOut] = []
 
 
+class ObjectiveControlOut(BaseModel):
+    # An objective (see the layout's objectives) now: each player's total OC
+    # on it (by seat), and who controls it (None: no one - a tie, or nobody's
+    # there).
+    objective_id: int
+    kind: str
+    area_ids: list[int]
+    oc: dict[int, int]
+    controller: int | None = None
+
+
+class TerritoryOut(BaseModel):
+    # Which line halves the battlefield into the players' territories
+    # ("vertical", "horizontal" or "diagonal"), its ends, and each player's
+    # half (by seat).
+    split: str
+    line: list[TerrainPointOut]
+    territories: dict[int, list[TerrainPointOut]]
+
+
 class DeploymentOut(BaseModel):
     deploying_seat: int | None
     units: list[DeploymentUnitOut]
+    # Who controls each objective now (see app/services/in_game/objectives.py),
+    # and the players' territories.
+    objectives: list[ObjectiveControlOut] = []
+    territory: TerritoryOut | None = None
 
 
 class ModelProblemsOut(BaseModel):
@@ -1431,6 +1473,9 @@ class CommandAbilityOut(BaseModel):
     targets: list[UnitIdNameOut] = []
     target_unit_id: int | None = None
     needs_target: bool = False
+    # Options that target an enemy unit (e.g. Invocation of Machine
+    # Vengeance), and the enemy units each could.
+    option_targets: dict[str, list[UnitIdNameOut]] = {}
 
 
 class CommandHealOut(BaseModel):
@@ -1458,3 +1503,219 @@ class CommandChoiceIn(BaseModel):
     # None: none (only for one that needn't have one).
     option: str | None = None
     target_unit_id: int | None = None
+
+
+class BattleShockTestOut(BaseModel):
+    # A Battle-shock test a unit takes (or must): why, any modifier, the
+    # Leadership it needs, its strength - and once taken, its dice (none for
+    # Insane Bravery) and whether it passed.
+    id: int
+    unit_id: int
+    unit_name: str
+    seat: int
+    reason: str
+    modifier: int
+    leadership: int
+    starting_strength: int
+    current_strength: int
+    dice: list[int] = []
+    insane_bravery: bool = False
+    passed: bool | None = None
+    # Mortal wounds it suffered for failing (e.g. "Delirium: D3 rolled 2").
+    mortal_wounds: str | None = None
+
+
+class BattleShockUnitOut(BaseModel):
+    unit_id: int
+    name: str
+    seat: int
+
+
+class BattleShockOut(BaseModel):
+    # Battle-shock now (see GET /games/{id}/battle-shock): the tests waiting
+    # to be taken, those taken this phase, the Battle-shocked units, and
+    # whether each player (by seat) can use Insane Bravery (None) or why not.
+    pending: list[BattleShockTestOut]
+    taken: list[BattleShockTestOut]
+    battle_shocked: list[BattleShockUnitOut]
+    insane_bravery_cp: int | None = None
+    insane_bravery: dict[int, str | None] = {}
+
+
+class BattleShockTakeIn(BaseModel):
+    # Take the test with Insane Bravery (passed automatically, for its CP)?
+    insane_bravery: bool = False
+
+
+class BattleShockRequireIn(BaseModel):
+    # A rule or stratagem makes the unit take a Battle-shock test.
+    unit_id: int
+    reason: str
+    modifier: int = 0
+
+
+class DestroyedModelOut(BaseModel):
+    # A model destroyed in a turn: when (phase), whose, its unit, the unit
+    # whose attacks destroyed it (None: none), and whether its unit was
+    # destroyed with it.
+    phase: str | None = None
+    seat: int
+    unit_id: int
+    unit_name: str
+    model_name: str
+    destroyed_by_unit_id: int | None = None
+    destroyed_by: str | None = None
+    unit_destroyed: bool
+
+
+class TurnStartObjectiveOut(BaseModel):
+    # An objective at the start of the turn: who controlled it (None: no
+    # one), and the units within range of it.
+    objective_id: int
+    kind: str
+    controller: int | None = None
+    unit_ids: list[int] = []
+
+
+class TurnRecordOut(BaseModel):
+    # What happened in a turn (see GET /games/{id}/turn-record): the models
+    # destroyed, and how the objectives stood at its start (none recorded:
+    # an empty list).
+    battle_round: int
+    turn_seat: int
+    destroyed: list[DestroyedModelOut]
+    start: list[TurnStartObjectiveOut]
+
+
+class ClaimOfferOut(BaseModel):
+    # A tactical secondary completed at a scoring moment, waiting for its
+    # holder to claim or hold it: its VP and why.
+    id: int
+    seat: int
+    game_secondary_id: int
+    name: str
+    timing: str
+    points: int
+    reasons: list[ScoreReasonOut]
+
+
+class ScoringOut(BaseModel):
+    # Automatic scoring now (see GET /games/{id}/scoring): the tactical
+    # secondaries to claim or hold, and what was scored this turn (by seat).
+    offers: list[ClaimOfferOut]
+    scored: dict[int, list[GameScoreOut]]
+
+
+class ActionTargetOut(BaseModel):
+    kind: str  # "objective" or "area"
+    id: int
+    label: str
+
+
+class ActionOptionOut(BaseModel):
+    # An action the unit's player has (from a mission card): what the unit
+    # could do it on now, or why it can't.
+    action: str
+    card: str
+    completes: str
+    targets: list[ActionTargetOut]
+    reason: str | None = None
+
+
+class UnitActionOut(BaseModel):
+    # An action a unit started this turn, and how it's gone ("started",
+    # "completed" or "failed").
+    unit_id: int
+    unit_name: str
+    action: str
+    target: str
+    status: str
+
+
+class ActionsOut(BaseModel):
+    # In the Shooting phase (see GET /games/{id}/actions): each of the
+    # player whose turn it is's units' actions (by unit id), and the actions
+    # started this turn.
+    options: dict[int, list[ActionOptionOut]]
+    started: list[UnitActionOut]
+
+
+class ActionIn(BaseModel):
+    unit_id: int
+    action: str
+    target_id: int
+
+
+class OperationMarkerOut(BaseModel):
+    # An operation marker on the battlefield: whose, what placed it, and
+    # where - an objective's marker point or a terrain area's middle (x, y).
+    id: int
+    seat: int
+    source: str
+    objective_id: int | None = None
+    area_id: int | None = None
+    x: float
+    y: float
+    label: str
+
+
+class MarkedUnitOut(BaseModel):
+    unit_id: int
+    unit_name: str
+    seat: int
+    kind: str
+
+
+class PromptOptionOut(BaseModel):
+    # Something a prompt's player can pick: a terrain area, an objective, an
+    # enemy unit or an operation marker (for consecration: which of their
+    # units it's for).
+    id: int
+    label: str
+    unit_id: int | None = None
+
+
+class MissionPromptOut(BaseModel):
+    # A choice a mission needs from a player (see GET /games/{id}/mission):
+    # what kind, why, its options, and how many to pick (at least, at most).
+    id: int
+    seat: int
+    kind: str
+    mission: str
+    text: str
+    options: list[PromptOptionOut]
+    pick_min: int
+    pick_max: int
+    # For guarding objectives (Burden of Trust): the units that can guard
+    # them (`options` are the objectives).
+    units: list[PromptOptionOut] = []
+
+
+class MissionStateOut(BaseModel):
+    prompts: list[MissionPromptOut]
+    markers: list[OperationMarkerOut]
+    marked: list[MarkedUnitOut]
+
+
+class MissionAnswerIn(BaseModel):
+    # The answer to a prompt: the ids picked (terrain areas, enemy units or
+    # an operation marker) - or, for consecration, {unit id: objective id}.
+    ids: list[int] = []
+    consecrations: dict[int, int] = {}
+    # Guarding objectives: {objective id: unit id}.
+    guards: dict[int, int] = {}
+
+
+class EmbarkedUnitOut(BaseModel):
+    # A unit embarked in a transport that's on the battlefield.
+    unit_id: int
+    name: str
+    transport_unit_id: int
+    transport_name: str
+
+
+class EmbarkedOut(BaseModel):
+    # In the movement phase (see GET /games/{id}/embarked): the units the
+    # player whose turn it is can disembark (None: no one can now).
+    seat: int | None
+    units: list[EmbarkedUnitOut]

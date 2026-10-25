@@ -482,15 +482,22 @@ async def test_secondaries_complete_only_on_their_turn(client: AsyncClient):
 
 
 async def test_discarding_a_tactical_secondary(client: AsyncClient):
+    # At the end of its holder's turn (the fight phase), for 1 CP.
     ids = await _setup(client)
     game = await _new_game(client, ids, first=1)
     game = (await client.post(f"/games/{game['id']}/start")).json()
     card = _player(game, 1)["secondaries"][0]
-    game = (await client.post(f"/games/{game['id']}/secondaries/{card['id']}/discard")).json()
+    url = f"/games/{game['id']}/secondaries/{card['id']}/discard"
+    response = await client.post(url)
+    assert "end of their holder's turn" in response.json()["detail"]
+    game = await _advance(client, game["id"], times=4)
+    assert game["phase"] == "fight"
+    cp = _player(game, 1)["cp"]
+    game = (await client.post(url)).json()
     assert next(c for c in _player(game, 1)["secondaries"] if c["id"] == card["id"])[
         "status"
     ] == "discarded"
-    assert _player(game, 1)["vp"] == 0
+    assert (_player(game, 1)["vp"], _player(game, 1)["cp"]) == (0, cp + 1)
 
 
 async def test_fixed_secondaries_cant_be_discarded(client: AsyncClient):

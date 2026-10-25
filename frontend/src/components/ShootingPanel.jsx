@@ -1,5 +1,12 @@
 import { useEffect, useState } from 'react'
-import { fireOverwatch, getOverwatchTargets, getShootingTargets, shoot } from '../api'
+import {
+  fireOverwatch,
+  getActions,
+  getOverwatchTargets,
+  getShootingTargets,
+  shoot,
+  startAction,
+} from '../api'
 import CombatResults from './CombatResults'
 
 // Shooting in the shooting phase (see app/services/in_game/shooting.py, which decides
@@ -7,6 +14,10 @@ import CombatResults from './CombatResults'
 // resolves it). The player picks a unit, a target it can see, and the weapons
 // that can reach it, and shoots - how the unit moved this turn and whether
 // the target's in cover come from the battlefield.
+//
+// Instead of shooting, a unit can start an action one of its player's
+// mission cards has (e.g. Cleanse, Plunder - see
+// app/services/in_game/actions.py), where it's allowed to.
 //
 // With `overwatch` (GET /games/{id}/overwatch), it's Fire Overwatch instead,
 // at the end of the opponent's movement phase (see
@@ -36,6 +47,8 @@ function ShootingPanel({ game, player, shooting, overwatch, focus, onFocus, onSh
   const [weaponKeys, setWeaponKeys] = useState(new Set())
   const [outcome, setOutcome] = useState(null)
   const [busy, setBusy] = useState(false)
+  // The actions each unit could start instead (not for Fire Overwatch).
+  const [actions, setActions] = useState(null)
   const selected = shooting?.units.find((u) => u.unit_id === focus.unitId) ?? null
   // Only one it can see (a click on the board can pick any unit).
   const target = targets.find((t) => t.unit_id === focus.targetId && t.visible) ?? null
@@ -54,6 +67,40 @@ function ShootingPanel({ game, player, shooting, overwatch, focus, onFocus, onSh
     }
     // Only when the unit (or whether it can still shoot) changes.
   }, [game.id, selected?.unit_id, selected?.can_shoot])
+
+  useEffect(() => {
+    if (overwatch || !shooting) {
+      setActions(null)
+      return
+    }
+    let cancelled = false
+    getActions(game.id)
+      .then((a) => !cancelled && setActions(a))
+      .catch((err) => onError(err.message))
+    return () => {
+      cancelled = true
+    }
+  }, [game.id, shooting, overwatch])
+
+  const act = async (unit, option, target) => {
+    setBusy(true)
+    onError(null)
+    try {
+      setActions(
+        await startAction(game.id, {
+          unit_id: unit.unit_id,
+          action: option.action,
+          target_id: target.id,
+        })
+      )
+      onShot()
+    } catch (err) {
+      onError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const unitActions = selected ? (actions?.options[selected.unit_id] ?? []) : []
 
   // Picking a target picks every weapon that can reach it.
   useEffect(() => {
@@ -200,6 +247,51 @@ function ShootingPanel({ game, player, shooting, overwatch, focus, onFocus, onSh
             </button>
           </div>
         </>
+      )}
+
+      {unitActions.length > 0 && (
+        <>
+          <h4>Or an action</h4>
+          <ul className="round-start-rules">
+            {unitActions.map((option) => (
+              <li key={option.action}>
+                <strong>{option.action}</strong>
+                <span className="hint">
+                  {' '}
+                  · {option.card} ·{' '}
+                  {option.completes === 'immediately'
+                    ? 'completes straight away'
+                    : 'completes at the end of the turn'}{' '}
+                  · it can't shoot, charge or fight this turn
+                </span>
+                {option.reason ? (
+                  <p className="hint">Can't: {option.reason}.</p>
+                ) : (
+                  <div className="inline-controls">
+                    {option.targets.map((target) => (
+                      <button
+                        key={`${target.kind}-${target.id}`}
+                        type="button"
+                        disabled={busy}
+                        onClick={() => act(selected, option, target)}
+                      >
+                        {option.action}: {target.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {actions?.started.length > 0 && (
+        <p className="hint">
+          Actions this turn:{' '}
+          {actions.started
+            .map((a) => `${a.unit_name} - ${a.action} (${a.target}): ${a.status}`)
+            .join('; ')}
+        </p>
       )}
 
       {outcome && (

@@ -17,33 +17,50 @@ const GRID_INCHES = 1
 // are relative to their position) and terrain features (ruin walls
 // and obstacles, each made of rectangles placed relative to its position),
 // turned clockwise by their rotation - all in inches, like the board.
-function Terrain({ layout }) {
+//
+// `control` ({area id: {side, title}}) marks objectives a player controls:
+// their areas are lightly shaded in that player's colour.
+function areaShape(a, key, className, title = null) {
+  return a.points.length > 0 ? (
+    // A polygon: its points are relative to its position.
+    <polygon
+      key={key}
+      className={className}
+      points={a.points.map((p) => `${p.x},${p.y}`).join(' ')}
+      transform={`translate(${a.x} ${a.y}) rotate(${a.rotation})`}
+    >
+      {title && <title>{title}</title>}
+    </polygon>
+  ) : (
+    <rect
+      key={key}
+      className={className}
+      x={a.x - a.width / 2}
+      y={a.y - a.height / 2}
+      width={a.width}
+      height={a.height}
+      transform={`rotate(${a.rotation} ${a.x} ${a.y})`}
+    >
+      {title && <title>{title}</title>}
+    </rect>
+  )
+}
+
+function Terrain({ layout, control = {} }) {
   // Objectives are terrain areas: those are outlined more heavily.
   const objectiveAreas = new Set((layout.objectives ?? []).flatMap((o) => o.area_ids))
   const areaClass = (a) =>
     `terrain-area${objectiveAreas.has(a.id) ? ' terrain-area--objective' : ''}`
   return (
     <g className="terrain">
+      {/* Controlled objectives' shading, under the areas' hatching. */}
+      {layout.areas.map(
+        (a) =>
+          control[a.id]?.side &&
+          areaShape(a, `held-${a.id}`, `objective-held objective-held--${control[a.id].side}`)
+      )}
       {layout.areas.map((a) =>
-        a.points.length > 0 ? (
-          // A polygon: its points are relative to its position.
-          <polygon
-            key={`area-${a.id}`}
-            className={areaClass(a)}
-            points={a.points.map((p) => `${p.x},${p.y}`).join(' ')}
-            transform={`translate(${a.x} ${a.y}) rotate(${a.rotation})`}
-          />
-        ) : (
-          <rect
-            key={`area-${a.id}`}
-            className={areaClass(a)}
-            x={a.x - a.width / 2}
-            y={a.y - a.height / 2}
-            width={a.width}
-            height={a.height}
-            transform={`rotate(${a.rotation} ${a.x} ${a.y})`}
-          />
-        )
+        areaShape(a, `area-${a.id}`, areaClass(a), control[a.id]?.title ?? null)
       )}
       {layout.features.map((f) => (
         <g
@@ -189,6 +206,7 @@ function Pieces({ pieces, onPointerDown, onClick }) {
             p.ghost && 'piece--ghost',
             p.shooter && 'piece--shooter',
             p.target && 'piece--target',
+            p.shocked && 'piece--shocked',
             onClick && !p.ghost && !p.draft && 'piece--clickable',
           ]
             .filter(Boolean)
@@ -224,6 +242,13 @@ function auraLabelX(aura) {
 // `rings` ({id, x, y, r} in inches) mark how far each moving model can go
 // from where it started, with a tether to where it is now (`to`, if moved) -
 // along `path` (points) where it goes round walls.
+// `objectiveControl` ({area id: {side, title}}) shades each controlled
+// objective's areas in its controller's colour (see Terrain).
+// `markers` ({id, x, y, side, title}) are operation markers, drawn as small
+// diamonds in their player's colour; `areaLabels` ({area id: text}) label
+// terrain areas at their middle (e.g. while picking some).
+// `territoryLine` ([{x, y}, {x, y}]) is the line between the players'
+// territories, drawn over the centre lines.
 // `auras` ({id, x, y, rx, ry, rotation, range, name, colour} in inches) draw
 // how far an aura reaches from a model's base: its base grown by `range` all
 // round, labelled.
@@ -240,6 +265,10 @@ function Gameboard({
   rings = [],
   bubbles = [],
   auras = [],
+  objectiveControl = {},
+  territoryLine = null,
+  markers = [],
+  areaLabels = {},
   onBoardClick = null,
   onPieceMove = null,
   onPieceRotate = null,
@@ -380,7 +409,20 @@ function Gameboard({
           x2={BOARD_WIDTH_INCHES}
           y2={BOARD_HEIGHT_INCHES / 2}
         />
-        {layout && <Terrain layout={layout} />}
+        {/* The line between the players' territories (a diagonal for
+            Search and Destroy). */}
+        {territoryLine && (
+          <line
+            className="gameboard-territory"
+            x1={territoryLine[0].x}
+            y1={territoryLine[0].y}
+            x2={territoryLine[1].x}
+            y2={territoryLine[1].y}
+          >
+            <title>Territory line</title>
+          </line>
+        )}
+        {layout && <Terrain layout={layout} control={objectiveControl} />}
         {layout && <ObjectiveMarkers objectives={layout.objectives ?? []} />}
         {bubbles.map((b) => (
           // Faded as a group, so where its shapes overlap isn't darker.
@@ -402,6 +444,23 @@ function Gameboard({
                 />
               )
             })}
+          </g>
+        ))}
+        {layout &&
+          layout.areas
+            .filter((a) => areaLabels[a.id])
+            .map((a) => (
+              <text key={`area-label-${a.id}`} className="area-label" x={a.x} y={a.y}>
+                {areaLabels[a.id]}
+              </text>
+            ))}
+        {markers.map((m) => (
+          <g key={`marker-${m.id}`} className={`operation-marker operation-marker--${m.side}`}>
+            <polygon
+              points={`${m.x},${m.y - 0.6} ${m.x + 0.6},${m.y} ${m.x},${m.y + 0.6} ${m.x - 0.6},${m.y}`}
+            >
+              <title>{m.title}</title>
+            </polygon>
           </g>
         ))}
         {auras.map((a) => (
