@@ -28,6 +28,16 @@ VENGEANCE_ACTIVE = "vengeance_active"
 # BATTLELINE unit" (see app/combat_rules/positions.py).
 NEAR_ADMECH_BATTLELINE = "near_admech_battleline"
 
+# The calculator's Positioning: within range of the unit's army's Acquisition
+# objective marker (Acquisition At Any Cost); and the attack's target within
+# range of the attacking army's. In a game, see
+# app/services/in_game/selected_objectives.py.
+ON_ACQUISITION = "on_acquisition_objective"
+TARGET_ON_ACQUISITION = "target_on_acquisition_objective"
+ATTACKER_OR_TARGET_ON_ACQUISITION = "attacker_or_target_on_acquisition"
+TARGET_WITHIN_ACQUISITION = "target_within_acquisition"
+DEFENDER_ON_ACQUISITION = "defender_on_acquisition"
+
 
 def melee_attack_against_battleline(context: dict) -> bool:
     # True at the pre-hit check of a melee attack against a defending unit
@@ -132,6 +142,26 @@ def vengeance_active(context: dict) -> bool:
     return VENGEANCE in context.get("attacker_positions", set())
 
 
+
+def target_within_acquisition(context: dict) -> bool:
+    # True at every step while the attack's target is within range of the
+    # attacking army's Acquisition objective marker (e.g. Logis).
+    return TARGET_ON_ACQUISITION in context.get("attacker_positions", set())
+
+
+def attacker_or_target_on_acquisition(context: dict) -> bool:
+    # As target_within_acquisition, or while the attacking unit is within
+    # range of it (Acquisition At Any Cost).
+    return target_within_acquisition(context) or ON_ACQUISITION in context.get(
+        "attacker_positions", set()
+    )
+
+
+def defender_on_acquisition(context: dict) -> bool:
+    # True at every step while the defending unit is within range of its own
+    # army's Acquisition objective marker (e.g. Genetor).
+    return ON_ACQUISITION in context.get("defender_positions", set())
+
 # {keyword: check}
 CONDITIONS = {
     MELEE_ATTACK_AGAINST_BATTLELINE: melee_attack_against_battleline,
@@ -148,6 +178,9 @@ CONDITIONS = {
     NEUTRON_FUSIL_WEAPON: neutron_fusil_weapon,
     OMNISSIAN_AXE_WEAPON: omnissian_axe_weapon,
     VENGEANCE_ACTIVE: vengeance_active,
+    TARGET_WITHIN_ACQUISITION: target_within_acquisition,
+    ATTACKER_OR_TARGET_ON_ACQUISITION: attacker_or_target_on_acquisition,
+    DEFENDER_ON_ACQUISITION: defender_on_acquisition,
 }
 
 # Seeded Condition rows: (keyword, name, description).
@@ -224,5 +257,23 @@ ENTRIES = [
         "Vengeance for the Omnissiah",
         "A friendly ADEPTUS MECHANICUS VEHICLE model was destroyed within 12\" of the attacking "
         "model this battle. Applies at every step.",
+    ),
+    (
+        TARGET_WITHIN_ACQUISITION,
+        "Target Within Acquisition Objective",
+        "The attack's target is within range of the attacking army's Acquisition objective "
+        "marker. Applies at every step.",
+    ),
+    (
+        ATTACKER_OR_TARGET_ON_ACQUISITION,
+        "Attacker or Target Within Acquisition Objective",
+        "The attacking unit, or the attack's target, is within range of the attacking army's "
+        "Acquisition objective marker. Applies at every step.",
+    ),
+    (
+        DEFENDER_ON_ACQUISITION,
+        "Defender Within Acquisition Objective",
+        "The defending unit is within range of its own army's Acquisition objective marker. "
+        "Applies at every step.",
     ),
 ]

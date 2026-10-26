@@ -24,7 +24,7 @@ from app.models import (
     User,
 )
 from app.models.game import BATTLE_ROUNDS, PHASES
-from app.models.stratagem import UNIT_TARGET_ACTIONS
+from app.models.stratagem import CHOICE_TARGET_ACTIONS, UNIT_TARGET_ACTIONS
 from app.schemas import GameIn
 from app.services.in_game import actions as actions_service
 from app.services.in_game import battle_formations as battle_formations_service
@@ -43,6 +43,7 @@ from app.services.in_game import terrain as terrain_service
 from app.services.in_game import emergency as emergency_service
 from app.services.in_game import first_turn as first_turn_service
 from app.services.in_game import scouts as scouts_service
+from app.services.in_game import selected_objectives as selected_objectives_service
 from app.services.in_game import objectives as objectives_service
 from app.seeds.factions.space_marines import teleport_homer as teleport_homer_service
 from app.services.in_game import turn_record as turn_record_service
@@ -278,6 +279,10 @@ async def _begin_command_phase(session: AsyncSession, game: Game) -> None:
     turn_record_service.snapshot_turn_start(game)
     mission_state_service.start_of_turn(game)
     game.phase = "command"
+    # Its start: the objectives the player selected for their rules last
+    # turn (e.g. their Acquisition objective marker) are theirs no longer -
+    # they select them again in this phase.
+    selected_objectives_service.clear(game, game.turn_seat)
     for player in game.players:
         player.cp += 1
     drawn = await _draw_tactical(session, game, player_at(game, game.turn_seat))
@@ -409,6 +414,9 @@ async def advance(session: AsyncSession, game: Game) -> None:
         # Canticles of the Omnissiah).
         if missing := command_phase_service.missing_choices(game):
             raise _bad_request("select an option first for " + ", ".join(missing))
+        # Objectives their rules have them select (e.g. Acquisition At Any Cost).
+        if missing := selected_objectives_service.missing(game):
+            raise _bad_request("select " + ", ".join(missing) + " first")
         # Its scoring moment (and a pause for any tactical secondary to claim).
         scoring_service.score(game, scoring_service.COMMAND_END)
         if scoring_service.pending_offers(game):
@@ -421,6 +429,8 @@ async def advance(session: AsyncSession, game: Game) -> None:
             reanimation_service.reanimate(game)
             if heal_service.placing(game):
                 return
+        # Enhancements that gain CP then (e.g. Magos).
+        selected_objectives_service.end_of_command(game)
     if game.phase == "movement" and not reinforcements_service.movement_ended(game):
         # The end of the movement phase: if the opponent could use Rapid
         # Ingress or Fire Overwatch, it pauses here for them to.
@@ -567,7 +577,18 @@ def stratagem_unavailable_reason(
         game, player, stratagem
     ):
         return "they have no unit it can place in Strategic Reserves now"
+    if stratagem.game_action in _stratagem_actions().ACTIONS and not stratagem_targets(
+        game, player, stratagem
+    ):
+        return "they have no unit it can be used on now"
     return None
+
+
+def _stratagem_actions():
+    # (Imported here: it imports fighting, which imports this module.)
+    from app.services.in_game import stratagem_actions
+
+    return stratagem_actions
 
 
 def stratagem_target_reason(
@@ -586,9 +607,19 @@ def stratagem_target_reason(
         return "it doesn't have the keywords the stratagem needs"
     if stratagem.game_action == "strategic_reserves":
         return reinforcements_service.extraction_reason(game, player.seat, unit)
+    if stratagem.game_action in _stratagem_actions().ACTIONS:
+        return _stratagem_actions().target_reason(game, player, stratagem, unit)
     if not deployment_service.models_on_battlefield(game, unit):
         return "it isn't on the battlefield"
     return None
+
+
+def stratagem_choices(game: Game, player: GamePlayer, stratagem: Stratagem, unit: Unit) -> list:
+    # What else its use on the unit could target (an objective, or a
+    # transport - e.g. Cached Acquisition's objective), for those that do.
+    if stratagem.game_action not in CHOICE_TARGET_ACTIONS:
+        return []
+    return _stratagem_actions().choices(game, player, stratagem, unit)
 
 
 def stratagem_targets(game: Game, player: GamePlayer, stratagem: Stratagem) -> list[Unit]:
@@ -615,10 +646,13 @@ async def use_stratagem(
     cp_discount: int = 0,
     target_unit_id: int | None = None,
     targeted_unit: Unit | None = None,
+    target_choice_id: int | None = None,
 ) -> None:
     # `cp_discount`: what a rule takes off its cost (e.g. Rapid Ingress using
     # a Teleport Homer token: 1CP). `target_unit_id`: the unit a stratagem
-    # whose game action targets one is used on (e.g. Gunship Extraction).
+    # whose game action targets one is used on (e.g. Gunship Extraction) -
+    # and `target_choice_id`, for one that also targets an objective or a
+    # transport, which (e.g. Cached Acquisition's objective).
     reason = stratagem_unavailable_reason(game, player, stratagem, cp_discount)
     if reason is not None:
         raise _bad_request(f"can't use {stratagem.name}: {reason}")
@@ -633,6 +667,18 @@ async def use_stratagem(
             raise _bad_request(f"can't use {stratagem.name} on that unit: {reason}")
     elif target_unit_id is not None:
         raise _bad_request(f"{stratagem.name} doesn't target a unit")
+    if stratagem.game_action in CHOICE_TARGET_ACTIONS:
+        choices = stratagem_choices(game, player, stratagem, target_unit)
+        if target_choice_id is None and len(choices) == 1:
+            target_choice_id = choices[0].id
+        if target_choice_id not in {c.id for c in choices}:
+            raise _bad_request(
+                f"{stratagem.name} needs one of "
+                + ", ".join(c.name for c in choices)
+                + " as its target too"
+            )
+    elif target_choice_id is not None:
+        raise _bad_request(f"{stratagem.name} doesn't take a second target")
 
     target = None
     if stratagem.game_action == "replace_secondary":
@@ -662,6 +708,8 @@ async def use_stratagem(
     player.stratagem_uses.append(use)
     if stratagem.game_action == "strategic_reserves":
         reinforcements_service.place_in_reserves(game, player.seat, target_unit)
+    if stratagem.game_action in _stratagem_actions().ACTIONS:
+        _stratagem_actions().carry_out(game, player, stratagem, target_unit, target_choice_id)
     # The unit it targeted (its target, or one it's used on - e.g. Rapid
     # Ingress): abilities that gain CP then (e.g. Broad Spectrum Data-tether).
     _stratagem_targeted(player, target_unit or targeted_unit)

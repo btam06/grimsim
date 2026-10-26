@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { chooseCommandOption, getCommand } from '../api'
+import { chooseCommandOption, getCommand, selectCommandObjective } from '../api'
 import CardTextAccordion from './CardTextAccordion'
 import { RuleOptionPicker } from './RuleOptionPicker'
 import Select from './Select'
@@ -14,7 +14,9 @@ import Select from './Select'
 // Protocols stay until changed. Army rules selected then (e.g. Combat
 // Doctrines) are optional, for every unit with the rule, and some options can
 // only be selected once a battle. Models that healed at the start of the
-// phase (e.g. Self-repair Mechanisms) are listed too.
+// phase (e.g. Self-repair Mechanisms) are listed too. Some detachment rules
+// have the player select an objective marker (e.g. Acquisition At Any Cost:
+// their Acquisition objective marker) before the phase ends.
 
 function abilityKey(ability) {
   if (ability.faction_ability_id !== null) return `rule-${ability.faction_ability_id}`
@@ -35,7 +37,9 @@ function CommandPanel({ game, onError }) {
     return () => {
       cancelled = true
     }
-  }, [game.id, game.battle_round, game.turn_seat, game.phase])
+    // Re-fetched whenever the game changes (e.g. a stratagem adds an
+    // Acquisition objective marker).
+  }, [game])
 
   const targetOf = (ability) =>
     targets[abilityKey(ability)] ?? ability.target_unit_id ?? ability.targets[0]?.unit_id ?? null
@@ -73,8 +77,26 @@ function CommandPanel({ game, onError }) {
     }
   }
 
+  const selectObjective = async (selection, objectiveId) => {
+    onError(null)
+    try {
+      setCommand(
+        await selectCommandObjective(game.id, {
+          seat: command.seat,
+          name: selection.name,
+          objective_id: objectiveId,
+        })
+      )
+    } catch (err) {
+      onError(err.message)
+    }
+  }
+
   if (!command || command.seat === null) return null
-  if (command.abilities.length === 0 && command.heals.length === 0) return null
+  const selections = command.objective_selections ?? []
+  if (command.abilities.length === 0 && command.heals.length === 0 && selections.length === 0) {
+    return null
+  }
   const player = game.players.find((p) => p.seat === command.seat)
 
   return (
@@ -97,6 +119,39 @@ function CommandPanel({ game, onError }) {
               </span>
             </li>
           ))}
+        </ul>
+      )}
+      {selections.length > 0 && (
+        <ul className="round-start-rules">
+          {selections.map((selection) => {
+            const names = Object.fromEntries(selection.options.map((o) => [o.id, o.name]))
+            return (
+              <li key={selection.name}>
+                <strong>{selection.name} objective marker</strong>
+                <span className="hint"> · {selection.rule}</span>
+                {selection.objective_id === null && (
+                  <span className="round-start-decision">Decide now</span>
+                )}
+                <div className="command-target">
+                  <span className="hint">Objective:</span>
+                  <Select
+                    options={selection.options}
+                    value={selection.objective_id === null ? '' : String(selection.objective_id)}
+                    placeholder="Choose an objective marker"
+                    onChange={(value) => value && selectObjective(selection, Number(value))}
+                  />
+                </div>
+                {selection.extra_objective_ids.length > 0 && (
+                  <p className="hint">
+                    Also: {selection.extra_objective_ids.map((id) => names[id]).join(', ')}.
+                  </p>
+                )}
+                {selection.objective_id === null && (
+                  <p className="hint">Select one before the Command phase ends.</p>
+                )}
+              </li>
+            )
+          })}
         </ul>
       )}
       <ul className="round-start-rules">

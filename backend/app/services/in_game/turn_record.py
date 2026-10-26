@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.models import (
     Game,
+    GameDestroyedOnObjective,
     GameKillOnObjective,
     GameModelDestroyed,
     GameTurnStartControl,
@@ -33,10 +34,25 @@ def _when(game: Game) -> dict:
 # --- destroyed ---
 
 
+def controlled_objectives_of(game: Game, unit: Unit) -> list[int]:
+    # The objectives the unit is within range of that its player controls.
+    # (Imported here: mission_state imports regions, objectives...)
+    from app.services.in_game import mission_state, objectives
+
+    seat = deployment.owner(game, unit).seat
+    held = {c.objective.id for c in objectives.controlled_by(game, seat)}
+    return [o.id for o in mission_state.unit_objectives(game, unit) if o.id in held]
+
+
 def record_destruction(
-    game: Game, unit_model: UnitModel, destroyed_by: Unit | None = None
+    game: Game,
+    unit_model: UnitModel,
+    destroyed_by: Unit | None = None,
+    controlled_objectives: list[int] = (),
 ) -> None:
-    # The model has just been destroyed (and taken off the battlefield).
+    # The model has just been destroyed (and taken off the battlefield) - the
+    # last of its unit, within range of `controlled_objectives` its player
+    # controlled.
     unit = deployment.find_unit(game, unit_model.unit_id)
     unit_destroyed = not deployment.models_on_battlefield(game, unit)
     record = GameModelDestroyed(
@@ -49,6 +65,9 @@ def record_destruction(
     )
     game.models_destroyed.append(record)
     if unit_destroyed:
+        record.controlled_objectives = [
+            GameDestroyedOnObjective(objective_id=i) for i in controlled_objectives
+        ]
         # (Imported here: mission_state imports regions, objectives...)
         from app.services.in_game import mission_state
 

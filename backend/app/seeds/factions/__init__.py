@@ -279,6 +279,25 @@ CHARGE_BONUSES: dict[str, int] = {
         getattr(faction, "detachment_rules", None), "CHARGE_BONUSES", {}
     ).items()
 }
+# {detachment rule name: the objective it has its player select in their
+# Command phase} - detachment_rules.py OBJECTIVE_SELECTIONS (e.g. Acquisition
+# At Any Cost); and {enhancement name: the CP it rolls for at the end of the
+# bearer's Command phase} - END_OF_COMMAND_CP (e.g. Magos). See
+# app/services/in_game/selected_objectives.py.
+OBJECTIVE_SELECTIONS: dict[str, dict] = {
+    rule: selection
+    for faction in FACTIONS
+    for rule, selection in getattr(
+        getattr(faction, "detachment_rules", None), "OBJECTIVE_SELECTIONS", {}
+    ).items()
+}
+END_OF_COMMAND_CP: dict[str, dict] = {
+    name: config
+    for faction in FACTIONS
+    for name, config in getattr(
+        getattr(faction, "detachment_rules", None), "END_OF_COMMAND_CP", {}
+    ).items()
+}
 ELIGIBLE_AFTER: dict[str, dict[str, tuple[str, ...]]] = {
     option_name: eligible
     for faction in FACTIONS

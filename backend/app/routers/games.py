@@ -19,6 +19,9 @@ from app.models import (
     Wargear,
 )
 from app.schemas import (
+    IdNameOut,
+    ObjectiveSelectionIn,
+    ObjectiveSelectionOut,
     ChargeIn,
     ChargeOut,
     ChargeTargetOut,
@@ -167,6 +170,7 @@ from app.services.in_game import game as game_service
 from app.services.in_game import movement as movement_service
 from app.services.in_game import objectives as objectives_service
 from app.services.in_game import scouts as scouts_service
+from app.services.in_game import selected_objectives as selected_objectives_service
 from app.services.in_game import overwatch as overwatch_service
 from app.services.in_game import pathing as pathing_service
 from app.seeds import factions as faction_seeds
@@ -455,6 +459,7 @@ async def use_stratagem(
         stratagems[0],
         payload.target_secondary_id,
         target_unit_id=payload.target_unit_id,
+        target_choice_id=payload.target_choice_id,
     )
     return await _commit_and_reload(session, game_id)
 
@@ -473,7 +478,14 @@ async def stratagem_targets(
         raise HTTPException(status_code=404, detail="stratagem not found")
     player = game_service.player_at(game, seat)
     return [
-        StratagemTargetOut(unit_id=u.id, name=u.faction_unit.name)
+        StratagemTargetOut(
+            unit_id=u.id,
+            name=u.faction_unit.name,
+            choices=[
+                IdNameOut(id=c.id, name=c.name)
+                for c in game_service.stratagem_choices(game, player, stratagems[0], u)
+            ],
+        )
         for u in game_service.stratagem_targets(game, player, stratagems[0])
     ]
 
@@ -786,6 +798,9 @@ def _defender_positions(game: Game, target: Unit) -> list[str]:
         for current in objectives_service.control(game)
     ):
         found.append(CONTROLLING_OBJECTIVE)
+    # Within range of objectives its player selected (e.g. its Acquisition
+    # objective marker).
+    found += selected_objectives_service.defender_positions(game, target)
     return found + _near_friendly(game, target)
 
 
@@ -805,6 +820,9 @@ def _attacker_positions(
     found += [p for p, reach in TARGET_WITHIN.items() if distance <= reach + TOLERANCE]
     if vengeance.active(game, unit):
         found.append(VENGEANCE)
+    # It, or its target, within range of objectives its player selected
+    # (e.g. Acquisition At Any Cost).
+    found += selected_objectives_service.attacker_positions(game, unit, target)
     return found + _near_friendly(game, unit)
 
 
@@ -1985,9 +2003,30 @@ def _command_out(game: Game) -> CommandOut:
     units = {
         m.id: (u, m) for p in game.players for u in p.army_list.units for m in u.unit_models
     }
+    options = [
+        IdNameOut(id=o.id, name=selected_objectives_service.label(game, o))
+        for o in objectives_service.objectives(game)
+    ]
+    selections = [
+        ObjectiveSelectionOut(
+            name=name,
+            rule=rule,
+            objective_id=own.objective_id if own else None,
+            extra_objective_ids=[
+                s.objective_id
+                for s in selected_objectives_service.selected(game, seat, name)
+                if s.extra
+            ],
+            options=options,
+        )
+        for rule, config in faction_seeds.OBJECTIVE_SELECTIONS.items()
+        if (name := config["name"]) in selected_objectives_service.configs(game, seat)
+        for own in [selected_objectives_service.own_selection(game, seat, name)]
+    ]
     return CommandOut(
         seat=seat,
         abilities=abilities,
+        objective_selections=selections,
         heals=[
             CommandHealOut(
                 unit_name=units[h.unit_model_id][0].faction_unit.name,
@@ -2024,6 +2063,18 @@ async def choose_command_option(
             game, payload.seat, payload.unit_id, payload.ability, payload.option,
             payload.target_unit_id,
         )
+    await session.commit()
+    return _command_out(await _load_game(session, game_id))
+
+
+@router.post("/{game_id}/command/objective", response_model=CommandOut)
+async def select_objective(
+    game_id: int, payload: ObjectiveSelectionIn, session: AsyncSession = Depends(get_session)
+):
+    # The player selects an objective for one of their rules (e.g. their
+    # Acquisition objective marker) in their Command phase.
+    game = await _load_game(session, game_id)
+    selected_objectives_service.select(game, payload.seat, payload.name, payload.objective_id)
     await session.commit()
     return _command_out(await _load_game(session, game_id))
 

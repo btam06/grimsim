@@ -108,7 +108,16 @@ def capacity_reason(game: Game, unit: Unit, carrier: Unit) -> str | None:
 
     name = carrier.faction_unit.name
     models = surviving_models(game, unit)
+    # A model whose ability lets it go wherever its Bodyguard unit can (e.g.
+    # Authority of the Inquisition), while it's leading one: its own keywords
+    # don't count.
+    from app.seeds import datasheet_abilities
+    from app.services.in_game import shooting
+
+    as_bodyguard = datasheet_abilities.TRANSPORT_AS_BODYGUARD
     for unit_model in models:
+        if shooting.leading(unit) and {a.name for a in unit_model.model.abilities} & as_bodyguard:
+            continue
         held = keywords(unit, unit_model)
         missing = [k for k in capacity.keywords if k not in held]
         if missing:
@@ -364,6 +373,10 @@ def embark(game: Game, unit: Unit, carrier: Unit) -> None:
         )
     if (reason := capacity_reason(game, unit, carrier)) is not None:
         raise _bad_request(f"it can't embark: {reason}")
+    _take_aboard(game, unit, carrier)
+
+
+def _take_aboard(game: Game, unit: Unit, carrier: Unit) -> None:
     models = {m.id for m in unit.unit_models}
     for position in [p for p in game.model_positions if p.unit_model_id in models]:
         game.model_positions.remove(position)
@@ -371,3 +384,14 @@ def embark(game: Game, unit: Unit, carrier: Unit) -> None:
         GameBattleFormation(unit_id=unit.id, place="embarked", transport_unit_id=carrier.id)
     )
     _record(game, unit, "embarked")
+
+
+def embark_now(game: Game, unit: Unit, carrier: Unit) -> None:
+    # A rule has the unit embark outside its Movement phase (e.g. Reactive
+    # Safeguard): every model must still be within 3" of the transport, with
+    # room for the whole unit.
+    if carrier.id not in {c.id for c in transports_in_reach(game, unit)}:
+        raise _bad_request(f'every model must be within 3" of {carrier.faction_unit.name}')
+    if (reason := capacity_reason(game, unit, carrier)) is not None:
+        raise _bad_request(f"it can't embark: {reason}")
+    _take_aboard(game, unit, carrier)

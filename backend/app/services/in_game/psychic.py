@@ -6,7 +6,8 @@ from fastapi import HTTPException
 
 from app.models import Game, GamePsychicUse, Unit
 from app.seeds import datasheet_abilities as datasheet_ability_seeds
-from app.services.in_game import battle_shock, deployment
+from app.services.combat import roll_dice_faces
+from app.services.in_game import battle_shock, casualties, deployment
 
 # Psychic abilities (e.g. the Space Marines' Librarius): a PSYKER unit has a
 # psyker level (from an ability - datasheet_abilities PSYKER_LEVELS, e.g.
@@ -21,6 +22,14 @@ from app.services.in_game import battle_shock, deployment
 # - Shrouding: when an enemy unit targets it (the player uses it as an enemy
 #   is about to attack it) - attacks that target it are -1 to hit until the
 #   end of the phase (its "Shrouded" rule option).
+#
+# Other PSYKERs' psychic abilities have no psychic level, and say when
+# they're used and what their psychic roll does (datasheet_abilities
+# PSYCHIC_ROLLS: {ability name: {"when": "own_command" (once in its player's
+# Command phase), "fails_on": the highest failing roll, "mortal_wounds":
+# dice its unit suffers on a fail, "targeted_within": inches - otherwise,
+# until the start of its player's next Command phase, ranged attacks can
+# only target its unit from that close}} - e.g. Psychic Veil).
 
 SOUL_SIGHT = "Soul Sight"
 SHROUDING = "Shrouding"
@@ -47,19 +56,27 @@ def psyker_level(unit: Unit) -> int:
 
 
 def abilities(unit: Unit) -> dict[str, int]:
-    # The unit's psychic abilities and their levels.
+    # The unit's psychic abilities and their levels (0: one without - see
+    # PSYCHIC_ROLLS).
     levels = datasheet_ability_seeds.PSYCHIC_ABILITIES
-    return {n: levels[n] for n in sorted(_names(unit)) if n in levels}
+    rolls = datasheet_ability_seeds.PSYCHIC_ROLLS
+    return {
+        n: levels.get(n, 0) for n in sorted(_names(unit)) if n in levels or n in rolls
+    }
 
 
 def psykers(game: Game) -> list[Unit]:
-    # Every unit on the battlefield with a psyker level and psychic abilities.
+    # Every unit on the battlefield with psychic abilities it can use - with a
+    # psyker level, or ones without a level.
     placed = deployment.positions(game)
+    rolls = datasheet_ability_seeds.PSYCHIC_ROLLS
     return [
         u
         for p in game.players
         for u in deployment.deployable_units(p)
-        if deployment.is_deployed(u, placed) and psyker_level(u) and abilities(u)
+        if deployment.is_deployed(u, placed)
+        and abilities(u)
+        and (psyker_level(u) or any(n in rolls for n in abilities(u)))
     ]
 
 
@@ -84,6 +101,14 @@ def unavailable_reason(game: Game, unit: Unit, ability: str) -> str | None:
     level = abilities(unit).get(ability)
     if level is None:
         return f"it has no {ability}"
+    roll = datasheet_ability_seeds.PSYCHIC_ROLLS.get(ability)
+    if roll is not None:
+        seat = deployment.owner(game, unit).seat
+        if roll["when"] == "own_command" and (game.phase != "command" or game.turn_seat != seat):
+            return "it's used in its player's Command phase"
+        if any(u.ability == ability and _this_phase(game, u) for u in uses_this_round(game, unit)):
+            return "it's already been used this phase"
+        return None
     if battle_shock.is_battle_shocked(game, unit):
         return "it's Battle-shocked"
     used = sum(abilities(unit).get(u.ability, 0) for u in uses_this_round(game, unit))
@@ -126,9 +151,39 @@ def use(game: Game, unit: Unit, ability: str, target: Unit | None = None) -> Gam
         target_unit_id=target.id if target else None,
     )
     game.psychic_uses.append(record)
-    if roll == 1:
+    rolled = datasheet_ability_seeds.PSYCHIC_ROLLS.get(ability)
+    if rolled is not None:
+        # Its own outcome: on a fail, mortal wounds to its unit.
+        if roll <= rolled["fails_on"] and rolled.get("mortal_wounds"):
+            wounds, _ = roll_dice_faces(rolled["mortal_wounds"])
+            casualties.mortal_wounds(game, unit, wounds)
+    elif roll == 1:
         battle_shock.battle_shock_outright(game, unit, f"{ability}: psychic roll of 1", roll)
     return record
+
+
+def _lasting(game: Game, use: GamePsychicUse) -> bool:
+    # Whether a use still lasts: until the start of its player's next Command
+    # phase.
+    if game.battle_round == use.battle_round:
+        return True
+    return game.battle_round == use.battle_round + 1 and game.turn_seat != use.turn_seat
+
+
+def targeted_within(game: Game, unit: Unit) -> float | None:
+    # How close a model has to be to target the unit with a ranged attack,
+    # from its psychic abilities now (e.g. Psychic Veil: 18"), if limited.
+    rolls = datasheet_ability_seeds.PSYCHIC_ROLLS
+    limits = [
+        rolls[u.ability]["targeted_within"]
+        for u in game.psychic_uses
+        if u.unit_id == unit.id
+        and u.ability in rolls
+        and rolls[u.ability].get("targeted_within")
+        and u.roll > rolls[u.ability]["fails_on"]
+        and _lasting(game, u)
+    ]
+    return min(limits, default=None)
 
 
 def soul_sighted(game: Game, target: Unit) -> bool:

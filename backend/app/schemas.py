@@ -203,10 +203,6 @@ class UnitIn(BaseModel):
     upgrade_id: int | None = None
     # Detachment rules with a selection limit this unit is selected for.
     selected_rule_ids: list[int] = []
-    # Whether it's its list's WARLORD (it needs a CHARACTER model): True makes
-    # it the Warlord in place of any other unit, False makes it not be - and
-    # None (left out) leaves that as it is.
-    warlord: bool | None = None
 
 
 class SelectableRuleOut(BaseModel):
@@ -227,8 +223,6 @@ class UnitOut(BaseModel):
     unit_models: list[UnitModelOut]
     upgrade_id: int | None
     selected_rule_ids: list[int] = []
-    # It's its list's WARLORD.
-    warlord: bool = False
 
 
 EnhancementScope = Literal["bearer", "led_unit", "bearers_unit", "unit"]
@@ -830,12 +824,22 @@ class GameStratagemIn(BaseModel):
     # e.g. Gunship Extraction, one of their units.
     target_secondary_id: int | None = None
     target_unit_id: int | None = None
+    # For one that also targets an objective or a transport (e.g. Cached
+    # Acquisition), which - one of the unit's `choices`.
+    target_choice_id: int | None = None
+
+
+class IdNameOut(BaseModel):
+    id: int
+    name: str
 
 
 class StratagemTargetOut(BaseModel):
-    # A unit a stratagem whose game action targets one could be used on.
+    # A unit a stratagem whose game action targets one could be used on - and
+    # for one that also targets an objective or a transport, those it could.
     unit_id: int
     name: str
+    choices: list[IdNameOut] = []
 
 
 class GameAchieveIn(BaseModel):
@@ -1698,12 +1702,31 @@ class CommandHealOut(BaseModel):
     healed: int
 
 
+class ObjectiveSelectionOut(BaseModel):
+    # An objective a rule of the player's has them select in their Command
+    # phase (e.g. Acquisition At Any Cost's Acquisition objective marker): the
+    # one selected (None: not yet), any a stratagem added (e.g. Infoslave
+    # Skull), and the objectives to pick from.
+    name: str
+    rule: str
+    objective_id: int | None = None
+    extra_objective_ids: list[int] = []
+    options: list[IdNameOut] = []
+
+
 class CommandOut(BaseModel):
     # The player whose turn it is's Command phase abilities (None: it isn't a
-    # Command phase).
+    # Command phase), and objectives their rules have them select.
     seat: int | None
     abilities: list[CommandAbilityOut]
     heals: list[CommandHealOut]
+    objective_selections: list[ObjectiveSelectionOut] = []
+
+
+class ObjectiveSelectionIn(BaseModel):
+    seat: Literal[1, 2]
+    name: str
+    objective_id: int
 
 
 class CommandChoiceIn(BaseModel):

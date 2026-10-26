@@ -671,6 +671,15 @@ section .app-dialog form {
   fill: #111;
 }
 
+.objective-number {
+  font-size: 1.4px;
+  font-weight: 700;
+  fill: #111;
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-width: 0.25px;
+}
+
 .terrain-hatch-line {
   stroke: #8886;
   stroke-width: 0.12;

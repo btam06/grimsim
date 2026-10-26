@@ -59,6 +59,19 @@ def granted_options(stratagem_name: str) -> list[str]:
     ]
 
 
+def action_config(stratagem_name: str) -> dict:
+    # How a stratagem carries out its game action, if that depends on it (e.g.
+    # Priority Reclamation's 6"), from every faction's stratagem_rules.py
+    # ACTIONS.
+    from app.seeds.factions import FACTIONS
+
+    for faction in FACTIONS:
+        config = getattr(getattr(faction, "stratagem_rules", None), "ACTIONS", {})
+        if stratagem_name in config:
+            return config[stratagem_name]
+    return {}
+
+
 def load(path: Path | None = None) -> list[dict]:
     path = path or data_files.data_dir() / "stratagems.json"
     if not path.exists():

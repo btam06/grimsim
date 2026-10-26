@@ -20,8 +20,10 @@ function PsychicPanel({ game, psychic, onUse }) {
             <strong>{unit.name}</strong>
             <span className="hint">
               {' '}
-              · {game.players.find((p) => p.seat === unit.seat)?.user_name}'s · psyker level{' '}
-              {unit.psyker_level} ({unit.used_this_round} used this round)
+              · {game.players.find((p) => p.seat === unit.seat)?.user_name}'s
+              {/* (A PSYKER whose abilities have no psychic level has none.) */}
+              {unit.psyker_level > 0 &&
+                ` · psyker level ${unit.psyker_level} (${unit.used_this_round} used this round)`}
             </span>
             {unit.abilities.map((ability) => {
               const key = `${unit.unit_id}-${ability.name}`
@@ -29,7 +31,10 @@ function PsychicPanel({ game, psychic, onUse }) {
               return (
                 <div key={ability.name} className="command-target">
                   <span>
-                    {ability.name} <span className="hint">(psychic level {ability.level})</span>
+                    {ability.name}{' '}
+                    {ability.level > 0 && (
+                      <span className="hint">(psychic level {ability.level})</span>
+                    )}
                   </span>
                   {ability.usable && ability.targets.length > 0 && (
                     <Select

@@ -47,6 +47,7 @@ from app.combat_rules.conditions import (
     TARGET_LED_BY_CHARACTER,
     TARGET_MODEL_CHARACTER,
     TARGET_MONSTER_OR_VEHICLE,
+    TARGET_NOT_IMPERIUM_OR_CHAOS,
     TARGET_NOT_MONSTER_OR_VEHICLE,
     WITHIN_HALF_RANGE,
     WITHOUT_DEVASTATING_WOUNDS,
@@ -264,6 +265,11 @@ CORE_ENTRIES = [
         RANGED_VS_OBJECTIVE_TARGET,
         "Ranged Attack vs Target on Objective",
         "A ranged attack against a unit within range of an objective marker.",
+    ),
+    (
+        TARGET_NOT_IMPERIUM_OR_CHAOS,
+        "Target Not Imperium or Chaos",
+        "The defending unit has no IMPERIUM or CHAOS model. Applies at every step.",
     ),
     (
         DEFENDER_CONTROLLING_OBJECTIVE,

@@ -282,7 +282,7 @@ async def test_gunship_extraction_places_a_terminator_unit_in_reserves(
     targets = await client.get(
         f"/games/{game_id}/stratagems/{stratagem_id}/targets", params={"seat": 1}
     )
-    assert targets.json() == [{"unit_id": t["unit_id"], "name": "T"}]
+    assert targets.json() == [{"unit_id": t["unit_id"], "name": "T", "choices": []}]
     response = await _use(client, game_id, stratagem_id, a)
     assert "keywords" in response.json()["detail"]
     cp = next(p["cp"] for p in (await client.get(f"/games/{game_id}")).json()["players"]

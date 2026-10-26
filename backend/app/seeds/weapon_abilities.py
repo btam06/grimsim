@@ -47,6 +47,7 @@ from app.combat_rules.effects import (
     HAZARDOUS,
     HEAVY,
     IGNORE_COVER,
+    IGNORE_HIT_PENALTIES,
     IMPROVE_AP,
     MELTA_2,
     MELTA_3,
@@ -213,12 +214,16 @@ ENTRIES = [
         [BLAST_2],
     ),
     (
-        # Descriptive only: psychic attacks (e.g. against Feel No Pain vs
-        # psychic attacks) aren't modelled yet.
+        # [PSYCHIC]: any or all modifiers to the attack's BS/WS and Hit roll
+        # can be ignored - so its penalties are (its bonuses kept; the engine
+        # only ever improves BS/WS). (Rules triggered by psychic attacks, e.g.
+        # Feel No Pain against them, aren't modelled yet.)
         "Psychic",
-        "Attacks made with this weapon are psychic attacks.",
-        [],
-        [],
+        "Each time an attack is made with this weapon, you can ignore any or all modifiers to "
+        "its BS or WS characteristic and any or all modifiers to the Hit roll. Attacks made "
+        "with this weapon are psychic attacks.",
+        [ALWAYS],
+        [IGNORE_HIT_PENALTIES],
     ),
     (
         # Descriptive only: the calculator already fires every weapon ticked.

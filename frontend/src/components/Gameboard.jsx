@@ -96,7 +96,8 @@ function Deployment({ deployment }) {
 }
 
 // The objectives' markers, as on the layout cards: a home (each side's
-// colour), an expansion or the centre.
+// colour), an expansion or the centre - numbered in layout order, as rules
+// that select one name them (e.g. "Objective 2").
 const OBJECTIVE_ICONS = {
   attacker_home: faChessRook,
   defender_home: faChessRook,
@@ -114,19 +115,26 @@ const MARKER_RADIUS = 1.4
 function ObjectiveMarkers({ objectives }) {
   return (
     <g className="objectives">
-      {objectives.map((o) => {
+      {objectives.map((o, i) => {
         const [width, height, , , path] = OBJECTIVE_ICONS[o.kind].icon
         const scale = (MARKER_RADIUS * 1.1) / Math.max(width, height)
         const left = o.x - (width * scale) / 2
         const top = o.y - (height * scale) / 2
         return (
           <g key={o.id} className={`objective objective--${o.kind}`}>
-            <title>{OBJECTIVE_NAMES[o.kind]}</title>
+            <title>{`Objective ${i + 1}: ${OBJECTIVE_NAMES[o.kind]}`}</title>
             <circle cx={o.x} cy={o.y} r={MARKER_RADIUS} />
             <path
               d={Array.isArray(path) ? path.join(' ') : path}
               transform={`translate(${left} ${top}) scale(${scale})`}
             />
+            <text
+              className="objective-number"
+              x={o.x + MARKER_RADIUS * 1.1}
+              y={o.y - MARKER_RADIUS * 0.9}
+            >
+              {i + 1}
+            </text>
           </g>
         )
       })}

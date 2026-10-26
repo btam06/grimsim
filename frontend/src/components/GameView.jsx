@@ -158,8 +158,21 @@ function ReplaceSecondaryDialog({ dialogRef, stratagem, cards, onConfirm }) {
 }
 
 // Stratagem game actions used on one of the player's units (see
-// app/models/stratagem.py UNIT_TARGET_ACTIONS).
-const UNIT_TARGET_ACTIONS = ['strategic_reserves', 'duty_in_death']
+// app/models/stratagem.py UNIT_TARGET_ACTIONS) - some also on an objective or
+// a transport, picked from the unit's choices (CHOICE_TARGET_ACTIONS).
+const UNIT_TARGET_ACTIONS = [
+  'strategic_reserves',
+  'duty_in_death',
+  'secure_on_destruction',
+  'longer_consolidation',
+  'extra_selected_objective',
+  'reactive_embark',
+]
+const CHOICE_LABELS = {
+  secure_on_destruction: 'objective',
+  extra_selected_objective: 'objective',
+  reactive_embark: 'transport',
+}
 
 function PlayerCard({ game, player, onAction }) {
   const [usable, setUsable] = useState([])
@@ -168,6 +181,8 @@ function PlayerCard({ game, player, onAction }) {
   // target now, and the one picked.
   const [targets, setTargets] = useState([])
   const [targetUnitId, setTargetUnitId] = useState('')
+  // And for one that also targets an objective or a transport, which.
+  const [targetChoiceId, setTargetChoiceId] = useState('')
   const replaceDialog = useRef(null)
   const [primaryPoints, setPrimaryPoints] = useState('')
   // VP to score per secondary card; starts at the card's base VP.
@@ -191,6 +206,8 @@ function PlayerCard({ game, player, onAction }) {
   const done = player.secondaries.filter((c) => c.status !== 'active')
   const selectedStratagem = usable.find((s) => String(s.id) === String(stratagemId))
   const targetsUnit = UNIT_TARGET_ACTIONS.includes(selectedStratagem?.game_action)
+  const choiceLabel = CHOICE_LABELS[selectedStratagem?.game_action]
+  const choices = targets.find((t) => String(t.unit_id) === String(targetUnitId))?.choices ?? []
 
   useEffect(() => {
     setTargetUnitId('')
@@ -210,6 +227,7 @@ function PlayerCard({ game, player, onAction }) {
         stratagem_id: Number(stratagemId),
         target_secondary_id: targetSecondaryId,
         target_unit_id: targetsUnit ? Number(targetUnitId) : null,
+        target_choice_id: choiceLabel && targetChoiceId ? Number(targetChoiceId) : null,
       })
     )
 
@@ -347,13 +365,28 @@ function PlayerCard({ game, player, onAction }) {
             <Select
               options={targets.map((t) => ({ id: t.unit_id, name: t.name }))}
               value={targetUnitId}
-              onChange={setTargetUnitId}
+              onChange={(value) => {
+                setTargetUnitId(value)
+                setTargetChoiceId('')
+              }}
               placeholder={targets.length ? 'Select unit' : 'No unit it can target'}
+            />
+          )}
+          {choiceLabel && targetUnitId && (
+            <Select
+              options={choices}
+              value={targetChoiceId}
+              onChange={setTargetChoiceId}
+              placeholder={`Select ${choiceLabel}`}
             />
           )}
           <button
             type="button"
-            disabled={!stratagemId || (targetsUnit && !targetUnitId)}
+            disabled={
+              !stratagemId ||
+              (targetsUnit && !targetUnitId) ||
+              (choiceLabel && choices.length > 1 && !targetChoiceId)
+            }
             onClick={() => {
               // Stratagems that replace a secondary need their target picked first.
               if (selectedStratagem?.game_action === 'replace_secondary') {

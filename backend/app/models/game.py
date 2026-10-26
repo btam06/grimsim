@@ -120,6 +120,11 @@ class Game(Base):
     secured_objectives: Mapped[list["GameSecuredObjective"]] = relationship(
         cascade="all, delete-orphan", lazy="selectin", order_by="GameSecuredObjective.id"
     )
+    # Objectives players have selected for their rules (e.g. Acquisition At
+    # Any Cost - see app/services/in_game/selected_objectives.py).
+    selected_objectives: Mapped[list["GameSelectedObjective"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameSelectedObjective.id"
+    )
     formations_done: Mapped[list["GameFormationsDone"]] = relationship(
         cascade="all, delete-orphan", lazy="selectin", order_by="GameFormationsDone.id"
     )
@@ -603,6 +608,25 @@ class GameSecuredObjective(Base):
     seat: Mapped[int] = mapped_column(Integer)
 
 
+class GameSelectedObjective(Base):
+    # An objective a player selected for a rule (`name` - e.g. "Acquisition")
+    # in their Command phase (battle round), until the start of their next
+    # one; `extra`: one added to it by a stratagem (e.g. Infoslave Skull)
+    # rather than the rule's own selection (see
+    # app/services/in_game/selected_objectives.py).
+    __tablename__ = "game_selected_objectives"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    seat: Mapped[int] = mapped_column(Integer)
+    name: Mapped[str] = mapped_column(String(64))
+    objective_id: Mapped[int] = mapped_column(
+        ForeignKey("terrain_objectives.id", ondelete="CASCADE")
+    )
+    battle_round: Mapped[int] = mapped_column(Integer)
+    extra: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
 class GameTransportWreck(Base):
     # Where a destroyed transport's model was, while units were embarked in
     # it - they emergency disembark round it (see
@@ -951,6 +975,11 @@ class GameModelDestroyed(Base):
     on_objective: Mapped["GameKillOnObjective | None"] = relationship(
         cascade="all, delete-orphan", lazy="selectin", uselist=False
     )
+    # Its unit was destroyed within range of objectives its player controlled
+    # (e.g. for Cached Acquisition) - their own table, likewise.
+    controlled_objectives: Mapped[list["GameDestroyedOnObjective"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin"
+    )
 
 
 class GameKillOnObjective(Base):
@@ -961,6 +990,19 @@ class GameKillOnObjective(Base):
 
     model_destroyed_id: Mapped[int] = mapped_column(
         ForeignKey("game_models_destroyed.id"), primary_key=True
+    )
+
+
+class GameDestroyedOnObjective(Base):
+    # An objective a destroyed unit was within range of, that its player
+    # controlled, when its last model was destroyed.
+    __tablename__ = "game_destroyed_on_objectives"
+
+    model_destroyed_id: Mapped[int] = mapped_column(
+        ForeignKey("game_models_destroyed.id"), primary_key=True
+    )
+    objective_id: Mapped[int] = mapped_column(
+        ForeignKey("terrain_objectives.id", ondelete="CASCADE"), primary_key=True
     )
 
 

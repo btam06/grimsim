@@ -272,6 +272,8 @@ export const takeBattleShockTest = (id, testId, insaneBravery) =>
     body: JSON.stringify({ insane_bravery: insaneBravery }),
   })
 export const getCommand = (id) => request(`/games/${id}/command`)
+export const selectCommandObjective = (id, payload) =>
+  request(`/games/${id}/command/objective`, { method: 'POST', body: JSON.stringify(payload) })
 export const chooseCommandOption = (id, payload) =>
   request(`/games/${id}/command/choice`, { method: 'POST', body: JSON.stringify(payload) })
 export const getRoundStart = (id) => request(`/games/${id}/round-start`)

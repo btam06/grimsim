@@ -448,7 +448,14 @@ def reach(game: Game, unit: Unit, target: Unit, assault: set | None = None) -> T
     # Advanced, only those can fire. A target with Lone Operative is only in
     # range of models within 12" of it.
     assault = assault or set()
-    lone = lone_operative(game, target)
+    # How close a model has to be to target it: Lone Operative's 12", or a
+    # psychic ability's (e.g. Psychic Veil: 18") - the closer.
+    from app.services.in_game import psychic
+
+    limits = [LONE_OPERATIVE_RANGE] if lone_operative(game, target) else []
+    if (veil := psychic.targeted_within(game, target)) is not None:
+        limits.append(veil)
+    target_limit = min(limits, default=None)
     advanced = move_status(game, unit).advanced
     shooters = _bases(game, unit)
     targets = list(_bases(game, target).values())
@@ -483,7 +490,7 @@ def reach(game: Game, unit: Unit, target: Unit, assault: set | None = None) -> T
             entry.carried_by += 1
             if entry.unusable:
                 continue
-            limit = min(weapon.range, LONE_OPERATIVE_RANGE) if lone else weapon.range
+            limit = min(weapon.range, target_limit) if target_limit else weapon.range
             if nearest is not None and nearest <= limit + TOLERANCE:
                 half = nearest <= weapon.range / 2 + TOLERANCE
                 entry.in_range += 1
@@ -510,7 +517,7 @@ def reach(game: Game, unit: Unit, target: Unit, assault: set | None = None) -> T
             entry.carried_by += 1
             if entry.unusable:
                 continue
-            limit = min(weapon.range, LONE_OPERATIVE_RANGE) if lone else weapon.range
+            limit = min(weapon.range, target_limit) if target_limit else weapon.range
             if nearest is not None and nearest <= limit + TOLERANCE:
                 half = nearest <= weapon.range / 2 + TOLERANCE
                 entry.in_range += 1

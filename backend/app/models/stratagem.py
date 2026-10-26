@@ -164,9 +164,27 @@ class StratagemTiming(Base):
 #   Gunship Extraction - see app/services/in_game/reinforcements.py).
 # - "duty_in_death": the target unit's destroyed models can stay on the
 #   battlefield until it has fought (see app/services/in_game/duty_in_death.py).
-STRATAGEM_GAME_ACTIONS = ("replace_secondary", "strategic_reserves", "duty_in_death")
+STRATAGEM_GAME_ACTIONS = (
+    "replace_secondary",
+    "strategic_reserves",
+    "duty_in_death",
+    "secure_on_destruction",
+    "longer_consolidation",
+    "extra_selected_objective",
+    "reactive_embark",
+)
 # Those whose target is one of the player's units.
-UNIT_TARGET_ACTIONS = ("strategic_reserves", "duty_in_death")
+UNIT_TARGET_ACTIONS = (
+    "strategic_reserves",
+    "duty_in_death",
+    "secure_on_destruction",
+    "longer_consolidation",
+    "extra_selected_objective",
+    "reactive_embark",
+)
+# Those that also target something else, picked from the unit's choices (an
+# objective, or a transport - see app/services/in_game/stratagem_actions.py).
+CHOICE_TARGET_ACTIONS = ("secure_on_destruction", "extra_selected_objective", "reactive_embark")
 
 
 class StratagemGameAction(Base):

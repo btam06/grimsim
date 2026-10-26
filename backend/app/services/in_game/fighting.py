@@ -19,7 +19,7 @@ from app.services.in_game.deployment import TOLERANCE, Base, Placement, Point, g
 from app.services.in_game.movement import ENGAGEMENT_RANGE
 from app.services.in_game.game import other_seat
 from app.services.in_game.shooting import WeaponReach
-from app.services.in_game.terrain import area_polygon
+from app.services.in_game.terrain import area_polygon, within
 from app.services.list_building.enhancements import granted_weapons
 
 # The fight phase. It starts with piling in: the player whose turn it is
@@ -251,7 +251,10 @@ def finish_piling_in(game: Game, seat: int) -> None:
 # up to 3" - towards the unit it fought, if any of it is left; if not,
 # towards the nearest enemy model, ending in Engagement Range of another
 # enemy unit - or onto an objective (a terrain area - see TerrainObjective).
-# (A unit it ends up engaged with that hasn't fought can then fight.)
+# (A unit it ends up engaged with that hasn't fought can then fight.) A
+# stratagem can let it go further (e.g. Priority Reclamation: 6", provided it
+# ends within range of its Acquisition objective marker - see
+# app/services/in_game/stratagem_actions.py).
 
 FIGHTS_FIRST = "Fights First"
 STEPS = ("pile_in", "consolidate", "fights_first", "remaining", "done")
@@ -472,18 +475,36 @@ def consolidating(game: Game) -> GameUnitFight | None:
     return last if could_consolidate(game, unit) else None
 
 
+def consolidation_reach(game: Game, unit: Unit) -> tuple[float, str | None]:
+    # How far the unit's models can consolidate: 3" - or further, with a
+    # stratagem (e.g. Priority Reclamation), provided it then ends within
+    # range of one of its player's selected objectives (that selection's name).
+    # (Imported here: stratagem_actions imports this module.)
+    from app.services.in_game import stratagem_actions
+
+    return stratagem_actions.consolidation(game, unit)
+
+
+def just_fought(game: Game) -> GameUnitFight | None:
+    # The last fight, if its unit hasn't consolidated (or skipped it) - even
+    # if it couldn't with 3" (a stratagem could let it go further).
+    fights = _fights(game)
+    if not fights or fights[-1].consolidation is not None:
+        return None
+    return fights[-1]
+
+
 def could_consolidate(game: Game, unit: Unit) -> bool:
     # Whether consolidating is worth offering: the unit's within Engagement
     # Range of an enemy, or one of its models could get within it - or onto an
-    # objective - with 3".
+    # objective - with 3" (or further, with a stratagem).
+    reach, _ = consolidation_reach(game, unit)
     bases = list(_bases(game, unit).values())
     enemies = _enemy_bases(game, unit)
-    if any(
-        _nearest(base, enemies) <= CONSOLIDATE + ENGAGEMENT_RANGE + TOLERANCE for base in bases
-    ):
+    if any(_nearest(base, enemies) <= reach + ENGAGEMENT_RANGE + TOLERANCE for base in bases):
         return True
     return any(
-        deployment.distance_to_polygon(base, area) <= CONSOLIDATE + TOLERANCE
+        deployment.distance_to_polygon(base, area) <= reach + TOLERANCE
         for base in bases
         for area in objective_areas(game)
     )
@@ -505,10 +526,16 @@ def objective_areas(game: Game) -> list[list[Point]]:
 
 
 def _towards(
-    models, start: dict, bases: dict, distance, name: str, pather: pathing.Pather
+    models,
+    start: dict,
+    bases: dict,
+    distance,
+    name: str,
+    pather: pathing.Pather,
+    reach: float = CONSOLIDATE,
 ) -> dict[int, list[str]]:
     # Each moved model must end closer to something (`distance` from a base to
-    # it) than it started - and no more than 3" from where it was.
+    # it) than it started - and no more than `reach` (3") from where it was.
     problems = {}
     for model in models:
         found = []
@@ -516,7 +543,7 @@ def _towards(
             bases[model.id].x - start[model.id].x, bases[model.id].y - start[model.id].y
         )
         if moved > TOLERANCE:
-            if problem := pathing.too_far(pather, start[model.id], bases[model.id], CONSOLIDATE):
+            if problem := pathing.too_far(pather, start[model.id], bases[model.id], reach):
                 found.append(problem)
             if distance(bases[model.id]) >= distance(start[model.id]) - TOLERANCE:
                 found.append(f"must end closer to {name}")
@@ -544,8 +571,20 @@ def check_consolidation(
     physical = deployment.physical_problems(
         game, models, bases, deployment.placed_bases(game, unit)
     )
+    reach, ending_within = consolidation_reach(game, unit)
     # Round dense terrain, unless it can go through it.
-    pather = pathing.for_unit(game, unit, start, CONSOLIDATE)
+    pather = pathing.for_unit(game, unit, start, reach)
+    # Further than 3": only ending within range of one of those objectives.
+    further = ending_within is not None and any(
+        pathing.too_far(pather, start[m.id], bases[m.id], CONSOLIDATE) for m in models
+    )
+    beyond = (
+        f'Moving more than {CONSOLIDATE:g}", the unit must end within range of its '
+        f"{ending_within} objective marker"
+        if further
+        and not _ends_within_selected(game, unit, bases, ending_within)
+        else None
+    )
 
     def result_of(per_model: dict[int, list[str]], unit_problem: str | None) -> Placement:
         result = deployment.summarise(
@@ -553,6 +592,8 @@ def check_consolidation(
         )
         if unit_problem:
             result.problems.append(unit_problem)
+        if beyond:
+            result.problems.append(beyond)
         result.paths = pather.bends(start, bases)
         return result
 
@@ -560,7 +601,7 @@ def check_consolidation(
     towards = list(_bases(game, target).values()) if target is not None else enemies
     name = target.faction_unit.name if target is not None else "the nearest enemy model"
     engaging = result_of(
-        _towards(models, start, bases, lambda b: _nearest(b, towards), name, pather),
+        _towards(models, start, bases, lambda b: _nearest(b, towards), name, pather, reach),
         None
         if any(_nearest(b, enemies) <= ENGAGEMENT_RANGE + TOLERANCE for b in bases.values())
         else "The unit must end within Engagement Range of an enemy unit",
@@ -574,7 +615,7 @@ def check_consolidation(
         return min(deployment.distance_to_polygon(base, area) for area in objectives)
 
     onto_objective = result_of(
-        _towards(models, start, bases, to_objective, "the nearest objective", pather),
+        _towards(models, start, bases, to_objective, "the nearest objective", pather, reach),
         None
         if any(to_objective(b) <= TOLERANCE for b in bases.values())
         else "No model ends on an objective",
@@ -585,6 +626,23 @@ def check_consolidation(
     # objective would do instead.
     engaging.problems.append("(Or it can end on an objective, each model that moves closer to one)")
     return engaging
+
+
+def _ends_within_selected(game: Game, unit: Unit, bases: dict[int, Base], name: str) -> bool:
+    # Whether the unit, its models at `bases`, would be within range of one of
+    # its player's `name` selected objectives.
+    from app.services.in_game import selected_objectives
+
+    seat = deployment.owner(game, unit).seat
+    ids = selected_objectives.objective_ids(game, seat, name)
+    layout = game.layout
+    return any(
+        within(base, area_polygon(a))
+        for o in (layout.objectives if layout is not None else [])
+        if o.id in ids
+        for a in o.areas
+        for base in bases.values()
+    )
 
 
 def consolidate(game: Game, unit: Unit, placement: dict[int, tuple[float, float, float]]) -> None:

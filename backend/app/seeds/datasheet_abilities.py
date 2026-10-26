@@ -265,6 +265,8 @@ COMBINED = (
     "REACTIVE_MOVES",
     "RALLIES",
     "REPAIRS",
+    "PSYCHIC_ROLLS",
+    "TRANSPORT_AS_BODYGUARD",
 )
 _combined: dict | None = None
 
@@ -301,6 +303,8 @@ def _combine() -> dict:
                 "REACTIVE_MOVES": {},
                 "RALLIES": {},
                 "REPAIRS": {},
+                "PSYCHIC_ROLLS": {},
+                "TRANSPORT_AS_BODYGUARD": set(),
             }
         ] + [
             {
@@ -331,6 +335,8 @@ def _combine() -> dict:
                     ("REACTIVE_MOVES", {}),
                     ("RALLIES", {}),
                     ("REPAIRS", {}),
+                    ("PSYCHIC_ROLLS", {}),
+                    ("TRANSPORT_AS_BODYGUARD", set()),
                 )
             }
             for faction in FACTIONS
@@ -448,6 +454,17 @@ def _combine() -> dict:
             # in their player's Command phase (repair.py).
             "RALLIES": {k: v for source in sources for k, v in source["RALLIES"].items()},
             "REPAIRS": {k: v for source in sources for k, v in source["REPAIRS"].items()},
+            # Psychic abilities without a psychic level, and what their
+            # psychic roll does (see app/services/in_game/psychic.py).
+            "PSYCHIC_ROLLS": {
+                k: v for source in sources for k, v in source["PSYCHIC_ROLLS"].items()
+            },
+            # Abilities that let their model, while it's leading a unit, embark
+            # in any TRANSPORT its Bodyguard unit can (see
+            # app/services/in_game/embarked.py).
+            "TRANSPORT_AS_BODYGUARD": {
+                n for source in sources for n in source["TRANSPORT_AS_BODYGUARD"]
+            },
             # {option name: ability name}. Option names are unique across every
             # ability (and every faction ability's options).
             "OPTION_OWNERS": {

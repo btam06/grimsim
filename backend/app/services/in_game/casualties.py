@@ -55,6 +55,7 @@ def _lose(game: Game, unit_model, wounds: int, destroyed_by: Unit | None = None)
 def _remove(game: Game, unit: Unit, unit_model, destroyed_by: Unit | None) -> None:
     # Takes a destroyed model off the battlefield (and records that).
     position = deployment.positions(game)[unit_model.id]
+    controlled = []
     if len(deployment.models_on_battlefield(game, unit)) == 1:
         # The last of its unit: rules for that happen before it's removed
         # (e.g. Executioner).
@@ -62,6 +63,9 @@ def _remove(game: Game, unit: Unit, unit_model, destroyed_by: Unit | None) -> No
         from app.services.in_game import battle_shock
 
         battle_shock.unit_about_to_be_destroyed(game, unit_model, destroyed_by)
+        # The objectives its player controls that it's within range of, for
+        # rules about where it was destroyed (e.g. Cached Acquisition).
+        controlled = turn_record.controlled_objectives_of(game, unit)
     # A transport with units inside: where it was, for them to emergency
     # disembark round (see app/services/in_game/emergency.py).
     from app.services.in_game import emergency
@@ -76,7 +80,7 @@ def _remove(game: Game, unit: Unit, unit_model, destroyed_by: Unit | None) -> No
         deployment.base_at(unit_model, position.x, position.y, position.rotation),
     )
     game.model_positions.remove(position)
-    turn_record.record_destruction(game, unit_model, destroyed_by)
+    turn_record.record_destruction(game, unit_model, destroyed_by, controlled)
 
 
 def remove_from_battlefield(game: Game, unit_model_id: int, destroyed_by_id: int | None) -> None:

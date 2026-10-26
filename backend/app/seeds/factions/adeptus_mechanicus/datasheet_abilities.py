@@ -16,6 +16,7 @@ from app.combat_rules.effects import (
     IGNORE_COVER,
     INVULNERABLE_4,
     MINUS_ONE_TO_WOUND,
+    PLUS_ONE_TO_HIT,
     PLUS_ONE_TOUGHNESS,
     REROLL_FAILED_HITS,
     REROLL_HIT_ONES,
@@ -24,7 +25,9 @@ from app.combat_rules.effects import (
 from app.seeds.datasheet_abilities import CORE_RULES
 from app.seeds.factions.adeptus_mechanicus.conditions import (
     ATTACKER_NEAR_ADMECH_BATTLELINE,
+    ATTACKER_OR_TARGET_ON_ACQUISITION,
     CONQUEROR_IMPERATIVE_ACTIVE,
+    DEFENDER_ON_ACQUISITION,
     KASTELAN_MELEE_WEAPON,
     KASTELAN_RANGED_WEAPON,
     NEUTRON_FUSIL_WEAPON,
@@ -33,6 +36,7 @@ from app.seeds.factions.adeptus_mechanicus.conditions import (
     TARGET_ELECTRO_PRIESTS_LED_BY_CHARACTER,
     TARGET_MODEL_DATASMITH_LEADING_KASTELANS,
     TARGET_MODEL_KASTELAN,
+    TARGET_WITHIN_ACQUISITION,
     VENGEANCE_ACTIVE,
 )
 
@@ -269,6 +273,34 @@ ENTRIES = [
         [],
     ),
     (
+        # Explorator Maniple's detachment rule. In a game, the Acquisition
+        # objective marker is selected in the Command phase (see
+        # app/services/in_game/selected_objectives.py).
+        "Acquisition At Any Cost",
+        "Each time a model in this unit makes an attack, if this unit is within range of your "
+        "Acquisition objective marker, or if the target of that attack is within range of your "
+        "Acquisition objective marker, re-roll a Wound roll of 1.",
+        [],
+        [],
+    ),
+    (
+        # The Genetor enhancement, for the unit its bearer leads.
+        "Genetor",
+        "While the bearer is leading a unit that is within range of your Acquisition objective "
+        "marker, models in that unit have a 4+ invulnerable save.",
+        [],
+        [],
+    ),
+    (
+        # The Logis enhancement, likewise.
+        "Logis",
+        "While the bearer is leading a unit, each time a model in that unit makes an attack "
+        "that targets a unit within range of your Acquisition objective marker, add 1 to the "
+        "Hit roll.",
+        [],
+        [],
+    ),
+    (
         "War-Form Mantle",
         "This model has a 4+ invulnerable save and the Feel No Pain 5+ ability.",
         [],
@@ -393,6 +425,10 @@ CALCULATOR_NOTES = {
         "calculator."
     ),
     "Repulsor Grid": "Not modelled: mortal wounds to the attacking unit aren't tracked.",
+    "Acquisition At Any Cost": (
+        "Tick whether the unit, or its target, is within range of the Acquisition objective "
+        "marker under Positioning; in a game, it's selected in your Command phase."
+    ),
 }
 
 # Code-defined rules for abilities above, by name.
@@ -469,6 +505,31 @@ RULES = {
             conditions=(CONQUEROR_IMPERATIVE_ACTIVE,),
             effects=(REROLL_WOUND_ONES,),
             description="Re-roll Wound rolls of 1 while the Conqueror Imperative is picked.",
+        ),
+    ],
+    "Acquisition At Any Cost": [
+        Rule(
+            conditions=(ATTACKER_OR_TARGET_ON_ACQUISITION,),
+            effects=(REROLL_WOUND_ONES,),
+            description=(
+                "Re-roll Wound rolls of 1 while the unit, or its target, is within range of the "
+                "Acquisition objective marker."
+            ),
+        ),
+    ],
+    "Genetor": [
+        Rule(
+            conditions=(DEFENDER_ON_ACQUISITION,),
+            effects=(INVULNERABLE_4,),
+            side="defender",
+            description="A 4+ invulnerable save within range of the Acquisition objective marker.",
+        ),
+    ],
+    "Logis": [
+        Rule(
+            conditions=(TARGET_WITHIN_ACQUISITION,),
+            effects=(PLUS_ONE_TO_HIT,),
+            description="+1 to hit against units within range of the Acquisition objective marker.",
         ),
     ],
     "War-Form Mantle": [
