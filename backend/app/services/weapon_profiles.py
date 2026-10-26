@@ -5,8 +5,10 @@ import re
 # Weapons with several profiles (e.g. "Plasma caliver – standard" and
 # "Plasma caliver – supercharge", or a melee weapon's "– strike" and
 # "– sweep"): each profile is its own weapon, named "<weapon> – <profile>"
-# (an en dash, em dash or hyphen between spaces). A model attacking with the
-# weapon uses only one of its profiles each time.
+# (an en dash, em dash or hyphen between spaces) - or, for its usual
+# profile, sometimes just "<weapon>" (e.g. "Melta Rifle" and "Melta Rifle -
+# Hunter"). A model attacking with the weapon uses only one of its profiles
+# each time.
 
 _SEPARATOR = re.compile(r"\s+[-–—]\s+")
 
@@ -24,9 +26,9 @@ def conflicting_profiles(weapons) -> str | None:
     # twice - e.g. two plasma weapons.)
     seen: dict[str, set[str]] = {}
     for weapon in weapons:
-        group = profile_group(weapon.name)
-        if group is None:
-            continue
+        # (A weapon that isn't one of several profiles is its own group - so
+        # "Melta Rifle" clashes with "Melta Rifle - Hunter".)
+        group = profile_group(weapon.name) or weapon.name
         seen.setdefault(group, set()).add(weapon.name)
         if len(seen[group]) > 1:
             return group

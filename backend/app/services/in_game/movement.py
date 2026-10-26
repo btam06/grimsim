@@ -6,7 +6,14 @@ import random
 from fastapi import HTTPException
 
 from app.models import Game, GameUnitMove, GameUnitMoveStart, Unit, UnitModel
-from app.services.in_game import deployment, embarked, mission_state, pathing, reinforcements
+from app.services.in_game import (
+    deployment,
+    embarked,
+    mission_state,
+    pathing,
+    regions,
+    reinforcements,
+)
 from app.services.in_game.deployment import TOLERANCE, Placement
 
 # Moving units in the movement phase. In their turn's movement phase a player
@@ -143,9 +150,32 @@ def _check_unit(game: Game, unit: Unit) -> None:
         )
 
 
+def roll_bonus(game: Game, unit: Unit, roll: str) -> int:
+    # What the unit's abilities add to its `roll` ("advance", "charge") now -
+    # e.g. Optimised Gait: +1, or +2 within 6" of a friendly ADEPTUS
+    # MECHANICUS BATTLELINE unit. (The best one counts.)
+    from app.seeds import datasheet_abilities
+
+    config = datasheet_abilities.ROLL_BONUSES
+    names = {a.name for m in unit.unit_models for a in m.model.abilities}
+    best = 0
+    for name in names & set(config):
+        bonus = config[name]
+        if roll not in bonus["rolls"]:
+            continue
+        value = bonus["bonus"]
+        if (near := bonus.get("near")) is not None:
+            keywords, reach, instead = near
+            if regions.near_friendly(game, unit, keywords, reach):
+                value = instead
+        best = max(best, value)
+    return best
+
+
 def roll_advance(game: Game, unit: Unit) -> GameUnitMove:
     # Rolls the unit's Advance D6, before it moves - once a phase: if it's
-    # already rolled, that roll stands.
+    # already rolled, that roll stands. (What its abilities add is added to
+    # it then - see roll_bonus.)
     _check_unit(game, unit)
     if "advance" not in allowed_kinds(game, unit):
         raise _bad_request("that unit can't Advance")
@@ -153,14 +183,14 @@ def roll_advance(game: Game, unit: Unit) -> GameUnitMove:
         # Already moved (normally) this phase: roll now; already rolled: that
         # roll stands.
         if move.advance_roll is None:
-            move.advance_roll = random.randint(1, 6)
+            move.advance_roll = random.randint(1, 6) + roll_bonus(game, unit, "advance")
         return move
     move = GameUnitMove(
         unit_id=unit.id,
         battle_round=game.battle_round,
         turn_seat=game.turn_seat,
         kind="advance",
-        advance_roll=random.randint(1, 6),
+        advance_roll=random.randint(1, 6) + roll_bonus(game, unit, "advance"),
         completed=False,
     )
     game.unit_moves.append(move)
@@ -211,6 +241,62 @@ def check_move(
     result = deployment.summarise(models, problems)
     result.paths = pather.bends(start, bases)
     return result
+
+
+def check_free_move(
+    game: Game,
+    unit: Unit,
+    placement: dict[int, tuple[float, float, float]],
+    start: dict[int, tuple[float, float, float]],
+    reach: float,
+) -> Placement:
+    # Whether the unit could make a Normal move of up to `reach` from `start`
+    # to `placement`, outside the movement phase (e.g. a Scouts move, or Ride
+    # the Thermals): on the battlefield, not overlapping, in coherency, each
+    # model within reach (round dense terrain), and none ending within
+    # Engagement Range of an enemy model.
+    models, bases = deployment.unit_bases(
+        unit, placement, deployment.models_on_battlefield(game, unit)
+    )
+    every = {m.id: m for m in unit.unit_models}
+    starts = {
+        i: deployment.base_at(every[i], x, y, rotation) for i, (x, y, rotation) in start.items()
+    }
+    problems = deployment.physical_problems(
+        game, models, bases, deployment.placed_bases(game, unit)
+    )
+    enemies = _enemy_bases(game, unit)
+    pather = pathing.for_unit(game, unit, starts, reach)
+    for model in models:
+        found = []
+        if problem := pathing.too_far(pather, starts[model.id], bases[model.id], reach):
+            found.append(problem)
+        if any(
+            deployment.gap(bases[model.id], e) <= ENGAGEMENT_RANGE + TOLERANCE for e in enemies
+        ):
+            found.append("would end within Engagement Range of an enemy model")
+        problems[model.id] = found + problems[model.id]
+    result = deployment.summarise(models, problems)
+    result.paths = pather.bends(starts, bases)
+    return result
+
+
+def current_positions(game: Game, unit: Unit) -> dict[int, tuple[float, float, float]]:
+    # Where the unit's models (on the battlefield) are now.
+    placed = deployment.positions(game)
+    return {
+        m.id: (placed[m.id].x, placed[m.id].y, placed[m.id].rotation)
+        for m in unit.unit_models
+        if m.id in placed
+    }
+
+
+def place(game: Game, placement: dict[int, tuple[float, float, float]]) -> None:
+    # Puts the models where `placement` says (they're on the battlefield).
+    placed = deployment.positions(game)
+    for unit_model_id, (x, y, rotation) in placement.items():
+        position = placed[unit_model_id]
+        position.x, position.y, position.rotation = x, y, rotation
 
 
 def move_unit(

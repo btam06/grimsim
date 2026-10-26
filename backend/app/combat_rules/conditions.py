@@ -63,6 +63,15 @@ BELOW_STARTING_STRENGTH = "below_starting_strength"
 BELOW_HALF_STRENGTH = "below_half_strength"
 # "There are no other units from your opponent's army within 6\" of the target".
 ISOLATED_TARGET = "isolated_target"
+# "While this unit is controlling an objective" (e.g. Unyielding in the Face
+# of the Foe): its player controls an objective one of its models is on.
+CONTROLLING_OBJECTIVE = "controlling_objective"
+DEFENDER_CONTROLLING_OBJECTIVE = "defender_controlling_objective"
+# "An enemy unit within 9\" of this unit" (e.g. Purgatus Tactics).
+WITHIN_9_OF_TARGET = "within_9_of_target"
+TARGET_WITHIN_9 = "target_within_9"
+ANTI_NON_VEHICLE_4 = "anti_non_vehicle_4"
+WITHOUT_DEVASTATING_WOUNDS = "without_devastating_wounds"
 
 PRE_WEAPON = "pre_weapon"
 CHARGED = "charged"
@@ -416,6 +425,35 @@ def ranged_vs_objective_target(context: dict) -> bool:
     return context.get("is_ranged", False) and defender_in_range_of_objective(context)
 
 
+def defender_controlling_objective(context: dict) -> bool:
+    # True at every step while the defending unit is controlling an objective
+    # (ticked under Positioning, or worked out in a game).
+    return CONTROLLING_OBJECTIVE in context.get("defender_positions", set())
+
+
+def target_within_9(context: dict) -> bool:
+    # True at every step while the target is within 9" of the attacking unit
+    # (ticked under Positioning, or measured in a game) - e.g. Purgatus
+    # Tactics.
+    return WITHIN_9_OF_TARGET in context.get("attacker_positions", set())
+
+
+def anti_non_vehicle_4(context: dict) -> bool:
+    # True at the wound step if the wound roll was a 4+ against a defending
+    # unit with no VEHICLE model (e.g. for "ANTI-non-VEHICLE 4+").
+    return (
+        context.get("step") == "wound"
+        and context.get("roll", 0) >= 4
+        and "VEHICLE" not in context.get("defender_keywords", set())
+    )
+
+
+def without_devastating_wounds(context: dict) -> bool:
+    # The attack's weapon doesn't have [DEVASTATING WOUNDS] of its own - e.g.
+    # "(excluding [DEVASTATING WOUNDS] attacks)".
+    return "Devastating Wounds" not in context.get("weapon_ability_names", set())
+
+
 CORE_CONDITIONS = {
     CRITICAL_HIT: critical_hit,
     CRITICAL_WOUND: critical_wound,
@@ -461,6 +499,10 @@ CORE_CONDITIONS = {
     TARGET_ISOLATED: target_isolated,
     TARGET_TITANIC: target_titanic,
     RANGED_VS_OBJECTIVE_TARGET: ranged_vs_objective_target,
+    TARGET_WITHIN_9: target_within_9,
+    DEFENDER_CONTROLLING_OBJECTIVE: defender_controlling_objective,
+    ANTI_NON_VEHICLE_4: anti_non_vehicle_4,
+    WITHOUT_DEVASTATING_WOUNDS: without_devastating_wounds,
 }
 
 

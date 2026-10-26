@@ -85,11 +85,13 @@ async def _unit(
         name=name, faction_id=faction_id, save=3, toughness=4, oc=1, movement=6, wounds=2,
         leadership=6, abilities=abilities, base_size=await _base_size(session, base),
     )
-    for keyword in keywords:
-        query = select(Keyword).where(Keyword.name == keyword)
-        model.keywords.append(
-            (await session.execute(query)).scalar_one_or_none() or Keyword(name=keyword)
-        )
+    # (No autoflush: the model isn't in the session yet.)
+    with session.no_autoflush:
+        for keyword in keywords:
+            query = select(Keyword).where(Keyword.name == keyword)
+            model.keywords.append(
+                (await session.execute(query)).scalar_one_or_none() or Keyword(name=keyword)
+            )
     weapons = []
     if weapon_range is not None:
         weapons = [
@@ -132,18 +134,19 @@ async def _unit(
     return unit.id
 
 
-async def _game(client, session, tmp_path, units=None, declare=True):
+async def _game(client, session, tmp_path, units=None, declare=True, first=2):
     # A game on the test layout, attacker seat 1. `units` is
     # {seat: [(name, count, kwargs)]}; by default each side has one unit of 5.
     # Both players have declared their battle formations (every unit on the
-    # battlefield), unless not `declare`.
+    # battlefield), unless not `declare`. Seat `first` goes first (None: the
+    # players roll off once everything is set up).
     ids = await _setup(client)
     await terrain_seed.seed(session, _layout_file(tmp_path))
     units = units or {1: [("Attackers", 5, {})], 2: [("Defenders", 5, {})]}
     for seat, specs in units.items():
         for name, count, kwargs in specs:
             await _unit(session, ids[f"list{seat}"], ids[f"faction{seat}"], name, count, **kwargs)
-    response = await client.post("/games", json=_game_payload(ids, attacker=1, first=2))
+    response = await client.post("/games", json=_game_payload(ids, attacker=1, first=first))
     assert response.status_code == 201, response.text
     game = response.json()
     if declare and game["status"] == "deployment":

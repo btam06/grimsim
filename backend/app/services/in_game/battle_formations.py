@@ -4,7 +4,7 @@ from fastapi import HTTPException
 
 from app.models import Game, GameBattleFormation, GameFormationsDone, GamePlayer, Unit
 from app.models.game import FORMATION_PLACES
-from app.services.in_game import deployment
+from app.services.in_game import deployment, embarked
 
 # Declaring battle formations, at the start of deployment: each player says
 # which of their units won't be set up on the battlefield -
@@ -12,8 +12,9 @@ from app.services.in_game import deployment
 # - In Strategic Reserves: up to half their army's points (by its units'
 #   points) can be.
 # - Embarked in a transport: in one of their TRANSPORT units (which can't
-#   itself embark). It doesn't count towards Strategic Reserves. (Transport
-#   capacity, and what can embark in what, aren't checked.)
+#   itself embark), within what it can carry (see
+#   app/services/in_game/embarked.py). It doesn't count towards Strategic
+#   Reserves.
 #
 # Neither is deployed. Each player says when they're done; once both are,
 # deployment begins (see app/services/in_game/deployment.py).
@@ -78,6 +79,8 @@ def set_formation(
             raise _bad_request(f"{transport.faction_unit.name} isn't a TRANSPORT")
         if is_transport(unit):
             raise _bad_request("a TRANSPORT can't embark in another")
+        if (reason := embarked.capacity_reason(game, unit, transport)) is not None:
+            raise _bad_request(reason)
     if place == "reserves":
         current = deployment.battle_formation(game, unit)
         already = current is not None and current.place == "reserves"

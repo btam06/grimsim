@@ -794,6 +794,9 @@ async def seed_datasheets(session: AsyncSession) -> None:
                             base_sizes, spec.base_size, "base size", datasheet.name
                         )
                         changed = True
+                    if spec.transport and model.transport is None:
+                        model.transport = spec.transport
+                        changed = True
                     faction_ability_names = {a.name for a in model.faction_abilities}
                     for name in spec.faction_abilities:
                         if name not in faction_ability_names:
@@ -893,6 +896,7 @@ async def seed_datasheets(session: AsyncSession) -> None:
                         ],
                         weapons=[build_weapon(w, datasheet.name) for w in spec.weapons],
                         wargear=[build_wargear(g, datasheet.name) for g in spec.wargear],
+                        transport=spec.transport,
                     )
                 )
                 changed = True

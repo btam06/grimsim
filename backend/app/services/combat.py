@@ -36,6 +36,16 @@ def roll_dice_faces(notation: str) -> tuple[int, list[int]]:
     return sum(faces) + plus, faces
 
 
+def average_damage(notation: str) -> float:
+    # The average of a damage roll - e.g. "D3+2" -> 4.
+    match = _DICE_PATTERN.match(notation)
+    if match["flat"] is not None:
+        return float(match["flat"])
+    count = int(match["count"]) if match["count"] else 1
+    plus = int(match["plus"]) if match["plus"] else 0
+    return count * (int(match["die"]) + 1) / 2 + plus
+
+
 def wound_threshold(strength: int, toughness: int) -> int:
     # The wound roll needed scales with how attacker strength compares to defender
     # toughness: double (or more) strength wounds easiest, double toughness hardest.
@@ -94,21 +104,30 @@ def _apply_triggered_effects(
 ) -> None:
     # Checked at every step (pre-hit/hit/wound/save): for each ability in play
     # - whether from the weapon itself or from wargear equipped on the same
-    # model - if *any* of its conditions match the current step, apply *all*
-    # of its effects. Unknown keywords (a condition/effect row with no matching
-    # hardcoded implementation) are simply ignored.
+    # model - if *all* of its conditions match the current step (and it has
+    # at least one), apply *all* of its effects. Unknown keywords (a
+    # condition/effect row with no matching hardcoded implementation) are
+    # simply ignored.
     for ability in abilities:
-        matched = any(
-            CONDITIONS[_keyword(condition)](context)
+        known = [
+            CONDITIONS[_keyword(condition)]
             for condition in ability.conditions
             if _keyword(condition) in CONDITIONS
-        )
-        if not matched:
+        ]
+        if not known or not all(check(context) for check in known):
             continue
         for effect in ability.effects:
             handler = EFFECTS.get(_keyword(effect))
             if handler is not None:
                 handler(state, pending)
+
+
+def _protective(ability) -> bool:
+    # Whether an ability only protects the model that has it (every effect is
+    # one of OWN_UNIT_EFFECTS - e.g. an invulnerable save).
+    return bool(ability.effects) and all(
+        _keyword(e) in OWN_UNIT_EFFECTS for e in ability.effects
+    )
 
 
 # eq=False: targets are removed from the queue by identity, and two models
@@ -183,6 +202,9 @@ class CombatResult:
     # hazardous - those aren't recorded).
     fnp_rolls                  : list[int] = field(default_factory=list)
     total_damage               : int       = field(default=0)
+    # How many hits were scored (rolled or automatic, and any extra ones -
+    # e.g. Sustained Hits).
+    hits                       : int       = field(default=0)
     models_destroyed           : int       = field(default=0)
     defending_models_remaining : int       = field(default=0)
     # Self-inflicted hazard checks made by the attacking unit (one per
@@ -236,7 +258,10 @@ def resolve_combat(
     defender_wounds: dict[int, int] | None = None,
     attacker_wounds: dict[int, int] | None = None,
     snap_shots: bool = False,
+    extra_weapons: dict[int, list] | None = None,
 ) -> CombatResult:
+    # `extra_weapons`: more weapons attacking models fire, by unit model id
+    # (e.g. a transport's Firing Deck: its embarked models' weapons).
     # `firing`, if given, is which weapons each attacking model can fire on
     # the battlefield and whether each is within half range: {unit model id:
     # {weapon id: half range}} (see app/services/in_game/shooting.py). A model only
@@ -467,6 +492,17 @@ def resolve_combat(
                     "defender",
                 )
                 if isinstance(ability, Rule)
+            )
+            # Its wargear's protective abilities (e.g. a Shield Dome's 5+
+            # invulnerable save) - and those of wargear another model in the
+            # unit has that reaches the bearer's unit.
+            + tuple(
+                ability
+                for other in defender.unit_models
+                for gear in other.wargear
+                if other is unit_model or gear.scope == "bearers_unit"
+                for ability in gear.abilities
+                if _protective(ability)
             ),
         )
         for unit_model in ordered_unit_models
@@ -503,12 +539,15 @@ def resolve_combat(
             # weapon it fires, same as the weapon's own abilities - and so are
             # those on wargear another model in the unit has, if it reaches the
             # bearer's unit (e.g. an Omnispex).
+            # (Not protective ones, e.g. a Shield Dome's invulnerable save:
+            # those protect the bearer when it's attacked - see below.)
             wargear_abilities = [
                 ability
                 for other in attacker.unit_models
                 for gear in other.wargear
                 if other is unit_model or gear.scope == "bearers_unit"
                 for ability in gear.abilities
+                if not _protective(ability)
             ]
             own_stratagems = stratagems_for(unit_model)
             model_stratagems = [attack_effects(s) for s in own_stratagems]
@@ -555,8 +594,13 @@ def resolve_combat(
             # against its own wounds once it's done firing (see below).
             model_hazardous_damage = 0
 
-            # Its own weapons, and any its enhancement gives it (e.g. TL-4Ø9).
-            for weapon in list(unit_model.weapons) + enhancement_rules.granted_weapons(unit_model):
+            # Its own weapons, any its enhancement gives it (e.g. TL-4Ø9), and any
+            # more it fires (e.g. a Firing Deck's).
+            for weapon in (
+                list(unit_model.weapons)
+                + enhancement_rules.granted_weapons(unit_model)
+                + (extra_weapons or {}).get(unit_model.id, [])
+            ):
                 # Only weapons the caller chose to fire/swing with this attack count.
                 if weapon.id not in selected_weapon_ids:
                     continue
@@ -844,6 +888,7 @@ def resolve_combat(
         # Wound phase: every hit rolls to wound. Nothing has been destroyed yet
         # this phase, so each wound roll is against the Toughness of the model
         # its attack will be allocated to first.
+        result.hits += len(successful_hits)
         if not targets:
             continue  # the defending unit was wiped out by an earlier profile
         wounds: list[tuple[dict, dict]] = []
@@ -979,13 +1024,23 @@ def resolve_combat(
                     attack,
                     deque(),
                 )
-                save_passed = save_roll >= save_needed
+                # +1 to the save roll (an unmodified 1 still fails).
+                bonus = 1 if attack.get("plus_one_to_save") else 0
+                save_passed = save_roll != 1 and save_roll + bonus >= save_needed
             if save_passed:
                 continue  # save succeeded - no damage from this attack
 
             # Damage roll: how many wounds this one failed save inflicts, plus any
             # bonus for the weapon (e.g. Melta within half range).
             rolled_damage, damage_faces = roll_dice_faces(weapon.damage)
+            # A damage roll that can be re-rolled is, if it's below average.
+            if (
+                damage_faces
+                and attack.get("reroll_damage")
+                and rolled_damage < average_damage(weapon.damage)
+            ):
+                weapon_result.damage_rolls.extend(damage_faces)
+                rolled_damage, damage_faces = roll_dice_faces(weapon.damage)
             weapon_result.damage_rolls.extend(damage_faces)
             damage = (
                 rolled_damage

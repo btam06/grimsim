@@ -1,21 +1,33 @@
 from app.combat_rules import Rule, RuleOption
-from app.combat_rules.conditions import ALWAYS
+from app.combat_rules.conditions import (
+    ALWAYS,
+    CHARGED,
+    CRITICAL_HIT,
+    DEFENDER_CONTROLLING_OBJECTIVE,
+    DEFENDER_IN_RANGE_OF_OBJECTIVE,
+    RANGED_ATTACK,
+    STRENGTH_EXCEEDS_TOUGHNESS,
+    TARGET_MONSTER_OR_VEHICLE,
+    TARGET_NOT_MONSTER_OR_VEHICLE,
+    TARGET_WITHIN_9,
+)
 from app.combat_rules.effects import (
     ADD_EXTRA_HIT,
     AUTO_PASS_WOUND,
     MINUS_ONE_TO_HIT,
     MINUS_ONE_TO_WOUND,
+    PLUS_ONE_TO_SAVE,
     PRECISION,
+    REROLL_DAMAGE,
     REROLL_HIT_ONES,
     REROLL_WOUND_ONES,
 )
 from app.seeds.factions.space_marines.conditions import (
-    ASSAULT_DOCTRINE_TARGET_WITHIN_9,
-    CHARGED_CLAWS_CRITICAL_VS_NON_MONSTER_VEHICLE,
-    CHARGED_HAMMER_CRITICAL_VS_MONSTER_VEHICLE,
-    DEVASTATOR_DOCTRINE_CRITICAL_HIT,
-    STANDARD_FALL,
-    TACTICAL_DOCTRINE_CRITICAL_HIT,
+    ASSAULT_DOCTRINE_ACTIVE,
+    DEVASTATOR_DOCTRINE_ACTIVE,
+    LIGHTNING_CLAWS_WEAPON,
+    TACTICAL_DOCTRINE_ACTIVE,
+    THUNDER_HAMMER_WEAPON,
 )
 
 # Space Marines datasheet abilities - see app/seeds/datasheet_abilities.py for
@@ -133,6 +145,43 @@ ENTRIES = [
         [],
         [],
     ),
+    (
+        "Unyielding in the Face of the Foe",
+        "While this unit is controlling an objective, this unit has +1 to save rolls.",
+        [],
+        [],
+    ),
+    (
+        # In a game, see SHOCK_DISEMBARK_AFTER below.
+        "Rapid Disembarkation",
+        "In your Movement phase, when this unit ends an advance move, units embarked within "
+        "this unit can make a shock disembark move.",
+        [],
+        [],
+    ),
+    (
+        # The Deathwatch Terminator Squad's - not the Terminator Assault
+        # Squad's Terminatus Assault, which shares its name.
+        "Terminatus Assault (Deathwatch)",
+        "This unit can re-roll charge rolls. After this unit ends a charge move, each enemy unit "
+        "engaged with this unit makes a battle-shock roll, with -1 to that battle-shock roll if "
+        "it's a non-IMPERIUM/CHAOS unit.",
+        [],
+        [],
+    ),
+    (
+        "Total Obliteration",
+        "This unit's ranged attacks can re-roll damage rolls.",
+        [],
+        [],
+    ),
+    (
+        "Flexible Asset",
+        "When this unit is selected to make an advance/fall-back move, that advance/fall-back "
+        "move does not prevent this unit from being eligible to start an action.",
+        [],
+        [],
+    ),
     # Granted to KILL TEAM units by Deathwatch Support's Mission Tactics (see
     # detachments.json).
     (
@@ -162,7 +211,7 @@ ENTRIES = [
 RULES = {
     "Never Shall the Standard Fall": [
         Rule(
-            conditions=(STANDARD_FALL,),
+            conditions=(DEFENDER_IN_RANGE_OF_OBJECTIVE, STRENGTH_EXCEEDS_TOUGHNESS),
             effects=(MINUS_ONE_TO_WOUND,),
             side="defender",
             description=(
@@ -173,7 +222,9 @@ RULES = {
     ],
     "Terminatus Assault": [
         Rule(
-            conditions=(CHARGED_CLAWS_CRITICAL_VS_NON_MONSTER_VEHICLE,),
+            conditions=(
+                CRITICAL_HIT, CHARGED, LIGHTNING_CLAWS_WEAPON, TARGET_NOT_MONSTER_OR_VEHICLE
+            ),
             effects=(ADD_EXTRA_HIT,),
             description=(
                 "After charging: Lightning Claws have [SUSTAINED HITS 1] against a unit with no "
@@ -181,7 +232,7 @@ RULES = {
             ),
         ),
         Rule(
-            conditions=(CHARGED_HAMMER_CRITICAL_VS_MONSTER_VEHICLE,),
+            conditions=(CRITICAL_HIT, CHARGED, THUNDER_HAMMER_WEAPON, TARGET_MONSTER_OR_VEHICLE),
             effects=(ADD_EXTRA_HIT,),
             description=(
                 "After charging: Thunder Hammers have [SUSTAINED HITS 1] against a unit with a "
@@ -189,23 +240,41 @@ RULES = {
             ),
         ),
     ],
+    "Total Obliteration": [
+        Rule(
+            conditions=(RANGED_ATTACK,),
+            effects=(REROLL_DAMAGE,),
+            description="Ranged attacks re-roll a damage roll below its average.",
+        ),
+    ],
+    "Unyielding in the Face of the Foe": [
+        Rule(
+            conditions=(DEFENDER_CONTROLLING_OBJECTIVE,),
+            effects=(PLUS_ONE_TO_SAVE,),
+            side="defender",
+            description=(
+                "+1 to save rolls while this unit is controlling an objective (ticked under "
+                "Positioning)."
+            ),
+        ),
+    ],
     "Furor Tactics": [
         Rule(
-            conditions=(DEVASTATOR_DOCTRINE_CRITICAL_HIT,),
+            conditions=(CRITICAL_HIT, DEVASTATOR_DOCTRINE_ACTIVE),
             effects=(ADD_EXTRA_HIT,),
             description="[SUSTAINED HITS 1] while the Devastator Doctrine is active.",
         ),
     ],
     "Malleus Tactics": [
         Rule(
-            conditions=(TACTICAL_DOCTRINE_CRITICAL_HIT,),
+            conditions=(CRITICAL_HIT, TACTICAL_DOCTRINE_ACTIVE),
             effects=(AUTO_PASS_WOUND,),
             description="[LETHAL HITS] while the Tactical Doctrine is active.",
         ),
     ],
     "Purgatus Tactics": [
         Rule(
-            conditions=(ASSAULT_DOCTRINE_TARGET_WITHIN_9,),
+            conditions=(ASSAULT_DOCTRINE_ACTIVE, TARGET_WITHIN_9),
             effects=(PRECISION,),
             description=(
                 "[PRECISION] while the Assault Doctrine is active, against a target within 9\" "
@@ -271,6 +340,18 @@ CALCULATOR_NOTES = {
         "active for this unit."
     ),
     "Author of the Codex": "Descriptive only: not modelled in a game yet.",
+    "Terminatus Assault (Deathwatch)": (
+        "Descriptive only in the calculator; in a game, the unit can re-roll its charge roll, "
+        "and enemy units engaged with it after its charge move take Battle-shock tests."
+    ),
+    "Flexible Asset": (
+        "Descriptive only in the calculator; in a game, Advancing or Falling Back doesn't stop "
+        "it starting an action."
+    ),
+    "Rapid Disembarkation": (
+        "Descriptive only in the calculator; in a game, units can disembark from it after it "
+        "Advanced (a shock disembark: they can't declare a charge that turn)."
+    ),
     "Leader of Astartes": (
         "Descriptive only in the calculator; in a game, models more than 12\" away can't shoot "
         "it while it's within 3\" of a friendly ADEPTUS ASTARTES INFANTRY unit."
@@ -305,3 +386,19 @@ SECURES_OBJECTIVES = {"Raise the Banner": "movement"}
 # abilities' levels (see app/services/in_game/psychic.py).
 PSYKER_LEVELS = {"Librarian": 1}
 PSYCHIC_ABILITIES = {"Shrouding": 1, "Soul Sight": 1}
+
+# In a game: transport abilities that let units embarked in it make a shock
+# disembark move after it made one of these moves (see
+# app/services/in_game/embarked.py).
+SHOCK_DISEMBARK_AFTER = {"Rapid Disembarkation": ("advance",)}
+
+# In a game (see app/services/in_game/charging.py): abilities that let their
+# unit re-roll its charge roll, and that make the enemy units engaged with it
+# after its charge move take a Battle-shock test - with this modifier, unless
+# they have one of these keywords.
+CHARGE_REROLLS = {"Terminatus Assault (Deathwatch)"}
+AFTER_CHARGE_BATTLE_SHOCK = {"Terminatus Assault (Deathwatch)": (-1, ("IMPERIUM", "CHAOS"))}
+
+# In a game: abilities whose unit can still start an action after these moves
+# (see app/services/in_game/actions.py).
+ACTION_AFTER = {"Flexible Asset": ("advanced", "fell_back")}

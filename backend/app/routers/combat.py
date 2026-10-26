@@ -160,7 +160,11 @@ def _active_options(
     # - a datasheet ability's options, if any of the unit's models has it, or
     #   its enhancements or detachment rules grant it (e.g. Malefic Surge);
     # - a datasheet ability's army-wide options, if a model with it is in
-    #   another unit of the same faction in this unit's army list.
+    #   another unit of the same faction in this unit's army list - and, for
+    #   an ability whose option is chosen for one friendly unit with some
+    #   keywords (e.g. Rod of the War Forge: a SKITARII or THULIA GHULD unit
+    #   within 6"), only if this unit has one of them: picking the option
+    #   means this unit is the one chosen.
     active: set[str] = set()
     rules: list[Rule] = []
     keywords: set[str] = set()
@@ -186,6 +190,8 @@ def _active_options(
                 if option_name not in option_names or option_name in active:
                     continue
                 if army_wide_only and not option.army_wide:
+                    continue
+                if army_wide_only and not _can_be_chosen(unit, ability_name):
                     continue
                 active.add(option_name)
                 rules.extend(option.rules)
@@ -221,6 +227,20 @@ def _active_options(
     if granted:
         return _active_options(unit, option_names + granted, detachment_rules)
     return active, rules, keywords
+
+
+def _can_be_chosen(unit: Unit, ability_name: str) -> bool:
+    # Whether the unit could be the one an ability's option is chosen for
+    # (its CommandChoice's target keywords - none: any unit).
+    config = datasheet_ability_seeds.COMMAND_CHOICES.get(ability_name)
+    if config is None or not config.target_keywords:
+        return True
+    keywords = {
+        name
+        for unit_model in unit.unit_models
+        for name in enhancement_rules.model_keywords(unit, unit_model)
+    }
+    return bool(keywords & set(config.target_keywords))
 
 
 def _datasheet_option(option_name: str) -> RuleOption:
@@ -426,6 +446,50 @@ async def relevant_positions(
     ]
 
 
+async def _deck_weapons(
+    session: AsyncSession, firing_deck: list[tuple[int, int, int]]
+) -> tuple[dict[int, list], set]:
+    # The Firing Deck weapons, shaped like weapons for the combat engine, on
+    # the transport's model that fires them ({unit model id: [weapon]}), and
+    # their ids.
+    if not firing_deck:
+        return {}, set()
+    weapons = {
+        w.id: w
+        for w in (
+            await session.execute(
+                select(Weapon)
+                .options(
+                    selectinload(Weapon.abilities).selectinload(WeaponAbility.conditions),
+                    selectinload(Weapon.abilities).selectinload(WeaponAbility.effects),
+                )
+                .where(Weapon.id.in_({w for _, _, w in firing_deck}))
+            )
+        ).scalars()
+    }
+    extra: dict[int, list] = {}
+    ids = set()
+    for carrier_id, embarked_id, weapon_id in firing_deck:
+        weapon = weapons[weapon_id]
+        deck_id = ("deck", embarked_id, weapon_id)
+        extra.setdefault(carrier_id, []).append(
+            enhancement_rules.GrantedWeapon(
+                id=deck_id,
+                name=weapon.name,
+                weapon_type=weapon.weapon_type,
+                range=weapon.range,
+                attacks=weapon.attacks,
+                skill=weapon.skill,
+                strength=weapon.strength,
+                ap=weapon.ap,
+                damage=weapon.damage,
+                abilities=list(weapon.abilities),
+            )
+        )
+        ids.add(deck_id)
+    return extra, ids
+
+
 @router.post("", response_model=CombatOut)
 async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_session)):
     return await calculate(session, payload)
@@ -437,11 +501,16 @@ async def calculate(
     firing: dict[int, dict] | None = None,
     defender_wounds: dict[int, int] | None = None,
     attacker_wounds: dict[int, int] | None = None,
+    firing_deck: list[tuple[int, int, int]] | None = None,
+    attacker_extra_rules: list[Rule] | None = None,
 ) -> CombatOut:
     # Resolves an attack (see app/services/combat.py). `firing` is which
     # weapons each attacking model can fire and at half range or not, when
     # that's known from the battlefield (see app/services/in_game/shooting.py); the
     # wounds are each model's left in a game (see app/services/in_game/casualties.py).
+    # `firing_deck`: weapons of models embarked in the attacking transport it
+    # fires as if it had them (Firing Deck), as (its model's unit model id,
+    # the embarked unit model's id, weapon id) - all of them fired.
     attacker = await _load_unit(session, payload.attacking_unit_id)
     if attacker is None:
         raise HTTPException(status_code=400, detail="invalid attacking_unit_id")
@@ -505,6 +574,8 @@ async def calculate(
         defender_detachment_rules,
     )
 
+    extra_weapons, deck_ids = await _deck_weapons(session, firing_deck or [])
+
     visible = True if payload.game_id is None else payload.defender_visible
     in_range = True if payload.game_id is None else payload.defender_in_range
 
@@ -512,7 +583,9 @@ async def calculate(
         attacker=attacker,
         defender=defender,
         selected_weapon_ids=set(payload.selected_weapon_ids)
-        | {("enhancement", i) for i in payload.selected_enhancement_weapon_ids},
+        | {("enhancement", i) for i in payload.selected_enhancement_weapon_ids}
+        | deck_ids,
+        extra_weapons=extra_weapons,
         in_engagement_range=payload.in_engagement_range,
         visible=visible,
         in_range=in_range,
@@ -525,7 +598,9 @@ async def calculate(
         apply_precision=payload.apply_precision,
         attacker_rules=attacker_option_rules
         + _datasheet_rules(attacker, attacker_detachment_rules)
-        + _stratagem_rules(stratagems, "attacker"),
+        + _stratagem_rules(stratagems, "attacker")
+        # (Rules only a game knows apply - e.g. Fire Support's re-roll.)
+        + list(attacker_extra_rules or []),
         defender_rules=defender_option_rules
         + _datasheet_rules(defender, defender_detachment_rules)
         + _stratagem_rules(defender_stratagems, "defender"),
@@ -562,6 +637,7 @@ async def calculate(
         fnp_rolls=result.fnp_rolls,
         total_damage=result.total_damage,
         models_destroyed=result.models_destroyed,
+        hits=result.hits,
         defending_models_remaining=result.defending_models_remaining,
         hazardous_rolls=result.hazardous_rolls,
         hazardous_wounds=result.hazardous_wounds,

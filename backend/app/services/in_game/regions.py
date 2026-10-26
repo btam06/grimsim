@@ -170,6 +170,11 @@ def _bases(game: Game, unit: Unit) -> list[Base]:
     ]
 
 
+def unit_bases(game: Game, unit: Unit) -> list[Base]:
+    # The bases of the unit's models on the battlefield.
+    return _bases(game, unit)
+
+
 def unit_within(game: Game, unit: Unit, polygon: list[Point]) -> bool:
     # Whether any of the unit's models is within the polygon.
     return any(base_within(b, polygon) for b in _bases(game, unit))
@@ -189,6 +194,55 @@ def unit_within_no_mans_land(game: Game, unit: Unit) -> bool:
 def unit_wholly_within_no_mans_land(game: Game, unit: Unit) -> bool:
     bases = _bases(game, unit)
     return bool(bases) and all(base_wholly_within_no_mans_land(game, b) for b in bases)
+
+
+# --- near other units ---
+
+
+def base_wholly_within_of(base: Base, others: list[Base], distance: float) -> bool:
+    # Whether every part of the base is within `distance` of one of `others`.
+    return any(
+        all(base_distance_to_point(o, p) <= distance + TOLERANCE for p in deployment.outline(base))
+        for o in others
+    )
+
+
+def friendly_units_with(game: Game, unit: Unit, keywords: tuple[str, ...]) -> list[Unit]:
+    # The unit's player's other units on the battlefield with a model that has
+    # every one of `keywords` (counting those its list gives it - e.g. a
+    # detachment's BATTLELINE).
+    from app.services.list_building import enhancements as enhancement_rules
+
+    player = deployment.owner(game, unit)
+    return [
+        other
+        for other in deployment.deployable_units(player)
+        if other.id != unit.id
+        and any(
+            set(keywords) <= enhancement_rules.model_keywords(other, m)
+            for m in deployment.models_on_battlefield(game, other)
+        )
+    ]
+
+
+def near_friendly(
+    game: Game, unit: Unit, keywords: tuple[str, ...], distance: float, wholly: bool = False
+) -> bool:
+    # Whether the unit is within `distance` of a friendly unit with
+    # `keywords` (one of its models within it of one of theirs) - or, if
+    # `wholly`, every one of its models is wholly within it of one.
+    bases = _bases(game, unit)
+    if not bases:
+        return False
+    for other in friendly_units_with(game, unit, keywords):
+        theirs = _bases(game, other)
+        if wholly and all(base_wholly_within_of(b, theirs, distance) for b in bases):
+            return True
+        if not wholly and any(
+            deployment.gap(b, t) <= distance + TOLERANCE for b in bases for t in theirs
+        ):
+            return True
+    return False
 
 
 # --- the centre, table quarters and battlefield edges ---

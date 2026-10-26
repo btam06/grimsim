@@ -401,8 +401,13 @@ async def test_seed_wargear_abilities_skips_if_conditions_or_effects_missing(
 ):
     await wargear_abilities.seed(session)
 
-    result = await session.execute(select(WargearAbility))
-    assert result.scalars().all() == []
+    # Only descriptive ones (no conditions or effects to look up) are seeded.
+    seeded = {a.name for a in (await session.execute(select(WargearAbility))).scalars()}
+    descriptive = {
+        name for name, _, conds, effects in wargear_abilities.ENTRIES if not (conds or effects)
+    }
+    assert seeded <= descriptive
+    assert "Ignores Cover" not in seeded
 
 
 async def test_seed_datasheet_abilities_creates_all_entries(session: AsyncSession):
@@ -705,24 +710,6 @@ async def test_seed_missions_rejects_an_unknown_disposition(session: AsyncSessio
     await dispositions.seed(session)
     with pytest.raises(ValueError, match="unknown disposition"):
         await missions.seed(session, path)
-
-
-async def test_seed_dispositions_renames_reconnaisance_in_place(session: AsyncSession):
-    old = Disposition(name="Reconnaisance")
-    session.add(old)
-    await session.commit()
-    old_id = old.id
-
-    await dispositions.seed(session)
-
-    rows = (
-        await session.execute(
-            select(Disposition.id, Disposition.name).where(
-                Disposition.name.in_(["Reconnaisance", "Reconnaissance"])
-            )
-        )
-    ).all()
-    assert rows == [(old_id, "Reconnaissance")]
 
 
 # --- datasheets, from app/data/factions/<faction>/datasheets.json ---

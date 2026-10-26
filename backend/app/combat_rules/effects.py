@@ -70,6 +70,10 @@ MINUS_ONE_DAMAGE = "minus_one_damage"
 PLUS_TWO_STRENGTH = "plus_two_strength"
 IGNORE_HIT_PENALTIES = "ignore_hit_penalties"
 IGNORE_WOUND_PENALTIES = "ignore_wound_penalties"
+PLUS_ONE_TO_SAVE = "plus_one_to_save"
+REROLL_DAMAGE = "reroll_damage"
+ADD_NINE_ATTACKS = "add_nine_attacks"
+ADD_FOUR_ATTACKS = "add_four_attacks"
 
 
 def auto_pass_wound(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
@@ -188,6 +192,32 @@ def cannot_attack(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None
     # This weapon can't be used against the current target at all (e.g. a
     # HUNTER profile against a unit without the keywords it hunts).
     state["cannot_attack"] = True
+
+
+def add_four_attacks(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # Queues four additional attacks for this weapon, each with its own hit
+    # roll (e.g. [RAPID FIRE 4]).
+    for _ in range(4):
+        pending.append({"auto_hit": False})
+
+
+def add_nine_attacks(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # Queues nine additional attacks for this weapon, each with its own hit
+    # roll (e.g. [RAPID FIRE 9]).
+    for _ in range(9):
+        pending.append({"auto_hit": False})
+
+
+def reroll_damage(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # This attack's damage roll can be re-rolled - it is, if it came up below
+    # its average (e.g. "can re-roll damage rolls").
+    state["reroll_damage"] = True
+
+
+def plus_one_to_save(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # Add 1 to the save roll against this attack (armour or invulnerable) - an
+    # unmodified 1 still fails. E.g. a defensive "+1 to save rolls".
+    state["plus_one_to_save"] = True
 
 
 def add_six_attacks(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
@@ -460,6 +490,10 @@ EFFECTS = {
     PLUS_TWO_STRENGTH: plus_two_strength,
     IGNORE_HIT_PENALTIES: ignore_hit_penalties,
     IGNORE_WOUND_PENALTIES: ignore_wound_penalties,
+    PLUS_ONE_TO_SAVE: plus_one_to_save,
+    REROLL_DAMAGE: reroll_damage,
+    ADD_NINE_ATTACKS: add_nine_attacks,
+    ADD_FOUR_ATTACKS: add_four_attacks,
 }
 
 

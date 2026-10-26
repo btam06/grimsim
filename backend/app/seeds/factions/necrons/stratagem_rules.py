@@ -17,8 +17,8 @@ from app.seeds.factions.necrons.conditions import (
 
 # Code-defined rules for Necrons stratagems, by stratagem name - for the parts a
 # stratagem's own conditions/effects (in stratagems.json) can't say, since
-# those apply all their effects when any condition matches: chiefly a second
-# tier, e.g. "if a NECRONS CHARACTER is leading your unit, ... instead". In
+# those are one set of conditions for all its effects: chiefly a second tier,
+# e.g. "if a NECRONS CHARACTER is leading your unit, ... instead". In
 # play while the stratagem is used, for the side the rule names. See
 # app/seeds/stratagems.py, which combines every faction's.
 RULES = {

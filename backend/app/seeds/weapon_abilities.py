@@ -31,6 +31,8 @@ from app.combat_rules.effects import (
     ADD_D6_PLUS_3_ATTACKS,
     ADD_EXTRA_ATTACK,
     ADD_EXTRA_HIT,
+    ADD_FOUR_ATTACKS,
+    ADD_NINE_ATTACKS,
     ADD_SIX_ATTACKS,
     ADD_THREE_ATTACKS,
     ADD_TWO_ATTACKS,
@@ -155,6 +157,12 @@ ENTRIES = [
         "This weapon makes 1 additional attack for every five models in the target unit.",
         [ALWAYS],
         [BLAST],
+    ),
+    (
+        "Blast 2",
+        "This weapon makes 2 additional attacks for every five models in the target unit.",
+        [ALWAYS],
+        [BLAST_2],
     ),
     (
         "Blistering Salvoes: Infantry",
@@ -328,6 +336,24 @@ ENTRIES = [
         "When the shooting model is within half range, this weapon makes 3 additional attacks.",
         [WITHIN_HALF_RANGE],
         [ADD_THREE_ATTACKS],
+    ),
+    (
+        "Rapid Fire 4",
+        "When the shooting model is within half range, this weapon makes 4 additional attacks.",
+        [WITHIN_HALF_RANGE],
+        [ADD_FOUR_ATTACKS],
+    ),
+    (
+        "Rapid Fire 9",
+        "When the shooting model is within half range, this weapon makes 9 additional attacks.",
+        [WITHIN_HALF_RANGE],
+        [ADD_NINE_ATTACKS],
+    ),
+    (
+        "Rapid Fire 6",
+        "When the shooting model is within half range, this weapon makes 6 additional attacks.",
+        [WITHIN_HALF_RANGE],
+        [ADD_SIX_ATTACKS],
     ),
     (
         "Rapid Fire D6+3",

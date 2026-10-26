@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Literal
 
+from app.models.model import TransportCapacity
 from app.seeds import data_files
 
 # The shape of a datasheet, loaded from app/data/factions/<faction>/datasheets.json
@@ -57,6 +58,8 @@ class ModelSpec:
     abilities: tuple[str, ...] = ()  # DatasheetAbility names
     weapons: tuple[WeaponSpec, ...] = field(default=())
     wargear: tuple[WargearSpec, ...] = field(default=())
+    # A TRANSPORT's capacity (see app/models/model.py TransportCapacity).
+    transport: TransportCapacity | None = None
 
 
 @dataclass(frozen=True)
@@ -82,7 +85,17 @@ def _model(data: dict) -> ModelSpec:
             "abilities": tuple(data.get("abilities", ())),
             "weapons": tuple(_weapon(w) for w in data.get("weapons", ())),
             "wargear": tuple(_wargear(g) for g in data.get("wargear", ())),
+            "transport": _transport(data["transport"]) if data.get("transport") else None,
         }
+    )
+
+
+def _transport(data: dict) -> TransportCapacity:
+    return TransportCapacity(
+        capacity=data["capacity"],
+        keywords=tuple(data.get("keywords", ())),
+        excluded_keywords=tuple(data.get("excluded_keywords", ())),
+        space=dict(data.get("space", {})),
     )
 
 

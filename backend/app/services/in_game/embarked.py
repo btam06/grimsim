@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from app.models import (
     Game,
     GameBattleFormation,
+    GameDisembarkation,
     GameModelPosition,
     GameUnitMove,
     GameUnitTransit,
@@ -21,8 +22,14 @@ from app.services.in_game.deployment import TOLERANCE, Base, Placement, gap
 # with every model wholly within 3" of its transport, not within Engagement
 # Range of an enemy unit (and on the battlefield, not overlapping, in
 # coherency - as when deploying) - unless its transport Advanced or Fell
-# Back this turn. If its transport has already moved this phase, that counts
-# as its Normal move (it can't move again); otherwise it can still move.
+# Back this turn (an assault disembark move). If its transport has already
+# moved this phase, that counts as its Normal move (it can't move again);
+# otherwise it can still move.
+#
+# A transport ability can let its units disembark after it Advanced anyway
+# (datasheet_abilities SHOCK_DISEMBARK_AFTER - e.g. Rapid Disembarkation): a
+# shock disembark move, set up the same way, after which the unit can't
+# declare a charge this turn.
 #
 # A unit can embark during the battle too: in its player's movement phase,
 # once it's made a Normal, Advance or Fall Back move that ended with every
@@ -30,8 +37,13 @@ from app.services.in_game.deployment import TOLERANCE, Base, Placement, gap
 # that transport - off the battlefield, as if it had started the battle
 # there. A unit can't embark and disembark in the same phase.
 #
-# (Transport capacity, and what happens to units inside a transport that's
-# destroyed, aren't modelled.)
+# A transport whose capacity was entered (Model.transport) can only carry
+# models with its keywords, without its excluded ones, up to its capacity -
+# some taking up more space than others (e.g. an Impulsor: 7 ADEPTUS ASTARTES
+# INFANTRY models, not TERMINATOR or JUMP PACK, each GRAVIS model taking up
+# the space of 2). One whose capacity wasn't entered can carry anything.
+# (What happens to units inside a destroyed transport: see
+# app/services/in_game/emergency.py.)
 
 DISEMBARK_RANGE = 3.0
 EMBARK_RANGE = 3.0
@@ -39,6 +51,9 @@ ENGAGEMENT_RANGE = 2.0
 # The kind of move (see GameUnitMove) disembarking from a transport that's
 # moved counts as.
 DISEMBARKED = "disembarked"
+# The transit (see GameUnitTransit) recorded, as well as "disembarked", for a
+# shock disembark move.
+SHOCK_DISEMBARKED = "shock_disembarked"
 
 
 def _bad_request(detail: str) -> HTTPException:
@@ -64,6 +79,58 @@ def embarked_units(game: Game, seat: int) -> list[tuple[Unit, Unit]]:
         if carrier is not None and deployment.is_deployed(carrier, placed):
             found.append((unit, carrier))
     return found
+
+
+def _capacities(carrier: Unit):
+    return [m.model.transport for m in carrier.unit_models if m.model.transport is not None]
+
+
+def _space(capacity, keywords: set[str]) -> int:
+    # The space a model with these keywords takes up in the transport.
+    return max([v for k, v in capacity.space.items() if k in keywords], default=1)
+
+
+def capacity_reason(game: Game, unit: Unit, carrier: Unit) -> str | None:
+    # Why the unit can't embark in the transport because of what it can carry
+    # (its keywords, and the room left after the units already in it), or
+    # None if it can.
+    from app.services.list_building import enhancements as enhancement_rules
+
+    capacities = _capacities(carrier)
+    if not capacities:
+        return None
+    # (A transport of several models: the first's rules, everyone's room.)
+    capacity = capacities[0]
+    total = sum(c.capacity for c in capacities)
+
+    def keywords(u: Unit, unit_model) -> set[str]:
+        return enhancement_rules.model_keywords(u, unit_model)
+
+    name = carrier.faction_unit.name
+    models = surviving_models(game, unit)
+    for unit_model in models:
+        held = keywords(unit, unit_model)
+        missing = [k for k in capacity.keywords if k not in held]
+        if missing:
+            return f"{name} can only carry {' '.join(capacity.keywords)} models"
+        excluded = [k for k in capacity.excluded_keywords if k in held]
+        if excluded:
+            return f"{name} can't carry {'/'.join(excluded)} models"
+    others = [
+        u
+        for u in deployment.deployable_units(deployment.owner(game, carrier))
+        if u.id != unit.id and getattr(transport(game, u), "id", None) == carrier.id
+    ]
+    used = sum(
+        _space(capacity, keywords(u, m)) for u in others for m in surviving_models(game, u)
+    )
+    needed = sum(_space(capacity, keywords(unit, m)) for m in models)
+    if used + needed > total:
+        return (
+            f"there isn't room in {name}: {total - used} of its {total} spaces are free, "
+            f"and the unit needs {needed}"
+        )
+    return None
 
 
 def _transport_bases(game: Game, carrier: Unit) -> list[Base]:
@@ -105,6 +172,33 @@ def _check_phase(game: Game, unit: Unit, what: str) -> None:
         raise _bad_request("the movement phase is over")
 
 
+def _shock_moves(carrier: Unit) -> set[str]:
+    # The moves after which the transport's units can shock disembark.
+    from app.seeds import datasheet_abilities
+
+    config = datasheet_abilities.SHOCK_DISEMBARK_AFTER
+    return {
+        kind
+        for m in carrier.unit_models
+        for a in m.model.abilities
+        for kind in config.get(a.name, ())
+    }
+
+
+def shock(game: Game, carrier: Unit) -> bool:
+    # Whether disembarking from the transport now is a shock disembark move:
+    # it made a move this phase that only a shock disembark is allowed after.
+    from app.services.in_game import movement
+
+    moved = movement.unit_move(game, carrier)
+    return (
+        moved is not None
+        and moved.completed
+        and moved.kind in ("advance", "fall_back")
+        and moved.kind in _shock_moves(carrier)
+    )
+
+
 def check_turn(game: Game, unit: Unit) -> Unit:
     # That the unit can disembark now; its transport.
     from app.services.in_game import movement
@@ -118,22 +212,15 @@ def check_turn(game: Game, unit: Unit) -> Unit:
     if transited(game, unit, "embarked"):
         raise _bad_request("it embarked this phase: it can't disembark in the same phase")
     moved = movement.unit_move(game, carrier)
-    if moved is not None and moved.completed and moved.kind in ("advance", "fall_back"):
+    if (
+        moved is not None
+        and moved.completed
+        and moved.kind in ("advance", "fall_back")
+        and not shock(game, carrier)
+    ):
         what = "Advanced" if moved.kind == "advance" else "Fell Back"
         raise _bad_request(f"its transport {what} this turn")
     return carrier
-
-
-def _wholly_within(base: Base, carriers: list[Base], distance: float) -> bool:
-    # Whether every part of the base is within `distance` of one of the
-    # transport's models.
-    return any(
-        all(
-            regions.base_distance_to_point(c, p) <= distance + TOLERANCE
-            for p in deployment.outline(base)
-        )
-        for c in carriers
-    )
 
 
 def surviving_models(game: Game, unit: Unit):
@@ -157,7 +244,7 @@ def check_disembark(
     for model in models:
         base = bases[model.id]
         found = []
-        if not _wholly_within(base, carriers, DISEMBARK_RANGE):
+        if not regions.base_wholly_within_of(base, carriers, DISEMBARK_RANGE):
             found.append('isn\'t wholly within 3" of its transport')
         if any(gap(base, e) <= ENGAGEMENT_RANGE + TOLERANCE for e in enemies):
             found.append("is within Engagement Range of an enemy model")
@@ -179,6 +266,16 @@ def disembark(game: Game, unit: Unit, placement: dict[int, tuple[float, float, f
         )
     game.battle_formations.remove(deployment.battle_formation(game, unit))
     _record(game, unit, "disembarked")
+    game.disembarkations.append(
+        GameDisembarkation(
+            unit_id=unit.id,
+            transport_unit_id=carrier.id,
+            battle_round=game.battle_round,
+            turn_seat=game.turn_seat,
+        )
+    )
+    if shock(game, carrier):
+        _record(game, unit, SHOCK_DISEMBARKED)
     moved = movement.unit_move(game, carrier)
     if moved is not None and moved.completed:
         game.unit_moves.append(
@@ -265,6 +362,8 @@ def embark(game: Game, unit: Unit, carrier: Unit) -> None:
             f'every model must be within 3" of {carrier.faction_unit.name}, one of its '
             "player's TRANSPORT units"
         )
+    if (reason := capacity_reason(game, unit, carrier)) is not None:
+        raise _bad_request(f"it can't embark: {reason}")
     models = {m.id for m in unit.unit_models}
     for position in [p for p in game.model_positions if p.unit_model_id in models]:
         game.model_positions.remove(position)

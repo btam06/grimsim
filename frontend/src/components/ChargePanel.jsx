@@ -85,6 +85,14 @@ function ChargePanel({
           </button>
         </div>
       )}
+      {selected?.can_reroll && (
+        // An ability lets it (e.g. Terminatus Assault): once, before it charges.
+        <div className="inline-controls">
+          <button type="button" onClick={() => onRoll(selected, true)}>
+            Re-roll charge
+          </button>
+        </div>
+      )}
 
       {canMove && (
         <>

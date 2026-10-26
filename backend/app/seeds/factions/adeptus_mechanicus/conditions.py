@@ -15,6 +15,7 @@ KASTELAN_RANGED_WEAPON = "kastelan_ranged_weapon"
 KASTELAN_MELEE_WEAPON = "kastelan_melee_weapon"
 TARGET_MODEL_KASTELAN = "target_model_kastelan"
 TARGET_MODEL_DATASMITH_LEADING_KASTELANS = "target_model_datasmith_leading_kastelans"
+NEUTRON_FUSIL_WEAPON = "neutron_fusil_weapon"
 
 # The calculator's Positioning: "within 6\" of a friendly ADEPTUS MECHANICUS
 # BATTLELINE unit" (see app/combat_rules/positions.py).
@@ -107,6 +108,11 @@ def target_model_datasmith_leading_kastelans(context: dict) -> bool:
     ) and "KASTELAN ROBOTS" in context.get("defender_keywords", set())
 
 
+def neutron_fusil_weapon(context: dict) -> bool:
+    # The attack is made with a neutron fusil - e.g. Monocular Targeting Helms.
+    return "neutron fusil" in context.get("weapon_name", "").lower()
+
+
 # {keyword: check}
 CONDITIONS = {
     MELEE_ATTACK_AGAINST_BATTLELINE: melee_attack_against_battleline,
@@ -120,6 +126,7 @@ CONDITIONS = {
     KASTELAN_MELEE_WEAPON: kastelan_melee_weapon,
     TARGET_MODEL_KASTELAN: target_model_kastelan,
     TARGET_MODEL_DATASMITH_LEADING_KASTELANS: target_model_datasmith_leading_kastelans,
+    NEUTRON_FUSIL_WEAPON: neutron_fusil_weapon,
 }
 
 # Seeded Condition rows: (keyword, name, description).
@@ -180,5 +187,10 @@ ENTRIES = [
         TARGET_MODEL_DATASMITH_LEADING_KASTELANS,
         "Target Model is a Datasmith Leading Kastelans",
         "The defending model is a CYBERNETICA DATASMITH in a unit with KASTELAN ROBOTS.",
+    ),
+    (
+        NEUTRON_FUSIL_WEAPON,
+        "Neutron Fusil Weapon",
+        "The attack is made with a neutron fusil (checked by its name).",
     ),
 ]

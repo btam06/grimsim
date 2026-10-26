@@ -216,6 +216,9 @@ export const getOverwatchTargets = (id, unitId) =>
 export const fireOverwatch = (id, payload) =>
   request(`/games/${id}/overwatch`, { method: 'POST', body: JSON.stringify(payload) })
 export const getCharge = (id) => request(`/games/${id}/charge`)
+// An ability can let a unit re-roll its charge roll, once.
+export const rerollCharge = (id, payload) =>
+  request(`/games/${id}/charge/reroll`, { method: 'POST', body: JSON.stringify(payload) })
 export const rollCharge = (id, payload) =>
   request(`/games/${id}/charge/roll`, { method: 'POST', body: JSON.stringify(payload) })
 export const getChargeTargets = (id, unitId) =>
@@ -328,3 +331,24 @@ export const discardSecondary = (id, cardId) =>
   request(`/games/${id}/secondaries/${cardId}/discard`, { method: 'POST' })
 export const scorePrimary = (id, payload) =>
   request(`/games/${id}/primary-score`, { method: 'POST', body: JSON.stringify(payload) })
+// Before the battle: the roll-off for who goes first, then Scouts moves (see
+// app/services/in_game/first_turn.py and scouts.py).
+export const rollFirstTurn = (id) => request(`/games/${id}/first-turn/roll`, { method: 'POST' })
+export const getScouts = (id) => request(`/games/${id}/scouts`)
+export const checkScoutMove = (id, payload) =>
+  request(`/games/${id}/scouts/check`, { method: 'POST', body: JSON.stringify(payload) })
+export const scoutMove = (id, payload) =>
+  request(`/games/${id}/scouts`, { method: 'POST', body: JSON.stringify(payload) })
+export const finishScouts = (id, payload) =>
+  request(`/games/${id}/scouts/done`, { method: 'POST', body: JSON.stringify(payload) })
+// Moving after shooting (e.g. Ride the Thermals - see
+// app/services/in_game/shoot_scoot.py).
+export const checkShootScoot = (id, payload) =>
+  request(`/games/${id}/shoot-scoot/check`, { method: 'POST', body: JSON.stringify(payload) })
+export const shootScoot = (id, payload) =>
+  request(`/games/${id}/shoot-scoot`, { method: 'POST', body: JSON.stringify(payload) })
+// The start of the Shooting phase (e.g. Secutor of Olympus - see
+// app/services/in_game/shooting_start.py).
+export const getShootingStart = (id) => request(`/games/${id}/shooting-start`)
+export const applyShootingStart = (id, payload) =>
+  request(`/games/${id}/shooting-start`, { method: 'POST', body: JSON.stringify(payload) })

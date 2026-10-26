@@ -6499,13 +6499,18 @@ def test_anti_walker_2_condition_checks_wound_roll_and_keyword():
     assert not check({"step": "hit", "roll": 6, "defender_keywords": {"WALKER"}})
 
 
-@pytest.mark.parametrize("option,expected_damage", [("The Fires of Mars", 1), (None, 0)])
+@pytest.mark.parametrize(
+    "option,keyword,expected_damage",
+    [("The Fires of Mars", "SKITARII", 1), (None, "SKITARII", 0), ("The Fires of Mars", None, 0)],
+)
 async def test_fires_of_mars_makes_both_imperatives_active_for_another_unit(
-    client: AsyncClient, session, monkeypatch, option, expected_damage
+    client: AsyncClient, session, monkeypatch, option, keyword, expected_damage
 ):
     # Thulia Ghuld's Rod of the War Forge, elsewhere in the list: The Fires of
-    # Mars makes both Imperatives active, so Murderous Imperative re-rolls a
-    # Hit roll of 1 (Protector) and a Wound roll of 1 (Conqueror).
+    # Mars makes both Imperatives active for the SKITARII (or THULIA GHULD)
+    # unit it's chosen for, so Murderous Imperative re-rolls a Hit roll of 1
+    # (Protector) and a Wound roll of 1 (Conqueror). Another unit can't be
+    # chosen.
     from app.seeds import factions as factions_seed
 
     await factions_seed.seed(session)
@@ -6543,11 +6548,15 @@ async def test_fires_of_mars_makes_both_imperatives_active_for_another_unit(
 
     thulia = await _create_model(client, admech, ability_ids=[abilities["Rod of the War Forge"]])
     await listed_unit(thulia)
+    keyword_ids = []
+    if keyword:
+        keyword_ids = [(await client.post("/keywords", json={"name": keyword})).json()["id"]]
     skitarii = await _create_model(
         client,
         admech,
         faction_ability_ids=[doctrina],
         ability_ids=[abilities["Murderous Imperative"]],
+        keyword_ids=keyword_ids,
     )
     weapon_id = await _create_weapon(client, skitarii, weapon_type="ranged")
     attacker = await listed_unit(skitarii, [weapon_id])

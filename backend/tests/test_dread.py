@@ -117,14 +117,15 @@ async def test_the_targets_state_goes_to_the_calculator(client: AsyncClient, ses
     await _destroy(session, game_id, a, 1)
     loaded = await _load_game(session, game_id)
     assert _defender_positions(loaded, unit) == ["below_starting_strength"]
-    # 1 of 3, and on the objective.
+    # 1 of 3, and on the objective (controlling it, with no enemy there).
     await _destroy(session, game_id, a, 2)
     a = _unit_named(await _deployment(client, game_id), "A")
     survivors = {**a, "models": [m for m in a["models"] if m["position"]]}
     await _place(session, survivors, [(10, 10)])
     loaded = await _load_game(session, game_id)
     assert _defender_positions(loaded, unit) == [
-        "below_starting_strength", "below_half_strength", "in_range_of_objective"
+        "below_starting_strength", "below_half_strength", "in_range_of_objective",
+        "controlling_objective",
     ]
 
 

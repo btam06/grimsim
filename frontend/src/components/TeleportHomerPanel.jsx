@@ -1,4 +1,4 @@
-// Teleport Homers (see app/services/in_game/teleport_homer.py): at the start
+// Teleport Homers (see app/seeds/factions/space_marines/teleport_homer.py): at the start
 // of the battle, each player can set up one token for each of their units
 // with a Teleport Homer, anywhere on the battlefield - pick a unit, then click
 // the board - and says when they're done. The game waits until both are.

@@ -186,6 +186,17 @@ model that doesn't have one yet.
 }
 ```
 
+A TRANSPORT model can have a `transport`: how many models it can carry
+(`capacity`), the keywords each needs (`keywords`, all of them) or can't have
+(`excluded_keywords`, any of them), and the space a model with a keyword takes
+up (`space` - otherwise 1). A transport without one can carry anything. It's
+filled in on an existing model that doesn't have one yet.
+
+```json
+"transport": {"capacity": 7, "keywords": ["ADEPTUS ASTARTES", "INFANTRY"],
+              "excluded_keywords": ["TERMINATOR", "JUMP PACK"], "space": {"GRAVIS": 2}}
+```
+
 Repeat a weapon to give a model several of it (e.g. three heavy stubbers).
 Mark the weapons a model is equipped with by default (its datasheet's "This
 model is equipped with: ...") with `"default": true`; they're pre-selected when

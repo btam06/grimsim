@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 
 from fastapi import HTTPException
@@ -8,9 +9,18 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.combat_rules.effects import ASSAULT
-from app.models import DetachmentRule, Effect, Game, GameUnitMove, Unit, UnitModel, WeaponAbility
+from app.models import (
+    DetachmentRule,
+    Effect,
+    Game,
+    GameFiringDeckUse,
+    GameUnitMove,
+    Unit,
+    UnitModel,
+    WeaponAbility,
+)
 from app.services import weapon_profiles
-from app.services.in_game import actions, command_phase, deployment
+from app.services.in_game import actions, command_phase, deployment, embarked
 from app.services.in_game import movement
 from app.services.in_game.deployment import TOLERANCE, Base, Point, gap, outline
 from app.services.in_game.terrain import area_polygon, feature_polygons, within
@@ -38,7 +48,14 @@ from app.services.list_building.enhancements import granted_weapons
 #   within range (base to base) - at half range if one is within half.
 # - Whether the target is in cover: it's INFANTRY, BEAST or SWARM, and every
 #   model in it is on a terrain area.
+# - A TRANSPORT with Firing Deck N can also fire the ranged weapons of up to N
+#   models embarked in it, as if it had them (measured from it). Its
+#   firing-deck weapons are grouped by weapon (ids ("deck", weapon id)): each
+#   one chosen is fired by the embarked models carrying it - the first N
+#   models carrying any chosen one. Then, until the end of the turn, the
+#   units embarked in it aren't eligible to shoot.
 
+FIRING_DECK = re.compile(r"^Firing Deck (\d+)$")
 DENSE = "ruin_wall"
 COVER_KEYWORDS = {"INFANTRY", "BEAST", "SWARM"}
 # Points around each base sight lines are drawn between (and its centre).
@@ -55,6 +72,99 @@ def is_shooting_phase(game: Game) -> bool:
 
 def _this_turn(game: Game, record) -> bool:
     return record.battle_round == game.battle_round and record.turn_seat == game.turn_seat
+
+
+def firing_deck(unit: Unit) -> int:
+    # How many embarked models' weapons the unit can fire (Firing Deck N), if
+    # any.
+    return max(
+        (
+            int(match.group(1))
+            for m in unit.unit_models
+            for a in m.model.abilities
+            if (match := FIRING_DECK.match(a.name))
+        ),
+        default=0,
+    )
+
+
+def _deck_carrier(unit: Unit) -> UnitModel | None:
+    # The model with Firing Deck (the deck's weapons are fired from it).
+    return next(
+        (m for m in unit.unit_models if any(FIRING_DECK.match(a.name) for a in m.model.abilities)),
+        None,
+    )
+
+
+def deck_models(game: Game, transport: Unit) -> list[UnitModel]:
+    # The models embarked in the transport (not destroyed), in unit order.
+    player = deployment.owner(game, transport)
+    return [
+        m
+        for unit in deployment.deployable_units(player)
+        if getattr(embarked.transport(game, unit), "id", None) == transport.id
+        for m in embarked.surviving_models(game, unit)
+    ]
+
+
+def deck_weapons(
+    game: Game, transport: Unit, weapon_ids: set[int] | None = None
+) -> list[tuple[UnitModel, object]]:
+    # The (embarked model, ranged weapon) pairs the transport's Firing Deck
+    # fires: with `weapon_ids`, those weapons, from the first N models carrying
+    # any of them; without, every embarked model's (to show what it could).
+    limit = firing_deck(transport)
+    if not limit:
+        return []
+    pairs = []
+    chosen = 0
+    for unit_model in deck_models(game, transport):
+        # (Their own weapons - not an enhancement's.)
+        weapons = [
+            w
+            for w in unit_model.weapons
+            if w.weapon_type != "melee" and w.range and (weapon_ids is None or w.id in weapon_ids)
+        ]
+        if not weapons:
+            continue
+        if weapon_ids is not None:
+            if chosen == limit:
+                break
+            chosen += 1
+        pairs += [(unit_model, w) for w in weapons]
+    return pairs
+
+
+def deck_id(unit_model: UnitModel, weapon) -> tuple:
+    # A firing-deck weapon as the combat calculator fires it.
+    return ("deck", unit_model.id, weapon.id)
+
+
+def deck_closed(game: Game, unit: Unit) -> bool:
+    # Whether the unit is in (or got out of) a transport that used its Firing
+    # Deck this turn: it isn't eligible to shoot until the end of the turn.
+    return any(
+        u.unit_id == unit.id
+        and u.battle_round == game.battle_round
+        and u.turn_seat == game.turn_seat
+        for u in game.firing_deck_uses
+    )
+
+
+def record_deck(game: Game, transport: Unit) -> None:
+    # The transport used its Firing Deck: the units in it can't shoot this
+    # turn.
+    player = deployment.owner(game, transport)
+    for unit in deployment.deployable_units(player):
+        if getattr(embarked.transport(game, unit), "id", None) == transport.id:
+            game.firing_deck_uses.append(
+                GameFiringDeckUse(
+                    unit_id=unit.id,
+                    transport_unit_id=transport.id,
+                    battle_round=game.battle_round,
+                    turn_seat=game.turn_seat,
+                )
+            )
 
 
 def unit_shot(game: Game, unit: Unit):
@@ -369,6 +479,33 @@ def reach(game: Game, unit: Unit, target: Unit, assault: set | None = None) -> T
                 entry.in_range += 1
                 entry.half_range = entry.half_range or half
                 firing.setdefault(unit_model.id, {})[weapon.id] = half
+    # Its Firing Deck: the embarked models' weapons, fired from the model with
+    # it.
+    carrier = _deck_carrier(unit)
+    base = shooters.get(carrier.id) if carrier is not None else None
+    if base is not None:
+        gaps = [gap(base, t) for t in targets if can_see(base, t, walls)]
+        nearest = min(gaps, default=None)
+        for embarked_model, weapon in deck_weapons(game, unit):
+            entry = reaches.setdefault(
+                ("deck", weapon.id),
+                WeaponReach(
+                    id=("deck", weapon.id),
+                    name=f"{weapon.name} (Firing Deck)",
+                    range=weapon.range,
+                    assault=weapon.id in assault,
+                    unusable=advanced and weapon.id not in assault,
+                ),
+            )
+            entry.carried_by += 1
+            if entry.unusable:
+                continue
+            limit = min(weapon.range, LONE_OPERATIVE_RANGE) if lone else weapon.range
+            if nearest is not None and nearest <= limit + TOLERANCE:
+                half = nearest <= weapon.range / 2 + TOLERANCE
+                entry.in_range += 1
+                entry.half_range = entry.half_range or half
+                firing.setdefault(carrier.id, {})[deck_id(embarked_model, weapon)] = half
     # (Soul Sight: ranged attacks that target it ignore cover this phase.)
     from app.services.in_game import psychic
 
@@ -520,6 +657,8 @@ def cant_shoot_reason(game: Game, unit: Unit, assault: set | None = None) -> str
         return "it isn't on the battlefield"
     if unit_shot(game, unit) is not None:
         return "it has already shot this phase"
+    if deck_closed(game, unit):
+        return "its transport fired its weapons with Firing Deck this turn"
     if (reason := actions.blocks(game, unit, "shoot")) is not None:
         return reason
     if move_status(game, unit).fell_back and not command_phase.eligible_after(
@@ -528,7 +667,9 @@ def cant_shoot_reason(game: Game, unit: Unit, assault: set | None = None) -> str
         return "it Fell Back this turn"
     if movement.in_engagement_range(game, unit):
         return "it's within Engagement Range of an enemy unit"
-    if not any(ranged_weapons(m) for m in deployment.models_on_battlefield(game, unit)):
+    if not any(
+        ranged_weapons(m) for m in deployment.models_on_battlefield(game, unit)
+    ) and not deck_weapons(game, unit):
         return "it has no ranged weapons"
     if move_status(game, unit).advanced and not assault:
         return "it Advanced, and has no Assault weapons"

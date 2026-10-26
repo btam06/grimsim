@@ -4,6 +4,7 @@ import {
   listAvailableEnhancements,
   listAvailableUpgrades,
   listEnhancements,
+  listKeywords,
   listSelectableRules,
   updateUnit,
 } from '../api'
@@ -66,12 +67,33 @@ function UnitFormPage({
   const [selectableRules, setSelectableRules] = useState([])
   const [selectedRuleIds, setSelectedRuleIds] = useState(editingUnit?.selected_rule_ids ?? [])
   const selectedRuleKey = selectedRuleIds.join(',')
+  // The CHARACTER keyword's id, to tell which models can be the list's
+  // Warlord; which of the unit's models is (its index), if one is; and
+  // whether the model being added will be.
+  const [characterId, setCharacterId] = useState(null)
+  const [warlordSlot, setWarlordSlot] = useState(null)
+  const [slotWarlord, setSlotWarlord] = useState(false)
   const [error, setError] = useState(null)
   const unitId = editingUnit?.id
 
   useEffect(() => {
     listEnhancements().then(setEnhancements).catch((err) => setError(err.message))
+    listKeywords()
+      .then((keywords) => setCharacterId(keywords.find((k) => k.name === 'CHARACTER')?.id ?? null))
+      .catch((err) => setError(err.message))
   }, [])
+
+  const isCharacter = (modelId) =>
+    characterId !== null &&
+    Boolean(models.find((m) => String(m.id) === String(modelId))?.keyword_ids.includes(characterId))
+
+  // A unit that's its list's Warlord: its first CHARACTER model is marked.
+  useEffect(() => {
+    if (!editingUnit?.warlord || characterId === null) return
+    const index = slotsFromUnit(editingUnit).findIndex((s) => isCharacter(s.model_id))
+    setWarlordSlot(index === -1 ? null : index)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingUnit, characterId])
 
   // Enhancements are only offered when adding a model, and only ones it can
   // carry (a CHARACTER, from the list's detachments, not taken elsewhere).
@@ -166,10 +188,15 @@ function UnitFormPage({
   const wargearOptionsForSlot = wargear.filter((g) => String(g.model_id) === slot.model_id)
   const requiredWeaponIdsForSlot = requiredWeaponIds(weaponOptionsForSlot)
 
+  const canBeWarlord = Boolean(listId) && isCharacter(slot.model_id)
+
   const addSlot = () => {
     if (!slot.model_id) return
-    // A model with an enhancement is added on its own.
-    const count = slot.enhancement_id ? 1 : Math.max(1, Number(quantity) || 1)
+    // A model with an enhancement, or made the Warlord, is added on its own.
+    const single = slot.enhancement_id || (canBeWarlord && slotWarlord)
+    const count = single ? 1 : Math.max(1, Number(quantity) || 1)
+    if (canBeWarlord && slotWarlord) setWarlordSlot(slots.length)
+    setSlotWarlord(false)
     setSlots([...slots, ...Array.from({ length: count }, () => slot)])
     // Keep the model/weapons/wargear selected, so adding more of the same (or
     // a variation on it) doesn't mean re-picking everything - but not the
@@ -178,7 +205,10 @@ function UnitFormPage({
     setQuantity('1')
   }
 
-  const removeSlot = (index) => setSlots(slots.filter((_, i) => i !== index))
+  const removeSlot = (index) => {
+    setSlots(slots.filter((_, i) => i !== index))
+    setWarlordSlot((w) => (w === null || w === index ? null : w > index ? w - 1 : w))
+  }
 
   // A model starts with its default weapons (its datasheet's "This model is
   // equipped with: ...") and any it always carries.
@@ -223,6 +253,8 @@ function UnitFormPage({
         })),
         upgrade_id: upgradeId ? Number(upgradeId) : null,
         selected_rule_ids: selectedRuleIds,
+        // Only a unit in a list can be its Warlord.
+        warlord: listId === '' ? null : warlordSlot !== null,
       }
       if (editingUnit) {
         await updateUnit(editingUnit.id, payload)
@@ -294,6 +326,16 @@ function UnitFormPage({
                 {s.weapon_ids.length > 0 && ` — ${s.weapon_ids.map(weaponName).join(', ')}`}
                 {s.wargear_ids.length > 0 && ` — ${s.wargear_ids.map(wargearName).join(', ')}`}
                 {s.enhancement_id && ` — Enhancement: ${enhancementLabel(s.enhancement_id)}`}
+                {listId && isCharacter(s.model_id) && (
+                  <label className="checkbox-field">
+                    <input
+                      type="checkbox"
+                      checked={warlordSlot === i}
+                      onChange={() => setWarlordSlot(warlordSlot === i ? null : i)}
+                    />
+                    Warlord
+                  </label>
+                )}
                 <button type="button" onClick={() => removeSlot(i)}>
                   Remove
                 </button>
@@ -346,12 +388,24 @@ function UnitFormPage({
             />
           </Field>
         )}
+        {canBeWarlord && (
+          // The list's WARLORD (in place of any other unit) once the unit's
+          // saved.
+          <label className="checkbox-field">
+            <input
+              type="checkbox"
+              checked={slotWarlord}
+              onChange={(e) => setSlotWarlord(e.target.checked)}
+            />
+            Make this model the Warlord
+          </label>
+        )}
         <Field label="Quantity">
           <input
             type="number"
             min="1"
-            value={slot.enhancement_id ? '1' : quantity}
-            disabled={Boolean(slot.enhancement_id)}
+            value={slot.enhancement_id || (canBeWarlord && slotWarlord) ? '1' : quantity}
+            disabled={Boolean(slot.enhancement_id) || (canBeWarlord && slotWarlord)}
             onChange={(e) => setQuantity(e.target.value)}
           />
         </Field>

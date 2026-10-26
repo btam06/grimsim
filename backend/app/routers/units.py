@@ -20,6 +20,7 @@ from app.routers.enhancements import used_in_list
 from app.schemas import SelectableRuleOut, UnitIn, UnitModelIn, UnitModelOut, UnitOut
 from app.services.list_building import allies as list_building
 from app.services.list_building import enhancements as enhancement_rules
+from app.services.list_building import warlord as warlord_rules
 
 router = APIRouter(prefix="/units", tags=["units"])
 
@@ -34,7 +35,7 @@ def _unit_model_to_out(unit_model: UnitModel) -> UnitModelOut:
     )
 
 
-def _to_out(unit: Unit) -> UnitOut:
+def _to_out(unit: Unit, warlord: bool = False) -> UnitOut:
     return UnitOut(
         id=unit.id,
         faction_unit_id=unit.faction_unit_id,
@@ -43,7 +44,59 @@ def _to_out(unit: Unit) -> UnitOut:
         unit_models=[_unit_model_to_out(um) for um in unit.unit_models],
         upgrade_id=unit.upgrade.id if unit.upgrade else None,
         selected_rule_ids=unit.selected_rule_ids,
+        warlord=warlord,
     )
+
+
+async def _warlord_ids(session: AsyncSession) -> set[int]:
+    # The units that are their list's Warlord.
+    return set((await session.execute(select(ListWarlord.unit_id))).scalars().all())
+
+
+async def _set_warlord(
+    session: AsyncSession, unit: Unit, models: list[Model], warlord: bool | None
+) -> None:
+    # Makes the unit (saved, but not yet committed) its list's Warlord, or
+    # not (`warlord` None: leaves it - though a unit moved to another list is
+    # no longer its old list's). The checks are the list's own (see
+    # app/routers/lists.py): a CHARACTER, not in the list only under an ally
+    # allowance, and not instead of a unit that must be the Warlord.
+    if warlord is None:
+        await session.execute(
+            delete(ListWarlord).where(
+                ListWarlord.unit_id == unit.id, ListWarlord.list_id != unit.list_id
+            )
+        )
+        return
+    if not warlord:
+        await session.execute(delete(ListWarlord).where(ListWarlord.unit_id == unit.id))
+        return
+    if unit.list_id is None:
+        raise HTTPException(status_code=400, detail="a Warlord needs the unit to be in a list")
+    if not any(k.name == "CHARACTER" for m in models for k in m.keywords):
+        raise HTTPException(status_code=400, detail="the Warlord must be a CHARACTER")
+    army_list = (
+        await session.execute(
+            select(ArmyList)
+            .options(selectinload(ArmyList.detachments), selectinload(ArmyList.subfaction_link))
+            .where(ArmyList.id == unit.list_id)
+        )
+    ).scalar_one()
+    reason = await warlord_rules.ally_warlord_reason(
+        session,
+        unit.id,
+        army_list.faction_id,
+        army_list.subfaction,
+        {d.name for d in army_list.detachments},
+    ) or await warlord_rules.warlord_reason(session, unit.list_id, unit.id, chosen_only=True)
+    if reason:
+        raise HTTPException(status_code=400, detail=reason)
+    await session.execute(
+        delete(ListWarlord).where(
+            (ListWarlord.list_id == unit.list_id) | (ListWarlord.unit_id == unit.id)
+        )
+    )
+    session.add(ListWarlord(list_id=unit.list_id, unit_id=unit.id))
 
 
 async def _build_unit_models(
@@ -342,7 +395,8 @@ async def list_units(session: AsyncSession = Depends(get_session)):
         )
         .order_by(Unit.id)
     )
-    return [_to_out(unit) for unit in result.scalars().all()]
+    warlords = await _warlord_ids(session)
+    return [_to_out(unit, unit.id in warlords) for unit in result.scalars().all()]
 
 
 @router.post("", response_model=UnitOut, status_code=201)
@@ -372,8 +426,10 @@ async def create_unit(payload: UnitIn, session: AsyncSession = Depends(get_sessi
     )
     unit.selected_rule_ids = selected
     session.add(unit)
+    await session.flush()
+    await _set_warlord(session, unit, models, payload.warlord)
     await session.commit()
-    return _to_out(unit)
+    return _to_out(unit, unit.id in await _warlord_ids(session))
 
 
 @router.put("/{unit_id}", response_model=UnitOut)
@@ -411,6 +467,8 @@ async def update_unit(
     unit.unit_models = new_unit_models
     unit.upgrade = upgrade
     unit.selected_rule_ids = selected
+    await session.flush()
+    await _set_warlord(session, unit, models, payload.warlord)
 
     await session.commit()
 
@@ -423,7 +481,7 @@ async def update_unit(
         .where(Unit.id == unit_id)
     )
     unit = result.scalar_one()
-    return _to_out(unit)
+    return _to_out(unit, unit.id in await _warlord_ids(session))
 
 
 @router.delete("/{unit_id}", status_code=204)

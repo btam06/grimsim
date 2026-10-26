@@ -33,8 +33,9 @@ from app.services.in_game.deployment import TOLERANCE, Base, Placement, gap
 # At the end of their opponent's movement phase (once they've finished
 # moving), a player can use the Rapid Ingress stratagem to set up a unit
 # from Reserves the same way - or, using its Teleport Homer token (see
-# app/services/in_game/teleport_homer.py), within 3" of that instead. A Strategic Reserves unit that hasn't arrived by
-# the end of the third battle round is destroyed.
+# app/seeds/factions/space_marines/teleport_homer.py), within 3" of that
+# instead. A Strategic Reserves unit that hasn't arrived by the end of the
+# third battle round is destroyed.
 #
 # Some enhancements change how the bearer's unit arrives
 # (faction_seeds.ARRIVAL_ENHANCEMENTS): it can make an ingress move - arrive
@@ -173,7 +174,7 @@ def check_arrival(
 ) -> Placement:
     # Whether the unit could arrive with its models at `placement` - with
     # `homer`, at its Teleport Homer token (within 3" of it, anywhere else).
-    from app.services.in_game import teleport_homer
+    from app.seeds.factions.space_marines import teleport_homer
 
     models, bases = deployment.unit_bases(unit, placement)
     others = deployment.placed_bases(game, unit)
@@ -217,7 +218,7 @@ def bring_in(
     # its own movement phase, it counts as having made a Normal move. With
     # `homer` (only by Rapid Ingress), at its Teleport Homer token - which is
     # then removed.
-    from app.services.in_game import teleport_homer
+    from app.seeds.factions.space_marines import teleport_homer
 
     check_turn(game, unit, rapid_ingress)
     if homer and not rapid_ingress:

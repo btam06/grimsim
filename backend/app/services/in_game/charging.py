@@ -7,7 +7,15 @@ from fastapi import HTTPException
 
 from app.models import Game, GameUnitCharge, Unit
 from app.seeds import factions as faction_seeds
-from app.services.in_game import actions, command_phase, deployment, mission_state, pathing
+from app.services.in_game import (
+    actions,
+    command_phase,
+    deployment,
+    mission_state,
+    movement,
+    pathing,
+    shoot_scoot,
+)
 from app.services.list_building import detachment_rules
 from app.services.list_building import enhancements as enhancement_rules
 from app.services.in_game.deployment import TOLERANCE, Base, Placement, gap
@@ -34,8 +42,17 @@ from app.services.in_game.movement import ENGAGEMENT_RANGE
 # A detachment rule can add to the charge rolls of the units it reaches
 # (faction_seeds.CHARGE_BONUSES - e.g. Death Blow: +1 for ADEPTUS ASTARTES
 # TERMINATOR units).
+#
+# Some abilities let a unit re-roll its charge roll, once, before it charges
+# (datasheet_abilities CHARGE_REROLLS); some make each enemy unit engaged with
+# it after its charge move take a Battle-shock test (AFTER_CHARGE_BATTLE_SHOCK
+# - e.g. the Deathwatch's Terminatus Assault: -1 unless it's IMPERIUM or
+# CHAOS).
 
 CHARGE_DICE = 2
+# A re-rolled charge, this phase (kept as a marked unit - see
+# app/services/in_game/mission_state.py).
+CHARGE_REROLLED = "charge_rerolled"
 
 
 def _bad_request(detail: str) -> HTTPException:
@@ -84,10 +101,15 @@ def cant_charge_reason(game: Game, unit: Unit) -> str | None:
     # Why the unit can't declare a charge this turn because of what it did
     # (an action, or it Advanced or Fell Back), or None.
     # (Imported here: shooting imports movement, which charging's callers use.)
+    from app.services.in_game import embarked
     from app.services.in_game.shooting import move_status
 
     if (reason := actions.blocks(game, unit, "charge")) is not None:
         return reason
+    if embarked.transited(game, unit, embarked.SHOCK_DISEMBARKED):
+        return "it made a shock disembark move this turn"
+    if shoot_scoot.no_charge(game, unit):
+        return "it moved after shooting this turn"
     status = move_status(game, unit)
     if status.advanced and not command_phase.eligible_after(game, unit, "advanced", "charge"):
         return "it Advanced this turn"
@@ -132,14 +154,79 @@ def roll_charge(game: Game, unit: Unit) -> GameUnitCharge:
     return charge
 
 
+def _abilities(unit: Unit) -> set[str]:
+    return {a.name for m in unit.unit_models for a in m.model.abilities}
+
+
+def _rerolled(game: Game, unit: Unit) -> bool:
+    return any(
+        m.unit_id == unit.id
+        and m.battle_round == game.battle_round
+        and m.turn_seat == game.turn_seat
+        for m in mission_state.marked(game, CHARGE_REROLLED)
+    )
+
+
+def can_reroll(game: Game, unit: Unit) -> bool:
+    # Whether the unit can re-roll its charge roll now: an ability lets it,
+    # it's rolled but not charged, and it hasn't re-rolled already.
+    from app.seeds import datasheet_abilities
+
+    charge = unit_charge(game, unit)
+    return (
+        charge is not None
+        and not charge.completed
+        and bool(_abilities(unit) & datasheet_abilities.CHARGE_REROLLS)
+        and not _rerolled(game, unit)
+    )
+
+
+def reroll_charge(game: Game, unit: Unit) -> GameUnitCharge:
+    # Re-rolls the unit's charge roll (both dice), if it can.
+    _check_unit(game, unit)
+    if not can_reroll(game, unit):
+        raise _bad_request("that unit can't re-roll its charge roll")
+    charge = unit_charge(game, unit)
+    charge.first_die, charge.second_die = (random.randint(1, 6) for _ in range(CHARGE_DICE))
+    mission_state.mark(game, deployment.owner(game, unit).seat, CHARGE_REROLLED, unit.id)
+    return charge
+
+
+def _after_charge(game: Game, unit: Unit) -> None:
+    # The unit ended a charge move: abilities that make the enemy units
+    # engaged with it take a Battle-shock test.
+    from app.seeds import datasheet_abilities
+    from app.services.in_game import battle_shock
+
+    config = datasheet_abilities.AFTER_CHARGE_BATTLE_SHOCK
+    rules = [(name, config[name]) for name in _abilities(unit) if name in config]
+    if not rules:
+        return
+    bases = list(_bases(game, unit).values())
+    for enemy in enemy_units(game, unit):
+        engaged = any(
+            gap(b, e) <= ENGAGEMENT_RANGE + TOLERANCE
+            for b in bases
+            for e in _bases(game, enemy).values()
+        )
+        if not engaged or battle_shock.is_battle_shocked(game, enemy):
+            continue
+        if any(t.unit_id == enemy.id for t in battle_shock.pending(game)):
+            continue
+        name, (modifier, spared) = rules[0]
+        keywords = {k.name for m in enemy.unit_models for k in m.model.keywords}
+        battle_shock.require(game, enemy, name, 0 if keywords & set(spared) else modifier)
+
+
 def charge_bonus(game: Game, unit: Unit) -> int:
-    # What the unit's list's detachment rules add to its charge rolls.
+    # What the unit's list's detachment rules, and its own abilities (e.g.
+    # Optimised Gait - see movement.roll_bonus), add to its charge rolls.
     rules = enhancement_rules.list_rules(deployment.owner(game, unit).army_list)
     return sum(
         faction_seeds.CHARGE_BONUSES[rule.name]
         for rule in rules
         if rule.name in faction_seeds.CHARGE_BONUSES and detachment_rules.applies_to(rule, unit)
-    )
+    ) + movement.roll_bonus(game, unit, "charge")
 
 
 def charge_roll(game: Game, unit: Unit) -> int | None:
@@ -258,3 +345,4 @@ def make_charge(
     charge.target_unit_id = target.id
     charge.completed = True
     mission_state.after_move(game, unit)
+    _after_charge(game, unit)

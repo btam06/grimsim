@@ -2,7 +2,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.combat_rules.conditions import ALWAYS
-from app.combat_rules.effects import IGNORE_COVER
+from app.combat_rules.effects import IGNORE_COVER, INVULNERABLE_5
 from app.models import Condition, Effect, WargearAbility
 
 # (name, description, [condition keywords], [effect keywords])
@@ -12,6 +12,23 @@ ENTRIES = [
         "Wargear equipped with this is not worsened by the defender being in cover.",
         [ALWAYS],
         [IGNORE_COVER],
+    ),
+    (
+        # Protects the bearer (e.g. a Shield Dome): it applies to attacks
+        # against it.
+        "5+ Invulnerable Save",
+        "The bearer has a 5+ invulnerable save.",
+        [ALWAYS],
+        [INVULNERABLE_5],
+    ),
+    (
+        # A pre-battle move (e.g. an Orbital Comms Array - see
+        # app/services/in_game/scouts.py).
+        "Scouts 6\"",
+        "The bearer's unit has Scouts 6\": at the start of the first battle round, before the "
+        "first turn begins, it can make a Normal move of up to 6\".",
+        [],
+        [],
     ),
 ]
 

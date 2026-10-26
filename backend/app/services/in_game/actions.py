@@ -119,6 +119,17 @@ def blocks(game: Game, unit: Unit, what: str) -> str | None:
     return f"it did an action this turn ({action.action})"
 
 
+def _act_after(unit: Unit) -> set[str]:
+    # The moves the unit's abilities let it start an action after
+    # (datasheet_abilities ACTION_AFTER).
+    from app.seeds import datasheet_abilities
+
+    config = datasheet_abilities.ACTION_AFTER
+    return {
+        move for m in unit.unit_models for a in m.model.abilities for move in config.get(a.name, ())
+    }
+
+
 def can_act(game: Game, unit: Unit) -> str | None:
     # Why the unit can't start an action now (whatever the action), or None.
     # (Imported here: shooting imports this module.)
@@ -135,9 +146,10 @@ def can_act(game: Game, unit: Unit) -> str | None:
     if shooting.unit_shot(game, unit) is not None:
         return "it has already shot this phase"
     status = shooting.move_status(game, unit)
-    if status.advanced:
+    # (An ability can let it anyway - e.g. Flexible Asset.)
+    if status.advanced and "advanced" not in _act_after(unit):
         return "it Advanced this turn"
-    if status.fell_back:
+    if status.fell_back and "fell_back" not in _act_after(unit):
         return "it Fell Back this turn"
     if movement.in_engagement_range(game, unit):
         return "it's within Engagement Range of an enemy unit"

@@ -14,6 +14,9 @@ from app.seeds import (
     weapon_abilities,
 )
 
+# Seeding only adds what's missing; changes to rows seeded before (renames,
+# changed conditions) are migrations, run first (see app/migrations/).
+#
 # To seed another table on startup: add a module here with a NAMES list and an
 # async def seed(session) function (see dispositions.py), then
 # register its `seed` function below.

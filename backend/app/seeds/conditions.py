@@ -9,6 +9,7 @@ from app.combat_rules.conditions import (
     ANTI_INFANTRY_4,
     ANTI_INFANTRY_5,
     ANTI_MONSTER_4,
+    ANTI_NON_VEHICLE_4,
     ANTI_VEHICLE_2,
     ANTI_VEHICLE_3,
     ANTI_VEHICLE_4,
@@ -24,6 +25,7 @@ from app.combat_rules.conditions import (
     DEFENDER_BATTLE_SHOCKED,
     DEFENDER_BELOW_HALF_STRENGTH,
     DEFENDER_BELOW_STARTING_STRENGTH,
+    DEFENDER_CONTROLLING_OBJECTIVE,
     DEFENDER_IN_RANGE_OF_OBJECTIVE,
     HALF_RANGE_ATTACK,
     MELEE_ATTACK,
@@ -41,11 +43,13 @@ from app.combat_rules.conditions import (
     TARGET_INFANTRY,
     TARGET_ISOLATED,
     TARGET_TITANIC,
+    TARGET_WITHIN_9,
     TARGET_LED_BY_CHARACTER,
     TARGET_MODEL_CHARACTER,
     TARGET_MONSTER_OR_VEHICLE,
     TARGET_NOT_MONSTER_OR_VEHICLE,
     WITHIN_HALF_RANGE,
+    WITHOUT_DEVASTATING_WOUNDS,
 )
 from app.models import Condition
 
@@ -260,6 +264,26 @@ CORE_ENTRIES = [
         RANGED_VS_OBJECTIVE_TARGET,
         "Ranged Attack vs Target on Objective",
         "A ranged attack against a unit within range of an objective marker.",
+    ),
+    (
+        DEFENDER_CONTROLLING_OBJECTIVE,
+        "Defender Controlling an Objective",
+        "The defending unit is controlling an objective. Applies at every step.",
+    ),
+    (
+        TARGET_WITHIN_9,
+        "Target Within 9\"",
+        "The target is within 9\" of the attacking unit. Applies at every step.",
+    ),
+    (
+        ANTI_NON_VEHICLE_4,
+        "Anti-non-Vehicle 4+",
+        "The wound roll was a 4+ against a defending unit with no VEHICLE model.",
+    ),
+    (
+        WITHOUT_DEVASTATING_WOUNDS,
+        "Without Devastating Wounds",
+        "The attack's weapon doesn't have [DEVASTATING WOUNDS].",
     ),
 ]
 

@@ -41,8 +41,10 @@ from app.services.in_game import reinforcements as reinforcements_service
 from app.services.in_game import scoring as scoring_service
 from app.services.in_game import terrain as terrain_service
 from app.services.in_game import emergency as emergency_service
+from app.services.in_game import first_turn as first_turn_service
+from app.services.in_game import scouts as scouts_service
 from app.services.in_game import objectives as objectives_service
-from app.services.in_game import teleport_homer as teleport_homer_service
+from app.seeds.factions.space_marines import teleport_homer as teleport_homer_service
 from app.services.in_game import turn_record as turn_record_service
 from app.services.list_building import enhancements as enhancement_rules
 from app.services.list_building import warlord as warlord_rules
@@ -300,7 +302,10 @@ async def _begin_battle_round(session: AsyncSession, game: Game) -> None:
     game.turn_seat = game.first_seat
     for seat, cp in battle_round_service.warlord_cp(game).items():
         player_at(game, seat).cp += cp
-    if battle_round_service.needs_decisions(game, game.battle_round):
+    # (The first one: Scouts moves then, too.)
+    if battle_round_service.needs_decisions(game, game.battle_round) or (
+        game.battle_round == 1 and scouts_service.any_scouts(game)
+    ):
         game.phase = START_OF_ROUND
     else:
         await _begin_command_phase(session, game)
@@ -308,7 +313,10 @@ async def _begin_battle_round(session: AsyncSession, game: Game) -> None:
 
 async def _begin_battle(session: AsyncSession, game: Game) -> None:
     # The start of the battle: missions that set up then prompt for it (e.g.
-    # Locate and Deny's operation markers); then the first battle round.
+    # Locate and Deny's operation markers); then the first battle round. (A
+    # game with nothing to deploy rolls off for who goes first now.)
+    if game.first_seat is None:
+        first_turn_service.roll(game)
     game.status = "in_progress"
     game.battle_round = 1
     mission_state_service.start_of_battle(game)
@@ -333,16 +341,39 @@ async def declare_formations(session: AsyncSession, game: Game, seat: int) -> No
     if deployment_service.formations_declared(game) and (
         deployment_service.deploying_seat(game) is None
     ):
-        await _begin_battle(session, game)
+        await _after_deploying(session, game)
 
 
 async def deploy_unit(
     session: AsyncSession, game: Game, unit, placement: dict[int, tuple[float, float, float]]
 ) -> None:
-    # Sets a unit up; once every unit is, the first battle round begins.
+    # Sets a unit up; once every unit is, on to the roll-off for who goes
+    # first.
     deployment_service.deploy(game, unit, placement)
     if deployment_service.deploying_seat(game) is None:
-        await _begin_battle(session, game)
+        await _after_deploying(session, game)
+
+
+async def _after_deploying(session: AsyncSession, game: Game) -> None:
+    # Everything's set up: the roll-off for who goes first (unless it's been
+    # decided) - it waits for the players - then (redeploys, when a rule asks
+    # for one, and) the first battle round.
+    if first_turn_service.waiting(game):
+        return
+    await _begin_battle(session, game)
+
+
+async def roll_first_turn(session: AsyncSession, game: Game) -> None:
+    # The players roll off for who goes first.
+    if not first_turn_service.waiting(game):
+        raise _bad_request("it isn't time to roll off for who goes first")
+    first_turn_service.roll(game)
+    await _after_deploying(session, game)
+
+
+async def finish_scouts(session: AsyncSession, game: Game, seat: int) -> None:
+    # The player is done making Scouts moves.
+    scouts_service.finish(game, seat)
 
 
 async def advance(session: AsyncSession, game: Game) -> None:
@@ -359,6 +390,8 @@ async def advance(session: AsyncSession, game: Game) -> None:
         raise _bad_request("make the missions' choices first")
     if teleport_homer_service.waiting(game):
         raise _bad_request("set up the Teleport Homer tokens first")
+    if scouts_service.waiting(game):
+        raise _bad_request("make the Scouts moves first")
     if emergency_service.waiting(game):
         raise _bad_request(
             "set up the units emergency disembarking from a destroyed transport first"
@@ -578,6 +611,7 @@ async def use_stratagem(
     target_secondary_id: int | None = None,
     cp_discount: int = 0,
     target_unit_id: int | None = None,
+    targeted_unit: Unit | None = None,
 ) -> None:
     # `cp_discount`: what a rule takes off its cost (e.g. Rapid Ingress using
     # a Teleport Homer token: 1CP). `target_unit_id`: the unit a stratagem
@@ -625,11 +659,28 @@ async def use_stratagem(
     player.stratagem_uses.append(use)
     if stratagem.game_action == "strategic_reserves":
         reinforcements_service.place_in_reserves(game, player.seat, target_unit)
+    # The unit it targeted (its target, or one it's used on - e.g. Rapid
+    # Ingress): abilities that gain CP then (e.g. Broad Spectrum Data-tether).
+    _stratagem_targeted(player, target_unit or targeted_unit)
     if target is not None:
         # Discard the target and draw one new card in its place.
         target.status = "discarded"
         drawn = await _draw_tactical(session, game, player, count=1)
         mission_state_service.cards_drawn(game, player.seat, drawn)
+
+
+def _stratagem_targeted(player: GamePlayer, unit: Unit | None) -> None:
+    # A Stratagem targeted the player's unit: its abilities that gain CP on a
+    # roll then roll (datasheet_abilities STRATAGEM_TARGET_CP).
+    from app.seeds import datasheet_abilities
+
+    if unit is None:
+        return
+    config = datasheet_abilities.STRATAGEM_TARGET_CP
+    names = {a.name for m in unit.unit_models for a in m.model.abilities}
+    for name in sorted(names & set(config)):
+        if random.randint(1, 6) >= config[name]:
+            player.cp += 1
 
 
 def achieve_secondary(game: Game, card: GameSecondary, points: int | None = None) -> None:

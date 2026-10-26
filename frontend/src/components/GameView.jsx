@@ -21,6 +21,13 @@ import {
   checkConsolidation,
   checkDeployment,
   checkMove,
+  checkScoutMove,
+  checkShootScoot,
+  shootScoot,
+  finishScouts,
+  getScouts,
+  rollFirstTurn,
+  scoutMove,
   checkPileIn,
   consolidate,
   rollAdvance,
@@ -50,6 +57,7 @@ import {
   moveUnit,
   resetMove as resetMoveApi,
   pileIn as pileInUnit,
+  rerollCharge,
   rollCharge,
   skipConsolidation,
   getTerrainLayout,
@@ -63,6 +71,9 @@ import { basesOverlap, freeSpot, slide } from '../collision'
 import CardTextAccordion from './CardTextAccordion'
 import ChargePanel from './ChargePanel'
 import DeploymentPanel from './DeploymentPanel'
+import PreBattlePanel from './PreBattlePanel'
+import ShootScootPanel from './ShootScootPanel'
+import ShootingStartPanel from './ShootingStartPanel'
 import FightPanel from './FightPanel'
 import FormationsPanel from './FormationsPanel'
 import Gameboard from './Gameboard'
@@ -524,7 +535,7 @@ function moveRings(deployment, movement, draft) {
   // move). A move: its M, plus its Advance roll if it's Advancing.
   const locked = new Set(draft.locked ?? [])
   let allowance = (id) => (locked.has(id) ? 0 : draft.allowance)
-  if (!['charge', 'pile_in', 'consolidate'].includes(draft.kind)) {
+  if (!['charge', 'pile_in', 'consolidate', 'scout', 'scoot'].includes(draft.kind)) {
     const moving = movement?.units.find((u) => u.unit_id === draft.unitId)
     if (!moving) return []
     const extra = draft.kind === 'advance' ? (moving.advance_roll ?? 0) : 0
@@ -683,6 +694,25 @@ function GameView({ gameId, onBack }) {
   // Teleport Homer tokens: set up at the start of the battle, and those on
   // the battlefield (see GET /games/{id}/teleport-homers). `homerPlacing` is
   // the unit whose token the next board click sets up.
+  // At the start of the first battle round: whose turn it is to make Scouts
+  // moves, and their units that can.
+  const [scouts, setScouts] = useState(null)
+  const scouting =
+    game?.status === 'in_progress' && game?.battle_round === 1 && game?.phase === 'start_of_round'
+  useEffect(() => {
+    if (!game || !scouting) {
+      setScouts(null)
+      return
+    }
+    let cancelled = false
+    getScouts(game.id)
+      .then((s) => !cancelled && setScouts(s))
+      .catch((err) => setError(err.message))
+    return () => {
+      cancelled = true
+    }
+  }, [game, scouting])
+
   const [homers, setHomers] = useState(null)
   const [homerPlacing, setHomerPlacing] = useState(null)
   useEffect(() => {
@@ -1006,6 +1036,10 @@ function GameView({ gameId, onBack }) {
         check = await checkEmergency(game.id, asPayload(unitId, positions))
       } else if (kind === 'consolidate') {
         check = await checkConsolidation(game.id, asPayload(unitId, positions))
+      } else if (kind === 'scout') {
+        check = await checkScoutMove(game.id, asPayload(unitId, positions))
+      } else if (kind === 'scoot') {
+        check = await checkShootScoot(game.id, asPayload(unitId, positions))
       } else if (kind === 'pile_in') {
         check = await checkPileIn(game.id, asPayload(unitId, positions))
       } else if (kind === 'charge') {
@@ -1316,10 +1350,11 @@ function GameView({ gameId, onBack }) {
     })
   }
 
-  const rollUnitCharge = async (unit) => {
+  const rollUnitCharge = async (unit, reroll = false) => {
     setError(null)
     try {
-      const result = await rollCharge(game.id, { unit_id: unit.unit_id })
+      const roll = reroll ? rerollCharge : rollCharge
+      const result = await roll(game.id, { unit_id: unit.unit_id })
       setCharge(result)
       startCharge(result.units.find((u) => u.unit_id === unit.unit_id))
     } catch (err) {
@@ -1391,7 +1426,44 @@ function GameView({ gameId, onBack }) {
           onError={setError}
         />
       )}
-      {game.status === 'deployment' && game.deployment_step !== 'formations' && (
+      {((game.status === 'deployment' && game.deployment_step === 'first_turn') ||
+        (scouting && scouts?.seat)) && (
+          <PreBattlePanel
+            game={game}
+            scouts={scouts}
+            draft={draft}
+            checking={checking}
+            onRoll={() => act(() => rollFirstTurn(game.id))}
+            onPick={(unit) => {
+              const positions = startPositions(unit.unit_id)
+              checkSeq.current++
+              setDraft({
+                ...NO_DRAFT,
+                unitId: unit.unit_id,
+                positions,
+                kind: 'scout',
+                allowance: unit.distance,
+              })
+              runCheck(unit.unit_id, positions, 'scout')
+            }}
+            onSave={async () => {
+              const { unitId, positions } = draftRef.current
+              setError(null)
+              try {
+                setScouts(await scoutMove(game.id, asPayload(unitId, positions)))
+                setDraft(NO_DRAFT)
+                await act(() => getGame(game.id))
+              } catch (err) {
+                setError(err.message)
+              }
+            }}
+            onDone={(seat) => {
+              setDraft(NO_DRAFT)
+              act(() => finishScouts(game.id, { seat }))
+            }}
+          />
+        )}
+      {game.status === 'deployment' && game.deployment_step === 'deploying' && (
         <DeploymentPanel
           game={game}
           deployment={deployment}
@@ -1687,6 +1759,20 @@ function GameView({ gameId, onBack }) {
         />
       )}
       {shootingPhase && (
+        <ShootingStartPanel
+          game={game}
+          refreshKey={shots}
+          onUsed={() => {
+            // Models it destroyed come off the battlefield.
+            setShots((n) => n + 1)
+            getGame(game.id)
+              .then(setGame)
+              .catch((err) => setError(err.message))
+          }}
+          onError={setError}
+        />
+      )}
+      {shootingPhase && (
         <ShootingPanel
           game={game}
           player={turnPlayer}
@@ -1701,6 +1787,32 @@ function GameView({ gameId, onBack }) {
               .catch((err) => setError(err.message))
           }}
           onError={setError}
+        />
+      )}
+      {shootingPhase && shooting && (
+        <ShootScootPanel
+          shooting={shooting}
+          draft={draft}
+          checking={checking}
+          onPick={(unit) => {
+            const positions = startPositions(unit.unit_id)
+            checkSeq.current++
+            setDraft({
+              ...NO_DRAFT,
+              unitId: unit.unit_id,
+              positions,
+              kind: 'scoot',
+              allowance: unit.shoot_scoot_reach,
+            })
+            runCheck(unit.unit_id, positions, 'scoot')
+          }}
+          onSave={async () => {
+            const { unitId, positions } = draftRef.current
+            if (await act(() => shootScoot(game.id, asPayload(unitId, positions)))) {
+              setDraft(NO_DRAFT)
+              setShots((n) => n + 1)
+            }
+          }}
         />
       )}
       {game.status === 'finished' && (

@@ -152,11 +152,16 @@ def units_to_deploy(game: Game, player: GamePlayer) -> list[Unit]:
 
 
 def deployment_step(game: Game) -> str | None:
-    # Where deployment is: declaring battle formations, then setting up units
-    # ("formations", "deploying"); None outside it.
+    # Where deployment is: declaring battle formations, setting up units, then
+    # the roll-off for who goes first ("formations", "deploying",
+    # "first_turn" - see app/services/in_game/first_turn.py); None outside it.
     if game.status != "deployment":
         return None
-    return "deploying" if formations_declared(game) else "formations"
+    if not formations_declared(game):
+        return "formations"
+    if deploying_seat(game) is not None:
+        return "deploying"
+    return "first_turn"
 
 
 def deploying_seat(game: Game) -> int | None:
@@ -164,7 +169,7 @@ def deploying_seat(game: Game) -> int | None:
     # about by how many each has set up - or whoever has any left. None
     # outside deployment, while battle formations are being declared, or once
     # everything is set up.
-    if deployment_step(game) != "deploying":
+    if game.status != "deployment" or not formations_declared(game):
         return None
     placed = positions(game)
     counts = {}

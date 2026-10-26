@@ -203,6 +203,10 @@ class UnitIn(BaseModel):
     upgrade_id: int | None = None
     # Detachment rules with a selection limit this unit is selected for.
     selected_rule_ids: list[int] = []
+    # Whether it's its list's WARLORD (it needs a CHARACTER model): True makes
+    # it the Warlord in place of any other unit, False makes it not be - and
+    # None (left out) leaves that as it is.
+    warlord: bool | None = None
 
 
 class SelectableRuleOut(BaseModel):
@@ -223,6 +227,8 @@ class UnitOut(BaseModel):
     unit_models: list[UnitModelOut]
     upgrade_id: int | None
     selected_rule_ids: list[int] = []
+    # It's its list's WARLORD.
+    warlord: bool = False
 
 
 EnhancementScope = Literal["bearer", "led_unit", "bearers_unit", "unit"]
@@ -585,6 +591,8 @@ class WeaponCombatResultOut(BaseModel):
 
 
 class CombatOut(BaseModel):
+    # (hits: how many were scored - rolled, automatic and extra.)
+    hits: int = 0
     visible: bool
     in_range: bool
     in_engagement_range: bool
@@ -706,7 +714,9 @@ class GameIn(BaseModel):
     players: list[GamePlayerIn] = Field(min_length=2, max_length=2)
     # Seats are 1 and 2, in the order of `players`.
     attacker_seat: Literal[1, 2]
-    first_seat: Literal[1, 2]
+    # Who goes first, if already decided; otherwise (left out) the players
+    # roll off once everything is set up.
+    first_seat: Literal[1, 2] | None = None
 
 
 class GameSecondaryOut(BaseModel):
@@ -778,11 +788,20 @@ class GamePlayerOut(BaseModel):
     stratagem_uses: list[GameStratagemUseOut]
 
 
+class FirstTurnRollOut(BaseModel):
+    # One player's D6 in the roll-off for who goes first (`attempt` 2 and on:
+    # after a tie).
+    attempt: int
+    seat: int
+    roll: int
+
+
 class GameOut(BaseModel):
     id: int
     status: str
     attacker_seat: int
-    first_seat: int
+    # Who goes first: None until the roll-off (see first_turn_rolls).
+    first_seat: int | None
     battle_round: int
     turn_seat: int | None
     phase: str | None
@@ -792,9 +811,13 @@ class GameOut(BaseModel):
     terrain_layout_id: int | None = None
     terrain_layout_name: str | None = None
     # Where deployment is ("formations": declaring battle formations, then
-    # "deploying"), and whose turn it is to deploy a unit.
+    # "deploying", then "first_turn": the roll-off for who goes first), whose
+    # turn it is to deploy a unit, and - at the start of the first battle
+    # round - whose to make Scouts moves.
     deployment_step: str | None = None
     deploying_seat: int | None = None
+    scouting_seat: int | None = None
+    first_turn_rolls: list[FirstTurnRollOut] = []
     # Whose turn it is to pile in, at the start of the fight phase.
     piling_in_seat: int | None = None
 
@@ -1128,6 +1151,10 @@ class ShootingUnitOut(BaseModel):
     # How far its furthest-moved model went this turn, if known.
     distance: float | None = None
     shot: ShotOut | None = None
+    # The ability it can move after shooting with now (e.g. Ride the
+    # Thermals), if any, and how far at most.
+    shoot_scoot: str | None = None
+    shoot_scoot_reach: float | None = None
 
 
 class ShootingOut(BaseModel):
@@ -1155,6 +1182,9 @@ class ShootingWeaponOut(BaseModel):
     name: str
     range: int
     carried_by: int
+    # One of the transport's embarked models' weapons, fired with its Firing
+    # Deck (`carried_by`: how many embarked models have it).
+    firing_deck: bool = False
     in_range: int
     half_range: bool
     # Whether it has Assault; and whether it can't be fired at all this phase
@@ -1180,6 +1210,9 @@ class ShootIn(BaseModel):
     target_unit_id: int
     weapon_ids: list[int] = []
     enhancement_weapon_ids: list[int] = []
+    # A transport's Firing Deck weapons (embarked models' weapons, by weapon
+    # id): each fired by the embarked models carrying it, up to its limit.
+    firing_deck_weapon_ids: list[int] = []
 
 
 class ShootOut(BaseModel):
@@ -1212,6 +1245,8 @@ class ChargeUnitOut(BaseModel):
     dice: list[int] = []
     bonus: int = 0
     roll: int | None = None
+    # An ability lets it re-roll its charge roll now (once).
+    can_reroll: bool = False
     failed: bool = False
     charged: bool = False
     target_unit_id: int | None = None
@@ -1460,6 +1495,45 @@ class TeleportHomersOut(BaseModel):
     waiting_seats: list[int]
     units: list[TeleportHomerUnitOut]
     tokens: list[dict]
+
+
+class StartOfShootingOut(BaseModel):
+    # An ability the player whose turn it is can use at the start of their
+    # Shooting phase (e.g. Secutor of Olympus), and its possible targets.
+    unit_id: int
+    unit_name: str
+    ability: str
+    description: str | None = None
+    targets: list[UnitIdNameOut]
+
+
+class StartOfShootingIn(BaseModel):
+    unit_id: int
+    ability: str
+    target_unit_id: int
+
+
+class StartOfShootingResultOut(BaseModel):
+    # The D6 rolled, the mortal wounds it inflicted (0 if it failed), and the
+    # models they destroyed.
+    roll: int
+    wounds: int
+    destroyed_unit_model_ids: list[int]
+
+
+class ScoutsUnitOut(BaseModel):
+    # A unit that can make a Scouts move, and how far.
+    unit_id: int
+    name: str
+    distance: int
+    moved: bool
+
+
+class ScoutsOut(BaseModel):
+    # Whose turn it is to make Scouts moves (None: no one's), and their units
+    # that can.
+    seat: int | None
+    units: list[ScoutsUnitOut]
 
 
 class TeleportHomerIn(BaseModel):

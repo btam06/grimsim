@@ -102,7 +102,11 @@ async def test_start_of_the_first_battle_round(client: AsyncClient, session, tmp
         "ability", 'Scouts 6"', FIRST, ["D"]
     )
     assert rule["options"] == []
-    # On to the first turn: its command phase, with its CP.
+    # D's Scouts move (seat 2 goes first): it can make one, then says it's
+    # done. On to the first turn: its command phase, with its CP.
+    assert game["scouting_seat"] == 2
+    response = await client.post(f"/games/{game_id}/scouts/done", json={"seat": 2})
+    assert response.status_code == 200, response.text
     cp = {p["seat"]: p["cp"] for p in game["players"]}
     game = (await client.post(f"/games/{game_id}/advance")).json()
     assert game["phase"] == "command"

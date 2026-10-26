@@ -29,6 +29,7 @@ from app.schemas import (
     FightOut,
     FightResultOut,
     FightTargetOut,
+    FirstTurnRollOut,
     FightUnitOut,
     FormationIn,
     FormationPlayerOut,
@@ -124,6 +125,11 @@ from app.schemas import (
     ShootOut,
     ShotOut,
     SightBubbleOut,
+    ScoutsOut,
+    ScoutsUnitOut,
+    StartOfShootingIn,
+    StartOfShootingOut,
+    StartOfShootingResultOut,
     StratagemOut,
     StratagemTargetOut,
     TerrainPointOut,
@@ -143,11 +149,15 @@ from app.services.in_game import deployment as deployment_service
 from app.services.in_game import embarked as embarked_service
 from app.services.in_game import emergency as emergency_service
 from app.services.in_game import psychic as psychic_service
-from app.services.in_game import teleport_homer as teleport_homer_service
+from app.seeds.factions.adeptus_mechanicus import fire_support
+from app.services.in_game import shoot_scoot as shoot_scoot_service
+from app.services.in_game import shooting_start as shooting_start_service
+from app.seeds.factions.space_marines import teleport_homer as teleport_homer_service
 from app.services.in_game import fighting as fighting_service
 from app.services.in_game import game as game_service
 from app.services.in_game import movement as movement_service
 from app.services.in_game import objectives as objectives_service
+from app.services.in_game import scouts as scouts_service
 from app.services.in_game import overwatch as overwatch_service
 from app.services.in_game import pathing as pathing_service
 from app.seeds import factions as faction_seeds
@@ -162,15 +172,18 @@ from app.services.in_game import shooting as shooting_service
 from app.services.in_game import turn_record as turn_record_service
 from app.routers import combat as combat_router
 from app.routers.combat import calculate as calculate_combat
+from app.services import weapon_profiles
 from app.combat_rules.conditions import (
     ALWAYS,
     BELOW_HALF_STRENGTH,
     BELOW_STARTING_STRENGTH,
+    CONTROLLING_OBJECTIVE,
     IN_RANGE_OF_OBJECTIVE,
     REMAINED_STATIONARY,
+    WITHIN_9_OF_TARGET,
 )
 from app.combat_rules.effects import ASSAULT
-from app.seeds.factions.space_marines.conditions import TARGET_WITHIN_9
+from app.combat_rules.positions import NEAR_FRIENDLY
 from app.services.in_game.deployment import TOLERANCE
 from app.services.in_game.terrain import MM_PER_INCH
 
@@ -262,6 +275,11 @@ def _game_out(game: Game) -> GameOut:
         terrain_layout_name=game.layout.name if game.layout else None,
         deployment_step=deployment_service.deployment_step(game),
         deploying_seat=deployment_service.deploying_seat(game),
+        scouting_seat=scouts_service.scouting_seat(game),
+        first_turn_rolls=[
+            FirstTurnRollOut(attempt=r.attempt, seat=r.seat, roll=r.roll)
+            for r in game.first_turn_rolls
+        ],
         piling_in_seat=fighting_service.piling_seat(game),
     )
 
@@ -747,12 +765,17 @@ def _defender_positions(game: Game, target: Unit) -> list[str]:
         found.append(BELOW_HALF_STRENGTH)
     if mission_state_service.unit_objectives(game, target):
         found.append(IN_RANGE_OF_OBJECTIVE)
-    return found
+    if any(
+        objectives_service.unit_controls(game, target, current)
+        for current in objectives_service.control(game)
+    ):
+        found.append(CONTROLLING_OBJECTIVE)
+    return found + _near_friendly(game, target)
 
 
 # How close a target has to be for rules that ask (see
 # app/combat_rules/positions.py): {position: inches}.
-TARGET_WITHIN = {TARGET_WITHIN_9: 9.0}
+TARGET_WITHIN = {WITHIN_9_OF_TARGET: 9.0}
 
 
 def _attacker_positions(
@@ -764,7 +787,17 @@ def _attacker_positions(
     found = [REMAINED_STATIONARY] if stationary else []
     distance = charging_service.distance(game, unit, target)
     found += [p for p, reach in TARGET_WITHIN.items() if distance <= reach + TOLERANCE]
-    return found
+    return found + _near_friendly(game, unit)
+
+
+def _near_friendly(game: Game, unit: Unit) -> list[str]:
+    # Positions about being near friendly units (e.g. within 6" of a friendly
+    # ADEPTUS MECHANICUS BATTLELINE unit), measured on the battlefield.
+    return [
+        position
+        for position, (keywords, reach) in NEAR_FRIENDLY.items()
+        if regions_service.near_friendly(game, unit, keywords, reach)
+    ]
 
 
 def _rule_options(game: Game, unit: Unit, attacking: Unit | None = None) -> list[str]:
@@ -839,6 +872,13 @@ async def get_shooting(game_id: int, session: AsyncSession = Depends(get_session
                 name=unit.faction_unit.name,
                 can_shoot=reason is None,
                 reason=reason,
+                shoot_scoot=(
+                    found[0]
+                    if (found := shoot_scoot_service.move_of(unit))
+                    and shoot_scoot_service.reason(game, unit) is None
+                    else None
+                ),
+                shoot_scoot_reach=shoot_scoot_service.reach(unit),
                 advanced=status.advanced,
                 remained_stationary=status.remained_stationary,
                 moved_less_than_3=status.moved_less_than_3,
@@ -859,10 +899,11 @@ async def get_shooting(game_id: int, session: AsyncSession = Depends(get_session
 
 
 def _weapon_out(weapon: shooting_service.WeaponReach) -> ShootingWeaponOut:
-    enhancement = isinstance(weapon.id, tuple)
+    kind = weapon.id[0] if isinstance(weapon.id, tuple) else None
     return ShootingWeaponOut(
-        id=weapon.id[1] if enhancement else weapon.id,
-        enhancement=enhancement,
+        id=weapon.id[1] if kind else weapon.id,
+        enhancement=kind == "enhancement",
+        firing_deck=kind == "deck",
         name=weapon.name,
         range=weapon.range,
         carried_by=weapon.carried_by,
@@ -909,16 +950,47 @@ async def shoot(game_id: int, payload: ShootIn, session: AsyncSession = Depends(
     game = await _load_game(session, game_id)
     unit = deployment_service.find_unit(game, payload.unit_id)
     target = deployment_service.find_unit(game, payload.target_unit_id)
-    weapon_ids = set(payload.weapon_ids) | {
-        ("enhancement", i) for i in payload.enhancement_weapon_ids
-    }
+    weapon_ids = (
+        set(payload.weapon_ids)
+        | {("enhancement", i) for i in payload.enhancement_weapon_ids}
+        | {("deck", i) for i in payload.firing_deck_weapon_ids}
+    )
     reach = shooting_service.check_shot(
         game, unit, target, weapon_ids, await _assault_weapons(session, unit, game)
     )
+    firing_deck = _firing_deck(game, unit, payload, reach)
     status = shooting_service.move_status(game, unit)
-    out = await _fire(session, game, unit, target, payload, reach, status)
+    out = await _fire(
+        session, game, unit, target, payload, reach, status, firing_deck=firing_deck
+    )
+    if firing_deck:
+        shooting_service.record_deck(game, unit)
     await session.commit()
     return out
+
+
+def _firing_deck(
+    game: Game, unit: Unit, payload: ShootIn, reach: shooting_service.TargetReach
+) -> list[tuple[int, int, int]]:
+    # The Firing Deck weapons the transport fires, for the calculator: the
+    # chosen weapons of its first embarked models carrying them (up to its
+    # limit), those that can reach the target - as (its model's id, the
+    # embarked model's id, weapon id). Only one profile of a weapon per model.
+    if not payload.firing_deck_weapon_ids:
+        return []
+    pairs = shooting_service.deck_weapons(game, unit, set(payload.firing_deck_weapon_ids))
+    for embarked_model in {m.id: m for m, _ in pairs}.values():
+        group = weapon_profiles.conflicting_profiles(w for m, w in pairs if m is embarked_model)
+        if group is not None:
+            raise HTTPException(
+                status_code=400, detail=f"choose only one profile of {group} to attack with"
+            )
+    found = []
+    for carrier_id, can_fire in reach.firing.items():
+        for embarked_model, weapon in pairs:
+            if shooting_service.deck_id(embarked_model, weapon) in can_fire:
+                found.append((carrier_id, embarked_model.id, weapon.id))
+    return found
 
 
 async def _fire(
@@ -930,6 +1002,7 @@ async def _fire(
     reach: shooting_service.TargetReach,
     status: shooting_service.MoveStatus,
     snap_shots: bool = False,
+    firing_deck: list[tuple[int, int, int]] | None = None,
 ) -> ShootOut:
     # Resolves a shot the unit can make (checked): the calculator, with each
     # model firing only the weapons it can, how the unit moved, and whether
@@ -966,7 +1039,10 @@ async def _fire(
         firing=reach.firing,
         defender_wounds=defender_wounds,
         attacker_wounds=attacker_wounds,
+        firing_deck=firing_deck,
+        attacker_extra_rules=fire_support.rules(game, unit, target),
     )
+    fire_support.after_shooting(game, unit, target, combat.hits)
     destroyed = casualties_service.apply_attack(
         game,
         unit,
@@ -1133,6 +1209,7 @@ def _charge_out(game: Game) -> ChargeOut:
                 dice=[charge.first_die, charge.second_die] if charge else [],
                 bonus=charging_service.charge_bonus(game, unit),
                 roll=charging_service.charge_roll(game, unit),
+                can_reroll=charging_service.can_reroll(game, unit),
                 failed=charging_service.failed(game, unit),
                 charged=bool(charge and charge.completed),
                 reason=charging_service.cant_charge_reason(game, unit),
@@ -1161,6 +1238,17 @@ async def roll_charge(
     # Rolls the unit's charge (once a phase: asking again gives the same roll).
     game = await _load_game(session, game_id)
     charging_service.roll_charge(game, deployment_service.find_unit(game, payload.unit_id))
+    await session.commit()
+    return _charge_out(await _load_game(session, game_id))
+
+
+@router.post("/{game_id}/charge/reroll", response_model=ChargeOut)
+async def reroll_charge(
+    game_id: int, payload: UnitIdIn, session: AsyncSession = Depends(get_session)
+):
+    # Re-rolls the unit's charge roll, if an ability lets it (once).
+    game = await _load_game(session, game_id)
+    charging_service.reroll_charge(game, deployment_service.find_unit(game, payload.unit_id))
     await session.commit()
     return _charge_out(await _load_game(session, game_id))
 
@@ -1734,7 +1822,9 @@ async def bring_in(
         discount = (
             teleport_homer_service.CP_DISCOUNT if homer else 0
         ) + reinforcements_service.rapid_ingress_discount(unit)
-        await game_service.use_stratagem(session, game, player, stratagem, cp_discount=discount)
+        await game_service.use_stratagem(
+            session, game, player, stratagem, cp_discount=discount, targeted_unit=unit
+        )
     reinforcements_service.bring_in(game, unit, placement, rapid, homer)
     return await _commit_and_reload(session, game_id)
 
@@ -2541,7 +2631,7 @@ async def use_psychic(
     return _psychic_out(await _load_game(session, game_id))
 
 
-# --- Teleport Homers (see app/services/in_game/teleport_homer.py) ---
+# --- Teleport Homers (see app/seeds/factions/space_marines/teleport_homer.py) ---
 
 
 def _teleport_homers_out(game: Game) -> TeleportHomersOut:
@@ -2604,6 +2694,136 @@ async def finish_teleport_homers(
 ):
     game = await _load_game(session, game_id)
     teleport_homer_service.finish(game, payload.seat)
+    return await _commit_and_reload(session, game_id)
+
+
+# --- the start of the Shooting phase (see app/services/in_game/shooting_start.py) ---
+
+
+@router.get("/{game_id}/shooting-start", response_model=list[StartOfShootingOut])
+async def get_shooting_start(game_id: int, session: AsyncSession = Depends(get_session)):
+    # The abilities the player whose turn it is can use now, at the start of
+    # their Shooting phase (e.g. Secutor of Olympus).
+    game = await _load_game(session, game_id)
+    return [
+        StartOfShootingOut(
+            unit_id=a.unit.id,
+            unit_name=a.unit.faction_unit.name,
+            ability=a.name,
+            description=next(
+                (x.description for x in a.model.model.abilities if x.name == a.name), None
+            ),
+            targets=[UnitIdNameOut(unit_id=t.id, name=t.faction_unit.name) for t in a.targets],
+        )
+        for a in shooting_start_service.available(game)
+    ]
+
+
+@router.post("/{game_id}/shooting-start", response_model=StartOfShootingResultOut)
+async def use_shooting_start(
+    game_id: int, payload: StartOfShootingIn, session: AsyncSession = Depends(get_session)
+):
+    game = await _load_game(session, game_id)
+    result = shooting_start_service.use(
+        game,
+        deployment_service.find_unit(game, payload.unit_id),
+        payload.ability,
+        deployment_service.find_unit(game, payload.target_unit_id),
+    )
+    await session.commit()
+    return StartOfShootingResultOut(
+        roll=result.roll, wounds=result.wounds, destroyed_unit_model_ids=result.destroyed
+    )
+
+
+# --- moving after shooting (see app/services/in_game/shoot_scoot.py) ---
+
+
+@router.post("/{game_id}/shoot-scoot/check", response_model=DeploymentCheckOut)
+async def check_shoot_scoot(
+    game_id: int, payload: UnitPlacementIn, session: AsyncSession = Depends(get_session)
+):
+    # Whether the unit could move after shooting as placed, and if not, why.
+    game = await _load_game(session, game_id)
+    unit = deployment_service.find_unit(game, payload.unit_id)
+    return _check_out(shoot_scoot_service.check(game, unit, _placement(payload.positions)))
+
+
+@router.post("/{game_id}/shoot-scoot", response_model=GameOut)
+async def shoot_scoot(
+    game_id: int, payload: UnitPlacementIn, session: AsyncSession = Depends(get_session)
+):
+    # The unit moves after shooting (e.g. Ride the Thermals).
+    game = await _load_game(session, game_id)
+    unit = deployment_service.find_unit(game, payload.unit_id)
+    shoot_scoot_service.scoot(game, unit, _placement(payload.positions))
+    return await _commit_and_reload(session, game_id)
+
+
+# --- the roll-off for who goes first, and Scouts moves (see
+# app/services/in_game/first_turn.py and scouts.py) ---
+
+
+@router.post("/{game_id}/first-turn/roll", response_model=GameOut)
+async def roll_first_turn(game_id: int, session: AsyncSession = Depends(get_session)):
+    # The players roll off for who goes first (ties re-rolled).
+    game = await _load_game(session, game_id)
+    await game_service.roll_first_turn(session, game)
+    return await _commit_and_reload(session, game_id)
+
+
+def _scouts_out(game: Game) -> ScoutsOut:
+    seat = scouts_service.scouting_seat(game)
+    units = scouts_service.scout_units(game, seat) if seat is not None else []
+    return ScoutsOut(
+        seat=seat,
+        units=[
+            ScoutsUnitOut(
+                unit_id=u.id,
+                name=u.faction_unit.name,
+                distance=scouts_service.distance(u),
+                moved=scouts_service.scout_move(game, u) is not None,
+            )
+            for u in units
+        ],
+    )
+
+
+@router.get("/{game_id}/scouts", response_model=ScoutsOut)
+async def get_scouts(game_id: int, session: AsyncSession = Depends(get_session)):
+    return _scouts_out(await _load_game(session, game_id))
+
+
+@router.post("/{game_id}/scouts/check", response_model=DeploymentCheckOut)
+async def check_scout_move(
+    game_id: int, payload: UnitPlacementIn, session: AsyncSession = Depends(get_session)
+):
+    # Whether the unit could make its Scouts move as placed, and if not, why.
+    game = await _load_game(session, game_id)
+    unit = deployment_service.find_unit(game, payload.unit_id)
+    seat = deployment_service.owner(game, unit).seat
+    return _check_out(scouts_service.check(game, seat, unit, _placement(payload.positions)))
+
+
+@router.post("/{game_id}/scouts", response_model=ScoutsOut)
+async def scout_move(
+    game_id: int, payload: UnitPlacementIn, session: AsyncSession = Depends(get_session)
+):
+    game = await _load_game(session, game_id)
+    unit = deployment_service.find_unit(game, payload.unit_id)
+    seat = deployment_service.owner(game, unit).seat
+    scouts_service.move(game, seat, unit, _placement(payload.positions))
+    await session.commit()
+    return _scouts_out(await _load_game(session, game_id))
+
+
+@router.post("/{game_id}/scouts/done", response_model=GameOut)
+async def finish_scouts(
+    game_id: int, payload: SeatIn, session: AsyncSession = Depends(get_session)
+):
+    # The player is done making Scouts moves.
+    game = await _load_game(session, game_id)
+    await game_service.finish_scouts(session, game, payload.seat)
     return await _commit_and_reload(session, game_id)
 
 

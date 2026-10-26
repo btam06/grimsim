@@ -1,7 +1,9 @@
 // Weapons with several profiles (e.g. "Plasma caliver – standard" and
 // "Plasma caliver – supercharge", or "– strike" and "– sweep"): each profile
-// is named "<weapon> – <profile>", and a model attacks with only one profile
-// of a weapon at a time (see app/services/weapon_profiles.py, which checks).
+// is named "<weapon> – <profile>" - or its usual one sometimes just
+// "<weapon>" (e.g. "Melta Rifle" and "Melta Rifle - Hunter") - and a model
+// attacks with only one profile of a weapon at a time (see
+// app/services/weapon_profiles.py, which checks).
 
 const SEPARATOR = /\s+[-–—]\s+/
 
@@ -17,8 +19,8 @@ export function profileGroup(name) {
 export function onePerProfile(items, nameOf = (item) => item.name) {
   const seen = new Map()
   return items.filter((item) => {
-    const group = profileGroup(nameOf(item))
-    if (group === null) return true
+    // (A weapon that isn't one of several profiles is its own group.)
+    const group = profileGroup(nameOf(item)) ?? nameOf(item)
     const first = seen.get(group)
     if (first === undefined) {
       seen.set(group, nameOf(item))
@@ -31,6 +33,5 @@ export function onePerProfile(items, nameOf = (item) => item.name) {
 
 // Whether two names are different profiles of the same weapon.
 export function otherProfile(a, b) {
-  const group = profileGroup(a)
-  return group !== null && group === profileGroup(b) && a !== b
+  return a !== b && (profileGroup(a) ?? a) === (profileGroup(b) ?? b)
 }

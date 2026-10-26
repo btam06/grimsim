@@ -3,8 +3,7 @@ from __future__ import annotations
 from fastapi import HTTPException
 
 from app.models import Game, GameTeleportHomer, GameTeleportHomersDone, Unit
-from app.services.in_game import deployment, regions
-from app.services.in_game.deployment import TOLERANCE
+from app.services.in_game import deployment, place_token
 
 # Teleport Homers: at the start of the battle, each of a player's units with
 # the Teleport Homer ability can have one token set up anywhere on the
@@ -13,13 +12,13 @@ from app.services.in_game.deployment import TOLERANCE
 # use its token: the stratagem costs 1CP less, and the unit is set up with
 # every model within 3" of the token (and, as ever, 8" from enemy models,
 # but anywhere else) - then the token is removed. If an enemy unit ends a
-# move within 1" of a token, it's removed.
+# move within 1" of a token, it's removed. The tokens themselves are placed
+# and removed by app/services/in_game/place_token.py.
 
 TELEPORT_HOMER = "Teleport Homer"
 HOMER_RANGE = 3.0
 REMOVE_RANGE = 1.0
 CP_DISCOUNT = 1
-WIDTH, HEIGHT = deployment.BOARD[2]
 
 
 def _bad_request(detail: str) -> HTTPException:
@@ -55,9 +54,7 @@ def waiting(game: Game) -> bool:
 
 def token(game: Game, unit: Unit) -> GameTeleportHomer | None:
     # The unit's token on the battlefield, if it has one.
-    return next(
-        (h for h in game.teleport_homers if h.unit_id == unit.id and h.status == "placed"), None
-    )
+    return place_token.token(game.teleport_homers, unit)
 
 
 def place(game: Game, seat: int, unit: Unit, x: float, y: float) -> None:
@@ -66,22 +63,15 @@ def place(game: Game, seat: int, unit: Unit, x: float, y: float) -> None:
         raise _bad_request("Teleport Homer tokens are set up at the start of the battle")
     if deployment.owner(game, unit).seat != seat or not has_homer(unit):
         raise _bad_request("that unit has no Teleport Homer")
-    if not (0 <= x <= WIDTH and 0 <= y <= HEIGHT):
-        raise _bad_request("set the token up on the battlefield")
-    existing = token(game, unit)
-    if existing is not None:
-        existing.x, existing.y = x, y
-    else:
-        game.teleport_homers.append(GameTeleportHomer(unit_id=unit.id, x=x, y=y))
+    place_token.place(game.teleport_homers, unit, x, y, GameTeleportHomer)
 
 
 def remove(game: Game, seat: int, unit: Unit) -> None:
     # Takes back a token set up at the start of the battle.
     if seat not in waiting_seats(game):
         raise _bad_request("Teleport Homer tokens are set up at the start of the battle")
-    existing = token(game, unit)
-    if existing is not None and deployment.owner(game, unit).seat == seat:
-        game.teleport_homers.remove(existing)
+    if deployment.owner(game, unit).seat == seat:
+        place_token.take_back(game.teleport_homers, unit)
 
 
 def finish(game: Game, seat: int) -> None:
@@ -93,24 +83,7 @@ def finish(game: Game, seat: int) -> None:
 
 def after_move(game: Game, unit: Unit) -> None:
     # A unit ended a move: its opponent's tokens within 1" of it are removed.
-    seat = deployment.owner(game, unit).seat
-    placed = deployment.positions(game)
-    bases = [
-        deployment.base_at(m, placed[m.id].x, placed[m.id].y, placed[m.id].rotation)
-        for m in unit.unit_models
-        if m.id in placed
-    ]
-    for homer in game.teleport_homers:
-        if homer.status != "placed":
-            continue
-        owner = deployment.owner(game, deployment.find_unit(game, homer.unit_id)).seat
-        if owner == seat:
-            continue
-        if any(
-            regions.base_distance_to_point(b, (homer.x, homer.y)) <= REMOVE_RANGE + TOLERANCE
-            for b in bases
-        ):
-            homer.status = "removed"
+    place_token.remove_near(game, game.teleport_homers, unit, REMOVE_RANGE)
 
 
 def homer_problems(game: Game, unit: Unit, base) -> list[str]:
@@ -119,13 +92,11 @@ def homer_problems(game: Game, unit: Unit, base) -> list[str]:
     homer = token(game, unit)
     if homer is None:
         return ["has no Teleport Homer token on the battlefield"]
-    if regions.base_distance_to_point(base, (homer.x, homer.y)) > HOMER_RANGE + TOLERANCE:
+    if not place_token.within(base, homer, HOMER_RANGE):
         return ['isn\'t within 3" of its Teleport Homer token']
     return []
 
 
 def use(game: Game, unit: Unit) -> None:
     # The unit arrived at its token: it's removed.
-    homer = token(game, unit)
-    if homer is not None:
-        homer.status = "used"
+    place_token.use(game.teleport_homers, unit)

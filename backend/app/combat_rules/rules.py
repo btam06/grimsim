@@ -7,8 +7,11 @@ from typing import Literal
 @dataclass(frozen=True)
 class Rule:
     # A code-defined counterpart to an ability row (WeaponAbility etc.): if
-    # *any* of its conditions match the current step, *all* of its effects
-    # apply - the same keywords, looked up in CONDITIONS/EFFECTS.
+    # *all* of its conditions match the current step, *all* of its effects
+    # apply - the same keywords, looked up in CONDITIONS/EFFECTS. Combine
+    # existing conditions (e.g. Terminatus Assault: a critical hit, if the
+    # unit charged, with a Lightning Claws weapon, against a unit with no
+    # MONSTER or VEHICLE model) rather than writing one for each combination.
     #
     # `side` says whose attacks the rule modifies: an "attacker" rule applies
     # when the unit that has it makes attacks; a "defender" rule applies to

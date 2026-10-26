@@ -4,6 +4,7 @@ from app.models import DatasheetAbility, Faction, Keyword, Model, Unit, UnitMode
 from app.routers import combat as combat_router
 from app.routers.games import _load_game, _rule_options
 from app.seeds.factions.space_marines import conditions as sm_conditions
+from app.seeds.factions.space_marines import datasheet_abilities as sm_datasheets
 from app.services.in_game import command_phase, deployment
 from app.services.list_building import enhancements as enhancement_rules
 from tests.test_deployment import _deploy, _deployment, _game, _row, _unit_named
@@ -149,28 +150,46 @@ async def test_codex_adept_has_every_doctrine(client: AsyncClient, session, tmp_
     assert "Devastator Doctrine" not in _rule_options(game, x)
 
 
+def _applies(rules, context) -> bool:
+    # Whether any of the rules' effects apply in that context (every one of a
+    # rule's conditions matching).
+    from collections import deque
+
+    from app.services.combat import _apply_triggered_effects
+
+    state: dict = {}
+    pending: deque = deque()
+    _apply_triggered_effects(rules, context, state, pending)
+    return bool(state or pending)
+
+
 def test_never_shall_the_standard_fall():
+    rules = sm_datasheets.RULES["Never Shall the Standard Fall"]
     on_objective = {"defender_positions": {"in_range_of_objective"}}
     stronger = {"step": "wound", "strength": 8, "toughness": 6}
-    assert sm_conditions.standard_fall({**on_objective, **stronger})
-    assert not sm_conditions.standard_fall({**on_objective, **stronger, "strength": 6})
-    assert not sm_conditions.standard_fall(stronger)
+    assert _applies(rules, {**on_objective, **stronger})
+    assert not _applies(rules, {**on_objective, **stronger, "strength": 6})
+    assert not _applies(rules, stronger)
 
 
 def test_terminatus_assault():
+    claws_rule, hammer_rule = sm_datasheets.RULES["Terminatus Assault"]
     crit = {"step": "hit", "roll": 6, "charged": True}
     infantry = {"defender_keywords": {"INFANTRY"}}
     vehicle = {"defender_keywords": {"VEHICLE"}}
     claws = {"weapon_name": "Twin Lightning Claws"}
     hammer = {"weapon_name": "Thunder Hammer"}
-    claws_check = sm_conditions.charged_claws_critical_vs_non_monster_vehicle
-    hammer_check = sm_conditions.charged_hammer_critical_vs_monster_vehicle
-    assert claws_check({**crit, **infantry, **claws})
-    assert not claws_check({**crit, **vehicle, **claws})
-    assert not claws_check({**crit, **infantry, **claws, "charged": False})
-    assert hammer_check({**crit, **vehicle, **hammer})
-    assert not hammer_check({**crit, **infantry, **hammer})
-    assert not hammer_check({**crit, **vehicle, **claws})
+    assert _applies([claws_rule], {**crit, **infantry, **claws})
+    assert not _applies([claws_rule], {**crit, **vehicle, **claws})
+    assert not _applies([claws_rule], {**crit, **infantry, **claws, "charged": False})
+    assert not _applies([claws_rule], {**crit, **infantry, **claws, "roll": 5})
+    assert _applies([hammer_rule], {**crit, **vehicle, **hammer})
+    assert not _applies([hammer_rule], {**crit, **infantry, **hammer})
+    assert not _applies([hammer_rule], {**crit, **vehicle, **claws})
+    # Only the weapons are Space Marines conditions.
+    assert {sm_conditions.LIGHTNING_CLAWS_WEAPON, sm_conditions.THUNDER_HAMMER_WEAPON} <= set(
+        sm_conditions.CONDITIONS
+    )
 
 
 def test_weapon_profiles():

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, ForeignKey, Integer, String
@@ -92,6 +93,77 @@ class Model(Base):
     base_size: Mapped["BaseSize | None"] = relationship(
         secondary=model_base_sizes, uselist=False, lazy="selectin"
     )
+
+    transport_link: Mapped["ModelTransport | None"] = relationship(
+        cascade="all, delete-orphan", uselist=False, lazy="selectin"
+    )
+    transport_rule_links: Mapped[list["ModelTransportRule"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin"
+    )
+
+    @property
+    def transport(self) -> "TransportCapacity | None":
+        # What it can carry, if it's a TRANSPORT whose capacity was entered.
+        if self.transport_link is None:
+            return None
+        rules = self.transport_rule_links
+        return TransportCapacity(
+            capacity=self.transport_link.capacity,
+            keywords=tuple(r.keyword for r in rules if r.kind == "required"),
+            excluded_keywords=tuple(r.keyword for r in rules if r.kind == "excluded"),
+            space={r.keyword: r.value for r in rules if r.kind == "space"},
+        )
+
+    @transport.setter
+    def transport(self, capacity: "TransportCapacity | None") -> None:
+        if capacity is None:
+            self.transport_link = None
+            self.transport_rule_links = []
+            return
+        self.transport_link = ModelTransport(capacity=capacity.capacity)
+        self.transport_rule_links = (
+            [ModelTransportRule(kind="required", keyword=k) for k in capacity.keywords]
+            + [ModelTransportRule(kind="excluded", keyword=k) for k in capacity.excluded_keywords]
+            + [
+                ModelTransportRule(kind="space", keyword=k, value=v)
+                for k, v in capacity.space.items()
+            ]
+        )
+
+
+@dataclass(frozen=True)
+class TransportCapacity:
+    # A transport's capacity: how many models it can carry, each needing every
+    # one of `keywords` and none of `excluded_keywords` (e.g. 7 ADEPTUS
+    # ASTARTES INFANTRY models, not TERMINATOR or JUMP PACK), and the space a
+    # model with one of `space`'s keywords takes up (e.g. GRAVIS: 2).
+    capacity: int
+    keywords: tuple[str, ...] = ()
+    excluded_keywords: tuple[str, ...] = ()
+    space: dict[str, int] = field(default_factory=dict)
+
+
+class ModelTransport(Base):
+    # A TRANSPORT model's capacity (see TransportCapacity). Its own table rather
+    # than a column on models, so existing databases pick it up without a
+    # migration.
+    __tablename__ = "model_transports"
+
+    model_id: Mapped[int] = mapped_column(ForeignKey("models.id"), primary_key=True)
+    capacity: Mapped[int] = mapped_column(Integer)
+
+
+class ModelTransportRule(Base):
+    # One keyword of a transport's capacity: `kind` "required" or "excluded"
+    # (models it carries need it, or can't have it), or "space" (a model with
+    # it takes up `value` spaces).
+    __tablename__ = "model_transport_rules"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    model_id: Mapped[int] = mapped_column(ForeignKey("models.id"))
+    kind: Mapped[str] = mapped_column(String(16))
+    keyword: Mapped[str] = mapped_column(String(255))
+    value: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class ModelMortalFeelNoPain(Base):

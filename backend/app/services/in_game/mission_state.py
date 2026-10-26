@@ -203,13 +203,15 @@ def area_within(game: Game, area, polygon) -> bool:
 
 def after_move(game: Game, unit: Unit) -> None:
     # A unit ended a move: its opponent's Teleport Homer tokens within 1" are
-    # removed (see app/services/in_game/teleport_homer.py); actions waiting to complete whose unit is now
-    # within Engagement Range fail (see app/services/in_game/actions.py); and
+    # removed (see app/seeds/factions/space_marines/teleport_homer.py);
+    # actions waiting to complete whose unit is now within Engagement Range
+    # fail (see app/services/in_game/actions.py); and
     # for Surveil the Foe, if it's within range of an objective with any of
     # its opponent's operation markers within range, those markers are
     # removed.
     # (Imported here: actions imports this module.)
-    from app.services.in_game import actions, teleport_homer
+    from app.seeds.factions.space_marines import teleport_homer
+    from app.services.in_game import actions
 
     actions.check_started(game)
     teleport_homer.after_move(game, unit)

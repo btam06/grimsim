@@ -33,7 +33,9 @@ class Game(Base):
     status: Mapped[str] = mapped_column(String(32), default="setup")
     # Seats are 1 and 2 (see GamePlayer.seat).
     attacker_seat: Mapped[int] = mapped_column(Integer)
-    first_seat: Mapped[int] = mapped_column(Integer)
+    # Who goes first: rolled off once everything is set up (see
+    # app/services/in_game/first_turn.py) - None until then.
+    first_seat: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # 0 until the game starts.
     battle_round: Mapped[int] = mapped_column(Integer, default=0)
     turn_seat: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -71,6 +73,29 @@ class Game(Base):
     )
     teleport_homers_done: Mapped[list["GameTeleportHomersDone"]] = relationship(
         cascade="all, delete-orphan", lazy="selectin", order_by="GameTeleportHomersDone.id"
+    )
+    # Units disembarking from transports, and from which (see
+    # app/services/in_game/embarked.py).
+    disembarkations: Mapped[list["GameDisembarkation"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameDisembarkation.id"
+    )
+    # Enemy units transports picked out for the units that disembarked from
+    # them (Fire Support - see app/seeds/factions/adeptus_mechanicus/fire_support.py).
+    fire_support_targets: Mapped[list["GameFireSupport"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameFireSupport.id"
+    )
+    # The roll-off for who goes first, every roll (ties are re-rolled).
+    first_turn_rolls: Mapped[list["GameFirstTurnRoll"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameFirstTurnRoll.id"
+    )
+    # The players done making Scouts moves, before the battle.
+    scouts_done: Mapped[list["GameScoutsDone"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameScoutsDone.id"
+    )
+    # Transports' Firing Deck uses: the units in them then (see
+    # app/services/in_game/shooting.py).
+    firing_deck_uses: Mapped[list["GameFiringDeckUse"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameFiringDeckUse.id"
     )
     # Destroyed models not yet removed from the battlefield (e.g. Duty in
     # Death - see app/services/in_game/duty_in_death.py).
@@ -616,7 +641,7 @@ class GameEmergencyRoll(Base):
 
 class GameTeleportHomer(Base):
     # A unit's Teleport Homer token, set up at the start of the battle (see
-    # app/services/in_game/teleport_homer.py): `status` "placed" while it's on
+    # app/seeds/factions/space_marines/teleport_homer.py): `status` "placed" while it's on
     # the battlefield, then "used" or "removed".
     __tablename__ = "game_teleport_homers"
 
@@ -635,6 +660,68 @@ class GameTeleportHomersDone(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
     seat: Mapped[int] = mapped_column(Integer)
+
+
+class GameDisembarkation(Base):
+    # A unit disembarking from a transport, in one turn (battle round and
+    # whose turn).
+    __tablename__ = "game_disembarkations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    transport_unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int] = mapped_column(Integer)
+
+
+class GameFireSupport(Base):
+    # An enemy unit a transport scored hits against, picked out for the units
+    # that disembarked from it, for the rest of one Shooting phase (battle
+    # round and whose turn).
+    __tablename__ = "game_fire_support"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    transport_unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    target_unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int] = mapped_column(Integer)
+
+
+class GameFirstTurnRoll(Base):
+    # One player's D6 in the roll-off for who goes first (`attempt`: 1, then
+    # 2... after each tie).
+    __tablename__ = "game_first_turn_rolls"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    attempt: Mapped[int] = mapped_column(Integer)
+    seat: Mapped[int] = mapped_column(Integer)
+    roll: Mapped[int] = mapped_column(Integer)
+
+
+class GameScoutsDone(Base):
+    # A player has finished making Scouts moves, before the battle.
+    __tablename__ = "game_scouts_done"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    seat: Mapped[int] = mapped_column(Integer)
+
+
+class GameFiringDeckUse(Base):
+    # A unit embarked in a transport that used its Firing Deck, in one turn
+    # (battle round and whose turn) - it isn't eligible to shoot until the end
+    # of that turn.
+    __tablename__ = "game_firing_deck_uses"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    transport_unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int] = mapped_column(Integer)
 
 
 class GameLingeringModel(Base):
@@ -676,8 +763,9 @@ class GamePsychicUse(Base):
 
 class GameUnitTransit(Base):
     # A unit embarking in or disembarking from a transport during the battle
-    # (`kind`: "embarked" or "disembarked"), in one movement phase (battle
-    # round and whose turn) - it can't do the other in the same phase.
+    # (`kind`: "embarked" or "disembarked" - and "shock_disembarked" too, for
+    # a shock disembark move), in one movement phase (battle round and whose
+    # turn) - it can't do the other in the same phase.
     __tablename__ = "game_unit_transits"
 
     id: Mapped[int] = mapped_column(primary_key=True)

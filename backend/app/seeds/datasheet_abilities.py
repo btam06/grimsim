@@ -75,6 +75,22 @@ CORE_ENTRIES = [
         [],
     ),
     (
+        "Firing Deck 2",
+        "Each time this TRANSPORT is selected to shoot, it can use the ranged weapons of up to "
+        "2 models embarked within it as if it were equipped with them. Until the end of the "
+        "turn, the units embarked within it are not eligible to shoot.",
+        [],
+        [],
+    ),
+    (
+        "Firing Deck 7",
+        "Each time this TRANSPORT is selected to shoot, it can use the ranged weapons of up to "
+        "7 models embarked within it as if it were equipped with them. Until the end of the "
+        "turn, the units embarked within it are not eligible to shoot.",
+        [],
+        [],
+    ),
+    (
         "Scouts 6\"",
         "At the start of the first battle round, before the first turn begins, this unit can "
         "make a Normal move of up to 6\".",
@@ -110,7 +126,18 @@ CORE_CALCULATOR_NOTES = {
     "Infiltrators": "Descriptive only: a deployment rule.",
     "Deep Strike": "Descriptive only: a deployment rule.",
     "Fights First": "Descriptive only here: in a game, it decides the fight order.",
-    'Scouts 6"': "Descriptive only: a pre-battle move.",
+    'Scouts 6"': (
+        "Descriptive only in the calculator; in a game, a Normal move of up to 6\" before the "
+        "first turn (see app/services/in_game/scouts.py)."
+    ),
+    "Firing Deck 2": (
+        "Descriptive only in the calculator; in a game, the transport can fire the ranged "
+        "weapons of up to 2 embarked models (see app/services/in_game/shooting.py)."
+    ),
+    "Firing Deck 7": (
+        "Descriptive only in the calculator; in a game, the transport can fire the ranged "
+        "weapons of up to 7 embarked models (see app/services/in_game/shooting.py)."
+    ),
     "Lone Operative": (
         "Descriptive only in the calculator; in a game, models more than 12\" away can't shoot "
         "it."
@@ -220,6 +247,14 @@ COMBINED = (
     "SECURES_OBJECTIVES",
     "PSYKER_LEVELS",
     "PSYCHIC_ABILITIES",
+    "SHOCK_DISEMBARK_AFTER",
+    "CHARGE_REROLLS",
+    "AFTER_CHARGE_BATTLE_SHOCK",
+    "ACTION_AFTER",
+    "ROLL_BONUSES",
+    "SHOOT_SCOOT",
+    "STRATAGEM_TARGET_CP",
+    "START_OF_SHOOTING",
 )
 _combined: dict | None = None
 
@@ -245,6 +280,14 @@ def _combine() -> dict:
                 "SECURES_OBJECTIVES": {},
                 "PSYKER_LEVELS": {},
                 "PSYCHIC_ABILITIES": {},
+                "SHOCK_DISEMBARK_AFTER": {},
+                "CHARGE_REROLLS": set(),
+                "AFTER_CHARGE_BATTLE_SHOCK": {},
+                "ACTION_AFTER": {},
+                "ROLL_BONUSES": {},
+                "SHOOT_SCOOT": {},
+                "STRATAGEM_TARGET_CP": {},
+                "START_OF_SHOOTING": {},
             }
         ] + [
             {
@@ -264,6 +307,14 @@ def _combine() -> dict:
                     ("SECURES_OBJECTIVES", {}),
                     ("PSYKER_LEVELS", {}),
                     ("PSYCHIC_ABILITIES", {}),
+                    ("SHOCK_DISEMBARK_AFTER", {}),
+                    ("CHARGE_REROLLS", set()),
+                    ("AFTER_CHARGE_BATTLE_SHOCK", {}),
+                    ("ACTION_AFTER", {}),
+                    ("ROLL_BONUSES", {}),
+                    ("SHOOT_SCOOT", {}),
+                    ("STRATAGEM_TARGET_CP", {}),
+                    ("START_OF_SHOOTING", {}),
                 )
             }
             for faction in FACTIONS
@@ -328,6 +379,47 @@ def _combine() -> dict:
             },
             "PSYCHIC_ABILITIES": {
                 k: v for source in sources for k, v in source["PSYCHIC_ABILITIES"].items()
+            },
+            # Transport abilities that let the units embarked in it make a shock
+            # disembark move after it made one of these moves this phase (e.g.
+            # Rapid Disembarkation: "advance") - see
+            # app/services/in_game/embarked.py: {ability name: (move kind, ...)}.
+            "SHOCK_DISEMBARK_AFTER": {
+                k: v for source in sources for k, v in source["SHOCK_DISEMBARK_AFTER"].items()
+            },
+            # In a game (see app/services/in_game/charging.py): abilities that
+            # let their unit re-roll its charge roll, and those that make each
+            # enemy unit engaged with it after its charge move take a
+            # Battle-shock test - {name: (modifier, keywords that spare an
+            # enemy unit the modifier)}.
+            "CHARGE_REROLLS": {n for source in sources for n in source["CHARGE_REROLLS"]},
+            "AFTER_CHARGE_BATTLE_SHOCK": {
+                k: v
+                for source in sources
+                for k, v in source["AFTER_CHARGE_BATTLE_SHOCK"].items()
+            },
+            # Abilities whose moves don't stop their unit starting an action
+            # (see app/services/in_game/actions.py): {name: (move, ...)} -
+            # "advanced", "fell_back".
+            "ACTION_AFTER": {k: v for source in sources for k, v in source["ACTION_AFTER"].items()},
+            # Abilities that add to their unit's Advance and charge rolls (see
+            # app/services/in_game/movement.py roll_bonus): {name: {"rolls":
+            # ("advance", "charge"), "bonus": n, "near": (keywords, inches,
+            # bonus instead while within that of a friendly unit with them)}}.
+            "ROLL_BONUSES": {k: v for source in sources for k, v in source["ROLL_BONUSES"].items()},
+            # Abilities that let their unit move after shooting (see
+            # app/services/in_game/shoot_scoot.py) - and how.
+            "SHOOT_SCOOT": {k: v for source in sources for k, v in source["SHOOT_SCOOT"].items()},
+            # Abilities that gain their player 1CP on a D6 roll of at least
+            # this, each time a Stratagem targets their unit (see
+            # app/services/in_game/game.py use_stratagem).
+            "STRATAGEM_TARGET_CP": {
+                k: v for source in sources for k, v in source["STRATAGEM_TARGET_CP"].items()
+            },
+            # Abilities used at the start of their player's Shooting phase on
+            # an enemy unit (see app/services/in_game/shooting_start.py).
+            "START_OF_SHOOTING": {
+                k: v for source in sources for k, v in source["START_OF_SHOOTING"].items()
             },
             # {option name: ability name}. Option names are unique across every
             # ability (and every faction ability's options).

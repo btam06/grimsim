@@ -1,14 +1,18 @@
 from app.combat_rules.conditions import (
     BELOW_HALF_STRENGTH,
     BELOW_STARTING_STRENGTH,
+    CONTROLLING_OBJECTIVE,
     DEFENDER_BELOW_HALF_STRENGTH,
     DEFENDER_BELOW_STARTING_STRENGTH,
+    DEFENDER_CONTROLLING_OBJECTIVE,
     DEFENDER_IN_RANGE_OF_OBJECTIVE,
     IN_RANGE_OF_OBJECTIVE,
     ISOLATED_TARGET,
     REMAINED_STATIONARY,
     STATIONARY_RANGED_CRITICAL_HIT,
     TARGET_ISOLATED,
+    TARGET_WITHIN_9,
+    WITHIN_9_OF_TARGET,
 )
 from app.seeds.factions.adeptus_mechanicus.conditions import (
     ATTACKER_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE,
@@ -40,10 +44,6 @@ from app.seeds.factions.necrons.conditions import (
     WITHIN_POWER_MATRIX,
     WORTHY_FOES_TARGET,
 )
-from app.seeds.factions.space_marines.conditions import (
-    ASSAULT_DOCTRINE_TARGET_WITHIN_9,
-    TARGET_WITHIN_9,
-)
 
 # Positions the calculator asks about, since it can't measure the table:
 # {position: label}. A combat request lists each side's positions.
@@ -64,7 +64,8 @@ POSITIONS = {
         'Within 9" of Nekrosor Ammentar after it destroyed a unit this phase'
     ),
     MARKED_PREY_TARGET: "Targeting the unit selected for Marked Prey",
-    TARGET_WITHIN_9: 'Target is within 9" of the attacking unit',
+    WITHIN_9_OF_TARGET: 'Target is within 9" of the attacking unit',
+    CONTROLLING_OBJECTIVE: "Controlling an objective",
 }
 
 # The conditions that read each position, by the side whose position it is -
@@ -108,8 +109,13 @@ POSITION_CONDITIONS = {
         "defender": set(),
     },
     MARKED_PREY_TARGET: {"attacker": {MARKED_PREY_CRITICAL_HIT}, "defender": set()},
-    TARGET_WITHIN_9: {"attacker": {ASSAULT_DOCTRINE_TARGET_WITHIN_9}, "defender": set()},
+    WITHIN_9_OF_TARGET: {"attacker": {TARGET_WITHIN_9}, "defender": set()},
+    CONTROLLING_OBJECTIVE: {"attacker": set(), "defender": {DEFENDER_CONTROLLING_OBJECTIVE}},
 }
+
+# In a game, positions about being near friendly units, measured on the
+# battlefield: {position: (keywords one of their models has, inches)}.
+NEAR_FRIENDLY = {NEAR_ADMECH_BATTLELINE: (("ADEPTUS MECHANICUS", "BATTLELINE"), 6.0)}
 
 # Positions asked about for every unit on a side, whatever its rules - board
 # state as general as cover (e.g. stratagems like Scriptural Prognosis read

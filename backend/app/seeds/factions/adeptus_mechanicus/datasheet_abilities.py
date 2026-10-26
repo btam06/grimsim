@@ -2,6 +2,7 @@ from app.combat_rules import CommandChoice, Rule, RuleOption
 from app.combat_rules.conditions import (
     ALWAYS,
     TARGET_HAS_CHARACTER,
+    TARGET_MONSTER_OR_VEHICLE,
     TARGET_LED_BY_CHARACTER,
 )
 from app.combat_rules.effects import (
@@ -9,6 +10,7 @@ from app.combat_rules.effects import (
     ASSAULT,
     FEEL_NO_PAIN_4,
     FEEL_NO_PAIN_5,
+    IGNORE_COVER,
     INVULNERABLE_4,
     MINUS_ONE_TO_WOUND,
     PLUS_ONE_TOUGHNESS,
@@ -22,6 +24,7 @@ from app.seeds.factions.adeptus_mechanicus.conditions import (
     CONQUEROR_IMPERATIVE_ACTIVE,
     KASTELAN_MELEE_WEAPON,
     KASTELAN_RANGED_WEAPON,
+    NEUTRON_FUSIL_WEAPON,
     PROTECTOR_IMPERATIVE_ACTIVE,
     TARGET_ELECTRO_PRIESTS_LED_BY_CHARACTER,
     TARGET_MODEL_DATASMITH_LEADING_KASTELANS,
@@ -33,6 +36,44 @@ from app.seeds.factions.adeptus_mechanicus.conditions import (
 
 # (name, description, [condition keywords], [effect keywords])
 ENTRIES = [
+    (
+        "Monocular Targeting Helms",
+        "Each time a model in this unit makes an attack with a neutron fusil against a MONSTER "
+        "or VEHICLE unit, that attack has the [IGNORES COVER] ability.",
+        [],
+        [],
+    ),
+    (
+        # In a game, see SHOOT_SCOOT below.
+        "Ride the Thermals",
+        "In your Shooting phase, after this unit has shot, if it is not within Engagement Range "
+        "of one or more enemy units, it can do one of the following: make a Normal move of up "
+        "to 6\"; or make a Normal move of up to 12\", provided every model in this unit ends "
+        "that move wholly within 6\" of one or more friendly ADEPTUS MECHANICUS BATTLELINE "
+        "units. In either case, if it does, until the end of the turn, this unit is not "
+        "eligible to declare a charge.",
+        [],
+        [],
+    ),
+    (
+        # In a game, see app/seeds/factions/adeptus_mechanicus/fire_support.py.
+        "Fire Support",
+        "In your Shooting phase, after this model has shot, select one enemy unit it scored one "
+        "or more hits against this phase. Until the end of the phase, each time a friendly "
+        "model that disembarked from this Transport this turn makes an attack that targets "
+        "that enemy unit, you can re-roll the Wound roll.",
+        [],
+        [],
+    ),
+    (
+        # In a game, see ROLL_BONUSES below.
+        "Optimised Gait",
+        "Add 1 to Advance and Charge rolls made for this unit. While this unit is within 6\" of "
+        "one or more friendly ADEPTUS MECHANICUS BATTLELINE units, add 2 to Advance and Charge "
+        "rolls made for this unit instead.",
+        [],
+        [],
+    ),
     (
         "Electro-infusion",
         "While a CHARACTER model is leading this unit, each time an attack targets this unit, "
@@ -225,6 +266,17 @@ ENTRIES = [
 # How the calculator handles abilities above, where that needs saying:
 # {ability name: note}.
 CALCULATOR_NOTES = {
+    "Ride the Thermals": (
+        "Descriptive only in the calculator; in a game, a move after shooting (see "
+        "app/services/in_game/shoot_scoot.py)."
+    ),
+    "Fire Support": (
+        "Descriptive only in the calculator; in a game, units that disembarked from it re-roll "
+        "Wound rolls against the unit it hit this Shooting phase."
+    ),
+    "Optimised Gait": (
+        "Descriptive only in the calculator; in a game, added to its Advance and charge rolls."
+    ),
     "Data-spike": (
         "Descriptive only: a start-of-Fight-phase action outside the attack "
         "sequence the combat engine resolves."
@@ -233,7 +285,10 @@ CALCULATOR_NOTES = {
         "Shooting after Advancing is modelled as every weapon having [ASSAULT]; "
         "Falling Back and Desperate Escape aren't modelled."
     ),
-    "Broad Spectrum Data-tether": "Descriptive only: gaining CP is outside the combat engine.",
+    "Broad Spectrum Data-tether": (
+        "Descriptive only in the calculator; in a game, a Stratagem used on its unit (with a "
+        "unit target, or Rapid Ingress) rolls for the CP."
+    ),
     "Dynamic Efficiency": "Descriptive only: charging and Desperate Escape aren't modelled.",
     "Voices in the Code": "Descriptive only: Battle-shock is outside the combat engine.",
     "Neurostatic Interference (Aura)": (
@@ -245,7 +300,8 @@ CALCULATOR_NOTES = {
         "it while it's within 3\" of another friendly ADEPTUS MECHANICUS unit."
     ),
     "Secutor of Olympus": (
-        "Descriptive only: a start-of-Shooting-phase action outside the attack sequence."
+        "Descriptive only in the calculator; in a game, used at the start of your Shooting "
+        "phase (see app/services/in_game/shooting_start.py)."
     ),
     "Supreme Commander": "Descriptive only: an army-building restriction.",
     "Objective Scouted": (
@@ -266,6 +322,13 @@ CALCULATOR_NOTES = {
 
 # Code-defined rules for abilities above, by name.
 RULES = {
+    "Monocular Targeting Helms": [
+        Rule(
+            conditions=(NEUTRON_FUSIL_WEAPON, TARGET_MONSTER_OR_VEHICLE),
+            effects=(IGNORE_COVER,),
+            description="Neutron fusils ignore cover against MONSTER or VEHICLE units.",
+        ),
+    ],
     "Electro-infusion": [
         Rule(
             conditions=(TARGET_HAS_CHARACTER,),
@@ -383,25 +446,27 @@ OPTIONS = {
             army_wide=True,
             eligible_after=("advanced",),
             description=(
-                "A SKITARII or THULIA GHULD unit within 6\" can shoot after Advancing - "
-                "modelled as its ranged weapons having [ASSAULT] (the 6\" isn't modelled)."
+                "The SKITARII or THULIA GHULD unit chosen (within 6\" of Thulia) can shoot "
+                "after Advancing - its ranged weapons have [ASSAULT]. Pick it for that unit; in "
+                "a game, it's chosen in the Command phase."
             ),
         ),
         "Adaptive Tactics": RuleOption(
             army_wide=True,
             eligible_after=("fell_back",),
             description=(
-                "Not modelled in the calculator: in a game, the unit can shoot and declare a "
-                "charge after Falling Back."
+                "Not modelled in the calculator: in a game, the SKITARII or THULIA GHULD unit "
+                "chosen (within 6\" of Thulia) can shoot and declare a charge after Falling "
+                "Back."
             ),
         ),
         "The Fires of Mars": RuleOption(
             army_wide=True,
             grants_options=("Protector Imperative", "Conqueror Imperative"),
             description=(
-                "A SKITARII or THULIA GHULD unit within 6\" has both the Protector and "
-                "Conqueror Imperatives active (if it has Doctrina Imperatives; the 6\" isn't "
-                "modelled)."
+                "The SKITARII or THULIA GHULD unit chosen (within 6\" of Thulia) has both the "
+                "Protector and Conqueror Imperatives active (if it has Doctrina Imperatives). "
+                "Pick it for that unit; in a game, it's chosen in the Command phase."
             ),
         ),
     },
@@ -455,3 +520,42 @@ CONDITIONAL_LONE_OPERATIVE = {"Mechanicus Bodyguard": (3.0, ("ADEPTUS MECHANICUS
 # the end of one of their player's phases (see
 # app/services/in_game/objectives.py).
 SECURES_OBJECTIVES = {"Objective Scouted": "command"}
+
+# In a game: abilities that let their unit move after shooting (see
+# app/services/in_game/shoot_scoot.py) - Ride the Thermals: 6", or 12" if
+# every model ends wholly within 6" of a friendly ADEPTUS MECHANICUS
+# BATTLELINE unit; then no charge this turn.
+SHOOT_SCOOT = {
+    "Ride the Thermals": {
+        "reach": 6.0,
+        "further": (12.0, ("ADEPTUS MECHANICUS", "BATTLELINE"), 6.0),
+        "no_charge": True,
+    },
+}
+
+# In a game: abilities that add to their unit's Advance and charge rolls (see
+# app/services/in_game/movement.py roll_bonus) - Optimised Gait: +1, or +2
+# within 6" of a friendly ADEPTUS MECHANICUS BATTLELINE unit.
+ROLL_BONUSES = {
+    "Optimised Gait": {
+        "rolls": ("advance", "charge"),
+        "bonus": 1,
+        "near": (("ADEPTUS MECHANICUS", "BATTLELINE"), 6.0, 2),
+    },
+}
+
+# In a game: abilities that gain their player 1CP on a D6 roll of at least
+# this, each time a Stratagem targets their unit - Broad Spectrum Data-tether.
+STRATAGEM_TARGET_CP = {"Broad Spectrum Data-tether": 5}
+
+# In a game: abilities used at the start of their player's Shooting phase on an
+# enemy unit (see app/services/in_game/shooting_start.py) - Secutor of
+# Olympus: an enemy VEHICLE unit within 12", on a 2+ D3+1 mortal wounds.
+START_OF_SHOOTING = {
+    "Secutor of Olympus": {
+        "target_keywords": ("VEHICLE",),
+        "range": 12.0,
+        "roll": 2,
+        "mortal_wounds": "D3+1",
+    },
+}

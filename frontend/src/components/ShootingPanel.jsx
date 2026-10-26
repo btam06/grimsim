@@ -53,7 +53,7 @@ function ShootingPanel({ game, player, shooting, overwatch, focus, onFocus, onSh
   const selected = shooting?.units.find((u) => u.unit_id === focus.unitId) ?? null
   // Only one it can see (a click on the board can pick any unit).
   const target = targets.find((t) => t.unit_id === focus.targetId && t.visible) ?? null
-  const key = (w) => `${w.enhancement ? 'e' : 'w'}${w.id}`
+  const key = (w) => `${w.firing_deck ? 'd' : w.enhancement ? 'e' : 'w'}${w.id}`
 
   // The selected unit's possible targets.
   useEffect(() => {
@@ -118,8 +118,10 @@ function ShootingPanel({ game, player, shooting, overwatch, focus, onFocus, onSh
       const result = await fireAt(game.id, {
         unit_id: selected.unit_id,
         target_unit_id: target.unit_id,
-        weapon_ids: chosen.filter((w) => !w.enhancement).map((w) => w.id),
+        weapon_ids: chosen.filter((w) => !w.enhancement && !w.firing_deck).map((w) => w.id),
         enhancement_weapon_ids: chosen.filter((w) => w.enhancement).map((w) => w.id),
+        // Its embarked models' weapons (a TRANSPORT with Firing Deck).
+        firing_deck_weapon_ids: chosen.filter((w) => w.firing_deck).map((w) => w.id),
       })
       setOutcome({ unit: selected.name, target: target.name, ...result })
       onShot()

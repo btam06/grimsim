@@ -27,7 +27,6 @@ function NewGamePage({ onCreated, onCancel }) {
   const [secondaries, setSecondaries] = useState([])
   const [players, setPlayers] = useState([EMPTY_PLAYER, EMPTY_PLAYER])
   const [attackerSeat, setAttackerSeat] = useState(1)
-  const [firstSeat, setFirstSeat] = useState(1)
   const [error, setError] = useState(null)
 
   useEffect(() => {
@@ -75,8 +74,8 @@ function NewGamePage({ onCreated, onCancel }) {
           disposition_id: p.disposition_id === '' ? null : Number(p.disposition_id),
           fixed_secondary_ids: p.secondary_mode === 'fixed' ? p.fixed_secondary_ids : [],
         })),
+        // Who goes first is rolled off once everything is set up.
         attacker_seat: Number(attackerSeat),
-        first_seat: Number(firstSeat),
       })
       onCreated(game)
     } catch (err) {
@@ -155,9 +154,6 @@ function NewGamePage({ onCreated, onCancel }) {
         })}
         <Field label="Attacker">
           <Select options={seatOptions} value={String(attackerSeat)} onChange={setAttackerSeat} />
-        </Field>
-        <Field label="Goes first">
-          <Select options={seatOptions} value={String(firstSeat)} onChange={setFirstSeat} />
         </Field>
         <button type="submit">Create Game</button>
         <button type="button" onClick={onCancel}>

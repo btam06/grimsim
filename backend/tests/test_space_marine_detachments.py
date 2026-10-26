@@ -4,6 +4,12 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from app.combat_rules import CONDITIONS, Rule
+from app.combat_rules.conditions import (
+    ANTI_NON_VEHICLE_4,
+    WITHIN_9_OF_TARGET,
+    WITHOUT_DEVASTATING_WOUNDS,
+)
 from app.combat_rules.positions import POSITIONS
 from app.models import (
     ArmyList,
@@ -29,6 +35,7 @@ from app.services.list_building import enhancements as enhancement_rules
 from tests.test_combat_doctrines import ASSAULT, _choose, _command, _doctrines_game
 from tests.test_deployment import _declare, _deploy, _deployment, _game, _row, _set, _unit_named
 from tests.test_reinforcements import EDGE, _advance_to, _at, _bring_in, _rapid_ingress
+from tests.test_space_marines import _applies
 
 # Games on the test layout: the attacker (seat 1) deploys along y 32-44, the
 # defender (seat 2) along y 0-12, and the defender goes first. Seat 1's
@@ -93,36 +100,39 @@ def _stratagem(name, detachment, phase, turn, game_action=None, keywords=()) -> 
 
 
 def test_hellfire_rounds_anti_non_vehicle_4():
-    check = sm_conditions.hellfire_anti_non_vehicle_4
-    wound = {"step": "wound", "is_ranged": True, "roll": 4, "defender_keywords": {"INFANTRY"}}
-    assert check(wound)
-    assert not check({**wound, "roll": 3})
-    assert not check({**wound, "defender_keywords": {"VEHICLE"}})
-    assert not check({**wound, "is_ranged": False})
+    # Its stratagems.json conditions, both core: every one must match.
+    rule = Rule(conditions=(ANTI_NON_VEHICLE_4, WITHOUT_DEVASTATING_WOUNDS), effects=("noop",))
+    wound = {"step": "wound", "roll": 4, "defender_keywords": {"INFANTRY"}}
+    matches = lambda context: all(CONDITIONS[c](context) for c in rule.conditions)  # noqa: E731
+    assert matches(wound)
+    assert not matches({**wound, "roll": 3})
+    assert not matches({**wound, "defender_keywords": {"VEHICLE"}})
     # Excluding [DEVASTATING WOUNDS] attacks.
-    assert not check({**wound, "weapon_ability_names": {"Devastating Wounds"}})
-    assert check({**wound, "weapon_ability_names": {"Lethal Hits"}})
+    assert not matches({**wound, "weapon_ability_names": {"Devastating Wounds"}})
+    assert matches({**wound, "weapon_ability_names": {"Lethal Hits"}})
 
 
 def test_mission_tactics_follow_the_doctrine():
+    furor, malleus, purgatus = (
+        sm_datasheets.RULES[f"{name} Tactics"] for name in ("Furor", "Malleus", "Purgatus")
+    )
     crit = {"step": "hit", "roll": 6}
     devastator = {"attacker_options": {"Devastator Doctrine"}}
     tactical = {"attacker_options": {"Tactical Doctrine"}}
     assault = {"attacker_options": {"Assault Doctrine"}}
-    assert sm_conditions.devastator_doctrine_critical_hit({**crit, **devastator})
-    assert not sm_conditions.devastator_doctrine_critical_hit({**crit, **tactical})
-    assert not sm_conditions.devastator_doctrine_critical_hit({**devastator, "step": "hit"})
-    assert sm_conditions.tactical_doctrine_critical_hit({**crit, **tactical})
-    assert not sm_conditions.tactical_doctrine_critical_hit({**crit, **assault})
+    assert _applies(furor, {**crit, **devastator})
+    assert not _applies(furor, {**crit, **tactical})
+    assert not _applies(furor, {**devastator, "step": "hit", "roll": 5})
+    assert _applies(malleus, {**crit, **tactical})
+    assert not _applies(malleus, {**crit, **assault})
     # Purgatus Tactics: the target within 9" too (Positioning).
-    near = {"attacker_positions": {sm_conditions.TARGET_WITHIN_9}}
-    assert sm_conditions.assault_doctrine_target_within_9({**assault, **near})
-    assert not sm_conditions.assault_doctrine_target_within_9(assault)
-    assert not sm_conditions.assault_doctrine_target_within_9({**tactical, **near})
-    assert sm_conditions.TARGET_WITHIN_9 in POSITIONS
+    near = {"attacker_positions": {WITHIN_9_OF_TARGET}}
+    assert _applies(purgatus, {**assault, **near})
+    assert not _applies(purgatus, assault)
+    assert not _applies(purgatus, {**tactical, **near})
+    assert WITHIN_9_OF_TARGET in POSITIONS
     for name in ("Furor Tactics", "Malleus Tactics", "Purgatus Tactics"):
         assert name in {entry[0] for entry in sm_datasheets.ENTRIES}
-        assert sm_datasheets.RULES[name]
 
 
 def test_gene_wrought_might_improves_ap_with_the_assault_doctrine():
@@ -151,10 +161,10 @@ async def test_purgatus_tactics_target_within_9_in_a_game(
         assert response.status_code == 200, response.text
     game_ = await _load_game(session, game["id"])
     a_, d_ = (deployment.find_unit(game_, u["unit_id"]) for u in (a, d))
-    assert sm_conditions.TARGET_WITHIN_9 not in _attacker_positions(game_, a_, d_)
+    assert WITHIN_9_OF_TARGET not in _attacker_positions(game_, a_, d_)
     for m in d_.unit_models:
         deployment.positions(game_)[m.id].y = 27
-    assert sm_conditions.TARGET_WITHIN_9 in _attacker_positions(game_, a_, d_)
+    assert WITHIN_9_OF_TARGET in _attacker_positions(game_, a_, d_)
     assert "remained_stationary" in _attacker_positions(game_, a_, d_, stationary=True)
 
 
@@ -465,8 +475,7 @@ async def _deathwatch_list(client, session, tmp_path):
     units = {
         1: [
             ("A", 1, {"keywords": ("ADEPTUS ASTARTES",)}),
-            # (Its new keywords first: the test helper adds them as it goes.)
-            ("W", 1, {"keywords": ("DEATHWATCH", "CHARACTER", "ADEPTUS ASTARTES")}),
+            ("W", 1, {"keywords": ("ADEPTUS ASTARTES", "DEATHWATCH", "CHARACTER")}),
         ],
         2: [("D", 1, {})],
     }

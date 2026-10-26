@@ -338,3 +338,33 @@ async def test_machine_vengeance_targets_one_enemy_unit(
     assert option in _rule_options(game, far, d)
     assert option not in _rule_options(game, far)
     assert option not in _rule_options(game, far, far)
+
+
+async def test_the_fires_of_mars_for_the_unit_chosen_within_6(
+    client: AsyncClient, session, tmp_path, monkeypatch
+):
+    game_id, units = await _command_game(client, session, tmp_path, monkeypatch)
+    await _advance_to(client, game_id, 1, 1, "command")
+    await _choose(client, game_id, units["Cawl"], "Canticles of the Omnissiah", "Shroudpsalm")
+    response = await _choose(
+        client, game_id, units["Thulia"], "Rod of the War Forge", "The Fires of Mars",
+        units["Skitarii"],
+    )
+    assert response.status_code == 200, response.text
+    assert "The Fires of Mars" in await _options(session, game_id, units["Skitarii"])
+    for name in ("Far", "Thulia", "Kastelans"):
+        assert "The Fires of Mars" not in await _options(session, game_id, units[name])
+    # Thulia can choose herself instead (she's THULIA GHULD, and within 6").
+    response = await _choose(
+        client, game_id, units["Thulia"], "Rod of the War Forge", "The Fires of Mars",
+        units["Thulia"],
+    )
+    assert response.status_code == 200, response.text
+    assert "The Fires of Mars" in await _options(session, game_id, units["Thulia"])
+    assert "The Fires of Mars" not in await _options(session, game_id, units["Skitarii"])
+    # Not a unit without SKITARII or THULIA GHULD, however close.
+    response = await _choose(
+        client, game_id, units["Thulia"], "Rod of the War Forge", "The Fires of Mars",
+        units["Cawl"],
+    )
+    assert response.status_code == 400

@@ -104,11 +104,14 @@ def resists(unit_model) -> bool:
     return fnp is not None and random.randint(1, 6) >= fnp
 
 
-def mortal_wounds(game: Game, unit: Unit, wounds: int) -> list[int]:
+def mortal_wounds(
+    game: Game, unit: Unit, wounds: int, destroyed_by: Unit | None = None
+) -> list[int]:
     # The unit suffers mortal wounds, one at a time: each to a wounded model
     # if it has one, otherwise to its first model on the battlefield - and
     # what's left over goes on to the next model. Each can be negated by the
-    # model's Feel No Pain (see mortal_fnp). The models destroyed.
+    # model's Feel No Pain (see mortal_fnp). The models destroyed (by
+    # `destroyed_by`, if a unit's rule inflicted them).
     destroyed = []
     for _ in range(wounds):
         left = wounds_remaining(game, unit)
@@ -119,7 +122,7 @@ def mortal_wounds(game: Game, unit: Unit, wounds: int) -> list[int]:
         target = models[(wounded or sorted(left))[0]]
         if resists(target):
             continue
-        _lose(game, target, 1)
+        _lose(game, target, 1, destroyed_by)
         if damage(game)[target.id].destroyed:
             destroyed.append(target.id)
     return destroyed
