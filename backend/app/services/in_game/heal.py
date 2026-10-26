@@ -54,7 +54,7 @@ def heal(game: Game, unit: Unit, wounds: int) -> tuple[int, int]:
             break
         record = records[destroyed[0].id]
         record.destroyed = False
-        record.wounds_lost = destroyed[0].model.wounds - 1
+        record.wounds_lost = destroyed[0].wounds - 1
         just_returned.add(destroyed[0].id)
         returned += 1
     return healed, returned

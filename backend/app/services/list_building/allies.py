@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from app.list_rules import AllyRule
 from app.models import ArmyList, Faction, FactionUnit, Model, Unit, UnitModel
-from app.seeds.factions import ALLY_RULES
+from app.seeds.factions import ALLY_RULES, SUBFACTIONS
 
 # Which factions' units and models an army list can include, beyond its own
 # faction's, under the ally rules (see app/list_rules.py). Shared by the
@@ -50,6 +50,58 @@ def model_unavailable_reason(
         return None
     if model_rule(model, model_faction, rules) is None:
         return f"{model.name} ({model_faction}) can't be included in a {list_faction} list"
+    return None
+
+
+def subfaction_allies(
+    list_faction: str, subfaction: str | None, detachments: set[str] = frozenset()
+) -> list[dict]:
+    # The selection's ally allowances (e.g. Deathwatch Allies) a list with
+    # these detachments (by name) has, for options other than its own.
+    config = SUBFACTIONS.get(list_faction)
+    if config is None:
+        return []
+    own = config["options"].get(subfaction)
+    return [
+        ally
+        for ally in config.get("allies", [])
+        if ally["detachment"] in detachments and ally["keyword"] != own
+    ]
+
+
+def subfaction_ally(
+    model: Model, list_faction: str, subfaction: str | None, detachments: set[str] = frozenset()
+) -> dict | None:
+    # The allowance letting a model with another option's keyword into the
+    # list, if any - e.g. a DEATHWATCH model in an Ultramarines list with
+    # Deathwatch Support.
+    keywords = _keywords(model)
+    return next(
+        (
+            ally
+            for ally in subfaction_allies(list_faction, subfaction, detachments)
+            if ally["keyword"] in keywords
+        ),
+        None,
+    )
+
+
+def subfaction_reason(
+    model: Model, list_faction: str, subfaction: str | None, detachments: set[str] = frozenset()
+) -> str | None:
+    # Why a list can't include a model because of its faction's selection
+    # (e.g. a Chapter): a model with another option's keyword of its own
+    # (e.g. Roboute Guilliman, ULTRAMARINES) can only be in a list of that
+    # option - unless one of the list's detachments (by name) lets it in
+    # (subfaction_ally). None if it can.
+    config = SUBFACTIONS.get(list_faction)
+    if config is None:
+        return None
+    allowed = {a["keyword"] for a in subfaction_allies(list_faction, subfaction, detachments)}
+    for option, keyword in config["options"].items():
+        if option != subfaction and keyword in _keywords(model) and keyword not in allowed:
+            article = "an" if option[0] in "AEIOU" else "a"
+            return f"{model.name} can only be included in {article} {option} list"
     return None
 
 
@@ -128,10 +180,14 @@ def unit_unavailable_reason(
     for model in models:
         reason = model_unavailable_reason(
             model, context.faction_names[model.faction_id], context.faction, rules
+        ) or subfaction_reason(
+            model, context.faction, context.army_list.subfaction, context.detachments
         )
         if reason:
             return reason
-    reason = _model_limit_reason(context, models, rules)
+    reason = _model_limit_reason(context, models, rules) or _subfaction_points_reason(
+        context, points, models
+    )
     if reason:
         return reason
     totals = context.points_by_faction()
@@ -142,6 +198,28 @@ def unit_unavailable_reason(
             return (
                 f"a {context.faction} list of {context.army_list.points_limit} pts can include "
                 f"at most {limit} pts of {' / '.join(rule.model_keywords)} units"
+            )
+    return None
+
+
+def _subfaction_points_reason(context: ListContext, points: int, models: list[Model]) -> str | None:
+    # Why adding this unit would take the list past an ally allowance's points
+    # (e.g. Deathwatch Allies: 500 pts of DEATHWATCH units), or None.
+    for ally in subfaction_allies(
+        context.faction, context.army_list.subfaction, context.detachments
+    ):
+        keyword = ally["keyword"]
+        if not any(keyword in _keywords(m) for m in models):
+            continue
+        total = points + sum(
+            unit.points
+            for unit in context.other_units
+            if any(keyword in _keywords(um.model) for um in unit.unit_models)
+        )
+        if total > ally["points"]:
+            return (
+                f"{ally['detachment']}: a list can include at most {ally['points']} pts of "
+                f"{keyword} units"
             )
     return None
 

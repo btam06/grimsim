@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from fastapi import HTTPException
 
 from app.models import Game, GamePlayer, GameRuleChoice
+from app.seeds import datasheet_abilities as datasheet_ability_seeds
 from app.seeds import factions as faction_seeds
 from app.services.in_game import deployment
 
@@ -210,11 +211,25 @@ def chosen_options(
     ]
 
 
+def command_phase_choice(game: Game, faction_ability_id: int) -> bool:
+    # Whether the ability's option is selected in the Command phase instead
+    # (e.g. Combat Doctrines - see app/services/in_game/command_phase.py).
+    ability = _ability(game, faction_ability_id)
+    return ability is not None and (
+        (ability.faction.name, ability.name) in faction_seeds.COMMAND_PHASE_CHOICES
+    )
+
+
 def active_options(game: Game, seat: int) -> list[str]:
     # The options active for the player's army now (for the combat
     # calculator's rule options - only those it knows): this battle round's,
-    # and those that last the battle.
-    ability_ids = {c.faction_ability_id for c in game.rule_choices if c.seat == seat}
+    # and those that last the battle. (Not those selected in the Command
+    # phase, which last from one of the player's Command phases to the next.)
+    ability_ids = {
+        c.faction_ability_id
+        for c in game.rule_choices
+        if c.seat == seat and not command_phase_choice(game, c.faction_ability_id)
+    }
     return [
         option
         for ability_id in ability_ids
@@ -280,3 +295,30 @@ def missing_choices(game: Game) -> list[str]:
             if rule.required and rule.faction_ability_id not in chosen:
                 missing.append(f"{player.user.name}'s {rule.name}")
     return missing
+
+
+# --- CP at the start of the battle round ---
+
+
+def warlord_cp(game: Game) -> dict[int, int]:
+    # What each player (by seat) gains at the start of the battle round from
+    # abilities that do while a model with one is their WARLORD (e.g.
+    # Transhuman Strategist: 1CP) - if their Warlord's unit has a model with
+    # one that isn't destroyed (on the battlefield, in reserves or embarked).
+    gains = datasheet_ability_seeds.ROUND_START_CP
+    destroyed = {d.unit_model_id for d in game.model_damage if d.destroyed}
+    found = {}
+    for player in game.players:
+        warlord = player.army_list.warlord
+        if warlord is None:
+            continue
+        names = {
+            ability.name
+            for unit_model in warlord.unit_models
+            if unit_model.id not in destroyed
+            for ability in unit_model.model.abilities
+        }
+        cp = sum(gains[name] for name in names if name in gains)
+        if cp:
+            found[player.seat] = cp
+    return found

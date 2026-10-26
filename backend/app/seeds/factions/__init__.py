@@ -109,6 +109,26 @@ FACTIONS = [
 
 NAMES = [faction.info.FACTION_NAME for faction in FACTIONS]
 
+# Each faction's list selection, for those that have one (info.py SUBFACTION -
+# e.g. the Space Marines' Chapter), by faction name.
+SUBFACTIONS: dict[str, dict] = {
+    faction.info.FACTION_NAME: faction.info.SUBFACTION
+    for faction in FACTIONS
+    if hasattr(faction.info, "SUBFACTION")
+}
+
+# Detachments whose units with certain keywords can only take that
+# detachment's enhancements (info.py EXCLUSIVE_ENHANCEMENTS - e.g. Deathwatch
+# Support's KILL TEAM units): {detachment name: (keyword, ...)}.
+EXCLUSIVE_ENHANCEMENTS: dict[str, tuple[str, ...]] = {
+    name: keywords
+    for faction in FACTIONS
+    for name, keywords in getattr(faction.info, "EXCLUSIVE_ENHANCEMENTS", {}).items()
+}
+
+# (Option names are unique across every faction's.)
+
+
 # Every faction's army-building ally rules (see app/list_rules.py).
 ALLY_RULES = [rule for faction in FACTIONS for rule in getattr(faction.info, "ALLY_RULES", [])]
 
@@ -205,6 +225,64 @@ LASTING_CHOICES: set[tuple[str, str]] = {
     (faction.info.FACTION_NAME, ability_name)
     for faction in FACTIONS
     for ability_name in getattr(faction.abilities, "LASTING_CHOICES", set())
+}
+
+
+# In a game: faction abilities whose option is selected in the player's
+# Command phase (abilities.py COMMAND_PHASE_CHOICES, with
+# COMMAND_PHASE_DESCRIPTIONS), those whose options can each be selected only
+# once per battle (ONCE_PER_BATTLE), and what options let a unit still do
+# after Advancing or Falling Back (ELIGIBLE_AFTER: {option name: {action:
+# (things it can still do)}}) - e.g. Combat Doctrines.
+COMMAND_PHASE_CHOICES: set[tuple[str, str]] = {
+    (faction.info.FACTION_NAME, ability_name)
+    for faction in FACTIONS
+    for ability_name in getattr(faction.abilities, "COMMAND_PHASE_CHOICES", set())
+}
+COMMAND_PHASE_DESCRIPTIONS: dict[tuple[str, str], dict[str, str]] = {
+    (faction.info.FACTION_NAME, ability_name): descriptions
+    for faction in FACTIONS
+    for ability_name, descriptions in getattr(
+        faction.abilities, "COMMAND_PHASE_DESCRIPTIONS", {}
+    ).items()
+}
+ONCE_PER_BATTLE: set[tuple[str, str]] = {
+    (faction.info.FACTION_NAME, ability_name)
+    for faction in FACTIONS
+    for ability_name in getattr(faction.abilities, "ONCE_PER_BATTLE", set())
+}
+# In a game, what detachment rules do beyond the abilities they grant (each
+# faction's optional detachment_rules.py): extra selections of once-per-battle
+# options ({detachment name: {option name: extra}} - e.g. Assault Mastery: the
+# Assault Doctrine twice), and charge roll bonuses ({rule name: bonus} - e.g.
+# Death Blow).
+EXTRA_SELECTIONS: dict[str, dict[str, int]] = {
+    detachment: extra
+    for faction in FACTIONS
+    for detachment, extra in getattr(
+        getattr(faction, "detachment_rules", None), "EXTRA_SELECTIONS", {}
+    ).items()
+}
+# {enhancement name: how it changes its bearer's unit's arrival from Reserves}
+# - detachment_rules.py ARRIVAL_ENHANCEMENTS (e.g. Beacon Angelis).
+ARRIVAL_ENHANCEMENTS: dict[str, dict] = {
+    name: arrival
+    for faction in FACTIONS
+    for name, arrival in getattr(
+        getattr(faction, "detachment_rules", None), "ARRIVAL_ENHANCEMENTS", {}
+    ).items()
+}
+CHARGE_BONUSES: dict[str, int] = {
+    rule: bonus
+    for faction in FACTIONS
+    for rule, bonus in getattr(
+        getattr(faction, "detachment_rules", None), "CHARGE_BONUSES", {}
+    ).items()
+}
+ELIGIBLE_AFTER: dict[str, dict[str, tuple[str, ...]]] = {
+    option_name: eligible
+    for faction in FACTIONS
+    for option_name, eligible in getattr(faction.abilities, "ELIGIBLE_AFTER", {}).items()
 }
 
 

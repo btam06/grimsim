@@ -6,6 +6,15 @@ import {
   checkArrival,
   checkDisembark,
   disembark,
+  embark,
+  checkEmergency,
+  emergencyDisembark,
+  getEmergency,
+  getTeleportHomers,
+  getPsychic,
+  castPsychic,
+  placeTeleportHomer,
+  finishTeleportHomers,
   getDisembarkFormation,
   getEmbarked,
   checkCharge,
@@ -44,6 +53,7 @@ import {
   rollCharge,
   skipConsolidation,
   getTerrainLayout,
+  listStratagemTargets,
   listUsableStratagems,
   scorePrimary,
   startGame,
@@ -64,6 +74,9 @@ import MissionPanel from './MissionPanel'
 import ReanimationPanel from './ReanimationPanel'
 import ReservesPanel from './ReservesPanel'
 import EmbarkedPanel from './EmbarkedPanel'
+import EmergencyPanel from './EmergencyPanel'
+import TeleportHomerPanel from './TeleportHomerPanel'
+import PsychicPanel from './PsychicPanel'
 import RoundStartPanel from './RoundStartPanel'
 import ScoringPanel from './ScoringPanel'
 import ShootingPanel from './ShootingPanel'
@@ -127,9 +140,17 @@ function ReplaceSecondaryDialog({ dialogRef, stratagem, cards, onConfirm }) {
   )
 }
 
+// Stratagem game actions used on one of the player's units (see
+// app/models/stratagem.py UNIT_TARGET_ACTIONS).
+const UNIT_TARGET_ACTIONS = ['strategic_reserves', 'duty_in_death']
+
 function PlayerCard({ game, player, onAction }) {
   const [usable, setUsable] = useState([])
   const [stratagemId, setStratagemId] = useState('')
+  // For a stratagem used on one of the player's units: the units it can
+  // target now, and the one picked.
+  const [targets, setTargets] = useState([])
+  const [targetUnitId, setTargetUnitId] = useState('')
   const replaceDialog = useRef(null)
   const [primaryPoints, setPrimaryPoints] = useState('')
   // VP to score per secondary card; starts at the card's base VP.
@@ -152,6 +173,18 @@ function PlayerCard({ game, player, onAction }) {
   const active = player.secondaries.filter((c) => c.status === 'active')
   const done = player.secondaries.filter((c) => c.status !== 'active')
   const selectedStratagem = usable.find((s) => String(s.id) === String(stratagemId))
+  const targetsUnit = UNIT_TARGET_ACTIONS.includes(selectedStratagem?.game_action)
+
+  useEffect(() => {
+    setTargetUnitId('')
+    if (!targetsUnit) {
+      setTargets([])
+      return
+    }
+    listStratagemTargets(game.id, stratagemId, player.seat)
+      .then(setTargets)
+      .catch(() => setTargets([]))
+  }, [game, player.seat, stratagemId, targetsUnit])
 
   const spendStratagem = (targetSecondaryId = null) =>
     onAction(() =>
@@ -159,6 +192,7 @@ function PlayerCard({ game, player, onAction }) {
         seat: player.seat,
         stratagem_id: Number(stratagemId),
         target_secondary_id: targetSecondaryId,
+        target_unit_id: targetsUnit ? Number(targetUnitId) : null,
       })
     )
 
@@ -292,9 +326,17 @@ function PlayerCard({ game, player, onAction }) {
             onChange={setStratagemId}
             placeholder={usable.length ? 'Select stratagem' : 'None usable now'}
           />
+          {targetsUnit && (
+            <Select
+              options={targets.map((t) => ({ id: t.unit_id, name: t.name }))}
+              value={targetUnitId}
+              onChange={setTargetUnitId}
+              placeholder={targets.length ? 'Select unit' : 'No unit it can target'}
+            />
+          )}
           <button
             type="button"
-            disabled={!stratagemId}
+            disabled={!stratagemId || (targetsUnit && !targetUnitId)}
             onClick={() => {
               // Stratagems that replace a secondary need their target picked first.
               if (selectedStratagem?.game_action === 'replace_secondary') {
@@ -414,10 +456,33 @@ function objectiveControl(game, deployment) {
       .map((p) => `${p.user_name} OC ${objective.oc[p.seat] ?? 0}`)
       .join(' · ')
     const holder = game.players.find((p) => p.seat === objective.controller)
-    const title = `${holder ? `Controlled by ${holder.user_name}` : 'Not controlled'} (${oc})`
+    // Secured (e.g. Raise the Banner): theirs until outscored at a phase's end.
+    const secured = objective.secured_by != null ? ', secured' : ''
+    const title = `${holder ? `Controlled by ${holder.user_name}${secured}` : 'Not controlled'} (${oc})`
     for (const id of objective.area_ids) found[id] = { side, title }
   }
   return found
+}
+
+// Where destroyed transports with units still to emergency disembark were:
+// each model's base, and 3" round it.
+function wreckRings(emergency) {
+  const seen = new Set()
+  return (emergency?.units ?? []).flatMap((unit) =>
+    unit.wreck
+      .map((w, i) => ({
+        id: `wreck-${unit.transport_unit_id}-${i}`,
+        x: w.x,
+        y: w.y,
+        rotation: w.rotation,
+        rx: w.rx,
+        ry: w.ry,
+        range: 3,
+        name: `${unit.transport_name} (destroyed)`,
+        colour: 2,
+      }))
+      .filter((ring) => !seen.has(ring.id) && seen.add(ring.id))
+  )
 }
 
 // How far the auras of the unit being moved (or placed) reach from its
@@ -614,6 +679,59 @@ function GameView({ gameId, onBack }) {
       cancelled = true
     }
   }, [game, commandPhase])
+
+  // Teleport Homer tokens: set up at the start of the battle, and those on
+  // the battlefield (see GET /games/{id}/teleport-homers). `homerPlacing` is
+  // the unit whose token the next board click sets up.
+  const [homers, setHomers] = useState(null)
+  const [homerPlacing, setHomerPlacing] = useState(null)
+  useEffect(() => {
+    if (!game || game.status !== 'in_progress') {
+      setHomers(null)
+      return
+    }
+    let cancelled = false
+    getTeleportHomers(game.id)
+      .then((h) => !cancelled && setHomers(h))
+      .catch((err) => setError(err.message))
+    return () => {
+      cancelled = true
+    }
+  }, [game])
+  // PSYKER units and their psychic abilities (see GET /games/{id}/psychic).
+  const [psychic, setPsychic] = useState(null)
+  useEffect(() => {
+    if (!game || game.status !== 'in_progress') {
+      setPsychic(null)
+      return
+    }
+    let cancelled = false
+    getPsychic(game.id)
+      .then((p) => !cancelled && setPsychic(p))
+      .catch((err) => setError(err.message))
+    return () => {
+      cancelled = true
+    }
+  }, [game])
+  // Using a unit's Teleport Homer with Rapid Ingress (see ReservesPanel).
+  const homerRef = useRef(false)
+
+  // Units emergency disembarking from destroyed transports, and the rolls
+  // after (see GET /games/{id}/emergency) - at any point in the battle.
+  const [emergency, setEmergency] = useState(null)
+  useEffect(() => {
+    if (!game || game.status !== 'in_progress') {
+      setEmergency(null)
+      return
+    }
+    let cancelled = false
+    getEmergency(game.id)
+      .then((e) => !cancelled && setEmergency(e))
+      .catch((err) => setError(err.message))
+    return () => {
+      cancelled = true
+    }
+  }, [game])
 
   // In the movement phase: who can bring units in from Reserves, and which
   // (see GET /games/{id}/reserves).
@@ -876,11 +994,16 @@ function GameView({ gameId, onBack }) {
     try {
       let check
       if (kind === 'reinforce') {
-        check = await checkArrival(game.id, asPayload(unitId, positions))
+        check = await checkArrival(game.id, {
+          ...asPayload(unitId, positions),
+          teleport_homer: homerRef.current,
+        })
       } else if (kind === 'disembark') {
         check = await checkDisembark(game.id, asPayload(unitId, positions))
       } else if (kind === 'reanimate') {
         check = await checkReanimation(game.id, asPayload(unitId, positions))
+      } else if (kind === 'emergency') {
+        check = await checkEmergency(game.id, asPayload(unitId, positions))
       } else if (kind === 'consolidate') {
         check = await checkConsolidation(game.id, asPayload(unitId, positions))
       } else if (kind === 'pile_in') {
@@ -921,7 +1044,7 @@ function GameView({ gameId, onBack }) {
       const positions = Object.fromEntries(
         formation.map((p) => [p.unit_model_id, { x: p.x, y: p.y, rotation: p.rotation }])
       )
-      setDraft({ unitId, positions, check: null, kind: kind ?? null })
+      setDraft({ unitId, positions, check: null, kind: kind ?? null, homer: homerRef.current })
       runCheck(unitId, positions, kind ?? null)
     } catch (err) {
       setError(err.message)
@@ -1310,17 +1433,31 @@ function GameView({ gameId, onBack }) {
           reserves={reserves}
           draft={draft}
           checking={checking}
+          usingHomer={draft.kind === 'reinforce' && draft.homer === true}
           onSelectUnit={(unitId) => {
             checkSeq.current++
+            homerRef.current = false
             setDraft({ ...NO_DRAFT, unitId, kind: 'reinforce' })
           }}
           onPickUp={() => {
             checkSeq.current++
-            setDraft((d) => ({ ...NO_DRAFT, unitId: d.unitId, kind: 'reinforce' }))
+            setDraft((d) => ({ ...NO_DRAFT, unitId: d.unitId, kind: 'reinforce', homer: d.homer }))
+          }}
+          onToggleHomer={async (unit) => {
+            checkSeq.current++
+            const homer = !homerRef.current
+            homerRef.current = homer
+            setDraft({ ...NO_DRAFT, unitId: unit.unit_id, kind: 'reinforce', homer })
+            // Set down at the token, for the player to arrange.
+            if (homer && unit.teleport_homer) {
+              await setDown(unit.teleport_homer.x, unit.teleport_homer.y)
+            }
           }}
           onBringIn={async () => {
             const { unitId, positions } = draftRef.current
-            if (await act(() => bringIn(game.id, asPayload(unitId, positions)))) {
+            const payload = { ...asPayload(unitId, positions), teleport_homer: homerRef.current }
+            if (await act(() => bringIn(game.id, payload))) {
+              homerRef.current = false
               setDraft(NO_DRAFT)
             }
           }}
@@ -1340,6 +1477,9 @@ function GameView({ gameId, onBack }) {
             checkSeq.current++
             setDraft((d) => ({ ...NO_DRAFT, unitId: d.unitId, kind: 'disembark' }))
           }}
+          onEmbark={(unitId, transportId) =>
+            act(() => embark(game.id, { unit_id: unitId, transport_unit_id: transportId }))
+          }
           onDisembark={async () => {
             const { unitId, positions } = draftRef.current
             if (await act(() => disembark(game.id, asPayload(unitId, positions)))) {
@@ -1379,6 +1519,71 @@ function GameView({ gameId, onBack }) {
             onError={setError}
           />
         )}
+      <PsychicPanel
+        game={game}
+        psychic={psychic}
+        onUse={async (payload) => {
+          setError(null)
+          try {
+            await castPsychic(game.id, payload)
+            // A psychic roll of 1 Battle-shocks it; Soul Sight changes cover
+            // (the game reloading refreshes this panel too).
+            setGame(await getGame(game.id))
+          } catch (err) {
+            setError(err.message)
+          }
+        }}
+      />
+      <TeleportHomerPanel
+        game={game}
+        homers={homers}
+        placingUnitId={homerPlacing?.unitId ?? null}
+        onPick={(seat, unitId) => setHomerPlacing({ seat, unitId })}
+        onRemove={async (seat, unitId) => {
+          try {
+            setHomers(await placeTeleportHomer(game.id, { seat, unit_id: unitId }))
+          } catch (err) {
+            setError(err.message)
+          }
+        }}
+        onDone={async (seat) => {
+          setHomerPlacing(null)
+          await act(() => finishTeleportHomers(game.id, { seat }))
+        }}
+      />
+      <EmergencyPanel
+        game={game}
+        emergency={emergency}
+        draft={draft}
+        checking={checking}
+        onSelectUnit={(unit) => {
+          checkSeq.current++
+          // Its models start where the backend suggests (those that fit).
+          const positions = Object.fromEntries(
+            unit.suggested.map((p) => [p.unit_model_id, { x: p.x, y: p.y, rotation: p.rotation }])
+          )
+          setDraft({ ...NO_DRAFT, unitId: unit.unit_id, positions, kind: 'emergency' })
+          runCheck(unit.unit_id, positions, 'emergency')
+        }}
+        onToggleModel={(unit, unitModelId) => {
+          const current = draftRef.current
+          const positions = { ...(current.positions ?? {}) }
+          if (positions[unitModelId] !== undefined) delete positions[unitModelId]
+          else {
+            // Back in, next to the wreck.
+            const wreck = unit.wreck[0]
+            positions[unitModelId] = { x: wreck.x + wreck.rx + 1, y: wreck.y, rotation: 0 }
+          }
+          setDraft({ ...current, positions, check: null })
+          runCheck(unit.unit_id, positions, 'emergency')
+        }}
+        onPlace={async () => {
+          const { unitId, positions } = draftRef.current
+          if (await act(() => emergencyDisembark(game.id, asPayload(unitId, positions ?? {})))) {
+            setDraft(NO_DRAFT)
+          }
+        }}
+      />
       {commandPhase && !reanimation?.placing && <CommandPanel game={game} onError={setError} />}
       {commandPhase && (
         <ReanimationPanel
@@ -1520,16 +1725,25 @@ function GameView({ gameId, onBack }) {
               : {}
         )}
         rings={moveRings(deployment, movement, draft)}
-        auras={auraCircles(deployment, draft)}
+        auras={[...auraCircles(deployment, draft), ...wreckRings(emergency)]}
         objectiveControl={objectiveControl(game, deployment)}
         territoryLine={deployment?.territory?.line ?? null}
-        markers={(mission?.markers ?? []).map((m) => ({
-          id: m.id,
-          x: m.x,
-          y: m.y,
-          side: m.seat === game.attacker_seat ? 'attacker' : 'defender',
-          title: `${game.players.find((p) => p.seat === m.seat)?.user_name}'s operation marker (${m.source}) - ${m.label}`,
-        }))}
+        markers={[
+          ...(mission?.markers ?? []).map((m) => ({
+            id: m.id,
+            x: m.x,
+            y: m.y,
+            side: m.seat === game.attacker_seat ? 'attacker' : 'defender',
+            title: `${game.players.find((p) => p.seat === m.seat)?.user_name}'s operation marker (${m.source}) - ${m.label}`,
+          })),
+          ...(homers?.tokens ?? []).map((t) => ({
+            id: `homer-${t.unit_id}`,
+            x: t.x,
+            y: t.y,
+            side: t.seat === game.attacker_seat ? 'attacker' : 'defender',
+            title: `${t.name}'s Teleport Homer token`,
+          })),
+        ]}
         areaLabels={Object.fromEntries(
           (mission?.prompts ?? [])
             .filter((p) => p.kind === 'place_markers')
@@ -1541,7 +1755,19 @@ function GameView({ gameId, onBack }) {
           sightBubble && { kind: 'shoot', regions: sightBubble.regions },
         ].filter(Boolean)}
         onBoardClick={
-          (game.status === 'deployment' ||
+          homerPlacing !== null
+            ? async (x, y) => {
+                const { seat, unitId } = homerPlacing
+                setHomerPlacing(null)
+                try {
+                  setHomers(
+                    await placeTeleportHomer(game.id, { seat, unit_id: unitId, x, y })
+                  )
+                } catch (err) {
+                  setError(err.message)
+                }
+              }
+            : (game.status === 'deployment' ||
             draft.kind === 'reinforce' ||
             draft.kind === 'disembark') &&
           draft.unitId !== null &&

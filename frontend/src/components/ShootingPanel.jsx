@@ -8,6 +8,7 @@ import {
   startAction,
 } from '../api'
 import CombatResults from './CombatResults'
+import { onePerProfile, otherProfile } from '../weaponProfiles'
 
 // Shooting in the shooting phase (see app/services/in_game/shooting.py, which decides
 // what each unit can see and reach, and app/services/combat.py, which
@@ -104,7 +105,9 @@ function ShootingPanel({ game, player, shooting, overwatch, focus, onFocus, onSh
 
   // Picking a target picks every weapon that can reach it.
   useEffect(() => {
-    setWeaponKeys(new Set((target?.weapons ?? []).filter((w) => w.in_range).map(key)))
+    setWeaponKeys(
+      new Set(onePerProfile((target?.weapons ?? []).filter((w) => w.in_range)).map(key))
+    )
   }, [target])
 
   const fire = async () => {
@@ -128,11 +131,17 @@ function ShootingPanel({ game, player, shooting, overwatch, focus, onFocus, onSh
   }
 
   if (!shooting) return null
+  // Picking one profile of a weapon unpicks its others.
   const toggleWeapon = (w) =>
     setWeaponKeys((keys) => {
       const next = new Set(keys)
       if (next.has(key(w))) next.delete(key(w))
-      else next.add(key(w))
+      else {
+        next.add(key(w))
+        for (const other of target.weapons) {
+          if (otherProfile(w.name, other.name)) next.delete(key(other))
+        }
+      }
       return next
     })
 

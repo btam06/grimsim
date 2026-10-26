@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -8,6 +8,7 @@ from app.models import (
     ArmyList,
     Enhancement,
     FactionUnit,
+    ListWarlord,
     Model,
     Unit,
     UnitModel,
@@ -229,6 +230,7 @@ async def _apply_enhancements(
         )
     ).scalar_one()
     detachment_ids = {d.id for d in army_list.detachments}
+    exclusive = enhancement_rules.exclusive_detachments(army_list.detachments)
     # Keywords the list's detachment rules give each model (e.g. BATTLELINE).
     granted = enhancement_rules.rule_granted_keywords(
         enhancement_rules.list_rules(army_list),
@@ -247,7 +249,7 @@ async def _apply_enhancements(
             continue
         enhancement = enhancements[entry.enhancement_id]
         reason = enhancement_rules.model_unavailable_reason(
-            enhancement, model, detachment_ids, extra
+            enhancement, model, detachment_ids, extra, exclusive
         )
         if reason is None and not list_building.can_take_enhancements(context, model):
             reason = "can't be given to a model included under an ally rule"
@@ -261,7 +263,9 @@ async def _apply_enhancements(
     if payload.upgrade_id is None:
         return None
     upgrade = enhancements[payload.upgrade_id]
-    reason = enhancement_rules.unit_unavailable_reason(upgrade, models, detachment_ids, granted)
+    reason = enhancement_rules.unit_unavailable_reason(
+        upgrade, models, detachment_ids, granted, exclusive
+    )
     if reason:
         raise HTTPException(status_code=400, detail=f"'{upgrade.name}' {reason}")
     return upgrade
@@ -430,5 +434,7 @@ async def delete_unit(unit_id: int, session: AsyncSession = Depends(get_session)
     if unit is None:
         raise HTTPException(status_code=404, detail="unit not found")
 
+    # No longer any list's Warlord.
+    await session.execute(delete(ListWarlord).where(ListWarlord.unit_id == unit_id))
     await session.delete(unit)
     await session.commit()

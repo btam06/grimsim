@@ -3,9 +3,20 @@
 // unit can arrive). In their movement phase, from the second battle round, a
 // player picks a unit in Reserves, clicks the board to set it down, arranges
 // its models and brings it in - or, at the end of their opponent's movement
-// phase, does the same with Rapid Ingress (1CP).
+// phase, does the same with Rapid Ingress (1CP) - or, using the unit's
+// Teleport Homer token, within 3" of it for 1CP less.
 
-function ReservesPanel({ game, reserves, draft, checking, onSelectUnit, onPickUp, onBringIn }) {
+function ReservesPanel({
+  game,
+  reserves,
+  draft,
+  checking,
+  usingHomer,
+  onSelectUnit,
+  onPickUp,
+  onToggleHomer,
+  onBringIn,
+}) {
   if (!reserves || reserves.seat === null || reserves.units.length === 0) return null
   const player = game.players.find((p) => p.seat === reserves.seat)
   const rapid = reserves.step === 'rapid_ingress'
@@ -41,6 +52,7 @@ function ReservesPanel({ game, reserves, draft, checking, onSelectUnit, onPickUp
             />
             {unit.name}
             {unit.deep_strike && <span className="hint"> · Deep Strike</span>}
+            {rapid && unit.teleport_homer && <span className="hint"> · Teleport Homer</span>}
           </label>
         ))}
       </div>
@@ -59,9 +71,19 @@ function ReservesPanel({ game, reserves, draft, checking, onSelectUnit, onPickUp
         )}
         {placed && check?.valid && <p className="deployment-ready">Ready to bring in.</p>}
       </div>
+      {rapid && selected?.teleport_homer && (
+        <label className="checkbox-field">
+          <input type="checkbox" checked={usingHomer} onChange={() => onToggleHomer(selected)} />
+          Use its Teleport Homer token: set up within 3" of it (1CP less)
+        </label>
+      )}
       <div className="inline-controls">
         <button type="button" disabled={!placed || !check?.valid || checking} onClick={onBringIn}>
-          {rapid ? 'Rapid Ingress (1CP)' : selected ? `Bring in ${selected.name}` : 'Bring in'}
+          {rapid
+            ? `Rapid Ingress${usingHomer ? ' (Teleport Homer, 1CP less)' : ' (1CP)'}`
+            : selected
+              ? `Bring in ${selected.name}`
+              : 'Bring in'}
         </button>
         <button type="button" disabled={!placed} onClick={onPickUp}>
           Pick up

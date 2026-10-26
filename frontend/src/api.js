@@ -288,6 +288,21 @@ export const checkDisembark = (id, payload) =>
   request(`/games/${id}/embarked/check`, { method: 'POST', body: JSON.stringify(payload) })
 export const disembark = (id, payload) =>
   request(`/games/${id}/embarked`, { method: 'POST', body: JSON.stringify(payload) })
+export const getTeleportHomers = (id) => request(`/games/${id}/teleport-homers`)
+export const placeTeleportHomer = (id, payload) =>
+  request(`/games/${id}/teleport-homers`, { method: 'POST', body: JSON.stringify(payload) })
+export const finishTeleportHomers = (id, payload) =>
+  request(`/games/${id}/teleport-homers/done`, { method: 'POST', body: JSON.stringify(payload) })
+export const getPsychic = (id) => request(`/games/${id}/psychic`)
+export const castPsychic = (id, payload) =>
+  request(`/games/${id}/psychic`, { method: 'POST', body: JSON.stringify(payload) })
+export const getEmergency = (id) => request(`/games/${id}/emergency`)
+export const checkEmergency = (id, payload) =>
+  request(`/games/${id}/emergency/check`, { method: 'POST', body: JSON.stringify(payload) })
+export const emergencyDisembark = (id, payload) =>
+  request(`/games/${id}/emergency`, { method: 'POST', body: JSON.stringify(payload) })
+export const embark = (id, payload) =>
+  request(`/games/${id}/embarked/embark`, { method: 'POST', body: JSON.stringify(payload) })
 export const getReserves = (id) => request(`/games/${id}/reserves`)
 export const getReservesFormation = (id, payload) =>
   request(`/games/${id}/reserves/formation`, { method: 'POST', body: JSON.stringify(payload) })
@@ -300,6 +315,10 @@ export const deployUnit = (id, payload) =>
 export const listUsableStratagems = (id, seat) => request(`/games/${id}/stratagems?seat=${seat}`)
 export const playGameStratagem = (id, payload) =>
   request(`/games/${id}/stratagems`, { method: 'POST', body: JSON.stringify(payload) })
+// The player's units a stratagem that targets one (e.g. Gunship Extraction)
+// could be used on now: [{unit_id, name}].
+export const listStratagemTargets = (id, stratagemId, seat) =>
+  request(`/games/${id}/stratagems/${stratagemId}/targets?seat=${seat}`)
 export const achieveSecondary = (id, cardId, points) =>
   request(`/games/${id}/secondaries/${cardId}/achieve`, {
     method: 'POST',

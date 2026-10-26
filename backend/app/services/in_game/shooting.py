@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.combat_rules.effects import ASSAULT
 from app.models import DetachmentRule, Effect, Game, GameUnitMove, Unit, UnitModel, WeaponAbility
+from app.services import weapon_profiles
 from app.services.in_game import actions, command_phase, deployment
 from app.services.in_game import movement
 from app.services.in_game.deployment import TOLERANCE, Base, Point, gap, outline
@@ -284,10 +285,50 @@ def in_cover(game: Game, unit: Unit) -> bool:
     return bool(bases) and all(any(within(base, area) for area in areas) for base in bases)
 
 
+# Lone Operative: a unit with it can only be targeted by ranged attacks
+# from models within 12" of it.
+LONE_OPERATIVE = "Lone Operative"
+LONE_OPERATIVE_RANGE = 12.0
+
+
+def lone_operative(game: Game, unit: Unit) -> bool:
+    # Whether the unit has Lone Operative now: one of its models has it, or
+    # an ability that gives it while near friendly units with some keywords
+    # (datasheet_abilities CONDITIONAL_LONE_OPERATIVE - e.g. Leader of
+    # Astartes: within 3" of a friendly ADEPTUS ASTARTES INFANTRY unit).
+    from app.seeds import datasheet_abilities as datasheet_ability_seeds
+
+    names = {a.name for m in unit.unit_models for a in m.model.abilities}
+    if LONE_OPERATIVE in names:
+        return True
+    conditional = datasheet_ability_seeds.CONDITIONAL_LONE_OPERATIVE
+    found = [conditional[n] for n in names if n in conditional]
+    if not found:
+        return False
+    own = list(_bases(game, unit).values())
+    player = deployment.owner(game, unit)
+    placed = deployment.positions(game)
+    for distance, keywords in found:
+        for other in deployment.deployable_units(player):
+            if other.id == unit.id or not deployment.is_deployed(other, placed):
+                continue
+            models = deployment.models_on_battlefield(game, other)
+            if not all(
+                set(keywords) <= enhancements.model_keywords(other, m) for m in models
+            ):
+                continue
+            others = list(_bases(game, other).values())
+            if any(gap(a, b) <= distance + TOLERANCE for a in own for b in others):
+                return True
+    return False
+
+
 def reach(game: Game, unit: Unit, target: Unit, assault: set | None = None) -> TargetReach:
     # `assault` is the unit's Assault weapons (see assault_weapons): if it
-    # Advanced, only those can fire.
+    # Advanced, only those can fire. A target with Lone Operative is only in
+    # range of models within 12" of it.
     assault = assault or set()
+    lone = lone_operative(game, target)
     advanced = move_status(game, unit).advanced
     shooters = _bases(game, unit)
     targets = list(_bases(game, target).values())
@@ -322,15 +363,19 @@ def reach(game: Game, unit: Unit, target: Unit, assault: set | None = None) -> T
             entry.carried_by += 1
             if entry.unusable:
                 continue
-            if nearest is not None and nearest <= weapon.range + TOLERANCE:
+            limit = min(weapon.range, LONE_OPERATIVE_RANGE) if lone else weapon.range
+            if nearest is not None and nearest <= limit + TOLERANCE:
                 half = nearest <= weapon.range / 2 + TOLERANCE
                 entry.in_range += 1
                 entry.half_range = entry.half_range or half
                 firing.setdefault(unit_model.id, {})[weapon.id] = half
+    # (Soul Sight: ranged attacks that target it ignore cover this phase.)
+    from app.services.in_game import psychic
+
     return TargetReach(
         unit=target,
         visible=visible,
-        in_cover=in_cover(game, target),
+        in_cover=in_cover(game, target) and not psychic.soul_sighted(game, target),
         weapons=list(reaches.values()),
         firing=firing,
         distance=closest,
@@ -478,7 +523,7 @@ def cant_shoot_reason(game: Game, unit: Unit, assault: set | None = None) -> str
     if (reason := actions.blocks(game, unit, "shoot")) is not None:
         return reason
     if move_status(game, unit).fell_back and not command_phase.eligible_after(
-        game, unit, "fell_back"
+        game, unit, "fell_back", "shoot"
     ):
         return "it Fell Back this turn"
     if movement.in_engagement_range(game, unit):
@@ -505,6 +550,8 @@ def check_shot(
         raise _bad_request("none of its models can see the target")
     if not weapon_ids:
         raise _bad_request("choose at least one weapon to shoot with")
+    if (conflict := weapon_profiles.unit_conflict(unit, weapon_ids)) is not None:
+        raise _bad_request(conflict)
     if any(w.unusable for w in result.weapons if w.id in weapon_ids):
         raise _bad_request("it Advanced: it can only shoot Assault weapons")
     usable = {w.id for w in result.weapons if w.in_range}

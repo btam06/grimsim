@@ -13,7 +13,8 @@ from app.models import (
     Unit,
     UnitModel,
 )
-from app.services.in_game import actions, deployment, mission_state, pathing
+from app.services import weapon_profiles
+from app.services.in_game import actions, deployment, duty_in_death, mission_state, pathing
 from app.services.in_game.deployment import TOLERANCE, Base, Placement, Point, gap
 from app.services.in_game.movement import ENGAGEMENT_RANGE
 from app.services.in_game.game import other_seat
@@ -418,6 +419,8 @@ def check_fight(game: Game, unit: Unit, target: Unit, weapon_ids: set) -> dict:
         raise _bad_request("the target must be an enemy unit within Engagement Range")
     if not weapon_ids:
         raise _bad_request("choose at least one weapon to fight with")
+    if (conflict := weapon_profiles.unit_conflict(unit, weapon_ids)) is not None:
+        raise _bad_request(conflict)
     weapons, firing = fight_reach(game, unit, target)
     if not weapon_ids <= {w.id for w in weapons if w.in_range}:
         raise _bad_request("one or more of those weapons can't reach the target")
@@ -444,6 +447,8 @@ def record_fight(
             models_destroyed=models_destroyed,
         )
     )
+    # It has fought: its models left on the battlefield by Duty in Death go.
+    duty_in_death.remove(game, unit)
 
 
 # --- consolidating ---

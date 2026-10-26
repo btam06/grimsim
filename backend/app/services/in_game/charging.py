@@ -6,7 +6,10 @@ import random
 from fastapi import HTTPException
 
 from app.models import Game, GameUnitCharge, Unit
+from app.seeds import factions as faction_seeds
 from app.services.in_game import actions, command_phase, deployment, mission_state, pathing
+from app.services.list_building import detachment_rules
+from app.services.list_building import enhancements as enhancement_rules
 from app.services.in_game.deployment import TOLERANCE, Base, Placement, gap
 from app.services.in_game.movement import ENGAGEMENT_RANGE
 
@@ -27,6 +30,10 @@ from app.services.in_game.movement import ENGAGEMENT_RANGE
 #   target than it started. Where they end up must be on the battlefield, not
 #   overlapping other models or terrain features, and in coherency (see
 #   app/services/in_game/deployment.py).
+#
+# A detachment rule can add to the charge rolls of the units it reaches
+# (faction_seeds.CHARGE_BONUSES - e.g. Death Blow: +1 for ADEPTUS ASTARTES
+# TERMINATOR units).
 
 CHARGE_DICE = 2
 
@@ -82,9 +89,9 @@ def cant_charge_reason(game: Game, unit: Unit) -> str | None:
     if (reason := actions.blocks(game, unit, "charge")) is not None:
         return reason
     status = move_status(game, unit)
-    if status.advanced and not command_phase.eligible_after(game, unit, "advanced"):
+    if status.advanced and not command_phase.eligible_after(game, unit, "advanced", "charge"):
         return "it Advanced this turn"
-    if status.fell_back and not command_phase.eligible_after(game, unit, "fell_back"):
+    if status.fell_back and not command_phase.eligible_after(game, unit, "fell_back", "charge"):
         return "it Fell Back this turn"
     return None
 
@@ -125,6 +132,23 @@ def roll_charge(game: Game, unit: Unit) -> GameUnitCharge:
     return charge
 
 
+def charge_bonus(game: Game, unit: Unit) -> int:
+    # What the unit's list's detachment rules add to its charge rolls.
+    rules = enhancement_rules.list_rules(deployment.owner(game, unit).army_list)
+    return sum(
+        faction_seeds.CHARGE_BONUSES[rule.name]
+        for rule in rules
+        if rule.name in faction_seeds.CHARGE_BONUSES and detachment_rules.applies_to(rule, unit)
+    )
+
+
+def charge_roll(game: Game, unit: Unit) -> int | None:
+    # The unit's charge roll this phase, with any bonus - None if it hasn't
+    # rolled.
+    charge = unit_charge(game, unit)
+    return charge.roll + charge_bonus(game, unit) if charge is not None else None
+
+
 def enemy_units(game: Game, unit: Unit) -> list[Unit]:
     seat = deployment.owner(game, unit).seat
     placed = deployment.positions(game)
@@ -158,7 +182,9 @@ def failed(game: Game, unit: Unit) -> bool:
     return (
         charge is not None
         and not charge.completed
-        and not any(in_reach(game, unit, t, charge.roll) for t in enemy_units(game, unit))
+        and not any(
+            in_reach(game, unit, t, charge_roll(game, unit)) for t in enemy_units(game, unit)
+        )
     )
 
 
@@ -176,12 +202,13 @@ def check_charge(
     charge = unit_charge(game, unit)
     if charge is None:
         raise _bad_request("roll the charge first")
+    roll = charge_roll(game, unit)
     if target.id not in {u.id for u in enemy_units(game, unit)}:
         raise _bad_request("the target must be an enemy unit on the battlefield")
-    if not in_reach(game, unit, target, charge.roll):
+    if not in_reach(game, unit, target, roll):
         raise _bad_request(
             f"{target.faction_unit.name} is out of reach: the closest model is "
-            f'{distance(game, unit, target):.1f}" away (rolled {charge.roll})'
+            f'{distance(game, unit, target):.1f}" away (rolled {roll})'
         )
     models, bases = deployment.unit_bases(
         unit, placement, deployment.models_on_battlefield(game, unit)
@@ -193,10 +220,10 @@ def check_charge(
     )
     engaged = 0
     # Round dense terrain, unless it can go through it.
-    pather = pathing.for_unit(game, unit, start, charge.roll)
+    pather = pathing.for_unit(game, unit, start, roll)
     for model in models:
         found = []
-        if problem := pathing.too_far(pather, start[model.id], bases[model.id], charge.roll):
+        if problem := pathing.too_far(pather, start[model.id], bases[model.id], roll):
             found.append(problem)
         before = _nearest(start[model.id], targets)
         after = _nearest(bases[model.id], targets)

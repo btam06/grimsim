@@ -32,6 +32,7 @@ from app.seeds import factions as faction_seeds
 from app.seeds import stratagems as stratagem_seeds
 from app.routers.stratagems import _to_out as stratagem_to_out
 from app.services import combat as combat_service
+from app.services import weapon_profiles
 from app.services import stratagem_availability
 from app.services.list_building import detachment_rules as detachment_rule_service
 from app.services.list_building import enhancements as enhancement_rules
@@ -457,6 +458,10 @@ async def calculate(
             status_code=400,
             detail="one or more selected_weapon_ids are not equipped by the attacking unit",
         )
+    # Only one profile of a weapon with several (e.g. standard or supercharge).
+    conflict = weapon_profiles.unit_conflict(attacker, set(payload.selected_weapon_ids))
+    if conflict is not None:
+        raise HTTPException(status_code=400, detail=conflict)
     attacker_enhancement_weapon_ids = {
         weapon.id
         for unit_model in attacker.unit_models

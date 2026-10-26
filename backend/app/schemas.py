@@ -13,6 +13,10 @@ class FactionOut(FactionIn):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    # What its lists select, if anything (e.g. the Space Marines' "Chapter"),
+    # and the options.
+    subfaction_label: str | None = None
+    subfactions: list[str] = []
 
 
 class FactionUnitIn(BaseModel):
@@ -616,6 +620,11 @@ class ArmyListIn(BaseModel):
     detachment_ids: list[int] = []
     # The user who owns the list, if any.
     user_id: int | None = None
+    # The unit containing its WARLORD (one of its CHARACTER units), if any.
+    warlord_unit_id: int | None = None
+    # Its selection for its faction's list selection, if any (e.g. a Space
+    # Marines list's Chapter - see FactionOut).
+    subfaction: str | None = None
 
 
 class ListEligibleOut(BaseModel):
@@ -632,6 +641,8 @@ class ArmyListOut(BaseModel):
     faction_id: int
     detachment_ids: list[int]
     user_id: int | None
+    warlord_unit_id: int | None = None
+    subfaction: str | None = None
 
 
 
@@ -739,6 +750,8 @@ class GameStratagemUseOut(BaseModel):
     turn_seat: int
     phase: str
     cp: int
+    # The unit it was used on, for one whose game action targets one.
+    target_unit_id: int | None = None
 
 
 class GamePlayerOut(BaseModel):
@@ -790,8 +803,16 @@ class GameStratagemIn(BaseModel):
     seat: Literal[1, 2]
     stratagem_id: int
     # For a stratagem whose game action needs one, e.g. New Orders: the
-    # player's Secondary Mission card (game secondary id) it targets.
+    # player's Secondary Mission card (game secondary id) it targets - or,
+    # e.g. Gunship Extraction, one of their units.
     target_secondary_id: int | None = None
+    target_unit_id: int | None = None
+
+
+class StratagemTargetOut(BaseModel):
+    # A unit a stratagem whose game action targets one could be used on.
+    unit_id: int
+    name: str
 
 
 class GameAchieveIn(BaseModel):
@@ -931,9 +952,11 @@ class DeploymentFormationIn(BaseModel):
 
 
 class DeployUnitIn(BaseModel):
-    # A unit's models, each placed on the board.
+    # A unit's models, each placed on the board - arriving by Rapid Ingress
+    # at its Teleport Homer token, if `teleport_homer`.
     unit_id: int
     positions: list[ModelPositionIn]
+    teleport_homer: bool = False
 
 
 class DeploymentModelOut(BaseModel):
@@ -994,11 +1017,14 @@ class ObjectiveControlOut(BaseModel):
     area_ids: list[int]
     oc: dict[int, int]
     controller: int | None = None
+    # The player who's secured it (it stays theirs until their opponent has
+    # OC on it), if anyone has.
+    secured_by: int | None = None
 
 
 class TerritoryOut(BaseModel):
     # Which line halves the battlefield into the players' territories
-    # ("vertical", "horizontal" or "diagonal"), its ends, and each player's
+    # ("vertical", "horizontal", "diagonal" or "slanted"), its ends, and each player's
     # half (by seat).
     split: str
     line: list[TerrainPointOut]
@@ -1178,11 +1204,13 @@ class SightBubbleOut(BaseModel):
 
 class ChargeUnitOut(BaseModel):
     # A unit of the player whose turn it is, in their charge phase: its charge
-    # roll (once rolled - the two dice, and their total), whether the charge
-    # failed (nothing in reach), and its target once it's charged.
+    # roll (once rolled - the two dice, what its rules add, and their total),
+    # whether the charge failed (nothing in reach), and its target once it's
+    # charged.
     unit_id: int
     name: str
     dice: list[int] = []
+    bonus: int = 0
     roll: int | None = None
     failed: bool = False
     charged: bool = False
@@ -1413,6 +1441,72 @@ class ReserveUnitOut(BaseModel):
     name: str
     # Every model has Deep Strike: it can arrive anywhere (8" from enemies).
     deep_strike: bool
+    # Its Teleport Homer token on the battlefield, if it has one (usable with
+    # Rapid Ingress, for 1CP less).
+    teleport_homer: dict | None = None
+
+
+class TeleportHomerUnitOut(BaseModel):
+    # A unit with a Teleport Homer, and its token (None: not set up).
+    unit_id: int
+    name: str
+    seat: int
+    token: dict | None = None
+
+
+class TeleportHomersOut(BaseModel):
+    # At the start of the battle, the players still setting up their tokens;
+    # their units with Teleport Homers; and every token on the battlefield.
+    waiting_seats: list[int]
+    units: list[TeleportHomerUnitOut]
+    tokens: list[dict]
+
+
+class TeleportHomerIn(BaseModel):
+    seat: Literal[1, 2]
+    unit_id: int | None = None
+    x: float | None = None
+    y: float | None = None
+
+
+class PsychicAbilityOut(BaseModel):
+    # One of a PSYKER unit's psychic abilities: its level, whether it can be
+    # used now (and if not, why), and - for Soul Sight - the units it could
+    # pick.
+    name: str
+    level: int
+    usable: bool
+    reason: str | None = None
+    targets: list[UnitIdNameOut] = []
+
+
+class PsychicUnitOut(BaseModel):
+    unit_id: int
+    name: str
+    seat: int
+    psyker_level: int
+    used_this_round: int
+    abilities: list[PsychicAbilityOut]
+
+
+class PsychicUseOut(BaseModel):
+    unit_name: str
+    ability: str
+    roll: int
+    target_name: str | None = None
+
+
+class PsychicOut(BaseModel):
+    # Every PSYKER unit on the battlefield and its psychic abilities, and the
+    # uses this battle round.
+    units: list[PsychicUnitOut]
+    uses: list[PsychicUseOut]
+
+
+class PsychicIn(BaseModel):
+    unit_id: int
+    ability: str
+    target_unit_id: int | None = None
 
 
 class ReservesOut(BaseModel):
@@ -1459,9 +1553,14 @@ class CommandAbilityOut(BaseModel):
     # options (with what each does), whether one must be selected, whether it
     # stays until another is (`persistent`), the option active now and
     # whether it was selected this phase - and, for one that applies to
-    # another unit, the units it could (`targets`) and the one it does.
-    unit_id: int
+    # another unit, the units it could (`targets`) and the one it does. An
+    # army rule (e.g. Combat Doctrines) has its faction ability's id instead
+    # of a unit's, the units with it, and the options already used up this
+    # battle (`used_options`).
+    unit_id: int | None = None
     unit_name: str
+    faction_ability_id: int | None = None
+    used_options: list[str] = []
     ability: str
     description: str
     options: list[str]
@@ -1497,9 +1596,12 @@ class CommandOut(BaseModel):
 
 
 class CommandChoiceIn(BaseModel):
+    # A unit's ability's option - or, with `faction_ability_id` (and no
+    # unit), an army rule's.
     seat: Literal[1, 2]
-    unit_id: int
-    ability: str
+    unit_id: int | None = None
+    faction_ability_id: int | None = None
+    ability: str = ""
     # None: none (only for one that needn't have one).
     option: str | None = None
     target_unit_id: int | None = None
@@ -1714,8 +1816,56 @@ class EmbarkedUnitOut(BaseModel):
     transport_name: str
 
 
+class EmbarkableUnitOut(BaseModel):
+    # A unit that's moved and can embark now, and the transports it can
+    # embark in.
+    unit_id: int
+    name: str
+    transports: list[UnitIdNameOut]
+
+
 class EmbarkedOut(BaseModel):
     # In the movement phase (see GET /games/{id}/embarked): the units the
-    # player whose turn it is can disembark (None: no one can now).
+    # player whose turn it is can disembark, and those it can embark (None:
+    # no one can now).
     seat: int | None
     units: list[EmbarkedUnitOut]
+    embarkable: list[EmbarkableUnitOut] = []
+
+
+class EmergencyRollOut(BaseModel):
+    # A roll after an emergency disembark (see GameEmergencyRoll): its kind
+    # ("hazard", "deadly_demise" or "deadly_demise_wounds"), the model or unit
+    # it's for, the roll and the wounds it caused.
+    kind: str
+    name: str | None = None
+    roll: int
+    wounds: int
+
+
+class EmergencyUnitOut(BaseModel):
+    # A unit that must emergency disembark from a destroyed transport: where
+    # to start its models (only those that fit within 3"), and the
+    # transport's wreck (each of its models' bases, as positions with their
+    # base sizes in inches).
+    unit_id: int
+    name: str
+    seat: int
+    transport_unit_id: int
+    transport_name: str
+    suggested: list[ModelPositionOut]
+    wreck: list[dict]
+    # Its models that aren't destroyed ({unit_model_id, name}).
+    models: list[dict] = []
+
+
+class EmergencyOut(BaseModel):
+    # Units still to emergency disembark, and the rolls made after those
+    # that have (this game, latest last).
+    units: list[EmergencyUnitOut]
+    rolls: list[EmergencyRollOut] = []
+
+
+class EmbarkIn(BaseModel):
+    unit_id: int
+    transport_unit_id: int

@@ -15,7 +15,7 @@ from app.services.in_game.deployment import BOARD, TOLERANCE, Base, Point
 #   zones - across the centre, if they're at the top and bottom; down it, if
 #   they're at the sides; or, if they're in opposite table quarters (Search
 #   and Destroy), corner to corner through the two corners neither zone is
-#   in.
+#   in. Some deployments draw their own line instead (SPLIT_LINES).
 # - No Man's Land is the battlefield outside both deployment zones.
 # - A unit is within a region if any of its models is (any part of its base
 #   over it, touching counts); wholly within it if every model's base is
@@ -49,6 +49,13 @@ def _middle(polygon: list[Point]) -> Point:
 
 CORNERS = [(0.0, 0.0), (WIDTH, 0.0), (WIDTH, HEIGHT), (0.0, HEIGHT)]
 
+# Deployments whose card draws the line between the territories somewhere
+# else - end to end, edge to edge.
+SPLIT_LINES: dict[str, tuple[Point, Point]] = {
+    # Slanted across the middle, from the left edge to the right.
+    "Sweeping Engagement": ((0.0, 19.0), (WIDTH, 25.0)),
+}
+
 
 def _in_a_zone(point: Point, zones: dict[str, list[Point]]) -> bool:
     # Inside a zone, or on its edge.
@@ -66,10 +73,13 @@ def split(game: Game) -> str | None:
     # Which line halves the battlefield into territories: "vertical" (x = 30:
     # zones at the sides), "horizontal" (y = 22: zones at the top and
     # bottom), or - for zones in opposite table quarters - "diagonal": from
-    # corner to corner through the two corners neither zone is in.
+    # corner to corner through the two corners neither zone is in; or
+    # "slanted", the deployment's own line (SPLIT_LINES).
     zones = _zones(game)
     if zones is None:
         return None
+    if game.layout.deployment.name in SPLIT_LINES:
+        return "slanted"
     if not any(_in_a_zone(c, zones) for c in (CORNERS[0], CORNERS[2])) or not any(
         _in_a_zone(c, zones) for c in (CORNERS[1], CORNERS[3])
     ):
@@ -81,6 +91,8 @@ def split(game: Game) -> str | None:
 def split_line(game: Game) -> tuple[Point, Point] | None:
     # The line between the territories, end to end.
     kind = split(game)
+    if kind == "slanted":
+        return SPLIT_LINES[game.layout.deployment.name]
     if kind == "vertical":
         return (WIDTH / 2, 0.0), (WIDTH / 2, HEIGHT)
     if kind == "horizontal":

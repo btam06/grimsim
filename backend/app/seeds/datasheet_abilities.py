@@ -20,6 +20,13 @@ from app.models import Condition, DatasheetAbility, Effect
 # (name, description, [condition keywords], [effect keywords])
 CORE_ENTRIES = [
     (
+        "Lone Operative",
+        "This unit can only be selected as the target of a ranged attack if the attacking model "
+        "is within 12\".",
+        [],
+        [],
+    ),
+    (
         "Reroll Failed Hits",
         "This unit may always re-roll failed hit rolls.",
         [ALWAYS],
@@ -104,6 +111,10 @@ CORE_CALCULATOR_NOTES = {
     "Deep Strike": "Descriptive only: a deployment rule.",
     "Fights First": "Descriptive only here: in a game, it decides the fight order.",
     'Scouts 6"': "Descriptive only: a pre-battle move.",
+    "Lone Operative": (
+        "Descriptive only in the calculator; in a game, models more than 12\" away can't shoot "
+        "it."
+    ),
 }
 
 # Code-defined rules for core abilities, by name - for rules the
@@ -202,6 +213,13 @@ COMBINED = (
     "OPTION_OWNERS",
     "COMMAND_CHOICES",
     "COMMAND_HEALS",
+    "ROUND_START_CP",
+    "ALWAYS_ACTIVE_OPTIONS",
+    "CONDITIONAL_LONE_OPERATIVE",
+    "WARGEAR_WOUNDS",
+    "SECURES_OBJECTIVES",
+    "PSYKER_LEVELS",
+    "PSYCHIC_ABILITIES",
 )
 _combined: dict | None = None
 
@@ -220,6 +238,13 @@ def _combine() -> dict:
                 "ARMY_RULES": {},
                 "COMMAND_CHOICES": {},
                 "COMMAND_HEALS": {},
+                "ROUND_START_CP": {},
+                "ALWAYS_ACTIVE_OPTIONS": {},
+                "CONDITIONAL_LONE_OPERATIVE": {},
+                "WARGEAR_WOUNDS": {},
+                "SECURES_OBJECTIVES": {},
+                "PSYKER_LEVELS": {},
+                "PSYCHIC_ABILITIES": {},
             }
         ] + [
             {
@@ -232,6 +257,13 @@ def _combine() -> dict:
                     ("ARMY_RULES", {}),
                     ("COMMAND_CHOICES", {}),
                     ("COMMAND_HEALS", {}),
+                    ("ROUND_START_CP", {}),
+                    ("ALWAYS_ACTIVE_OPTIONS", {}),
+                    ("CONDITIONAL_LONE_OPERATIVE", {}),
+                    ("WARGEAR_WOUNDS", {}),
+                    ("SECURES_OBJECTIVES", {}),
+                    ("PSYKER_LEVELS", {}),
+                    ("PSYCHIC_ABILITIES", {}),
                 )
             }
             for faction in FACTIONS
@@ -260,6 +292,42 @@ def _combine() -> dict:
             },
             "COMMAND_HEALS": {
                 k: v for source in sources for k, v in source["COMMAND_HEALS"].items()
+            },
+            # Abilities that gain CP at the start of the battle round while a
+            # model with one is its player's WARLORD.
+            "ROUND_START_CP": {
+                k: v for source in sources for k, v in source["ROUND_START_CP"].items()
+            },
+            # Abilities that make army rule options active for their own unit
+            # all the time (e.g. Codex Adept: every Combat Doctrine).
+            "ALWAYS_ACTIVE_OPTIONS": {
+                k: v for source in sources for k, v in source["ALWAYS_ACTIVE_OPTIONS"].items()
+            },
+            # Abilities that give their unit Lone Operative while it's within
+            # a distance of a friendly unit with some keywords (e.g. Leader of
+            # Astartes): {ability name: (distance, keywords)}.
+            "CONDITIONAL_LONE_OPERATIVE": {
+                k: v
+                for source in sources
+                for k, v in source["CONDITIONAL_LONE_OPERATIVE"].items()
+            },
+            # Wargear that adds to its bearer's Wounds characteristic (e.g.
+            # Storm Shield: +1), by wargear name.
+            "WARGEAR_WOUNDS": {
+                k: v for source in sources for k, v in source["WARGEAR_WOUNDS"].items()
+            },
+            # Abilities that secure the objectives their unit is controlling
+            # at the end of one of their player's phases: {name: phase}.
+            "SECURES_OBJECTIVES": {
+                k: v for source in sources for k, v in source["SECURES_OBJECTIVES"].items()
+            },
+            # A PSYKER's psyker level, by the ability that gives it, and each
+            # psychic ability's psychic level (see app/services/in_game/psychic.py).
+            "PSYKER_LEVELS": {
+                k: v for source in sources for k, v in source["PSYKER_LEVELS"].items()
+            },
+            "PSYCHIC_ABILITIES": {
+                k: v for source in sources for k, v in source["PSYCHIC_ABILITIES"].items()
             },
             # {option name: ability name}. Option names are unique across every
             # ability (and every faction ability's options).

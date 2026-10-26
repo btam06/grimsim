@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { fight, getFightTargets } from '../api'
 import CombatResults from './CombatResults'
+import { onePerProfile, otherProfile } from '../weaponProfiles'
 
 // Fighting, once both players have piled in (see
 // app/services/in_game/fighting.py, which decides who picks the next unit to
@@ -103,7 +104,9 @@ function FightPanel({
   // Picking a target picks each model's first melee weapon that can reach.
   useEffect(() => {
     setWeaponIds(
-      new Set((target?.weapons ?? []).filter((w) => w.in_range && w.default).map(key))
+      new Set(
+        onePerProfile((target?.weapons ?? []).filter((w) => w.in_range && w.default)).map(key)
+      )
     )
   }, [target])
 
@@ -132,11 +135,17 @@ function FightPanel({
     }
   }
 
+  // Picking one profile of a weapon unpicks its others.
   const toggle = (w) =>
     setWeaponIds((ids) => {
       const next = new Set(ids)
       if (next.has(key(w))) next.delete(key(w))
-      else next.add(key(w))
+      else {
+        next.add(key(w))
+        for (const other of target.weapons) {
+          if (otherProfile(w.name, other.name)) next.delete(key(other))
+        }
+      }
       return next
     })
 

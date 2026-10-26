@@ -498,13 +498,16 @@ def _grid(count: int) -> tuple[int, int]:
     return math.ceil(count / columns), columns
 
 
-def formation(game: Game, unit: Unit, x: float, y: float) -> dict[int, tuple[float, float, float]]:
+def formation(
+    game: Game, unit: Unit, x: float, y: float, models: list[UnitModel] | None = None
+) -> dict[int, tuple[float, float, float]]:
     # Where to start a unit's models when it's set down at (x, y): in even rows
     # centred there (a short last row centred under the others), kept on the
     # battlefield - and, if (x, y) is in its owner's deployment zone, within
     # that zone's extent - then any model overlapping another or a terrain
     # feature moved to the nearest free spot. A starting point: the player then arranges them.
-    models = unit_models(unit)
+    # (Just `models`, if given - e.g. those not destroyed.)
+    models = unit_models(unit) if models is None else models
     sizes = {m.id: base_mm(m)[:2] for m in models}
     # Spaced by the widest and tallest bases (ovals start facing across).
     cell_x = max(w for w, _ in sizes.values()) / MM_PER_INCH + FORMATION_GAP

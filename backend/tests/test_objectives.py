@@ -84,13 +84,13 @@ async def test_territories_and_no_mans_land(client: AsyncClient, session, tmp_pa
     assert not regions.unit_within(loaded, unit_d, regions.territory(loaded, 2))
 
 
-def _fake_game(attacker_zone, defender_zone):
-    # Just what regions needs: the layout's deployment zones, and who's the
-    # attacker.
+def _fake_game(attacker_zone, defender_zone, name="Test deployment"):
+    # Just what regions needs: the layout's deployment (its name and zones),
+    # and who's the attacker.
     from types import SimpleNamespace
 
     zones = {"attacker": attacker_zone, "defender": defender_zone}
-    deployment_ = SimpleNamespace(zone=lambda side: zones[side])
+    deployment_ = SimpleNamespace(name=name, zone=lambda side: zones[side])
     return SimpleNamespace(layout=SimpleNamespace(deployment=deployment_), attacker_seat=1)
 
 
@@ -107,6 +107,24 @@ def test_search_and_destroy_territories_are_split_corner_to_corner():
     assert set(regions.split_line(game)) == {(0, 0), (60, 44)}
     assert set(regions.territory(game, 1)) == {(0, 0), (60, 44), (0, 44)}
     assert set(regions.territory(game, 2)) == {(0, 0), (60, 44), (60, 0)}
+
+
+def test_sweeping_engagement_territories_are_split_by_its_slanted_line():
+    # Its card draws the line from the left edge, 19" down, to the right
+    # edge, 25" down - not straight across the middle.
+    game = _fake_game(
+        [(0, 44), (0, 30), (30, 30), (30, 36), (60, 36), (60, 44)],
+        [(60, 0), (60, 14), (30, 14), (30, 8), (0, 8), (0, 0)],
+        name="Sweeping Engagement",
+    )
+    assert regions.split(game) == "slanted"
+    assert set(regions.split_line(game)) == {(0, 19), (60, 25)}
+    assert set(regions.territory(game, 1)) == {(0, 19), (60, 25), (60, 44), (0, 44)}
+    assert set(regions.territory(game, 2)) == {(0, 19), (60, 25), (60, 0), (0, 0)}
+    # (5, 20) is below the line at the left edge, in the attacker's half;
+    # (55, 24) is above it at the right, in the defender's.
+    assert regions.point_in((5, 20), regions.territory(game, 1))
+    assert regions.point_in((55, 24), regions.territory(game, 2))
 
 
 def test_side_by_side_zones_split_down_the_middle():

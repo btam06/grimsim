@@ -6,8 +6,17 @@ from dataclasses import dataclass
 from fastapi import HTTPException
 
 from app.combat_rules import CommandChoice
-from app.models import Game, GameCommandChoice, GameCommandHeal, Unit, UnitModel
+from app.models import (
+    FactionAbility,
+    Game,
+    GameCommandChoice,
+    GameCommandHeal,
+    GameRuleChoice,
+    Unit,
+    UnitModel,
+)
 from app.seeds import datasheet_abilities as datasheet_ability_seeds
+from app.seeds import factions as faction_seeds
 from app.services.in_game import casualties, deployment
 from app.services.in_game.battle_round import START_OF_ROUND
 from app.services.in_game.deployment import TOLERANCE, gap
@@ -36,6 +45,13 @@ from app.services.in_game.deployment import TOLERANCE, gap
 # Other abilities heal a model at the start of its owner's Command phase
 # (datasheet_abilities COMMAND_HEALS - e.g. Self-repair Mechanisms: D3 lost
 # wounds).
+#
+# Some army rules have their player select one of their options (or none)
+# then too (faction COMMAND_PHASE_CHOICES - e.g. Combat Doctrines), for every
+# unit with the rule, until the start of their next Command phase; some
+# options can only be selected once per battle (ONCE_PER_BATTLE). While
+# active, it's one of those units' rule options in combat, and can let them
+# shoot or declare a charge after Advancing or Falling Back (ELIGIBLE_AFTER).
 
 
 def _bad_request(detail: str) -> HTTPException:
@@ -143,7 +159,9 @@ def options_for(
     # which checks its range) - the calculator works out which it gains. One
     # with an enemy target (e.g. Invocation of Machine Vengeance) only when
     # the unit is attacking that target.
-    found = []
+    found = active_army_options(game, seat) + [
+        o for o in always_active_options(unit) if o not in active_army_options(game, seat)
+    ]
     for choice in active_choices(game, seat):
         if _aura(choice):
             continue
@@ -160,11 +178,17 @@ def _aura(choice: ActiveChoice) -> bool:
     return option is not None and option.aura_range is not None
 
 
-def eligible_after(game: Game, unit: Unit, action: str) -> bool:
-    # Whether an active option lets the unit shoot and declare a charge after
-    # `action` ("advanced", "fell_back") this turn: its own, or one that
-    # applies to it.
+def eligible_after(game: Game, unit: Unit, action: str, to: str) -> bool:
+    # Whether an active option lets the unit `to` ("shoot", "charge": declare
+    # a charge) after `action` ("advanced", "fell_back") this turn: its own,
+    # one that applies to it, or its army rule's (e.g. the Tactical
+    # Doctrine).
     seat = deployment.owner(game, unit).seat
+    held = _held_army_rules(unit)
+    army_options = [o for a, o in _active_army_choices(game, seat) if a in held]
+    for option in army_options + always_active_options(unit):
+        if to in faction_seeds.ELIGIBLE_AFTER.get(option, {}).get(action, ()):
+            return True
     for choice in active_choices(game, seat):
         if choice.target_unit_id is not None and choice.target_unit_id != unit.id:
             continue
@@ -294,6 +318,157 @@ def missing_choices(game: Game) -> list[str]:
             continue
         missing.append(f"{ability.unit.faction_unit.name}'s {ability.ability}")
     return missing
+
+
+# --- army rules selected in the Command phase ---
+
+
+@dataclass
+class ArmyRule:
+    # An army rule (faction ability) of the player's whose option is selected
+    # in their Command phase, and the names of their units with it on the
+    # battlefield.
+    ability: FactionAbility
+    units: list[str]
+
+    @property
+    def key(self) -> tuple[str, str]:
+        return (self.ability.faction.name, self.ability.name)
+
+
+def army_rules(game: Game, seat: int) -> list[ArmyRule]:
+    # The player's such army rules (once each), in list order.
+    player = next(p for p in game.players if p.seat == seat)
+    found: dict[int, ArmyRule] = {}
+    for unit in deployment.deployable_units(player):
+        for unit_model in deployment.models_on_battlefield(game, unit):
+            for ability in unit_model.model.faction_abilities:
+                if (ability.faction.name, ability.name) not in faction_seeds.COMMAND_PHASE_CHOICES:
+                    continue
+                rule = found.setdefault(ability.id, ArmyRule(ability, []))
+                if unit.faction_unit.name not in rule.units:
+                    rule.units.append(unit.faction_unit.name)
+    return list(found.values())
+
+
+def _army_rule_choices(game: Game, seat: int) -> list[GameRuleChoice]:
+    # The player's choices for army rules selected in the Command phase (one
+    # per Command phase - its battle round).
+    keys = faction_seeds.COMMAND_PHASE_CHOICES
+    abilities = {
+        a.id: a
+        for p in game.players
+        for u in p.army_list.units
+        for m in u.unit_models
+        for a in m.model.faction_abilities
+    }
+    return [
+        c
+        for c in game.rule_choices
+        if c.seat == seat
+        and c.faction_ability_id in abilities
+        and (abilities[c.faction_ability_id].faction.name, abilities[c.faction_ability_id].name)
+        in keys
+    ]
+
+
+def _active_army_choices(game: Game, seat: int) -> list[tuple[int, str]]:
+    # The (faction ability id, option) active for the player now: selected in
+    # their most recent Command phase.
+    latest = last_command_round(game, seat)
+    return [
+        (c.faction_ability_id, c.option)
+        for c in _army_rule_choices(game, seat)
+        if c.battle_round == latest
+    ]
+
+
+def active_army_options(game: Game, seat: int) -> list[str]:
+    # The options active for the player's units with those army rules (the
+    # calculator applies each only to units with its rule).
+    return [option for _, option in _active_army_choices(game, seat)]
+
+
+def always_active_options(unit: Unit) -> list[str]:
+    # Army rule options active for the unit all the time because of one of
+    # its models' abilities (datasheet_abilities ALWAYS_ACTIVE_OPTIONS - e.g.
+    # Codex Adept: every Combat Doctrine).
+    config = datasheet_ability_seeds.ALWAYS_ACTIVE_OPTIONS
+    found: list[str] = []
+    for unit_model in unit.unit_models:
+        for ability in unit_model.model.abilities:
+            for option in config.get(ability.name, ()):
+                if option not in found:
+                    found.append(option)
+    return found
+
+
+def _held_army_rules(unit: Unit) -> set[int]:
+    return {a.id for m in unit.unit_models for a in m.model.faction_abilities}
+
+
+def army_rule_options(game: Game, seat: int, rule: ArmyRule) -> list[str]:
+    # The options the player can select for the rule this Command phase: all
+    # of them - less those selected in earlier ones, for a rule whose options
+    # can each be selected once per battle (or more, with a detachment that
+    # lets them - e.g. Assault Mastery).
+    names = list(faction_seeds.rule_options(*rule.key))
+    if rule.key not in faction_seeds.ONCE_PER_BATTLE:
+        return names
+    earlier = [
+        c.option
+        for c in _army_rule_choices(game, seat)
+        if c.faction_ability_id == rule.ability.id and c.battle_round < game.battle_round
+    ]
+    player = next(p for p in game.players if p.seat == seat)
+    allowed = {name: 1 for name in names}
+    for detachment in player.army_list.detachments:
+        for option, extra in faction_seeds.EXTRA_SELECTIONS.get(detachment.name, {}).items():
+            if option in allowed:
+                allowed[option] += extra
+    return [n for n in names if earlier.count(n) < allowed[n]]
+
+
+def army_rule_this_phase(game: Game, seat: int, faction_ability_id: int) -> GameRuleChoice | None:
+    # The option the player has selected for the rule in this Command phase.
+    return next(
+        (
+            c
+            for c in _army_rule_choices(game, seat)
+            if c.faction_ability_id == faction_ability_id and c.battle_round == game.battle_round
+        ),
+        None,
+    )
+
+
+def choose_army_rule(
+    game: Game, seat: int, faction_ability_id: int, option: str | None
+) -> None:
+    # The player selects an option (or none) for one of their army rules in
+    # their Command phase.
+    if not is_command_phase(game) or game.turn_seat != seat:
+        raise _bad_request("army rules' options are selected in their owner's Command phase")
+    rule = next(
+        (r for r in army_rules(game, seat) if r.ability.id == faction_ability_id), None
+    )
+    if rule is None:
+        raise _bad_request("that player has no army rule with options to select now")
+    if option is not None and option not in army_rule_options(game, seat, rule):
+        if option in faction_seeds.rule_options(*rule.key):
+            raise _bad_request(f"{option} has already been selected this battle")
+        raise _bad_request(f"{rule.ability.name} has no option {option!r}")
+    existing = army_rule_this_phase(game, seat, faction_ability_id)
+    if existing is not None:
+        game.rule_choices.remove(existing)
+    if option is not None:
+        game.rule_choices.append(
+            GameRuleChoice(
+                battle_round=game.battle_round,
+                seat=seat,
+                faction_ability_id=faction_ability_id,
+                option=option,
+            )
+        )
 
 
 # --- healing at the start of the Command phase ---

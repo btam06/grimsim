@@ -617,7 +617,7 @@ def _(ctx: Context) -> Lines:
                 f"For each enemy CHARACTER model destroyed ({len(characters)})",
                 3 * len(characters),
             )
-            tough = [d for d in characters if ctx.unit_model(d.unit_model_id).model.wounds >= 4]
+            tough = [d for d in characters if ctx.unit_model(d.unit_model_id).wounds >= 4]
             if tough:
                 yield (f"For each of those with W 4+ ({len(tough)})", len(tough))
         return
@@ -654,7 +654,7 @@ def _(ctx: Context) -> Lines:
     if not ctx.any_turn_end():
         return
     big = [
-        d for d in ctx.destroyed_models() if ctx.unit_model(d.unit_model_id).model.wounds >= 10
+        d for d in ctx.destroyed_models() if ctx.unit_model(d.unit_model_id).wounds >= 10
     ]
     if not big:
         return

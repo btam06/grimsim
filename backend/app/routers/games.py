@@ -68,8 +68,21 @@ from app.schemas import (
     MovementModelOut,
     MovementOut,
     OverwatchOut,
+    EmbarkableUnitOut,
     EmbarkedOut,
     EmbarkedUnitOut,
+    EmbarkIn,
+    EmergencyOut,
+    EmergencyRollOut,
+    EmergencyUnitOut,
+    TeleportHomerIn,
+    PsychicAbilityOut,
+    PsychicIn,
+    PsychicOut,
+    PsychicUnitOut,
+    PsychicUseOut,
+    TeleportHomersOut,
+    TeleportHomerUnitOut,
     MarkedUnitOut,
     MissionAnswerIn,
     MissionPromptOut,
@@ -112,6 +125,7 @@ from app.schemas import (
     ShotOut,
     SightBubbleOut,
     StratagemOut,
+    StratagemTargetOut,
     TerrainPointOut,
     UnitIdIn,
     UnitMoveIn,
@@ -127,12 +141,16 @@ from app.services.in_game import charging as charging_service
 from app.services.in_game import command_phase as command_phase_service
 from app.services.in_game import deployment as deployment_service
 from app.services.in_game import embarked as embarked_service
+from app.services.in_game import emergency as emergency_service
+from app.services.in_game import psychic as psychic_service
+from app.services.in_game import teleport_homer as teleport_homer_service
 from app.services.in_game import fighting as fighting_service
 from app.services.in_game import game as game_service
 from app.services.in_game import movement as movement_service
 from app.services.in_game import objectives as objectives_service
 from app.services.in_game import overwatch as overwatch_service
 from app.services.in_game import pathing as pathing_service
+from app.seeds import factions as faction_seeds
 from app.seeds.factions.necrons import reanimation as reanimation_service
 from app.services.in_game import heal as heal_service
 from app.services.in_game import regions as regions_service
@@ -145,10 +163,15 @@ from app.services.in_game import turn_record as turn_record_service
 from app.routers import combat as combat_router
 from app.routers.combat import calculate as calculate_combat
 from app.combat_rules.conditions import (
+    ALWAYS,
     BELOW_HALF_STRENGTH,
     BELOW_STARTING_STRENGTH,
     IN_RANGE_OF_OBJECTIVE,
+    REMAINED_STATIONARY,
 )
+from app.combat_rules.effects import ASSAULT
+from app.seeds.factions.space_marines.conditions import TARGET_WITHIN_9
+from app.services.in_game.deployment import TOLERANCE
 from app.services.in_game.terrain import MM_PER_INCH
 
 router = APIRouter(prefix="/games", tags=["games"])
@@ -218,6 +241,7 @@ def _player_out(player: GamePlayer) -> GamePlayerOut:
                 turn_seat=u.turn_seat,
                 phase=u.phase,
                 cp=u.cp,
+                target_unit_id=u.target_unit_id,
             )
             for u in player.stratagem_uses
         ],
@@ -277,7 +301,9 @@ def _game_options():
         players.selectinload(GamePlayer.primary_mission),
         players.selectinload(GamePlayer.secondaries).selectinload(GameSecondary.mission),
         players.selectinload(GamePlayer.scores),
-        players.selectinload(GamePlayer.stratagem_uses).selectinload(GameStratagemUse.stratagem),
+        players.selectinload(GamePlayer.stratagem_uses)
+        .selectinload(GameStratagemUse.stratagem)
+        .selectinload(Stratagem.game_action_link),
     ]
 
 
@@ -395,8 +421,28 @@ async def use_stratagem(
         game_service.player_at(game, payload.seat),
         stratagems[0],
         payload.target_secondary_id,
+        target_unit_id=payload.target_unit_id,
     )
     return await _commit_and_reload(session, game_id)
+
+
+@router.get(
+    "/{game_id}/stratagems/{stratagem_id}/targets", response_model=list[StratagemTargetOut]
+)
+async def stratagem_targets(
+    game_id: int, stratagem_id: int, seat: int, session: AsyncSession = Depends(get_session)
+):
+    # The player's units a stratagem whose game action targets one (e.g.
+    # Gunship Extraction) could be used on now.
+    game = await _load_game(session, game_id)
+    stratagems = await _load_stratagems(session, [stratagem_id])
+    if not stratagems:
+        raise HTTPException(status_code=404, detail="stratagem not found")
+    player = game_service.player_at(game, seat)
+    return [
+        StratagemTargetOut(unit_id=u.id, name=u.faction_unit.name)
+        for u in game_service.stratagem_targets(game, player, stratagems[0])
+    ]
 
 
 def _card(game: Game, card_id: int) -> GameSecondary:
@@ -476,7 +522,7 @@ async def get_deployment(game_id: int, session: AsyncSession = Depends(get_sessi
                 width, height, measured = deployment_service.base_mm(unit_model)
                 position = placed.get(unit_model.id)
                 record = damage.get(unit_model.id)
-                wounds = unit_model.model.wounds
+                wounds = unit_model.wounds
                 models.append(
                     DeploymentModelOut(
                         unit_model_id=unit_model.id,
@@ -535,6 +581,7 @@ async def get_deployment(game_id: int, session: AsyncSession = Depends(get_sessi
                 area_ids=[a.id for a in c.objective.areas],
                 oc=c.oc,
                 controller=c.controller,
+                secured_by=c.secured_by,
             )
             for c in objectives_service.control(game)
         ],
@@ -703,6 +750,23 @@ def _defender_positions(game: Game, target: Unit) -> list[str]:
     return found
 
 
+# How close a target has to be for rules that ask (see
+# app/combat_rules/positions.py): {position: inches}.
+TARGET_WITHIN = {TARGET_WITHIN_9: 9.0}
+
+
+def _attacker_positions(
+    game: Game, unit: Unit, target: Unit, stationary: bool = False
+) -> list[str]:
+    # What the battlefield says about the attacking unit that the calculator
+    # asks about: whether it Remained Stationary, and how close its target is
+    # (e.g. within 9", for Purgatus Tactics).
+    found = [REMAINED_STATIONARY] if stationary else []
+    distance = charging_service.distance(game, unit, target)
+    found += [p for p, reach in TARGET_WITHIN.items() if distance <= reach + TOLERANCE]
+    return found
+
+
 def _rule_options(game: Game, unit: Unit, attacking: Unit | None = None) -> list[str]:
     # The rule options active for the unit in combat: its owner's army rule
     # options this round (e.g. Doctrina Imperatives), those of abilities
@@ -715,6 +779,7 @@ def _rule_options(game: Game, unit: Unit, attacking: Unit | None = None) -> list
         battle_round_service.active_options(game, seat)
         + command_phase_service.options_for(game, seat, unit, attacking)
         + auras_service.aura_options(game, unit)
+        + psychic_service.active_options(game, unit)
     )
 
 
@@ -725,11 +790,24 @@ async def _assault_weapons(session: AsyncSession, unit: Unit, game: Game | None 
     # The unit's Assault weapons, as the calculator sees them (so loaded as it
     # loads units, with its detachment rules) - every ranged weapon, in a game
     # where an active option lets it shoot after Advancing (e.g. Fanatical
-    # Devotion).
-    if game is not None and command_phase_service.eligible_after(game, unit, "advanced"):
-        return {w.id for m in unit.unit_models for w in shooting_service.ranged_weapons(m)}
+    # Devotion) or gives its ranged weapons [ASSAULT] (e.g. the Devastator
+    # Doctrine, the Conqueror Imperative).
+    every = {w.id for m in unit.unit_models for w in shooting_service.ranged_weapons(m)}
+    if game is not None and command_phase_service.eligible_after(
+        game, unit, "advanced", "shoot"
+    ):
+        return every
     loaded = await combat_router._load_unit(session, unit.id)
     rules = await combat_router._detachment_rules(session, loaded)
+    if game is not None:
+        _, option_rules, _ = combat_router._active_options(
+            loaded, _rule_options(game, unit), rules
+        )
+        if any(
+            r.side == "attacker" and ASSAULT in r.effects and ALWAYS in r.conditions
+            for r in option_rules
+        ):
+            return every
     ids = await shooting_service.assault_ability_ids(session)
     return shooting_service.assault_weapons(loaded, rules, ids)
 
@@ -869,7 +947,9 @@ async def _fire(
             defending_unit_id=target.id,
             selected_weapon_ids=payload.weapon_ids,
             selected_enhancement_weapon_ids=payload.enhancement_weapon_ids,
-            attacker_positions=["remained_stationary"] if status.remained_stationary else [],
+            attacker_positions=_attacker_positions(
+                game, unit, target, status.remained_stationary
+            ),
             defender_positions=_defender_positions(game, target),
             defender_battle_shocked=battle_shock_service.is_battle_shocked(game, target),
             in_cover=reach.in_cover,
@@ -1051,7 +1131,8 @@ def _charge_out(game: Game) -> ChargeOut:
                 unit_id=unit.id,
                 name=unit.faction_unit.name,
                 dice=[charge.first_die, charge.second_die] if charge else [],
-                roll=charge.roll if charge else None,
+                bonus=charging_service.charge_bonus(game, unit),
+                roll=charging_service.charge_roll(game, unit),
                 failed=charging_service.failed(game, unit),
                 charged=bool(charge and charge.completed),
                 reason=charging_service.cant_charge_reason(game, unit),
@@ -1102,7 +1183,9 @@ async def charge_targets(
                 name=target.faction_unit.name,
                 distance=round(distance, 2),
                 in_reach=charge is not None
-                and charging_service.in_reach(game, unit, target, charge.roll),
+                and charging_service.in_reach(
+                    game, unit, target, charging_service.charge_roll(game, unit)
+                ),
             )
         )
     return sorted(targets, key=lambda t: t.distance)
@@ -1308,6 +1391,7 @@ async def fight(game_id: int, payload: ShootIn, session: AsyncSession = Depends(
             selected_enhancement_weapon_ids=payload.enhancement_weapon_ids,
             in_engagement_range=True,
             charged=charged,
+            attacker_positions=_attacker_positions(game, unit, target),
             defender_positions=_defender_positions(game, target),
             defender_battle_shocked=battle_shock_service.is_battle_shocked(game, target),
             # The options each side chose for its army rules this round (e.g.
@@ -1543,9 +1627,19 @@ def _reserves_out(game: Game) -> ReservesOut:
             step, seat = "rapid_ingress", game_service.other_seat(game.turn_seat)
         else:
             step, seat = "movement", game.turn_seat
-        if not reinforcements_service.arrival_round(game):
-            seat = None
-    units = reinforcements_service.reserve_units(game, seat) if seat is not None else []
+    units = (
+        [
+            u
+            for u in reinforcements_service.reserve_units(game, seat)
+            # (In the first battle round, only those that can make an
+            # ingress move.)
+            if reinforcements_service.arrival_round(game, u, step == "rapid_ingress")
+        ]
+        if seat is not None
+        else []
+    )
+    if not units and not reinforcements_service.arrival_round(game):
+        seat = None
     return ReservesOut(
         step=step,
         seat=seat,
@@ -1555,6 +1649,11 @@ def _reserves_out(game: Game) -> ReservesOut:
                 unit_id=u.id,
                 name=u.faction_unit.name,
                 deep_strike=reinforcements_service.has_deep_strike(u),
+                teleport_homer=(
+                    {"x": token.x, "y": token.y}
+                    if (token := teleport_homer_service.token(game, u)) is not None
+                    else None
+                ),
             )
             for u in units
         ],
@@ -1600,7 +1699,9 @@ async def check_arrival(
     game = await _load_game(session, game_id)
     unit, _ = _arriving(game, payload.unit_id)
     return _check_out(
-        reinforcements_service.check_arrival(game, unit, _placement(payload.positions))
+        reinforcements_service.check_arrival(
+            game, unit, _placement(payload.positions), payload.teleport_homer
+        )
     )
 
 
@@ -1613,7 +1714,12 @@ async def bring_in(
     game = await _load_game(session, game_id)
     unit, rapid = _arriving(game, payload.unit_id)
     placement = _placement(payload.positions)
-    result = reinforcements_service.check_arrival(game, unit, placement)
+    homer = payload.teleport_homer
+    if homer and not rapid:
+        raise HTTPException(
+            status_code=400, detail="a Teleport Homer token is used with Rapid Ingress"
+        )
+    result = reinforcements_service.check_arrival(game, unit, placement, homer)
     if not result.valid:
         raise HTTPException(
             status_code=400, detail="can't bring it in there: " + "; ".join(result.problems)
@@ -1623,8 +1729,13 @@ async def bring_in(
         if stratagem is None:
             raise HTTPException(status_code=400, detail="there's no Rapid Ingress stratagem")
         player = deployment_service.owner(game, unit)
-        await game_service.use_stratagem(session, game, player, stratagem)
-    reinforcements_service.bring_in(game, unit, placement, rapid)
+        # Using its Teleport Homer token: 1CP less - and any its enhancement
+        # takes off (e.g. Beacon Angelis).
+        discount = (
+            teleport_homer_service.CP_DISCOUNT if homer else 0
+        ) + reinforcements_service.rapid_ingress_discount(unit)
+        await game_service.use_stratagem(session, game, player, stratagem, cp_discount=discount)
+    reinforcements_service.bring_in(game, unit, placement, rapid, homer)
     return await _commit_and_reload(session, game_id)
 
 
@@ -1742,6 +1853,25 @@ def _command_out(game: Game) -> CommandOut:
                 },
             )
         )
+    for rule in command_phase_service.army_rules(game, seat):
+        names = list(faction_seeds.rule_options(*rule.key))
+        available = command_phase_service.army_rule_options(game, seat, rule)
+        selected = command_phase_service.army_rule_this_phase(game, seat, rule.ability.id)
+        abilities.append(
+            CommandAbilityOut(
+                unit_name=", ".join(rule.units),
+                faction_ability_id=rule.ability.id,
+                ability=rule.ability.name,
+                description=rule.ability.description or "",
+                options=available,
+                option_descriptions=faction_seeds.COMMAND_PHASE_DESCRIPTIONS.get(rule.key, {}),
+                used_options=[n for n in names if n not in available],
+                required=False,
+                persistent=False,
+                active=selected.option if selected else None,
+                chosen=selected is not None,
+            )
+        )
     units = {
         m.id: (u, m) for p in game.players for u in p.army_list.units for m in u.unit_models
     }
@@ -1773,10 +1903,17 @@ async def choose_command_option(
     game_id: int, payload: CommandChoiceIn, session: AsyncSession = Depends(get_session)
 ):
     game = await _load_game(session, game_id)
-    command_phase_service.choose(
-        game, payload.seat, payload.unit_id, payload.ability, payload.option,
-        payload.target_unit_id,
-    )
+    if payload.faction_ability_id is not None:
+        command_phase_service.choose_army_rule(
+            game, payload.seat, payload.faction_ability_id, payload.option
+        )
+    else:
+        if payload.unit_id is None:
+            raise HTTPException(status_code=400, detail="choose a unit's ability or an army rule")
+        command_phase_service.choose(
+            game, payload.seat, payload.unit_id, payload.ability, payload.option,
+            payload.target_unit_id,
+        )
     await session.commit()
     return _command_out(await _load_game(session, game_id))
 
@@ -2282,6 +2419,18 @@ def _embarked_out(game: Game) -> EmbarkedOut:
                 transport_name=carrier.faction_unit.name,
             )
             for unit, carrier in embarked_service.embarked_units(game, game.turn_seat)
+            # Not one that embarked this phase: it can't disembark again yet.
+            if not embarked_service.transited(game, unit, "embarked")
+        ],
+        embarkable=[
+            EmbarkableUnitOut(
+                unit_id=unit.id,
+                name=unit.faction_unit.name,
+                transports=[
+                    UnitIdNameOut(unit_id=c.id, name=c.faction_unit.name) for c in carriers
+                ],
+            )
+            for unit, carriers in embarked_service.embarkable(game)
         ],
     )
 
@@ -2304,7 +2453,7 @@ async def disembark_formation(
     return [
         ModelPositionOut(unit_model_id=i, x=x, y=y, rotation=rotation)
         for i, (x, y, rotation) in deployment_service.formation(
-            game, unit, payload.x, payload.y
+            game, unit, payload.x, payload.y, embarked_service.surviving_models(game, unit)
         ).items()
     ]
 
@@ -2317,6 +2466,231 @@ async def check_disembark(
     unit = deployment_service.find_unit(game, payload.unit_id)
     embarked_service.check_turn(game, unit)
     return _check_out(embarked_service.check_disembark(game, unit, _placement(payload.positions)))
+
+
+# --- psychic abilities (see app/services/in_game/psychic.py) ---
+
+
+def _psychic_out(game: Game) -> PsychicOut:
+    units = []
+    for unit in psychic_service.psykers(game):
+        abilities = []
+        for name, level in psychic_service.abilities(unit).items():
+            reason = psychic_service.unavailable_reason(game, unit, name)
+            targets = (
+                psychic_service.soul_sight_targets(game, unit)
+                if name == psychic_service.SOUL_SIGHT and reason is None
+                else []
+            )
+            abilities.append(
+                PsychicAbilityOut(
+                    name=name,
+                    level=level,
+                    usable=reason is None,
+                    reason=reason,
+                    targets=[UnitIdNameOut(unit_id=t.id, name=t.faction_unit.name) for t in targets],
+                )
+            )
+        units.append(
+            PsychicUnitOut(
+                unit_id=unit.id,
+                name=unit.faction_unit.name,
+                seat=deployment_service.owner(game, unit).seat,
+                psyker_level=psychic_service.psyker_level(unit),
+                used_this_round=sum(
+                    psychic_service.abilities(unit).get(u.ability, 0)
+                    for u in psychic_service.uses_this_round(game, unit)
+                ),
+                abilities=abilities,
+            )
+        )
+    names = {u.id: u.faction_unit.name for p in game.players for u in p.army_list.units}
+    uses = [
+        PsychicUseOut(
+            unit_name=names.get(u.unit_id, "?"),
+            ability=u.ability,
+            roll=u.roll,
+            target_name=names.get(u.target_unit_id) if u.target_unit_id else None,
+        )
+        for u in game.psychic_uses
+        if u.battle_round == game.battle_round
+    ]
+    return PsychicOut(units=units, uses=uses)
+
+
+@router.get("/{game_id}/psychic", response_model=PsychicOut)
+async def get_psychic(game_id: int, session: AsyncSession = Depends(get_session)):
+    return _psychic_out(await _load_game(session, game_id))
+
+
+@router.post("/{game_id}/psychic", response_model=PsychicOut)
+async def use_psychic(
+    game_id: int, payload: PsychicIn, session: AsyncSession = Depends(get_session)
+):
+    # A PSYKER unit uses a psychic ability: its psychic roll (a 1
+    # Battle-shocks it), and its effect.
+    game = await _load_game(session, game_id)
+    unit = deployment_service.find_unit(game, payload.unit_id)
+    target = (
+        deployment_service.find_unit(game, payload.target_unit_id)
+        if payload.target_unit_id is not None
+        else None
+    )
+    psychic_service.use(game, unit, payload.ability, target)
+    await session.commit()
+    return _psychic_out(await _load_game(session, game_id))
+
+
+# --- Teleport Homers (see app/services/in_game/teleport_homer.py) ---
+
+
+def _teleport_homers_out(game: Game) -> TeleportHomersOut:
+    units = []
+    for player in game.players:
+        for unit in teleport_homer_service.homer_units(game, player.seat):
+            token = teleport_homer_service.token(game, unit)
+            units.append(
+                TeleportHomerUnitOut(
+                    unit_id=unit.id,
+                    name=unit.faction_unit.name,
+                    seat=player.seat,
+                    token={"x": token.x, "y": token.y} if token else None,
+                )
+            )
+    tokens = []
+    for homer in game.teleport_homers:
+        if homer.status != "placed":
+            continue
+        unit = deployment_service.find_unit(game, homer.unit_id)
+        tokens.append(
+            {
+                "unit_id": unit.id,
+                "name": unit.faction_unit.name,
+                "seat": deployment_service.owner(game, unit).seat,
+                "x": homer.x,
+                "y": homer.y,
+            }
+        )
+    return TeleportHomersOut(
+        waiting_seats=teleport_homer_service.waiting_seats(game), units=units, tokens=tokens
+    )
+
+
+@router.get("/{game_id}/teleport-homers", response_model=TeleportHomersOut)
+async def get_teleport_homers(game_id: int, session: AsyncSession = Depends(get_session)):
+    return _teleport_homers_out(await _load_game(session, game_id))
+
+
+@router.post("/{game_id}/teleport-homers", response_model=TeleportHomersOut)
+async def place_teleport_homer(
+    game_id: int, payload: TeleportHomerIn, session: AsyncSession = Depends(get_session)
+):
+    # Sets up (or moves) a unit's token - or, with no position, takes it back.
+    game = await _load_game(session, game_id)
+    if payload.unit_id is None:
+        raise HTTPException(status_code=400, detail="choose a unit")
+    unit = deployment_service.find_unit(game, payload.unit_id)
+    if payload.x is None or payload.y is None:
+        teleport_homer_service.remove(game, payload.seat, unit)
+    else:
+        teleport_homer_service.place(game, payload.seat, unit, payload.x, payload.y)
+    await session.commit()
+    return _teleport_homers_out(await _load_game(session, game_id))
+
+
+@router.post("/{game_id}/teleport-homers/done", response_model=GameOut)
+async def finish_teleport_homers(
+    game_id: int, payload: TeleportHomerIn, session: AsyncSession = Depends(get_session)
+):
+    game = await _load_game(session, game_id)
+    teleport_homer_service.finish(game, payload.seat)
+    return await _commit_and_reload(session, game_id)
+
+
+# --- emergency disembarking (see app/services/in_game/emergency.py) ---
+
+
+def _emergency_out(game: Game) -> EmergencyOut:
+    names = {
+        m.id: (u, m) for p in game.players for u in p.army_list.units for m in u.unit_models
+    }
+    units = []
+    for record in emergency_service.pending(game):
+        unit = deployment_service.find_unit(game, record.unit_id)
+        transport = deployment_service.find_unit(game, record.transport_unit_id)
+        units.append(
+            EmergencyUnitOut(
+                unit_id=unit.id,
+                name=unit.faction_unit.name,
+                seat=deployment_service.owner(game, unit).seat,
+                transport_unit_id=transport.id,
+                transport_name=transport.faction_unit.name,
+                suggested=[
+                    ModelPositionOut(unit_model_id=i, x=x, y=y, rotation=r)
+                    for i, (x, y, r) in emergency_service.suggested(game, unit).items()
+                ],
+                wreck=[
+                    {
+                        "x": b.x,
+                        "y": b.y,
+                        "rotation": b.rotation,
+                        "rx": b.semi_axes[0],
+                        "ry": b.semi_axes[1],
+                    }
+                    for b in emergency_service.wreck_bases(game, transport.id)
+                ],
+                models=[
+                    {"unit_model_id": m.id, "name": m.model.name}
+                    for m in emergency_service.surviving_models(game, unit)
+                ],
+            )
+        )
+    rolls = []
+    for r in game.emergency_rolls:
+        name = None
+        if r.unit_model_id in names:
+            unit, model = names[r.unit_model_id]
+            name = unit.faction_unit.name if r.kind == "deadly_demise_wounds" else model.model.name
+        rolls.append(EmergencyRollOut(kind=r.kind, name=name, roll=r.roll, wounds=r.wounds))
+    return EmergencyOut(units=units, rolls=rolls)
+
+
+@router.get("/{game_id}/emergency", response_model=EmergencyOut)
+async def get_emergency(game_id: int, session: AsyncSession = Depends(get_session)):
+    # Units that must emergency disembark from destroyed transports, and the
+    # rolls after those that have.
+    return _emergency_out(await _load_game(session, game_id))
+
+
+@router.post("/{game_id}/emergency/check", response_model=DeploymentCheckOut)
+async def check_emergency(
+    game_id: int, payload: DeployUnitIn, session: AsyncSession = Depends(get_session)
+):
+    game = await _load_game(session, game_id)
+    unit = deployment_service.find_unit(game, payload.unit_id)
+    return _check_out(emergency_service.check(game, unit, _placement(payload.positions)))
+
+
+@router.post("/{game_id}/emergency", response_model=GameOut)
+async def emergency_disembark(
+    game_id: int, payload: DeployUnitIn, session: AsyncSession = Depends(get_session)
+):
+    # The unit emergency disembarks with the models placed (the rest are
+    # destroyed); then its hazard rolls, and the transport's Deadly Demise.
+    game = await _load_game(session, game_id)
+    unit = deployment_service.find_unit(game, payload.unit_id)
+    emergency_service.disembark(game, unit, _placement(payload.positions))
+    return await _commit_and_reload(session, game_id)
+
+
+@router.post("/{game_id}/embarked/embark", response_model=GameOut)
+async def embark(game_id: int, payload: EmbarkIn, session: AsyncSession = Depends(get_session)):
+    # A unit that's moved embarks in a transport within 3" of it.
+    game = await _load_game(session, game_id)
+    unit = deployment_service.find_unit(game, payload.unit_id)
+    carrier = deployment_service.find_unit(game, payload.transport_unit_id)
+    embarked_service.embark(game, unit, carrier)
+    return await _commit_and_reload(session, game_id)
 
 
 @router.post("/{game_id}/embarked", response_model=GameOut)

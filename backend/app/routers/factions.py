@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_session
 from app.models import Faction
 from app.schemas import FactionIn, FactionOut
+from app.seeds.factions import SUBFACTIONS
 
 router = APIRouter(prefix="/factions", tags=["factions"])
 
@@ -13,7 +14,17 @@ router = APIRouter(prefix="/factions", tags=["factions"])
 @router.get("", response_model=list[FactionOut])
 async def list_factions(session: AsyncSession = Depends(get_session)):
     result = await session.execute(select(Faction).order_by(Faction.id))
-    return result.scalars().all()
+    return [_to_out(faction) for faction in result.scalars().all()]
+
+
+def _to_out(faction: Faction) -> FactionOut:
+    config = SUBFACTIONS.get(faction.name, {})
+    return FactionOut(
+        id=faction.id,
+        name=faction.name,
+        subfaction_label=config.get("label"),
+        subfactions=list(config.get("options", {})),
+    )
 
 
 @router.post("", response_model=FactionOut, status_code=201)

@@ -14,14 +14,17 @@ from app.models import (
     GamePlayer,
     GameScore,
     GameSecondary,
+    GameStratagemTarget,
     GameStratagemUse,
     GameTerrainLayout,
     PrimaryMission,
     SecondaryMission,
     Stratagem,
+    Unit,
     User,
 )
 from app.models.game import BATTLE_ROUNDS, PHASES
+from app.models.stratagem import UNIT_TARGET_ACTIONS
 from app.schemas import GameIn
 from app.services.in_game import actions as actions_service
 from app.services.in_game import battle_formations as battle_formations_service
@@ -29,6 +32,7 @@ from app.services.in_game import battle_shock as battle_shock_service
 from app.services.in_game import battle_round as battle_round_service
 from app.services.in_game import command_phase as command_phase_service
 from app.services.in_game import deployment as deployment_service
+from app.services.in_game import duty_in_death as duty_in_death_service
 from app.services.in_game import overwatch as overwatch_service
 from app.seeds.factions.necrons import reanimation as reanimation_service
 from app.services.in_game import heal as heal_service
@@ -36,7 +40,12 @@ from app.services.in_game import mission_state as mission_state_service
 from app.services.in_game import reinforcements as reinforcements_service
 from app.services.in_game import scoring as scoring_service
 from app.services.in_game import terrain as terrain_service
+from app.services.in_game import emergency as emergency_service
+from app.services.in_game import objectives as objectives_service
+from app.services.in_game import teleport_homer as teleport_homer_service
 from app.services.in_game import turn_record as turn_record_service
+from app.services.list_building import enhancements as enhancement_rules
+from app.services.list_building import warlord as warlord_rules
 
 # How many new tactical secondary cards a player draws in each of their
 # command phases (11th edition: on top of any still held - no hand limit).
@@ -94,6 +103,11 @@ async def create_game(session: AsyncSession, payload: GameIn) -> Game:
             raise _bad_request(f"player {seat}: list not found")
         if army_list.owner is None or army_list.owner.id != spec.user_id:
             raise _bad_request(f"player {seat}: that list doesn't belong to that user")
+        reason = await warlord_rules.warlord_reason(
+            session, army_list.id, army_list.warlord_unit_id
+        )
+        if reason:
+            raise _bad_request(f"player {seat}: {reason}")
 
         # The player's disposition comes from their list's detachments.
         candidates = {
@@ -280,9 +294,12 @@ START_OF_ROUND = battle_round_service.START_OF_ROUND
 
 
 async def _begin_battle_round(session: AsyncSession, game: Game) -> None:
-    # The round's first turn: after the start of the round, if a rule then
-    # needs a decision; otherwise straight to its command phase.
+    # The round's first turn: after the start of the round (when Warlords'
+    # abilities gain CP - e.g. Transhuman Strategist), if a rule then needs a
+    # decision; otherwise straight to its command phase.
     game.turn_seat = game.first_seat
+    for seat, cp in battle_round_service.warlord_cp(game).items():
+        player_at(game, seat).cp += cp
     if battle_round_service.needs_decisions(game, game.battle_round):
         game.phase = START_OF_ROUND
     else:
@@ -340,6 +357,12 @@ async def advance(session: AsyncSession, game: Game) -> None:
         raise _bad_request("claim or hold the completed secondaries first")
     if mission_state_service.pending(game):
         raise _bad_request("make the missions' choices first")
+    if teleport_homer_service.waiting(game):
+        raise _bad_request("set up the Teleport Homer tokens first")
+    if emergency_service.waiting(game):
+        raise _bad_request(
+            "set up the units emergency disembarking from a destroyed transport first"
+        )
     if game.phase == START_OF_ROUND:
         if missing := battle_round_service.missing_choices(game):
             raise _bad_request("choose an option first for " + ", ".join(missing))
@@ -368,6 +391,12 @@ async def advance(session: AsyncSession, game: Game) -> None:
         if await rapid_ingress_open(session, game) or await overwatch_open(session, game):
             reinforcements_service.end_movement(game)
             return
+    # The end of the phase: destroyed models left on the battlefield till then
+    # (Duty in Death) go; secured objectives lost since, then rules that
+    # secure objectives then (e.g. Raise the Banner).
+    duty_in_death_service.remove(game)
+    objectives_service.refresh_secured(game)
+    objectives_service.secure_at_end_of(game, game.phase)
     index = PHASES.index(game.phase)
     if index + 1 < len(PHASES):
         game.phase = PHASES[index + 1]
@@ -436,10 +465,25 @@ async def rapid_ingress_open(session: AsyncSession, game: Game) -> bool:
     if not reinforcements_service.arrival_round(game):
         return False
     opponent = player_at(game, other_seat(game.turn_seat))
-    if not reinforcements_service.reserve_units(game, opponent.seat):
+    units = reinforcements_service.reserve_units(game, opponent.seat)
+    if not units:
         return False
     stratagem = await rapid_ingress_stratagem(session)
-    return stratagem is not None and stratagem_unavailable_reason(game, opponent, stratagem) is None
+    # The cheapest it could be for one of those units (e.g. with a Teleport
+    # Homer token, or Beacon Angelis).
+    discount = max(
+        reinforcements_service.rapid_ingress_discount(u)
+        + (
+            teleport_homer_service.CP_DISCOUNT
+            if teleport_homer_service.token(game, u) is not None
+            else 0
+        )
+        for u in units
+    )
+    return (
+        stratagem is not None
+        and stratagem_unavailable_reason(game, opponent, stratagem, discount) is None
+    )
 
 
 async def overwatch_open(session: AsyncSession, game: Game) -> bool:
@@ -455,7 +499,7 @@ async def overwatch_open(session: AsyncSession, game: Game) -> bool:
 
 
 def stratagem_unavailable_reason(
-    game: Game, player: GamePlayer, stratagem: Stratagem
+    game: Game, player: GamePlayer, stratagem: Stratagem, cp_discount: int = 0
 ) -> str | None:
     # Why a player can't use a stratagem right now, or None if they can.
     if game.status != "in_progress":
@@ -479,11 +523,45 @@ def stratagem_unavailable_reason(
     ):
         # Each stratagem can be used once per phase (by each player).
         return "it has already been used this phase"
-    if player.cp < stratagem.cp:
+    if player.cp < max(0, stratagem.cp - cp_discount):
         return "not enough CP"
     if stratagem.game_action == "replace_secondary" and not replaceable_secondaries(player):
         return "they have no active tactical Secondary Mission to replace"
+    if stratagem.game_action == "strategic_reserves" and not stratagem_targets(
+        game, player, stratagem
+    ):
+        return "they have no unit it can place in Strategic Reserves now"
     return None
+
+
+def stratagem_target_reason(
+    game: Game, player: GamePlayer, stratagem: Stratagem, unit: Unit
+) -> str | None:
+    # Why the player can't use a stratagem whose game action targets one of
+    # their units (UNIT_TARGET_ACTIONS) on that unit, or None if they can: it's
+    # theirs, on the battlefield, has a model with the stratagem's keywords,
+    # and its action can be carried out on it.
+    if deployment_service.owner(game, unit).seat != player.seat:
+        return "it isn't one of their units"
+    if not stratagem.is_unrestricted and not any(
+        stratagem.applies_to(enhancement_rules.model_keywords(unit, unit_model))
+        for unit_model in unit.unit_models
+    ):
+        return "it doesn't have the keywords the stratagem needs"
+    if stratagem.game_action == "strategic_reserves":
+        return reinforcements_service.extraction_reason(game, player.seat, unit)
+    if not deployment_service.models_on_battlefield(game, unit):
+        return "it isn't on the battlefield"
+    return None
+
+
+def stratagem_targets(game: Game, player: GamePlayer, stratagem: Stratagem) -> list[Unit]:
+    # The player's units the stratagem could be used on now.
+    return [
+        unit
+        for unit in deployment_service.deployable_units(player)
+        if stratagem_target_reason(game, player, stratagem, unit) is None
+    ]
 
 
 def replaceable_secondaries(player: GamePlayer) -> list[GameSecondary]:
@@ -498,10 +576,26 @@ async def use_stratagem(
     player: GamePlayer,
     stratagem: Stratagem,
     target_secondary_id: int | None = None,
+    cp_discount: int = 0,
+    target_unit_id: int | None = None,
 ) -> None:
-    reason = stratagem_unavailable_reason(game, player, stratagem)
+    # `cp_discount`: what a rule takes off its cost (e.g. Rapid Ingress using
+    # a Teleport Homer token: 1CP). `target_unit_id`: the unit a stratagem
+    # whose game action targets one is used on (e.g. Gunship Extraction).
+    reason = stratagem_unavailable_reason(game, player, stratagem, cp_discount)
     if reason is not None:
         raise _bad_request(f"can't use {stratagem.name}: {reason}")
+
+    target_unit = None
+    if stratagem.game_action in UNIT_TARGET_ACTIONS:
+        if target_unit_id is None:
+            raise _bad_request(f"{stratagem.name} needs one of their units as its target")
+        target_unit = deployment_service.find_unit(game, target_unit_id)
+        reason = stratagem_target_reason(game, player, stratagem, target_unit)
+        if reason is not None:
+            raise _bad_request(f"can't use {stratagem.name} on that unit: {reason}")
+    elif target_unit_id is not None:
+        raise _bad_request(f"{stratagem.name} doesn't target a unit")
 
     target = None
     if stratagem.game_action == "replace_secondary":
@@ -516,17 +610,21 @@ async def use_stratagem(
     elif target_secondary_id is not None:
         raise _bad_request(f"{stratagem.name} doesn't take a target")
 
-    player.cp -= stratagem.cp
-    player.stratagem_uses.append(
-        GameStratagemUse(
-            stratagem_id=stratagem.id,
-            stratagem=stratagem,
-            battle_round=game.battle_round,
-            turn_seat=game.turn_seat,
-            phase=game.phase,
-            cp=stratagem.cp,
-        )
+    cost = max(0, stratagem.cp - cp_discount)
+    player.cp -= cost
+    use = GameStratagemUse(
+        stratagem_id=stratagem.id,
+        stratagem=stratagem,
+        battle_round=game.battle_round,
+        turn_seat=game.turn_seat,
+        phase=game.phase,
+        cp=cost,
     )
+    if target_unit is not None:
+        use.target_link = GameStratagemTarget(unit_id=target_unit.id)
+    player.stratagem_uses.append(use)
+    if stratagem.game_action == "strategic_reserves":
+        reinforcements_service.place_in_reserves(game, player.seat, target_unit)
     if target is not None:
         # Discard the target and draw one new card in its place.
         target.status = "discarded"

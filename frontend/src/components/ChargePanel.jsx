@@ -10,7 +10,10 @@ import { getChargeTargets } from '../api'
 function unitStatus(unit) {
   if (unit.charged) return `Charged ${unit.target_name} (rolled ${unit.roll})`
   if (unit.failed) return `Charge failed: rolled ${unit.roll}, nothing in reach`
-  if (unit.roll !== null) return `Rolled ${unit.roll} (${unit.dice.join(' + ')})`
+  if (unit.roll !== null) {
+    const parts = unit.bonus ? [...unit.dice, unit.bonus] : unit.dice
+    return `Rolled ${unit.roll} (${parts.join(' + ')})`
+  }
   if (unit.reason) return `Can't charge: ${unit.reason}`
   return 'Not charged'
 }

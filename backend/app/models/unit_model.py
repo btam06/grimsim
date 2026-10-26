@@ -31,8 +31,18 @@ class UnitModel(Base):
     unit: Mapped["Unit"] = relationship(back_populates="unit_models")
     model: Mapped["Model"] = relationship(back_populates="unit_models")
     weapons: Mapped[list["Weapon"]] = relationship(secondary=unit_model_weapons)
-    wargear: Mapped[list["Wargear"]] = relationship(secondary=unit_model_wargear)
+    wargear: Mapped[list["Wargear"]] = relationship(secondary=unit_model_wargear, lazy="selectin")
     # The enhancement this model carries, if any (a CHARACTER only).
+    @property
+    def wounds(self) -> int:
+        # Its Wounds characteristic: its model's, plus any its wargear gives it
+        # (see app/seeds/datasheet_abilities.py WARGEAR_WOUNDS - e.g. a Storm
+        # Shield: +1 W). Needs its model and wargear loaded.
+        from app.seeds import datasheet_abilities
+
+        bonus = datasheet_abilities.WARGEAR_WOUNDS
+        return self.model.wounds + sum(bonus.get(w.name, 0) for w in self.wargear)
+
     enhancement: Mapped["Enhancement | None"] = relationship(
         secondary=unit_model_enhancements, uselist=False, lazy="selectin"
     )

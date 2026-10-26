@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import HTTPException
 
 from app.models import Game, Unit
+from app.services import weapon_profiles
 from app.services.in_game import deployment, movement, reinforcements
 from app.services.in_game import shooting
 from app.services.in_game.deployment import TOLERANCE
@@ -107,6 +108,8 @@ def check_overwatch(game: Game, unit: Unit, target: Unit, weapon_ids: set) -> Ta
         raise _bad_request('the target must be within 24"')
     if not weapon_ids:
         raise _bad_request("choose at least one weapon to shoot with")
+    if (conflict := weapon_profiles.unit_conflict(unit, weapon_ids)) is not None:
+        raise _bad_request(conflict)
     usable = {w.id for w in result.weapons if w.in_range}
     if not weapon_ids <= usable:
         raise _bad_request("one or more of those weapons can't reach the target")

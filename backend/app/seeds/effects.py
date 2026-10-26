@@ -14,6 +14,7 @@ from app.combat_rules.effects import (
     AUTO_PASS_WOUND,
     BENEFIT_OF_COVER,
     BLAST,
+    BLAST_2,
     CANNOT_ATTACK,
     CRITICAL_HIT_4,
     CRITICAL_HIT_5,
@@ -121,6 +122,11 @@ ENTRIES = [
         BLAST,
         "Blast",
         "This weapon makes 1 additional attack for every five models in the target unit.",
+    ),
+    (
+        BLAST_2,
+        "Blast 2",
+        "This weapon makes 2 additional attacks for every five models in the target unit.",
     ),
     (
         CANNOT_ATTACK,

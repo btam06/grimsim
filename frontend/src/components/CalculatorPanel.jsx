@@ -25,6 +25,7 @@ import { Described, RuleOptionPicker } from './RuleOptionPicker'
 import CombatResults from './CombatResults'
 import Select from './Select'
 import UnitDatasheet from './UnitDatasheet'
+import { onePerProfile, otherProfile } from '../weaponProfiles'
 
 // The stratagems usable on a unit as the 'attacker' or 'defender', from the
 // server, for the shooting phase (ranged) or the fight phase (melee).
@@ -311,7 +312,7 @@ function CalculatorPanel() {
   // Default every weapon group to selected whenever the attacking unit
   // changes (or its weapons finish loading).
   useEffect(() => {
-    setSelectedWeaponNames(weaponGroups.map((g) => g.name))
+    setSelectedWeaponNames(onePerProfile(weaponGroups).map((g) => g.name))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attackingUnitId, weapons, enhancementWeapons])
 
@@ -485,9 +486,12 @@ function CalculatorPanel() {
   ])
 
 
+  // Picking one profile of a weapon unpicks its others.
   const toggleWeaponName = (name) => {
     setSelectedWeaponNames((names) =>
-      names.includes(name) ? names.filter((n) => n !== name) : [...names, name]
+      names.includes(name)
+        ? names.filter((n) => n !== name)
+        : [...names.filter((n) => !otherProfile(name, n)), name]
     )
   }
 

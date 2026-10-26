@@ -63,7 +63,7 @@ def _bad_request(detail: str) -> HTTPException:
 def starting_strength(unit: Unit) -> int:
     models = unit.unit_models
     if len(models) == 1:
-        return models[0].model.wounds
+        return models[0].wounds
     return len(models)
 
 

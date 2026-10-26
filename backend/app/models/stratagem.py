@@ -159,7 +159,14 @@ class StratagemTiming(Base):
 # tracker when it's used:
 # - "replace_secondary": discard one of the player's active tactical Secondary
 #   Mission cards (the stratagem's target) and draw one new one (New Orders).
-STRATAGEM_GAME_ACTIONS = ("replace_secondary",)
+# - "strategic_reserves": at the end of the opponent's fight phase, place one
+#   of the player's unengaged units (the target) in Strategic Reserves (e.g.
+#   Gunship Extraction - see app/services/in_game/reinforcements.py).
+# - "duty_in_death": the target unit's destroyed models can stay on the
+#   battlefield until it has fought (see app/services/in_game/duty_in_death.py).
+STRATAGEM_GAME_ACTIONS = ("replace_secondary", "strategic_reserves", "duty_in_death")
+# Those whose target is one of the player's units.
+UNIT_TARGET_ACTIONS = ("strategic_reserves", "duty_in_death")
 
 
 class StratagemGameAction(Base):

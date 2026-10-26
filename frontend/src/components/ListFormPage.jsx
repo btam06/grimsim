@@ -16,6 +16,8 @@ function buildEmptyForm() {
     faction_id: '',
     detachment_ids: [],
     user_id: '',
+    warlord_unit_id: '',
+    subfaction: '',
   }
 }
 
@@ -26,6 +28,8 @@ function formFromList(list) {
     faction_id: String(list.faction_id),
     detachment_ids: list.detachment_ids,
     user_id: list.user_id === null ? '' : String(list.user_id),
+    warlord_unit_id: list.warlord_unit_id === null ? '' : String(list.warlord_unit_id),
+    subfaction: list.subfaction ?? '',
   }
 }
 
@@ -36,6 +40,8 @@ function toPayload(form) {
     faction_id: Number(form.faction_id),
     detachment_ids: form.detachment_ids,
     user_id: form.user_id === '' ? null : Number(form.user_id),
+    warlord_unit_id: form.warlord_unit_id === '' ? null : Number(form.warlord_unit_id),
+    subfaction: form.subfaction || null,
   }
 }
 
@@ -109,8 +115,12 @@ function ListFormPage({
     return enhancement ? `${enhancement.name} (+${enhancement.points} pts)` : `#${id}`
   }
 
+  // What the faction's lists select, if anything (e.g. a Space Marines
+  // Chapter).
+  const selectedFaction = factions.find((f) => String(f.id) === form.faction_id)
+
   const handleFactionChange = (faction_id) => {
-    setForm({ ...form, faction_id, detachment_ids: [] })
+    setForm({ ...form, faction_id, detachment_ids: [], subfaction: '' })
   }
 
   const toggleDetachment = (id) => {
@@ -207,6 +217,34 @@ function ListFormPage({
             placeholder="Select faction"
           />
         </Field>
+        {selectedFaction?.subfactions?.length > 0 && (
+          <Field label={selectedFaction.subfaction_label}>
+            <Select
+              options={[
+                { id: '', name: 'None' },
+                ...selectedFaction.subfactions.map((name) => ({ id: name, name })),
+              ]}
+              value={form.subfaction}
+              onChange={(subfaction) => setForm({ ...form, subfaction })}
+            />
+          </Field>
+        )}
+        {editingList && (
+          // Its WARLORD: one of its CHARACTER units (checked when it's saved).
+          <Field label="Warlord">
+            <Select
+              options={[
+                { id: '', name: 'No Warlord' },
+                ...unitsInThisList.map((u) => ({
+                  id: String(u.id),
+                  name: `${factionUnitName(u.faction_unit_id)} — ${u.points}pts`,
+                })),
+              ]}
+              value={form.warlord_unit_id}
+              onChange={(warlord_unit_id) => setForm({ ...form, warlord_unit_id })}
+            />
+          </Field>
+        )}
         <div className="checkbox-group">
           Detachments
           {detachmentOptionsForFaction.length === 0 && (

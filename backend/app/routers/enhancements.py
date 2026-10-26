@@ -107,8 +107,11 @@ async def used_in_list(session: AsyncSession, list_id: int, except_unit_id: int 
     )
 
 
-async def _list_detachments(session: AsyncSession, list_id: int) -> tuple[set[int], list]:
-    # The list's detachment ids, and their rules (e.g. for keywords they grant).
+async def _list_detachments(
+    session: AsyncSession, list_id: int
+) -> tuple[set[int], list, dict[int, set[str]]]:
+    # The list's detachment ids, their rules (e.g. for keywords they grant),
+    # and those that limit some units to their own enhancements.
     army_list = (
         await session.execute(
             select(ArmyList)
@@ -118,7 +121,11 @@ async def _list_detachments(session: AsyncSession, list_id: int) -> tuple[set[in
     ).scalar_one_or_none()
     if army_list is None:
         raise HTTPException(status_code=400, detail="invalid list_id")
-    return {d.id for d in army_list.detachments}, enhancement_rules.list_rules(army_list)
+    return (
+        {d.id for d in army_list.detachments},
+        enhancement_rules.list_rules(army_list),
+        enhancement_rules.exclusive_detachments(army_list.detachments),
+    )
 
 
 def _keyword_names(model: Model) -> set[str]:
@@ -156,7 +163,7 @@ async def available_enhancements(
     # The enhancements a model could carry in a unit of this list (`unit_id`:
     # the unit being edited, if any), leaving out ones other units in the list
     # have already taken.
-    detachment_ids, rules = await _list_detachments(session, list_id)
+    detachment_ids, rules, exclusive = await _list_detachments(session, list_id)
     model = (await _load_models(session, [model_id]))[model_id]
     # Keywords the list's detachment rules give it (judged on the model alone).
     granted = enhancement_rules.rule_granted_keywords(
@@ -170,7 +177,10 @@ async def available_enhancements(
         _to_out(e)
         for e in await _all(session)
         if e.id not in used
-        and enhancement_rules.model_unavailable_reason(e, model, detachment_ids, granted) is None
+        and enhancement_rules.model_unavailable_reason(
+            e, model, detachment_ids, granted, exclusive
+        )
+        is None
     ]
 
 
@@ -184,7 +194,7 @@ async def available_upgrades(
 ):
     # The upgrades a unit made of these models (one id per model) could take
     # in this list, leaving out ones other units in the list have taken.
-    detachment_ids, rules = await _list_detachments(session, list_id)
+    detachment_ids, rules, exclusive = await _list_detachments(session, list_id)
     models = await _load_models(session, list(set(model_ids)))
     unit_models = [models[i] for i in model_ids]
     granted = enhancement_rules.rule_granted_keywords(
@@ -195,7 +205,9 @@ async def available_upgrades(
         _to_out(e)
         for e in await _all(session)
         if e.id not in used
-        and enhancement_rules.unit_unavailable_reason(e, unit_models, detachment_ids, granted)
+        and enhancement_rules.unit_unavailable_reason(
+            e, unit_models, detachment_ids, granted, exclusive
+        )
         is None
     ]
 

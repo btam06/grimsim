@@ -58,6 +58,7 @@ CRITICAL_HIT_4 = "critical_hit_4"
 ADD_D6_PLUS_3_ATTACKS = "add_d6_plus_3_attacks"
 PLUS_ONE_TOUGHNESS = "plus_one_toughness"
 BLAST = "blast"
+BLAST_2 = "blast_2"
 REROLL_FAILED_WOUNDS = "reroll_failed_wounds"
 DEADLY_DEMISE = "deadly_demise"
 ADD_TWO_EXTRA_HITS = "add_two_extra_hits"
@@ -295,6 +296,12 @@ def blast(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
     state["blast"] = True
 
 
+def blast_2(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # Blast 2 - the engine adds 2 attacks for every five models in the target
+    # unit when the weapon attacks (e.g. Cleave 2, on melee weapons).
+    state["blast"] = max(int(state.get("blast", 0)), 2)
+
+
 def reroll_failed_wounds(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
     # If this attack's wound roll fails, it is rolled once more and the second
     # result is used instead (e.g. Twin-linked).
@@ -441,6 +448,7 @@ EFFECTS = {
     ADD_D6_PLUS_3_ATTACKS: add_d6_plus_3_attacks,
     PLUS_ONE_TOUGHNESS: plus_one_toughness,
     BLAST: blast,
+    BLAST_2: blast_2,
     REROLL_FAILED_WOUNDS: reroll_failed_wounds,
     DEADLY_DEMISE: deadly_demise,
     ADD_TWO_EXTRA_HITS: add_two_extra_hits,

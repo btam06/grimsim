@@ -5,9 +5,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db import get_session
-from app.models import ArmyList, Detachment, FactionUnit, Model, Unit, User
+from app.models import (
+    ArmyList,
+    Detachment,
+    Faction,
+    FactionUnit,
+    ListSubfaction,
+    ListWarlord,
+    Model,
+    Unit,
+    UnitModel,
+    User,
+)
 from app.schemas import ArmyListIn, ArmyListOut, ListEligibleOut
+from app.seeds.factions import SUBFACTIONS
 from app.services.list_building import allies as list_building
+from app.services.list_building import warlord as warlord_rules
 
 router = APIRouter(prefix="/lists", tags=["lists"])
 
@@ -20,6 +33,8 @@ def _to_out(army_list: ArmyList) -> ArmyListOut:
         faction_id=army_list.faction_id,
         detachment_ids=[d.id for d in army_list.detachments],
         user_id=army_list.owner.id if army_list.owner else None,
+        warlord_unit_id=army_list.warlord_unit_id,
+        subfaction=army_list.subfaction,
     )
 
 
@@ -55,6 +70,71 @@ async def _build_detachments(
             detail=f"only one {', '.join(clashing)} detachment can be taken",
         )
     return detachments
+
+
+async def _build_warlord(
+    session: AsyncSession, list_id: int | None, unit_id: int | None
+) -> ListWarlord | None:
+    # The list's Warlord: one of its units, a CHARACTER.
+    if unit_id is None:
+        return None
+    unit = (
+        await session.execute(
+            select(Unit)
+            .options(
+                selectinload(Unit.unit_models)
+                .selectinload(UnitModel.model)
+                .selectinload(Model.keywords)
+            )
+            .where(Unit.id == unit_id)
+        )
+    ).scalar_one_or_none()
+    if unit is None or list_id is None or unit.list_id != list_id:
+        raise HTTPException(status_code=400, detail="the Warlord must be a unit in this list")
+    if not any(k.name == "CHARACTER" for m in unit.unit_models for k in m.model.keywords):
+        raise HTTPException(status_code=400, detail="the Warlord must be a CHARACTER")
+    return ListWarlord(unit_id=unit.id)
+
+
+async def _build_subfaction(
+    session: AsyncSession,
+    faction_id: int,
+    subfaction: str | None,
+    list_id: int | None = None,
+    detachments: set[str] = frozenset(),
+) -> ListSubfaction | None:
+    # The list's selection for its faction's list selection (e.g. a
+    # Chapter): one of its options - and every unit already in the list must
+    # still be allowed in it (e.g. Roboute Guilliman, only in an Ultramarines
+    # list), given the list's detachments (by name - e.g. Deathwatch Support
+    # lets DEATHWATCH units into any Chapter's list).
+    faction = await session.get(Faction, faction_id)
+    if faction is None:
+        raise HTTPException(status_code=400, detail="invalid faction_id")
+    config = SUBFACTIONS.get(faction.name)
+    if subfaction is not None and (config is None or subfaction not in config["options"]):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{faction.name} lists have no {config['label'] if config else 'selection'} "
+            f"{subfaction!r}",
+        )
+    if list_id is not None:
+        models = (
+            await session.execute(
+                select(Model)
+                .join(UnitModel, UnitModel.model_id == Model.id)
+                .join(Unit, Unit.id == UnitModel.unit_id)
+                .options(selectinload(Model.keywords))
+                .where(Unit.list_id == list_id)
+            )
+        ).scalars().all()
+        for model in models:
+            reason = list_building.subfaction_reason(
+                model, faction.name, subfaction, detachments
+            )
+            if reason:
+                raise HTTPException(status_code=400, detail=reason)
+    return ListSubfaction(name=subfaction) if subfaction is not None else None
 
 
 @router.get("", response_model=list[ArmyListOut])
@@ -94,6 +174,10 @@ async def eligible_for_list(list_id: int, session: AsyncSession = Depends(get_se
                 m, context.faction_names[m.faction_id], context.faction, rules
             )
             is None
+            and list_building.subfaction_reason(
+                m, context.faction, context.army_list.subfaction, context.detachments
+            )
+            is None
         ),
     )
 
@@ -102,6 +186,9 @@ async def eligible_for_list(list_id: int, session: AsyncSession = Depends(get_se
 async def create_list(payload: ArmyListIn, session: AsyncSession = Depends(get_session)):
     detachments = await _build_detachments(session, payload.detachment_ids, payload.faction_id)
     owner = await _build_owner(session, payload.user_id)
+    # A new list has no units yet to be its Warlord.
+    await _build_warlord(session, None, payload.warlord_unit_id)
+    subfaction = await _build_subfaction(session, payload.faction_id, payload.subfaction)
 
     army_list = ArmyList(
         name=payload.name,
@@ -109,6 +196,8 @@ async def create_list(payload: ArmyListIn, session: AsyncSession = Depends(get_s
         faction_id=payload.faction_id,
         detachments=detachments,
         owner=owner,
+        warlord_link=None,
+        subfaction_link=subfaction,
     )
     session.add(army_list)
     try:
@@ -140,6 +229,29 @@ async def update_list(
     army_list.faction_id = payload.faction_id
     army_list.detachments = detachments
     army_list.owner = await _build_owner(session, payload.user_id)
+    warlord = await _build_warlord(session, list_id, payload.warlord_unit_id)
+    reason = await warlord_rules.warlord_reason(
+        session, list_id, payload.warlord_unit_id, chosen_only=True
+    )
+    if reason:
+        raise HTTPException(status_code=400, detail=reason)
+    if army_list.warlord_unit_id != payload.warlord_unit_id:
+        army_list.warlord_link = None
+        await session.flush()
+        army_list.warlord_link = warlord
+    detachment_names = {d.name for d in detachments}
+    subfaction = await _build_subfaction(
+        session, payload.faction_id, payload.subfaction, list_id, detachment_names
+    )
+    reason = await warlord_rules.ally_warlord_reason(
+        session, payload.warlord_unit_id, payload.faction_id, payload.subfaction, detachment_names
+    )
+    if reason:
+        raise HTTPException(status_code=400, detail=reason)
+    if army_list.subfaction != payload.subfaction:
+        army_list.subfaction_link = None
+        await session.flush()
+        army_list.subfaction_link = subfaction
 
     try:
         await session.commit()

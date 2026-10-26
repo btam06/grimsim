@@ -65,6 +65,21 @@ def _target_priority(model: Model) -> tuple[int, int]:
     return (0 if is_priority_target else 1, -_effective_save(model))
 
 
+def hazard_failed(roll: int) -> bool:
+    # A hazard roll (one D6) fails on a 1-2.
+    return roll <= 2
+
+
+def hazard_wounds(keywords: set[str]) -> int:
+    # The mortal wounds a model suffers for a failed hazard roll, by its
+    # keywords: 3 for a VEHICLE, 1 for INFANTRY, otherwise none.
+    if "VEHICLE" in keywords:
+        return 3
+    if "INFANTRY" in keywords:
+        return 1
+    return 0
+
+
 def _keyword(item) -> str:
     # Ability/stratagem rows hold Condition/Effect rows; code-defined Rules
     # hold the bare keyword strings.
@@ -243,7 +258,7 @@ def resolve_combat(
     def wounded(unit_model) -> bool:
         return (
             defender_wounds is not None
-            and defender_wounds[unit_model.id] < unit_model.model.wounds
+            and defender_wounds[unit_model.id] < unit_model.wounds
         )
 
     ordered_unit_models = sorted(
@@ -432,7 +447,7 @@ def resolve_combat(
             feel_no_pain_mortal=unit_model.model.feel_no_pain_mortal,
             invulnerable_ranged_only=unit_model.model.invulnerable_ranged_only,
             remaining_wounds=(
-                unit_model.model.wounds
+                unit_model.wounds
                 if defender_wounds is None
                 else defender_wounds[unit_model.id]
             ),
@@ -584,6 +599,9 @@ def resolve_combat(
                     "is_ranged": is_ranged,
                     # e.g. for "your unit's Tesla Sphere weapons".
                     "weapon_name": weapon.name,
+                    # Its own abilities, by name - e.g. for "(excluding
+                    # [DEVASTATING WOUNDS] attacks)".
+                    "weapon_ability_names": {a.name for a in weapon.abilities},
                     "defender_keywords": defender_keywords,
                     "attacker_keywords": attacker_keywords,
                     "attacker_unit_model_keywords": attacker_unit_model_keywords,
@@ -675,8 +693,10 @@ def resolve_combat(
                 if pre_weapon_state.get("blast"):
                     # Blast: +1 attack for every five models in the target unit
                     # (counted when targets are declared, before any attacks
-                    # resolve), rounding down.
-                    for _ in range(len(targets) // 5):
+                    # resolve), rounding down - or more, for Blast 2 (e.g.
+                    # Cleave 2).
+                    per_five = int(pre_weapon_state["blast"])
+                    for _ in range(len(targets) // 5 * per_five):
                         pending_attacks.append({"auto_hit": False})
                 if pre_weapon_state.get("torrent"):
                     # Torrent: every attack hits automatically.
@@ -689,14 +709,10 @@ def resolve_combat(
                     hazard_roll = random.randint(1, 6)
                     result.hazardous_rolls.append(hazard_roll)
                     weapon_result.hazardous_rolls.append(hazard_roll)
-                    if hazard_roll <= 2:
-                        shooter_keywords = enhancement_rules.model_keywords(attacker, unit_model)
-                        if "VEHICLE" in shooter_keywords:
-                            self_wounds = 3
-                        elif "INFANTRY" in shooter_keywords:
-                            self_wounds = 1
-                        else:
-                            self_wounds = 0
+                    if hazard_failed(hazard_roll):
+                        self_wounds = hazard_wounds(
+                            enhancement_rules.model_keywords(attacker, unit_model)
+                        )
                         for _ in range(self_wounds):
                             if shooter_fnp is not None and random.randint(1, 6) >= shooter_fnp:
                                 continue  # feel no pain negated this point of damage
@@ -712,7 +728,7 @@ def resolve_combat(
             # took while firing added up to (or past) its own wounds, it died.
             if model_hazardous_damage:
                 result.attacker_damage[unit_model.id] = model_hazardous_damage
-            wounds = (attacker_wounds or {}).get(unit_model.id, unit_model.model.wounds)
+            wounds = (attacker_wounds or {}).get(unit_model.id, unit_model.wounds)
             if model_hazardous_damage >= wounds:
                 result.hazardous_models_destroyed += 1
 

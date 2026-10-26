@@ -23,6 +23,7 @@ from app.models import (
     unit_model_enhancements,
     unit_upgrades,
 )
+from app.seeds import factions as faction_seeds
 
 # Which models and units can take an enhancement or upgrade. Shared by the
 # endpoints that offer them and the unit endpoints that validate them, so the
@@ -49,17 +50,40 @@ def _detachment_reason(enhancement: Enhancement, detachment_ids: set[int]) -> st
     return None
 
 
+def exclusive_detachments(detachments: Iterable) -> dict[int, set[str]]:
+    # Those of a list's detachments whose units with certain keywords can only
+    # take that detachment's enhancements (faction_seeds.EXCLUSIVE_ENHANCEMENTS
+    # - e.g. Deathwatch Support's KILL TEAM units): {detachment id: keywords}.
+    return {
+        d.id: set(faction_seeds.EXCLUSIVE_ENHANCEMENTS[d.name])
+        for d in detachments
+        if d.name in faction_seeds.EXCLUSIVE_ENHANCEMENTS
+    }
+
+
+def _exclusive_reason(
+    enhancement: Enhancement, keyword_names: set[str], exclusive: dict[int, set[str]]
+) -> str | None:
+    for detachment_id, keywords in exclusive.items():
+        held = keywords & keyword_names
+        if held and enhancement.detachment_id != detachment_id:
+            return f"isn't from the detachment {', '.join(sorted(held))} units take theirs from"
+    return None
+
+
 def model_unavailable_reason(
     enhancement: Enhancement,
     model: Model,
     detachment_ids: set[int],
     granted: set[str] = frozenset(),
+    exclusive: dict[int, set[str]] | None = None,
 ) -> str | None:
     # Why a model can't carry this enhancement, or None if it can: it must be
     # an enhancement (not an upgrade) from one of the list's detachments, and
     # the model a CHARACTER (but not an EPIC HERO) meeting its keywords -
-    # counting any `granted` it (e.g. by a detachment rule). Needs the model's
-    # keywords loaded.
+    # counting any `granted` it (e.g. by a detachment rule) - and from the
+    # right detachment for a model `exclusive` (exclusive_detachments) limits.
+    # Needs the model's keywords loaded.
     if enhancement.kind != "enhancement":
         return "is an upgrade, which is taken by a unit, not a model"
     names = _keyword_names(model) | set(granted)
@@ -67,8 +91,10 @@ def model_unavailable_reason(
         return "can only be carried by a CHARACTER"
     if "EPIC HERO" in names:
         return "can't be carried by an EPIC HERO"
-    return _detachment_reason(enhancement, detachment_ids) or _keyword_reason(
-        enhancement, names, "a model"
+    return (
+        _detachment_reason(enhancement, detachment_ids)
+        or _keyword_reason(enhancement, names, "a model")
+        or _exclusive_reason(enhancement, names, exclusive or {})
     )
 
 
@@ -77,6 +103,7 @@ def unit_unavailable_reason(
     models: Iterable[Model],
     detachment_ids: set[int],
     granted: list[set[str]] | None = None,
+    exclusive: dict[int, set[str]] | None = None,
 ) -> str | None:
     # Why a unit made of these models can't take this upgrade, or None if it
     # can: it must be an upgrade from one of the list's detachments, and every
@@ -92,7 +119,10 @@ def unit_unavailable_reason(
         return reason
     granted = granted or [set() for _ in models]
     for model, extra in zip(models, granted):
-        reason = _keyword_reason(upgrade, _keyword_names(model) | extra, "a unit")
+        names = _keyword_names(model) | extra
+        reason = _keyword_reason(upgrade, names, "a unit") or _exclusive_reason(
+            upgrade, names, exclusive or {}
+        )
         if reason:
             return reason
     return None
@@ -207,12 +237,38 @@ def _detachment_keywords(unit: Unit, unit_model: UnitModel) -> set[str]:
     return rule_granted_keywords(rules, keyword_sets, unit.selected_rule_ids)[index]
 
 
+def _subfaction_keywords(unit: Unit, unit_model: UnitModel) -> set[str]:
+    # The keyword the unit's list's selection gives this model, if it has the
+    # keyword that gets it (e.g. an Ultramarines list: ULTRAMARINES for its
+    # ADEPTUS ASTARTES models) - none if the unit isn't in a list, or its list
+    # wasn't loaded with it, or the model has another option's keyword of its
+    # own (e.g. a DEATHWATCH model there under Deathwatch Allies).
+    if "army_list" in inspect(unit).unloaded or unit.army_list is None:
+        return set()
+    selected = unit.army_list.subfaction
+    own = {k.name for k in unit_model.model.keywords}
+    for config in faction_seeds.SUBFACTIONS.values():
+        keyword = config["options"].get(selected)
+        if (
+            keyword
+            and config["keyword_holders"] in own
+            and not own & (set(config["options"].values()) - {keyword})
+        ):
+            return {keyword}
+    return set()
+
+
 def model_keywords(unit: Unit, unit_model: UnitModel) -> set[str]:
     # A model's keywords, including any its unit's enhancements and upgrade
-    # give it (e.g. SKITARII from Martial Signatum Amplificator), and any the
+    # give it (e.g. SKITARII from Martial Signatum Amplificator), any the
     # rules of its list's detachments give it (e.g. BATTLELINE for Houndpack
-    # Lance's WAR DOGs). Needs the model's keywords loaded.
-    return _own_keywords(unit, unit_model) | _detachment_keywords(unit, unit_model)
+    # Lance's WAR DOGs), and its list's Chapter's (e.g. ULTRAMARINES). Needs
+    # the model's keywords loaded.
+    return (
+        _own_keywords(unit, unit_model)
+        | _detachment_keywords(unit, unit_model)
+        | _subfaction_keywords(unit, unit_model)
+    )
 
 
 @dataclass(eq=False)

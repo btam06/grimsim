@@ -202,15 +202,17 @@ def area_within(game: Game, area, polygon) -> bool:
 
 
 def after_move(game: Game, unit: Unit) -> None:
-    # A unit ended a move: actions waiting to complete whose unit is now
+    # A unit ended a move: its opponent's Teleport Homer tokens within 1" are
+    # removed (see app/services/in_game/teleport_homer.py); actions waiting to complete whose unit is now
     # within Engagement Range fail (see app/services/in_game/actions.py); and
     # for Surveil the Foe, if it's within range of an objective with any of
     # its opponent's operation markers within range, those markers are
     # removed.
     # (Imported here: actions imports this module.)
-    from app.services.in_game import actions
+    from app.services.in_game import actions, teleport_homer
 
     actions.check_started(game)
+    teleport_homer.after_move(game, unit)
     seat = deployment.owner(game, unit).seat
     if not has_primary(game, seat, SURVEIL_THE_FOE):
         return
@@ -318,7 +320,7 @@ def may_redraw(game: Game, seat: int, card) -> str | None:
         placed = deployment.positions(game)
         big = [
             m for u in enemy for m in u.unit_models
-            if m.id in placed and m.model.wounds >= BIG_MODEL_WOUNDS
+            if m.id in placed and m.wounds >= BIG_MODEL_WOUNDS
         ]
         if not big:
             return "discard"

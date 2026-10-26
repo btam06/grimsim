@@ -40,6 +40,10 @@ from app.seeds.factions.necrons.conditions import (
     WITHIN_POWER_MATRIX,
     WORTHY_FOES_TARGET,
 )
+from app.seeds.factions.space_marines.conditions import (
+    ASSAULT_DOCTRINE_TARGET_WITHIN_9,
+    TARGET_WITHIN_9,
+)
 
 # Positions the calculator asks about, since it can't measure the table:
 # {position: label}. A combat request lists each side's positions.
@@ -60,6 +64,7 @@ POSITIONS = {
         'Within 9" of Nekrosor Ammentar after it destroyed a unit this phase'
     ),
     MARKED_PREY_TARGET: "Targeting the unit selected for Marked Prey",
+    TARGET_WITHIN_9: 'Target is within 9" of the attacking unit',
 }
 
 # The conditions that read each position, by the side whose position it is -
@@ -103,6 +108,7 @@ POSITION_CONDITIONS = {
         "defender": set(),
     },
     MARKED_PREY_TARGET: {"attacker": {MARKED_PREY_CRITICAL_HIT}, "defender": set()},
+    TARGET_WITHIN_9: {"attacker": {ASSAULT_DOCTRINE_TARGET_WITHIN_9}, "defender": set()},
 }
 
 # Positions asked about for every unit on a side, whatever its rules - board

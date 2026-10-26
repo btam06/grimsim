@@ -38,6 +38,7 @@ from app.combat_rules.effects import (
     ASSAULT,
     AUTO_PASS_WOUND,
     BLAST,
+    BLAST_2,
     CANNOT_ATTACK,
     CRITICAL_HIT_4,
     FORCE_CRITICAL_WOUND,
@@ -196,6 +197,22 @@ ENTRIES = [
         [NO_SAVE],
     ),
     (
+        # Blast 2, for melee weapons.
+        "Cleave 2",
+        "This melee weapon makes 2 additional attacks for every five models in the target unit "
+        "(Blast 2, for melee).",
+        [ALWAYS],
+        [BLAST_2],
+    ),
+    (
+        # Descriptive only: psychic attacks (e.g. against Feel No Pain vs
+        # psychic attacks) aren't modelled yet.
+        "Psychic",
+        "Attacks made with this weapon are psychic attacks.",
+        [],
+        [],
+    ),
+    (
         # Descriptive only: the calculator already fires every weapon ticked.
         "Extra Attacks",
         "This weapon can be used in addition to the bearer's other melee weapons.",
@@ -322,6 +339,12 @@ ENTRIES = [
         "Sustained 1",
         "Each critical hit (an unmodified roll of 6 to hit) scores 1 additional hit.",
         [CRITICAL_HIT],
+        [ADD_EXTRA_HIT],
+    ),
+    (
+        "Sustained 1: non-Monster/Vehicle",
+        "Sustained 1, but only against a unit with no MONSTER or VEHICLE model.",
+        [CRITICAL_HIT_NOT_MONSTER_OR_VEHICLE],
         [ADD_EXTRA_HIT],
     ),
     (

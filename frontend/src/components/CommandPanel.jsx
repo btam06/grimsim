@@ -11,10 +11,13 @@ import Select from './Select'
 // for one that applies to another unit, which unit; for an option against
 // one enemy unit (Invocation of Machine Vengeance), which enemy unit. Most must be selected
 // before the phase ends and last until their next Command phase; Battle
-// Protocols stay until changed. Models that healed at the start of the phase
-// (e.g. Self-repair Mechanisms) are listed too.
+// Protocols stay until changed. Army rules selected then (e.g. Combat
+// Doctrines) are optional, for every unit with the rule, and some options can
+// only be selected once a battle. Models that healed at the start of the
+// phase (e.g. Self-repair Mechanisms) are listed too.
 
 function abilityKey(ability) {
+  if (ability.faction_ability_id !== null) return `rule-${ability.faction_ability_id}`
   return `${ability.unit_id}-${ability.ability}`
 }
 
@@ -59,6 +62,7 @@ function CommandPanel({ game, onError }) {
         await chooseCommandOption(game.id, {
           seat: command.seat,
           unit_id: ability.unit_id,
+          faction_ability_id: ability.faction_ability_id,
           ability: ability.ability,
           option: option || null,
           target_unit_id: option ? target : null,
@@ -102,7 +106,11 @@ function CommandPanel({ game, onError }) {
           return (
             <li key={key}>
               <strong>{ability.ability}</strong>
-              <span className="hint"> · {ability.unit_name}</span>
+              <span className="hint">
+                {' '}
+                · {ability.faction_ability_id !== null && 'Army rule: '}
+                {ability.unit_name}
+              </span>
               {ability.required && !ability.chosen && !noTargets && (
                 <span className="round-start-decision">Decide now</span>
               )}
@@ -163,6 +171,9 @@ function CommandPanel({ game, onError }) {
               )}
               {noTargets && (
                 <p className="hint">No unit it could apply to is in range: nothing to select.</p>
+              )}
+              {ability.used_options?.length > 0 && (
+                <p className="hint">Already used this battle: {ability.used_options.join(', ')}.</p>
               )}
               {ability.persistent && !ability.chosen && (
                 <p className="hint">Stays in {ability.active} unless you change it.</p>

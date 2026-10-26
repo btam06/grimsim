@@ -50,6 +50,42 @@ class Game(Base):
     battle_formations: Mapped[list["GameBattleFormation"]] = relationship(
         cascade="all, delete-orphan", lazy="selectin", order_by="GameBattleFormation.id"
     )
+    # Units embarking and disembarking during the battle.
+    unit_transits: Mapped[list["GameUnitTransit"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameUnitTransit.id"
+    )
+    # Transports destroyed with units inside, and those units' emergency
+    # disembarking.
+    transport_wrecks: Mapped[list["GameTransportWreck"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameTransportWreck.id"
+    )
+    emergency_disembarks: Mapped[list["GameEmergencyDisembark"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameEmergencyDisembark.id"
+    )
+    emergency_rolls: Mapped[list["GameEmergencyRoll"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameEmergencyRoll.id"
+    )
+    # Teleport Homer tokens, and who's finished setting theirs up.
+    teleport_homers: Mapped[list["GameTeleportHomer"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameTeleportHomer.id"
+    )
+    teleport_homers_done: Mapped[list["GameTeleportHomersDone"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameTeleportHomersDone.id"
+    )
+    # Destroyed models not yet removed from the battlefield (e.g. Duty in
+    # Death - see app/services/in_game/duty_in_death.py).
+    lingering_models: Mapped[list["GameLingeringModel"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameLingeringModel.id"
+    )
+    # Psychic abilities used.
+    psychic_uses: Mapped[list["GamePsychicUse"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GamePsychicUse.id",
+        foreign_keys="GamePsychicUse.game_id",
+    )
+    # Objectives secured (sticky) by a player.
+    secured_objectives: Mapped[list["GameSecuredObjective"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameSecuredObjective.id"
+    )
     formations_done: Mapped[list["GameFormationsDone"]] = relationship(
         cascade="all, delete-orphan", lazy="selectin", order_by="GameFormationsDone.id"
     )
@@ -264,6 +300,27 @@ class GameStratagemUse(Base):
 
     player: Mapped["GamePlayer"] = relationship(back_populates="stratagem_uses")
     stratagem: Mapped["Stratagem"] = relationship()
+    target_link: Mapped["GameStratagemTarget | None"] = relationship(
+        cascade="all, delete-orphan", uselist=False, lazy="selectin"
+    )
+
+    @property
+    def target_unit_id(self) -> int | None:
+        # The unit it was used on, for a stratagem whose game action targets
+        # one (e.g. Gunship Extraction).
+        return self.target_link.unit_id if self.target_link else None
+
+
+class GameStratagemTarget(Base):
+    # The unit a stratagem use targeted (one at most). Its own table rather
+    # than a column on game_stratagem_uses, so existing databases pick it up
+    # without a migration.
+    __tablename__ = "game_stratagem_targets"
+
+    stratagem_use_id: Mapped[int] = mapped_column(
+        ForeignKey("game_stratagem_uses.id"), primary_key=True
+    )
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
 
 
 class GameModelPosition(Base):
@@ -496,6 +553,139 @@ class GameBattleFormation(Base):
     transport_unit_id: Mapped[int | None] = mapped_column(
         ForeignKey("units.id", ondelete="CASCADE"), nullable=True
     )
+
+
+class GameSecuredObjective(Base):
+    # An objective a player has secured (e.g. with Raise the Banner): it stays
+    # theirs while their opponent has no OC on it - and is no longer secured
+    # once they do (see app/services/in_game/objectives.py).
+    __tablename__ = "game_secured_objectives"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    objective_id: Mapped[int] = mapped_column(
+        ForeignKey("terrain_objectives.id", ondelete="CASCADE")
+    )
+    seat: Mapped[int] = mapped_column(Integer)
+
+
+class GameTransportWreck(Base):
+    # Where a destroyed transport's model was, while units were embarked in
+    # it - they emergency disembark round it (see
+    # app/services/in_game/emergency.py).
+    __tablename__ = "game_transport_wrecks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    transport_unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    unit_model_id: Mapped[int] = mapped_column(ForeignKey("unit_models.id", ondelete="CASCADE"))
+    x: Mapped[float] = mapped_column(Float)
+    y: Mapped[float] = mapped_column(Float)
+    rotation: Mapped[float] = mapped_column(Float, default=0)
+
+
+class GameEmergencyDisembark(Base):
+    # A unit that was embarked in a transport when it was destroyed, which
+    # must emergency disembark (`placed` once it has).
+    __tablename__ = "game_emergency_disembarks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    transport_unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    placed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class GameEmergencyRoll(Base):
+    # A roll after an emergency disembark: a set-up model's hazard roll
+    # ("hazard", and the wounds it took), the destroyed transport's Deadly
+    # Demise ("deadly_demise"), and on a 6 the mortal wounds rolled for each
+    # unit within 6" ("deadly_demise_wounds", by one of its models).
+    __tablename__ = "game_emergency_rolls"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    transport_unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    unit_model_id: Mapped[int | None] = mapped_column(
+        ForeignKey("unit_models.id", ondelete="CASCADE"), nullable=True
+    )
+    kind: Mapped[str] = mapped_column(String(32))
+    roll: Mapped[int] = mapped_column(Integer)
+    wounds: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class GameTeleportHomer(Base):
+    # A unit's Teleport Homer token, set up at the start of the battle (see
+    # app/services/in_game/teleport_homer.py): `status` "placed" while it's on
+    # the battlefield, then "used" or "removed".
+    __tablename__ = "game_teleport_homers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    x: Mapped[float] = mapped_column(Float)
+    y: Mapped[float] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(String(16), default="placed")
+
+
+class GameTeleportHomersDone(Base):
+    # A player has finished setting up their Teleport Homer tokens.
+    __tablename__ = "game_teleport_homers_done"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    seat: Mapped[int] = mapped_column(Integer)
+
+
+class GameLingeringModel(Base):
+    # A destroyed model left on the battlefield for now (see
+    # app/services/in_game/duty_in_death.py), in one phase (battle round and
+    # whose turn) - removed when its unit has fought, or at the end of the
+    # phase.
+    __tablename__ = "game_lingering_models"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    unit_model_id: Mapped[int] = mapped_column(ForeignKey("unit_models.id", ondelete="CASCADE"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int] = mapped_column(Integer)
+    # The unit whose attacks destroyed it, if any.
+    destroyed_by_unit_id: Mapped[int | None] = mapped_column(
+        ForeignKey("units.id", ondelete="CASCADE"), nullable=True
+    )
+
+
+class GamePsychicUse(Base):
+    # A PSYKER unit using a psychic ability (see
+    # app/services/in_game/psychic.py): when (battle round, whose turn,
+    # phase), its psychic roll, and the enemy unit it picked (Soul Sight).
+    __tablename__ = "game_psychic_uses"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    ability: Mapped[str] = mapped_column(String(255))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int] = mapped_column(Integer)
+    phase: Mapped[str] = mapped_column(String(32))
+    roll: Mapped[int] = mapped_column(Integer)
+    target_unit_id: Mapped[int | None] = mapped_column(
+        ForeignKey("units.id", ondelete="CASCADE"), nullable=True
+    )
+
+
+class GameUnitTransit(Base):
+    # A unit embarking in or disembarking from a transport during the battle
+    # (`kind`: "embarked" or "disembarked"), in one movement phase (battle
+    # round and whose turn) - it can't do the other in the same phase.
+    __tablename__ = "game_unit_transits"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(32))
 
 
 class GameFormationsDone(Base):

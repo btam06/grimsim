@@ -139,6 +139,15 @@ ENTRIES = [
         [],
     ),
     (
+        "Objective Scouted",
+        "At the end of your Command phase, if this unit is within range of an objective marker "
+        "you control, that objective marker remains under your control until your opponent's "
+        "Level of Control over that objective marker is greater than yours at the end of a "
+        "phase.",
+        [],
+        [],
+    ),
+    (
         "Mechanicus Bodyguard",
         "While this model is within 3\" of one or more other friendly ADEPTUS MECHANICUS units, "
         "this model has the Lone Operative ability.",
@@ -231,11 +240,18 @@ CALCULATOR_NOTES = {
         "Descriptive only: Battle-shock/Leadership is outside the combat "
         "engine."
     ),
-    "Mechanicus Bodyguard": "Descriptive only: targeting restrictions aren't modelled.",
+    "Mechanicus Bodyguard": (
+        "Descriptive only in the calculator; in a game, models more than 12\" away can't shoot "
+        "it while it's within 3\" of another friendly ADEPTUS MECHANICUS unit."
+    ),
     "Secutor of Olympus": (
         "Descriptive only: a start-of-Shooting-phase action outside the attack sequence."
     ),
     "Supreme Commander": "Descriptive only: an army-building restriction.",
+    "Objective Scouted": (
+        "Descriptive only in the calculator; in a game, objectives it's controlling at the end "
+        "of your Command phase are secured."
+    ),
     "Self-repair Mechanisms": (
         "Descriptive only in the calculator; in a game, the model regains D3 lost wounds at "
         "the start of its owner's Command phase."
@@ -429,3 +445,13 @@ COMMAND_CHOICES = {
 COMMAND_HEALS = {
     "Self-repair Mechanisms": 3,
 }
+
+# In a game: abilities that give their unit Lone Operative while within a
+# distance of a friendly unit with some keywords (see
+# app/services/in_game/shooting.py).
+CONDITIONAL_LONE_OPERATIVE = {"Mechanicus Bodyguard": (3.0, ("ADEPTUS MECHANICUS",))}
+
+# In a game: abilities that secure the objectives their unit is controlling at
+# the end of one of their player's phases (see
+# app/services/in_game/objectives.py).
+SECURES_OBJECTIVES = {"Objective Scouted": "command"}
