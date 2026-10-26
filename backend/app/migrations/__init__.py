@@ -3,7 +3,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.migrations import (
     first_seat_nullable,
     hellfire_rounds_conditions,
+    hull_boxes,
     reconnaissance_spelling,
+    skitarii_marshal_spelling,
 )
 
 # Changes to databases made before something changed - a rename, different
@@ -20,6 +22,8 @@ MIGRATIONS = [
     reconnaissance_spelling,
     hellfire_rounds_conditions,
     first_seat_nullable,
+    skitarii_marshal_spelling,
+    hull_boxes,
 ]
 
 

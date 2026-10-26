@@ -992,6 +992,8 @@ class DeploymentModelOut(BaseModel):
     width: float
     height: float
     measured: bool
+    # A rectangular base (a hull measured as a box), rather than round or oval.
+    box: bool = False
     # Where it is, once deployed (None again once it's destroyed).
     position: ModelPositionOut | None = None
     # Its Wounds characteristic, how many it has left in this game, and
@@ -1497,9 +1499,10 @@ class TeleportHomersOut(BaseModel):
     tokens: list[dict]
 
 
-class StartOfShootingOut(BaseModel):
-    # An ability the player whose turn it is can use at the start of their
-    # Shooting phase (e.g. Secutor of Olympus), and its possible targets.
+class UnitAbilityTargetsOut(BaseModel):
+    # A unit's ability that can be used now on one of these units - e.g. at
+    # the start of the Shooting phase (Secutor of Olympus), or to rally a
+    # Battle-shocked unit (Servo-skull Uplink).
     unit_id: int
     unit_name: str
     ability: str
@@ -1507,10 +1510,31 @@ class StartOfShootingOut(BaseModel):
     targets: list[UnitIdNameOut]
 
 
-class StartOfShootingIn(BaseModel):
+class UnitAbilityTargetIn(BaseModel):
     unit_id: int
     ability: str
     target_unit_id: int
+
+
+class RepairTargetOut(BaseModel):
+    unit_model_id: int
+    name: str
+    unit_name: str
+
+
+class RepairOut(BaseModel):
+    # A unit's ability that can repair one of these models now (in its
+    # player's Command phase - e.g. Omnissiah's Blessing).
+    unit_id: int
+    unit_name: str
+    ability: str
+    targets: list[RepairTargetOut]
+
+
+class RepairIn(BaseModel):
+    unit_id: int
+    ability: str
+    unit_model_id: int
 
 
 class StartOfShootingResultOut(BaseModel):
@@ -1519,6 +1543,19 @@ class StartOfShootingResultOut(BaseModel):
     roll: int
     wounds: int
     destroyed_unit_model_ids: list[int]
+
+
+class ReactiveMoveOut(BaseModel):
+    # A unit that can make a reactive move now (e.g. Tactica Obliqua): its
+    # ability, the enemy unit that set it off, its roll for how far (once
+    # rolled), and how far it can go further near a friendly unit (if it can).
+    unit_id: int
+    name: str
+    seat: int
+    ability: str
+    trigger_name: str
+    roll: int | None = None
+    further: float | None = None
 
 
 class ScoutsUnitOut(BaseModel):

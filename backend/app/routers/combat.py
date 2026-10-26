@@ -503,6 +503,7 @@ async def calculate(
     attacker_wounds: dict[int, int] | None = None,
     firing_deck: list[tuple[int, int, int]] | None = None,
     attacker_extra_rules: list[Rule] | None = None,
+    defender_model_rules: dict[int, list[Rule]] | None = None,
 ) -> CombatOut:
     # Resolves an attack (see app/services/combat.py). `firing` is which
     # weapons each attacking model can fire and at half range or not, when
@@ -586,6 +587,7 @@ async def calculate(
         | {("enhancement", i) for i in payload.selected_enhancement_weapon_ids}
         | deck_ids,
         extra_weapons=extra_weapons,
+        defender_model_rules=defender_model_rules,
         in_engagement_range=payload.in_engagement_range,
         visible=visible,
         in_range=in_range,

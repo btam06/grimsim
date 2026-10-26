@@ -16,6 +16,13 @@ KASTELAN_MELEE_WEAPON = "kastelan_melee_weapon"
 TARGET_MODEL_KASTELAN = "target_model_kastelan"
 TARGET_MODEL_DATASMITH_LEADING_KASTELANS = "target_model_datasmith_leading_kastelans"
 NEUTRON_FUSIL_WEAPON = "neutron_fusil_weapon"
+OMNISSIAN_AXE_WEAPON = "omnissian_axe_weapon"
+# The calculator's Positioning (see app/combat_rules/positions.py): a
+# friendly ADEPTUS MECHANICUS VEHICLE model was destroyed within 12" of the
+# attacking model this battle (Vengeance for the Omnissiah - in a game,
+# app/seeds/factions/adeptus_mechanicus/vengeance.py).
+VENGEANCE = "vengeance_for_the_omnissiah"
+VENGEANCE_ACTIVE = "vengeance_active"
 
 # The calculator's Positioning: "within 6\" of a friendly ADEPTUS MECHANICUS
 # BATTLELINE unit" (see app/combat_rules/positions.py).
@@ -113,6 +120,18 @@ def neutron_fusil_weapon(context: dict) -> bool:
     return "neutron fusil" in context.get("weapon_name", "").lower()
 
 
+def omnissian_axe_weapon(context: dict) -> bool:
+    # The attack is made with an Omnissian axe - e.g. Vengeance for the
+    # Omnissiah.
+    return "omnissian axe" in context.get("weapon_name", "").lower()
+
+
+def vengeance_active(context: dict) -> bool:
+    # True at every step while the attacking unit has Vengeance for the
+    # Omnissiah's vengeance (ticked under Positioning, or set in a game).
+    return VENGEANCE in context.get("attacker_positions", set())
+
+
 # {keyword: check}
 CONDITIONS = {
     MELEE_ATTACK_AGAINST_BATTLELINE: melee_attack_against_battleline,
@@ -127,6 +146,8 @@ CONDITIONS = {
     TARGET_MODEL_KASTELAN: target_model_kastelan,
     TARGET_MODEL_DATASMITH_LEADING_KASTELANS: target_model_datasmith_leading_kastelans,
     NEUTRON_FUSIL_WEAPON: neutron_fusil_weapon,
+    OMNISSIAN_AXE_WEAPON: omnissian_axe_weapon,
+    VENGEANCE_ACTIVE: vengeance_active,
 }
 
 # Seeded Condition rows: (keyword, name, description).
@@ -192,5 +213,16 @@ ENTRIES = [
         NEUTRON_FUSIL_WEAPON,
         "Neutron Fusil Weapon",
         "The attack is made with a neutron fusil (checked by its name).",
+    ),
+    (
+        OMNISSIAN_AXE_WEAPON,
+        "Omnissian Axe Weapon",
+        "The attack is made with an Omnissian axe (checked by its name).",
+    ),
+    (
+        VENGEANCE_ACTIVE,
+        "Vengeance for the Omnissiah",
+        "A friendly ADEPTUS MECHANICUS VEHICLE model was destroyed within 12\" of the attacking "
+        "model this battle. Applies at every step.",
     ),
 ]

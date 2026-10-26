@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import HTTPException
 
 from app.models import Game, Unit
-from app.services.in_game import deployment, mission_state, movement, pathing, regions
+from app.services.in_game import deployment, mission_state, movement
 from app.services.in_game.deployment import Placement
 
 # Moving after shooting (shoot and scoot): some abilities let a unit, in its
@@ -98,30 +98,9 @@ def check(game: Game, unit: Unit, placement: dict[int, tuple[float, float, float
     if (why := reason(game, unit)) is not None:
         raise _bad_request(f"it can't move after shooting: {why}")
     name, how = move_of(unit)
-    further = how.get("further")
-    limit = reach(unit)
-    start = movement.current_positions(game, unit)
-    result = movement.check_free_move(game, unit, placement, start, limit)
-    if further:
-        _, keywords, within = further
-        every = {m.id: m for m in unit.unit_models}
-        starts = {i: deployment.base_at(every[i], *xyr) for i, xyr in start.items()}
-        ends = {i: deployment.base_at(every[i], *placement[i]) for i in start if i in placement}
-        pather = pathing.for_unit(game, unit, starts, limit)
-        if any(pathing.too_far(pather, starts[i], ends[i], how["reach"]) for i in ends):
-            near = any(
-                all(
-                    regions.base_wholly_within_of(b, regions.unit_bases(game, other), within)
-                    for b in ends.values()
-                )
-                for other in regions.friendly_units_with(game, unit, keywords)
-            )
-            if not near:
-                result.problems.append(
-                    f'{name}: moving more than {how["reach"]:g}", every model must end wholly '
-                    f'within {within:g}" of a friendly {" ".join(keywords)} unit'
-                )
-    return result
+    return movement.check_reach_or_further(
+        game, unit, placement, how["reach"], how.get("further"), name
+    )
 
 
 def scoot(game: Game, unit: Unit, placement: dict[int, tuple[float, float, float]]) -> None:

@@ -680,7 +680,11 @@ def _stratagem_targeted(player: GamePlayer, unit: Unit | None) -> None:
     if unit is None:
         return
     config = datasheet_abilities.STRATAGEM_TARGET_CP
-    names = {a.name for m in unit.unit_models for a in m.model.abilities}
+    # (Its models' abilities, and their wargear's - e.g. an enhanced
+    # data-tether.)
+    names = {a.name for m in unit.unit_models for a in m.model.abilities} | {
+        a.name for m in unit.unit_models for g in m.wargear for a in g.abilities
+    }
     for name in sorted(names & set(config)):
         if random.randint(1, 6) >= config[name]:
             player.cp += 1

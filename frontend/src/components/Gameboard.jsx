@@ -188,16 +188,43 @@ function RotateHandles({ pieces, onPointerDown }) {
   )
 }
 
-// Models on the board: each a base (an ellipse, rx/ry its half width and
-// height in inches) centred on (x, y), turned `rotation` degrees clockwise,
+// A model's base: an ellipse (rx/ry its half width and height in inches) - or
+// a rectangle, for a hull measured as a box (`box`) - centred on (x, y),
+// turned `rotation` degrees clockwise.
+function Base({ piece: p, className, onPointerDown, onClick }) {
+  const transform = p.rotation ? `rotate(${p.rotation} ${p.x} ${p.y})` : undefined
+  const shape = { className, transform, onPointerDown, onClick }
+  if (p.box) {
+    return (
+      <rect
+        {...shape}
+        x={p.x - p.rx}
+        y={p.y - p.ry}
+        width={p.rx * 2}
+        height={p.ry * 2}
+      >
+        <title>{p.title}</title>
+      </rect>
+    )
+  }
+  return (
+    <ellipse {...shape} cx={p.x} cy={p.y} rx={p.rx} ry={p.ry}>
+      <title>{p.title}</title>
+    </ellipse>
+  )
+}
+
+// Models on the board: each a base (see Base) centred on (x, y), turned
+// `rotation` degrees clockwise,
 // coloured by side. Draft pieces (a unit being placed) can be dragged; invalid
 // ones are marked; ghosts show where a moving unit's models started.
 function Pieces({ pieces, onPointerDown, onClick }) {
   return (
     <g className="pieces">
       {pieces.map((p) => (
-        <ellipse
+        <Base
           key={p.id}
+          piece={p}
           className={[
             'piece',
             `piece--${p.side}`,
@@ -211,19 +238,12 @@ function Pieces({ pieces, onPointerDown, onClick }) {
           ]
             .filter(Boolean)
             .join(' ')}
-          cx={p.x}
-          cy={p.y}
-          rx={p.rx}
-          ry={p.ry}
-          transform={p.rotation ? `rotate(${p.rotation} ${p.x} ${p.y})` : undefined}
           onPointerDown={p.draft ? (e) => onPointerDown(e, p) : undefined}
           onClick={(e) => {
             e.stopPropagation()
             if (onClick && !p.ghost && p.unitId !== undefined) onClick(p.unitId)
           }}
-        >
-          <title>{p.title}</title>
-        </ellipse>
+        />
       ))}
     </g>
   )

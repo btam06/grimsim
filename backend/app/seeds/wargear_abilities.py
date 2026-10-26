@@ -22,6 +22,15 @@ ENTRIES = [
         [INVULNERABLE_5],
     ),
     (
+        # In a game, a Stratagem used on the bearer's unit rolls for the CP
+        # (see datasheet_abilities STRATAGEM_TARGET_CP).
+        "Enhanced data-tether",
+        "Each time you select the bearer's unit as the target of a Stratagem, roll one D6: on "
+        "a 5+, you gain 1CP.",
+        [],
+        [],
+    ),
+    (
         # A pre-battle move (e.g. an Orbital Comms Array - see
         # app/services/in_game/scouts.py).
         "Scouts 6\"",

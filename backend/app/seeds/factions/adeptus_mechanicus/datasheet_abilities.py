@@ -1,11 +1,14 @@
 from app.combat_rules import CommandChoice, Rule, RuleOption
 from app.combat_rules.conditions import (
     ALWAYS,
+    ATTACKER_LED_BY_CHARACTER,
+    PRE_WEAPON,
     TARGET_HAS_CHARACTER,
     TARGET_MONSTER_OR_VEHICLE,
     TARGET_LED_BY_CHARACTER,
 )
 from app.combat_rules.effects import (
+    ADD_THREE_ATTACKS,
     ADD_TWO_ATTACKS,
     ASSAULT,
     FEEL_NO_PAIN_4,
@@ -25,10 +28,12 @@ from app.seeds.factions.adeptus_mechanicus.conditions import (
     KASTELAN_MELEE_WEAPON,
     KASTELAN_RANGED_WEAPON,
     NEUTRON_FUSIL_WEAPON,
+    OMNISSIAN_AXE_WEAPON,
     PROTECTOR_IMPERATIVE_ACTIVE,
     TARGET_ELECTRO_PRIESTS_LED_BY_CHARACTER,
     TARGET_MODEL_DATASMITH_LEADING_KASTELANS,
     TARGET_MODEL_KASTELAN,
+    VENGEANCE_ACTIVE,
 )
 
 # Adeptus Mechanicus datasheet abilities - see app/seeds/datasheet_abilities.py
@@ -36,6 +41,59 @@ from app.seeds.factions.adeptus_mechanicus.conditions import (
 
 # (name, description, [condition keywords], [effect keywords])
 ENTRIES = [
+    (
+        "Control Edict",
+        "While this model is leading a unit, each time a model in that unit makes an attack, "
+        "you can re-roll the Hit roll.",
+        [],
+        [],
+    ),
+    (
+        # In a game, see RALLIES below.
+        "Servo-skull Uplink",
+        "Once per battle, at the start of any phase, you can select one friendly SKITARII unit "
+        "that is Battle-shocked and within 6\" of this model. That unit is no longer "
+        "Battle-shocked.",
+        [],
+        [],
+    ),
+    (
+        "Enginseer",
+        "While this model is within 3\" of one or more friendly ADEPTUS MECHANICUS VEHICLE "
+        "units, unless it is leading a unit, this model has the Lone Operative ability.",
+        [],
+        [],
+    ),
+    (
+        # In a game, see REPAIRS below.
+        "Omnissiah's Blessing",
+        "In your Command phase, select one friendly ADEPTUS MECHANICUS model within 3\" of "
+        "this model. That model regains up to D3 lost wounds and, if it is a VEHICLE model, "
+        "until the start of your next Command phase, that model has the Feel No Pain 5+ "
+        "ability. Each model can only be selected for this ability once per Command phase.",
+        [],
+        [],
+    ),
+    (
+        # In a game, see app/seeds/factions/adeptus_mechanicus/vengeance.py.
+        "Vengeance for the Omnissiah",
+        "If a friendly ADEPTUS MECHANICUS VEHICLE model is destroyed within 12\" of this model, "
+        "until the end of the battle, this model's Omnissian axe has an Attacks characteristic "
+        "of 6.",
+        [],
+        [],
+    ),
+    (
+        # In a game, see REACTIVE_MOVES below.
+        "Tactica Obliqua",
+        "In your opponent's Movement phase, if an enemy unit ends a move within 8\" of this "
+        "unit, if this unit is not within Engagement Range of one or more enemy units, it can "
+        "do one of the following: make a Normal move of up to D6\"; or make a Normal move of "
+        "up to 6\" provided every model in this unit ends that move wholly within 6\" of one "
+        "or more friendly ADEPTUS MECHANICUS BATTLELINE units.",
+        [],
+        [],
+    ),
     (
         "Monocular Targeting Helms",
         "Each time a model in this unit makes an attack with a neutron fusil against a MONSTER "
@@ -266,6 +324,23 @@ ENTRIES = [
 # How the calculator handles abilities above, where that needs saying:
 # {ability name: note}.
 CALCULATOR_NOTES = {
+    "Servo-skull Uplink": (
+        "Descriptive only in the calculator; in a game, once per battle it rallies a friendly "
+        "Battle-shocked SKITARII unit within 6\"."
+    ),
+    "Enginseer": (
+        "Descriptive only in the calculator; in a game, models more than 12\" away can't shoot "
+        "it while it's within 3\" of a friendly ADEPTUS MECHANICUS VEHICLE unit and not "
+        "leading one."
+    ),
+    "Omnissiah's Blessing": (
+        "Descriptive only in the calculator; in a game, used in your Command phase on a model "
+        "within 3\"."
+    ),
+    "Tactica Obliqua": (
+        "Descriptive only in the calculator; in a game, a move in your opponent's Movement "
+        "phase (see app/services/in_game/reactive_move.py) - once that phase."
+    ),
     "Ride the Thermals": (
         "Descriptive only in the calculator; in a game, a move after shooting (see "
         "app/services/in_game/shoot_scoot.py)."
@@ -322,6 +397,23 @@ CALCULATOR_NOTES = {
 
 # Code-defined rules for abilities above, by name.
 RULES = {
+    "Control Edict": [
+        Rule(
+            conditions=(ATTACKER_LED_BY_CHARACTER,),
+            effects=(REROLL_FAILED_HITS,),
+            description="Re-roll Hit rolls while a CHARACTER is leading the unit.",
+        ),
+    ],
+    "Vengeance for the Omnissiah": [
+        Rule(
+            conditions=(PRE_WEAPON, OMNISSIAN_AXE_WEAPON, VENGEANCE_ACTIVE),
+            effects=(ADD_THREE_ATTACKS,),
+            description=(
+                "The Omnissian axe has 6 Attacks once a friendly ADEPTUS MECHANICUS VEHICLE "
+                "model was destroyed within 12\" (ticked under Positioning)."
+            ),
+        ),
+    ],
     "Monocular Targeting Helms": [
         Rule(
             conditions=(NEUTRON_FUSIL_WEAPON, TARGET_MONSTER_OR_VEHICLE),
@@ -514,7 +606,11 @@ COMMAND_HEALS = {
 # In a game: abilities that give their unit Lone Operative while within a
 # distance of a friendly unit with some keywords (see
 # app/services/in_game/shooting.py).
-CONDITIONAL_LONE_OPERATIVE = {"Mechanicus Bodyguard": (3.0, ("ADEPTUS MECHANICUS",))}
+# (A third value of True: only while it isn't leading a unit.)
+CONDITIONAL_LONE_OPERATIVE = {
+    "Mechanicus Bodyguard": (3.0, ("ADEPTUS MECHANICUS",)),
+    "Enginseer": (3.0, ("ADEPTUS MECHANICUS", "VEHICLE"), True),
+}
 
 # In a game: abilities that secure the objectives their unit is controlling at
 # the end of one of their player's phases (see
@@ -546,7 +642,36 @@ ROLL_BONUSES = {
 
 # In a game: abilities that gain their player 1CP on a D6 roll of at least
 # this, each time a Stratagem targets their unit - Broad Spectrum Data-tether.
-STRATAGEM_TARGET_CP = {"Broad Spectrum Data-tether": 5}
+STRATAGEM_TARGET_CP = {"Broad Spectrum Data-tether": 5, "Enhanced data-tether": 5}
+
+# In a game: abilities that rally a friendly Battle-shocked unit (see
+# app/services/in_game/rally.py) - Servo-skull Uplink.
+RALLIES = {
+    "Servo-skull Uplink": {"keywords": ("SKITARII",), "range": 6.0, "once_per_battle": True},
+}
+
+# In a game: abilities that repair a friendly model in their player's Command
+# phase (see app/services/in_game/repair.py) - Omnissiah's Blessing.
+REPAIRS = {
+    "Omnissiah's Blessing": {
+        "keywords": ("ADEPTUS MECHANICUS",),
+        "range": 3.0,
+        "heal": "D3",
+        "vehicle_feel_no_pain": 5,
+    },
+}
+
+# In a game: abilities that let their unit move in its opponent's Movement
+# phase (see app/services/in_game/reactive_move.py) - Tactica Obliqua: D6",
+# or 6" ending wholly within 6" of a friendly ADEPTUS MECHANICUS BATTLELINE
+# unit.
+REACTIVE_MOVES = {
+    "Tactica Obliqua": {
+        "trigger_range": 8.0,
+        "reach": "D6",
+        "further": (6.0, ("ADEPTUS MECHANICUS", "BATTLELINE"), 6.0),
+    },
+}
 
 # In a game: abilities used at the start of their player's Shooting phase on an
 # enemy unit (see app/services/in_game/shooting_start.py) - Secutor of

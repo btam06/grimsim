@@ -19,6 +19,8 @@ from app.seeds.factions.adeptus_mechanicus.conditions import (
     ATTACKER_NEAR_ADMECH_BATTLELINE,
     MELEE_VS_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE,
     NEAR_ADMECH_BATTLELINE,
+    VENGEANCE,
+    VENGEANCE_ACTIVE,
 )
 from app.seeds.factions.chaos_knights.conditions import (
     MARKED_PREY_CRITICAL_HIT,
@@ -66,6 +68,10 @@ POSITIONS = {
     MARKED_PREY_TARGET: "Targeting the unit selected for Marked Prey",
     WITHIN_9_OF_TARGET: 'Target is within 9" of the attacking unit',
     CONTROLLING_OBJECTIVE: "Controlling an objective",
+    VENGEANCE: (
+        'A friendly ADEPTUS MECHANICUS VEHICLE model was destroyed within 12" '
+        "(Vengeance for the Omnissiah)"
+    ),
 }
 
 # The conditions that read each position, by the side whose position it is -
@@ -111,6 +117,7 @@ POSITION_CONDITIONS = {
     MARKED_PREY_TARGET: {"attacker": {MARKED_PREY_CRITICAL_HIT}, "defender": set()},
     WITHIN_9_OF_TARGET: {"attacker": {TARGET_WITHIN_9}, "defender": set()},
     CONTROLLING_OBJECTIVE: {"attacker": set(), "defender": {DEFENDER_CONTROLLING_OBJECTIVE}},
+    VENGEANCE: {"attacker": {VENGEANCE_ACTIVE}, "defender": set()},
 }
 
 # In a game, positions about being near friendly units, measured on the

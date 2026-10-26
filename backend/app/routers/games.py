@@ -126,10 +126,14 @@ from app.schemas import (
     ShootOut,
     ShotOut,
     SightBubbleOut,
+    ReactiveMoveOut,
+    RepairIn,
+    RepairOut,
+    RepairTargetOut,
     ScoutsOut,
     ScoutsUnitOut,
-    StartOfShootingIn,
-    StartOfShootingOut,
+    UnitAbilityTargetIn,
+    UnitAbilityTargetsOut,
     StartOfShootingResultOut,
     StratagemOut,
     StratagemTargetOut,
@@ -150,7 +154,11 @@ from app.services.in_game import deployment as deployment_service
 from app.services.in_game import embarked as embarked_service
 from app.services.in_game import emergency as emergency_service
 from app.services.in_game import psychic as psychic_service
-from app.seeds.factions.adeptus_mechanicus import fire_support
+from app.seeds.factions.adeptus_mechanicus import fire_support, vengeance
+from app.seeds.factions.adeptus_mechanicus.conditions import VENGEANCE
+from app.services.in_game import rally as rally_service
+from app.services.in_game import reactive_move as reactive_move_service
+from app.services.in_game import repair as repair_service
 from app.services.in_game import shoot_scoot as shoot_scoot_service
 from app.services.in_game import shooting_start as shooting_start_service
 from app.seeds.factions.space_marines import teleport_homer as teleport_homer_service
@@ -558,6 +566,7 @@ async def get_deployment(game_id: int, session: AsyncSession = Depends(get_sessi
                         width=width / MM_PER_INCH,
                         height=height / MM_PER_INCH,
                         measured=measured,
+                        box=deployment_service.base_at(unit_model, 0, 0).box,
                         wounds=wounds,
                         wounds_remaining=wounds - (record.wounds_lost if record else 0),
                         destroyed=bool(record and record.destroyed),
@@ -794,6 +803,8 @@ def _attacker_positions(
     found = [REMAINED_STATIONARY] if stationary else []
     distance = charging_service.distance(game, unit, target)
     found += [p for p, reach in TARGET_WITHIN.items() if distance <= reach + TOLERANCE]
+    if vengeance.active(game, unit):
+        found.append(VENGEANCE)
     return found + _near_friendly(game, unit)
 
 
@@ -1048,6 +1059,7 @@ async def _fire(
         attacker_wounds=attacker_wounds,
         firing_deck=firing_deck,
         attacker_extra_rules=fire_support.rules(game, unit, target),
+        defender_model_rules=repair_service.model_rules(game, target),
     )
     fire_support.after_shooting(game, unit, target, combat.hits)
     destroyed = casualties_service.apply_attack(
@@ -1499,6 +1511,7 @@ async def fight(game_id: int, payload: ShootIn, session: AsyncSession = Depends(
         firing=firing,
         defender_wounds=defender_wounds,
         attacker_wounds=attacker_wounds,
+        defender_model_rules=repair_service.model_rules(game, target),
     )
     destroyed = casualties_service.apply_attack(
         game,
@@ -2704,16 +2717,139 @@ async def finish_teleport_homers(
     return await _commit_and_reload(session, game_id)
 
 
+# --- rallying, and repairing (see app/services/in_game/rally.py, repair.py) ---
+
+
+@router.get("/{game_id}/rallies", response_model=list[UnitAbilityTargetsOut])
+async def get_rallies(game_id: int, session: AsyncSession = Depends(get_session)):
+    # Abilities that can rally a Battle-shocked unit now (e.g. Servo-skull
+    # Uplink), and the units each could.
+    game = await _load_game(session, game_id)
+    return [
+        UnitAbilityTargetsOut(
+            unit_id=unit.id,
+            unit_name=unit.faction_unit.name,
+            ability=name,
+            targets=[UnitIdNameOut(unit_id=t.id, name=t.faction_unit.name) for t in targets],
+        )
+        for unit, name, targets in rally_service.available(game)
+    ]
+
+
+@router.post("/{game_id}/rallies", response_model=GameOut)
+async def rally(
+    game_id: int, payload: UnitAbilityTargetIn, session: AsyncSession = Depends(get_session)
+):
+    game = await _load_game(session, game_id)
+    rally_service.rally(
+        game,
+        deployment_service.find_unit(game, payload.unit_id),
+        payload.ability,
+        deployment_service.find_unit(game, payload.target_unit_id),
+    )
+    return await _commit_and_reload(session, game_id)
+
+
+@router.get("/{game_id}/repairs", response_model=list[RepairOut])
+async def get_repairs(game_id: int, session: AsyncSession = Depends(get_session)):
+    # Abilities that can repair a model now (e.g. Omnissiah's Blessing), and
+    # the models each could.
+    game = await _load_game(session, game_id)
+    units = {m.id: u for p in game.players for u in p.army_list.units for m in u.unit_models}
+    return [
+        RepairOut(
+            unit_id=unit.id,
+            unit_name=unit.faction_unit.name,
+            ability=name,
+            targets=[
+                RepairTargetOut(
+                    unit_model_id=m.id,
+                    name=m.model.name,
+                    unit_name=units[m.id].faction_unit.name,
+                )
+                for m in targets
+            ],
+        )
+        for unit, name, targets in repair_service.available(game)
+    ]
+
+
+@router.post("/{game_id}/repairs", response_model=GameOut)
+async def repair(game_id: int, payload: RepairIn, session: AsyncSession = Depends(get_session)):
+    game = await _load_game(session, game_id)
+    repair_service.repair(
+        game, deployment_service.find_unit(game, payload.unit_id), payload.ability,
+        payload.unit_model_id,
+    )
+    return await _commit_and_reload(session, game_id)
+
+
+# --- reactive moves (see app/services/in_game/reactive_move.py) ---
+
+
+def _reactive_out(game: Game) -> list[ReactiveMoveOut]:
+    return [
+        ReactiveMoveOut(
+            unit_id=unit.id,
+            name=unit.faction_unit.name,
+            seat=deployment_service.owner(game, unit).seat,
+            ability=name,
+            trigger_name=_unit_name(game, record.trigger_unit_id),
+            roll=record.roll,
+            further=how["further"][0] if how.get("further") else None,
+        )
+        for unit, name, how, record in reactive_move_service.available(game)
+    ]
+
+
+@router.get("/{game_id}/reactive-moves", response_model=list[ReactiveMoveOut])
+async def get_reactive_moves(game_id: int, session: AsyncSession = Depends(get_session)):
+    # The reactive moves the player whose turn it isn't can make now.
+    return _reactive_out(await _load_game(session, game_id))
+
+
+@router.post("/{game_id}/reactive-moves/roll", response_model=list[ReactiveMoveOut])
+async def roll_reactive_move(
+    game_id: int, payload: UnitIdIn, session: AsyncSession = Depends(get_session)
+):
+    # Rolls for how far the unit's reactive move can go.
+    game = await _load_game(session, game_id)
+    reactive_move_service.roll(game, deployment_service.find_unit(game, payload.unit_id))
+    await session.commit()
+    return _reactive_out(await _load_game(session, game_id))
+
+
+@router.post("/{game_id}/reactive-moves/check", response_model=DeploymentCheckOut)
+async def check_reactive_move(
+    game_id: int, payload: UnitPlacementIn, session: AsyncSession = Depends(get_session)
+):
+    game = await _load_game(session, game_id)
+    unit = deployment_service.find_unit(game, payload.unit_id)
+    result = reactive_move_service.check(game, unit, _placement(payload.positions))
+    await session.commit()
+    return _check_out(result)
+
+
+@router.post("/{game_id}/reactive-moves", response_model=GameOut)
+async def make_reactive_move(
+    game_id: int, payload: UnitPlacementIn, session: AsyncSession = Depends(get_session)
+):
+    game = await _load_game(session, game_id)
+    unit = deployment_service.find_unit(game, payload.unit_id)
+    reactive_move_service.make(game, unit, _placement(payload.positions))
+    return await _commit_and_reload(session, game_id)
+
+
 # --- the start of the Shooting phase (see app/services/in_game/shooting_start.py) ---
 
 
-@router.get("/{game_id}/shooting-start", response_model=list[StartOfShootingOut])
+@router.get("/{game_id}/shooting-start", response_model=list[UnitAbilityTargetsOut])
 async def get_shooting_start(game_id: int, session: AsyncSession = Depends(get_session)):
     # The abilities the player whose turn it is can use now, at the start of
     # their Shooting phase (e.g. Secutor of Olympus).
     game = await _load_game(session, game_id)
     return [
-        StartOfShootingOut(
+        UnitAbilityTargetsOut(
             unit_id=a.unit.id,
             unit_name=a.unit.faction_unit.name,
             ability=a.name,
@@ -2728,7 +2864,7 @@ async def get_shooting_start(game_id: int, session: AsyncSession = Depends(get_s
 
 @router.post("/{game_id}/shooting-start", response_model=StartOfShootingResultOut)
 async def use_shooting_start(
-    game_id: int, payload: StartOfShootingIn, session: AsyncSession = Depends(get_session)
+    game_id: int, payload: UnitAbilityTargetIn, session: AsyncSession = Depends(get_session)
 ):
     game = await _load_game(session, game_id)
     result = shooting_start_service.use(

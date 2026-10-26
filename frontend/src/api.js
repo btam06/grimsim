@@ -352,3 +352,20 @@ export const shootScoot = (id, payload) =>
 export const getShootingStart = (id) => request(`/games/${id}/shooting-start`)
 export const applyShootingStart = (id, payload) =>
   request(`/games/${id}/shooting-start`, { method: 'POST', body: JSON.stringify(payload) })
+// Reactive moves (e.g. Tactica Obliqua - see app/services/in_game/reactive_move.py).
+export const listReactiveMoves = (id) => request(`/games/${id}/reactive-moves`)
+export const rollReactiveMove = (id, payload) =>
+  request(`/games/${id}/reactive-moves/roll`, { method: 'POST', body: JSON.stringify(payload) })
+export const checkReactiveMove = (id, payload) =>
+  request(`/games/${id}/reactive-moves/check`, { method: 'POST', body: JSON.stringify(payload) })
+export const makeReactiveMove = (id, payload) =>
+  request(`/games/${id}/reactive-moves`, { method: 'POST', body: JSON.stringify(payload) })
+// Rallying a Battle-shocked unit (e.g. Servo-skull Uplink - see
+// app/services/in_game/rally.py), and repairing a model in the Command phase
+// (e.g. Omnissiah's Blessing - see repair.py).
+export const listRallies = (id) => request(`/games/${id}/rallies`)
+export const rallyUnit = (id, payload) =>
+  request(`/games/${id}/rallies`, { method: 'POST', body: JSON.stringify(payload) })
+export const listRepairs = (id) => request(`/games/${id}/repairs`)
+export const repairModel = (id, payload) =>
+  request(`/games/${id}/repairs`, { method: 'POST', body: JSON.stringify(payload) })

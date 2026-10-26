@@ -13,7 +13,9 @@ from app.models import TerrainArea, TerrainFeature, TerrainLayout
 # Where a model's base is relative to the battlefield's terrain: whether it's
 # within (any part of it over) or wholly within (all of it over) a terrain area
 # or terrain feature. Positions are in inches on the board (see
-# app/models/terrain.py); bases are sized in mm, as on the datasheet.
+# app/models/terrain.py); bases are sized in mm, as on the datasheet - round,
+# oval, or a box (a model with no base whose hull is measured as a
+# rectangle, e.g. a Skorpius's 155 x 90mm).
 
 MM_PER_INCH = 25.4
 # Touching counts as within: allow for floating-point error at the edge.
@@ -25,13 +27,14 @@ Point = tuple[float, float]
 @dataclass(frozen=True)
 class Base:
     # A model's base, centred on (x, y) inches: round (width_mm == height_mm)
-    # or oval, its width along the direction it faces, turned `rotation`
-    # degrees clockwise.
+    # or oval - or a rectangle, if `box` - its width along the direction it
+    # faces, turned `rotation` degrees clockwise.
     x: float
     y: float
     width_mm: float
     height_mm: float
     rotation: float = 0
+    box: bool = False
 
     @property
     def semi_axes(self) -> tuple[float, float]:
@@ -41,6 +44,7 @@ class Base:
 
 _ROUND = re.compile(r"^(\d+(?:\.\d+)?)mm$")
 _OVAL = re.compile(r"^(\d+(?:\.\d+)?) x (\d+(?:\.\d+)?)mm$")
+_BOX = re.compile(r"^(\d+(?:\.\d+)?) x (\d+(?:\.\d+)?)mm box$")
 
 
 def base_dimensions(base_size: str) -> tuple[float, float] | None:
@@ -50,9 +54,45 @@ def base_dimensions(base_size: str) -> tuple[float, float] | None:
     if match := _ROUND.match(base_size):
         diameter = float(match[1])
         return diameter, diameter
-    if match := _OVAL.match(base_size):
+    if match := _OVAL.match(base_size) or _BOX.match(base_size):
         return float(match[1]), float(match[2])
     return None
+
+
+def is_box(base_size: str) -> bool:
+    # Whether a base size is a box - a rectangle, e.g. "155 x 90mm box".
+    return bool(_BOX.match(base_size))
+
+
+def base_corners(base: Base) -> list[Point]:
+    # A box base's corners, in order round it.
+    return rectangle(
+        base.x, base.y, base.width_mm / MM_PER_INCH, base.height_mm / MM_PER_INCH, base.rotation
+    )
+
+
+def convex_overlap(first: list[Point], second: list[Point], touching: bool) -> bool:
+    # Whether two convex polygons overlap - or, if `touching`, touch - by the
+    # separating axis test: they don't if, along the normal of some edge of
+    # either, their shadows are apart.
+    for polygon in (first, second):
+        for p, q in zip(polygon, polygon[1:] + polygon[:1]):
+            nx, ny = q[1] - p[1], p[0] - q[0]
+            length = math.hypot(nx, ny)
+            if length == 0:
+                continue
+            nx, ny = nx / length, ny / length
+            a = [x * nx + y * ny for x, y in first]
+            b = [x * nx + y * ny for x, y in second]
+            gap = max(min(b) - max(a), min(a) - max(b))
+            if gap > EPSILON if touching else gap > -EPSILON:
+                return False
+    return True
+
+
+def _inside_convex(point: Point, polygon: list[Point]) -> bool:
+    # Whether a point is inside a convex polygon (or on an edge).
+    return _contains_origin([(x - point[0], y - point[1]) for x, y in polygon])
 
 
 def _rotate(x: float, y: float, degrees: float) -> Point:
@@ -164,6 +204,8 @@ def within(base: Base, polygon: list[Point]) -> bool:
     # Whether any part of the base is over a convex polygon (touching counts).
     # Scaled so the base is a unit circle, the polygon stays convex: the base
     # reaches it if the circle's centre is inside it or within 1 of an edge.
+    if base.box:
+        return convex_overlap(base_corners(base), polygon, touching=True)
     shape = [_to_unit_circle(p, base) for p in polygon]
     if _contains_origin(shape):
         return True
@@ -175,7 +217,9 @@ def within(base: Base, polygon: list[Point]) -> bool:
 def wholly_within(base: Base, polygon: list[Point]) -> bool:
     # Whether all of the base is over a convex polygon: for every edge, the
     # base's furthest point in the direction out through that edge (its
-    # support) mustn't pass it.
+    # support) mustn't pass it. (A box: all its corners inside.)
+    if base.box:
+        return all(_inside_convex(c, polygon) for c in base_corners(base))
     a, b = base.semi_axes
     u = _rotate(1, 0, base.rotation)  # the base's width axis
     v = _rotate(0, 1, base.rotation)  # its height axis

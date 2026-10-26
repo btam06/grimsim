@@ -259,7 +259,11 @@ def resolve_combat(
     attacker_wounds: dict[int, int] | None = None,
     snap_shots: bool = False,
     extra_weapons: dict[int, list] | None = None,
+    defender_model_rules: dict[int, list[Rule]] | None = None,
 ) -> CombatResult:
+    # `defender_model_rules`: more rules for attacks allocated to particular
+    # defending models, by unit model id (e.g. a repaired VEHICLE's Feel No
+    # Pain).
     # `extra_weapons`: more weapons attacking models fire, by unit model id
     # (e.g. a transport's Firing Deck: its embarked models' weapons).
     # `firing`, if given, is which weapons each attacking model can fire on
@@ -493,6 +497,7 @@ def resolve_combat(
                 )
                 if isinstance(ability, Rule)
             )
+            + tuple((defender_model_rules or {}).get(unit_model.id, ()))
             # Its wargear's protective abilities (e.g. a Shield Dome's 5+
             # invulnerable save) - and those of wargear another model in the
             # unit has that reaches the bearer's unit.

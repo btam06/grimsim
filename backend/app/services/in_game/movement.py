@@ -281,6 +281,44 @@ def check_free_move(
     return result
 
 
+def check_reach_or_further(
+    game: Game,
+    unit: Unit,
+    placement: dict[int, tuple[float, float, float]],
+    reach: float,
+    further: tuple[float, tuple[str, ...], float] | None,
+    name: str,
+) -> Placement:
+    # As check_free_move from where the unit is now, up to `reach` - or, with
+    # `further` (inches, keywords, inches), up to further than that, if every
+    # model ends wholly within the last inches of a friendly unit with those
+    # keywords (e.g. Ride the Thermals, Tactica Obliqua).
+    limit = max(reach, further[0]) if further else reach
+    start = current_positions(game, unit)
+    result = check_free_move(game, unit, placement, start, limit)
+    if not further or further[0] <= reach:
+        return result
+    _, keywords, within = further
+    every = {m.id: m for m in unit.unit_models}
+    starts = {i: deployment.base_at(every[i], *xyr) for i, xyr in start.items()}
+    ends = {i: deployment.base_at(every[i], *placement[i]) for i in start if i in placement}
+    pather = pathing.for_unit(game, unit, starts, limit)
+    if any(pathing.too_far(pather, starts[i], ends[i], reach) for i in ends):
+        near = any(
+            all(
+                regions.base_wholly_within_of(b, regions.unit_bases(game, other), within)
+                for b in ends.values()
+            )
+            for other in regions.friendly_units_with(game, unit, keywords)
+        )
+        if not near:
+            result.problems.append(
+                f'{name}: moving more than {reach:g}", every model must end wholly within '
+                f'{within:g}" of a friendly {" ".join(keywords)} unit'
+            )
+    return result
+
+
 def current_positions(game: Game, unit: Unit) -> dict[int, tuple[float, float, float]]:
     # Where the unit's models (on the battlefield) are now.
     placed = deployment.positions(game)
@@ -344,6 +382,11 @@ def move_unit(
     move.completed = True
     mission_state.after_move(game, unit)
     _super_heavy_walker(game, unit, start, placement)
+    # Enemy units it ended its move near that can react (e.g. Tactica
+    # Obliqua). (Imported here: reactive_move imports this module.)
+    from app.services.in_game import reactive_move
+
+    reactive_move.after_enemy_move(game, unit)
 
 
 def _super_heavy_walker(game: Game, unit: Unit, start: dict, placement: dict) -> None:

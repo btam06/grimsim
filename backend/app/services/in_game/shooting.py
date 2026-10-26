@@ -401,11 +401,19 @@ LONE_OPERATIVE = "Lone Operative"
 LONE_OPERATIVE_RANGE = 12.0
 
 
+def leading(unit: Unit) -> bool:
+    # Whether a CHARACTER is leading the unit: it has CHARACTER models and
+    # others.
+    characters = ["CHARACTER" in {k.name for k in m.model.keywords} for m in unit.unit_models]
+    return any(characters) and not all(characters)
+
+
 def lone_operative(game: Game, unit: Unit) -> bool:
     # Whether the unit has Lone Operative now: one of its models has it, or
     # an ability that gives it while near friendly units with some keywords
     # (datasheet_abilities CONDITIONAL_LONE_OPERATIVE - e.g. Leader of
-    # Astartes: within 3" of a friendly ADEPTUS ASTARTES INFANTRY unit).
+    # Astartes: within 3" of a friendly ADEPTUS ASTARTES INFANTRY unit) - for
+    # some, only while it isn't leading a unit (e.g. Enginseer).
     from app.seeds import datasheet_abilities as datasheet_ability_seeds
 
     names = {a.name for m in unit.unit_models for a in m.model.abilities}
@@ -418,7 +426,9 @@ def lone_operative(game: Game, unit: Unit) -> bool:
     own = list(_bases(game, unit).values())
     player = deployment.owner(game, unit)
     placed = deployment.positions(game)
-    for distance, keywords in found:
+    for distance, keywords, *unless_leading in found:
+        if unless_leading and unless_leading[0] and leading(unit):
+            continue
         for other in deployment.deployable_units(player):
             if other.id == unit.id or not deployment.is_deployed(other, placed):
                 continue

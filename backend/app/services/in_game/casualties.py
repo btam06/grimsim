@@ -67,6 +67,14 @@ def _remove(game: Game, unit: Unit, unit_model, destroyed_by: Unit | None) -> No
     from app.services.in_game import emergency
 
     emergency.record_wreck(game, unit, unit_model, position)
+    # Rules for a friendly model destroyed nearby (e.g. Vengeance for the
+    # Omnissiah).
+    from app.seeds.factions.adeptus_mechanicus import vengeance
+
+    vengeance.model_destroyed(
+        game, unit, unit_model,
+        deployment.base_at(unit_model, position.x, position.y, position.rotation),
+    )
     game.model_positions.remove(position)
     turn_record.record_destruction(game, unit_model, destroyed_by)
 

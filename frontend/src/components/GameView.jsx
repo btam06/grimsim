@@ -23,6 +23,10 @@ import {
   checkMove,
   checkScoutMove,
   checkShootScoot,
+  checkReactiveMove,
+  listReactiveMoves,
+  makeReactiveMove,
+  rollReactiveMove,
   shootScoot,
   finishScouts,
   getScouts,
@@ -71,7 +75,9 @@ import { basesOverlap, freeSpot, slide } from '../collision'
 import CardTextAccordion from './CardTextAccordion'
 import ChargePanel from './ChargePanel'
 import DeploymentPanel from './DeploymentPanel'
+import AbilityActionsPanel from './AbilityActionsPanel'
 import PreBattlePanel from './PreBattlePanel'
+import ReactiveMovePanel from './ReactiveMovePanel'
 import ShootScootPanel from './ShootScootPanel'
 import ShootingStartPanel from './ShootingStartPanel'
 import FightPanel from './FightPanel'
@@ -420,6 +426,7 @@ function boardPieces(game, deployment, draft, focus = {}) {
           rotation: start.rotation,
           rx: model.width / 2,
           ry: model.height / 2,
+          box: model.box,
           side,
           ghost: true,
           title: `${model.name} started here`,
@@ -433,6 +440,7 @@ function boardPieces(game, deployment, draft, focus = {}) {
         rotation: position.rotation,
         rx: model.width / 2,
         ry: model.height / 2,
+        box: model.box,
         side,
         draft: draftPosition !== undefined && !locked.has(model.unit_model_id),
         invalid: isDraft && problems.has(model.unit_model_id),
@@ -535,7 +543,7 @@ function moveRings(deployment, movement, draft) {
   // move). A move: its M, plus its Advance roll if it's Advancing.
   const locked = new Set(draft.locked ?? [])
   let allowance = (id) => (locked.has(id) ? 0 : draft.allowance)
-  if (!['charge', 'pile_in', 'consolidate', 'scout', 'scoot'].includes(draft.kind)) {
+  if (!['charge', 'pile_in', 'consolidate', 'scout', 'scoot', 'react'].includes(draft.kind)) {
     const moving = movement?.units.find((u) => u.unit_id === draft.unitId)
     if (!moving) return []
     const extra = draft.kind === 'advance' ? (moving.advance_roll ?? 0) : 0
@@ -712,6 +720,24 @@ function GameView({ gameId, onBack }) {
       cancelled = true
     }
   }, [game, scouting])
+
+  // In the movement phase: the reactive moves the other player can make (e.g.
+  // Tactica Obliqua).
+  const [reactiveMoves, setReactiveMoves] = useState([])
+  const inMovement = game?.status === 'in_progress' && game?.phase === 'movement'
+  useEffect(() => {
+    if (!game || !inMovement) {
+      setReactiveMoves([])
+      return
+    }
+    let cancelled = false
+    listReactiveMoves(game.id)
+      .then((m) => !cancelled && setReactiveMoves(m))
+      .catch((err) => setError(err.message))
+    return () => {
+      cancelled = true
+    }
+  }, [game, inMovement])
 
   const [homers, setHomers] = useState(null)
   const [homerPlacing, setHomerPlacing] = useState(null)
@@ -1040,6 +1066,8 @@ function GameView({ gameId, onBack }) {
         check = await checkScoutMove(game.id, asPayload(unitId, positions))
       } else if (kind === 'scoot') {
         check = await checkShootScoot(game.id, asPayload(unitId, positions))
+      } else if (kind === 'react') {
+        check = await checkReactiveMove(game.id, asPayload(unitId, positions))
       } else if (kind === 'pile_in') {
         check = await checkPileIn(game.id, asPayload(unitId, positions))
       } else if (kind === 'charge') {
@@ -1710,6 +1738,36 @@ function GameView({ gameId, onBack }) {
         />
       )}
       {roundStart && <RoundStartPanel game={game} onError={setError} />}
+      {game.status === 'in_progress' && (
+        <AbilityActionsPanel game={game} onAction={act} onError={setError} />
+      )}
+      {inMovement && (
+        <ReactiveMovePanel
+          game={game}
+          moves={reactiveMoves}
+          draft={draft}
+          checking={checking}
+          onRoll={async (m) => {
+            try {
+              setReactiveMoves(await rollReactiveMove(game.id, { unit_id: m.unit_id }))
+            } catch (err) {
+              setError(err.message)
+            }
+          }}
+          onPick={(m, reach) => {
+            const positions = startPositions(m.unit_id)
+            checkSeq.current++
+            setDraft({ ...NO_DRAFT, unitId: m.unit_id, positions, kind: 'react', allowance: reach })
+            runCheck(m.unit_id, positions, 'react')
+          }}
+          onSave={async () => {
+            const { unitId, positions } = draftRef.current
+            if (await act(() => makeReactiveMove(game.id, asPayload(unitId, positions)))) {
+              setDraft(NO_DRAFT)
+            }
+          }}
+        />
+      )}
       {fighting && (
         <FightPanel
           game={game}

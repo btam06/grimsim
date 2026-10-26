@@ -4,7 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import BaseSize
 
 # The standard bases, round then oval, plus "Use model" for models that don't
-# come with one (e.g. vehicle hulls) and flying bases.
+# come with one (e.g. vehicle hulls) and flying bases - and boxes, hulls
+# measured as a rectangle (e.g. a Skorpius's 155 x 90mm).
 NAMES = [
     "25mm",
     "28mm",
@@ -29,6 +30,7 @@ NAMES = [
     "Small flying base",
     "Large flying base",
     "Use model",
+    "155 x 90mm box",
 ]
 
 

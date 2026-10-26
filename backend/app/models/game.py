@@ -74,6 +74,15 @@ class Game(Base):
     teleport_homers_done: Mapped[list["GameTeleportHomersDone"]] = relationship(
         cascade="all, delete-orphan", lazy="selectin", order_by="GameTeleportHomersDone.id"
     )
+    # Models repaired in Command phases (see app/services/in_game/repair.py).
+    repairs: Mapped[list["GameRepair"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameRepair.id"
+    )
+    # Reactive moves units can make, or made (see
+    # app/services/in_game/reactive_move.py).
+    reactive_moves: Mapped[list["GameReactiveMove"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameReactiveMove.id"
+    )
     # Units disembarking from transports, and from which (see
     # app/services/in_game/embarked.py).
     disembarkations: Mapped[list["GameDisembarkation"]] = relationship(
@@ -660,6 +669,37 @@ class GameTeleportHomersDone(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
     seat: Mapped[int] = mapped_column(Integer)
+
+
+class GameRepair(Base):
+    # A model repaired by a unit's ability in one Command phase (battle round
+    # and whose turn) - and the Feel No Pain it has until its player's next
+    # Command phase, if any (a VEHICLE's).
+    __tablename__ = "game_repairs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    source_unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    unit_model_id: Mapped[int] = mapped_column(ForeignKey("unit_models.id", ondelete="CASCADE"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int] = mapped_column(Integer)
+    feel_no_pain: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class GameReactiveMove(Base):
+    # A unit that can make a reactive move (e.g. Tactica Obliqua) in one phase
+    # (battle round and whose turn), because `trigger_unit_id` ended a move
+    # near it: its roll for how far, once rolled, and whether it's made it.
+    __tablename__ = "game_reactive_moves"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    trigger_unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int] = mapped_column(Integer)
+    roll: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    made: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class GameDisembarkation(Base):

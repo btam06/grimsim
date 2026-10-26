@@ -91,6 +91,13 @@ CORE_ENTRIES = [
         [],
     ),
     (
+        "Scouts 9\"",
+        "At the start of the first battle round, before the first turn begins, this unit can "
+        "make a Normal move of up to 9\".",
+        [],
+        [],
+    ),
+    (
         "Scouts 6\"",
         "At the start of the first battle round, before the first turn begins, this unit can "
         "make a Normal move of up to 6\".",
@@ -255,6 +262,9 @@ COMBINED = (
     "SHOOT_SCOOT",
     "STRATAGEM_TARGET_CP",
     "START_OF_SHOOTING",
+    "REACTIVE_MOVES",
+    "RALLIES",
+    "REPAIRS",
 )
 _combined: dict | None = None
 
@@ -288,6 +298,9 @@ def _combine() -> dict:
                 "SHOOT_SCOOT": {},
                 "STRATAGEM_TARGET_CP": {},
                 "START_OF_SHOOTING": {},
+                "REACTIVE_MOVES": {},
+                "RALLIES": {},
+                "REPAIRS": {},
             }
         ] + [
             {
@@ -315,6 +328,9 @@ def _combine() -> dict:
                     ("SHOOT_SCOOT", {}),
                     ("STRATAGEM_TARGET_CP", {}),
                     ("START_OF_SHOOTING", {}),
+                    ("REACTIVE_MOVES", {}),
+                    ("RALLIES", {}),
+                    ("REPAIRS", {}),
                 )
             }
             for faction in FACTIONS
@@ -421,6 +437,17 @@ def _combine() -> dict:
             "START_OF_SHOOTING": {
                 k: v for source in sources for k, v in source["START_OF_SHOOTING"].items()
             },
+            # Abilities that let their unit move in its opponent's Movement
+            # phase when an enemy unit ends a move near it (see
+            # app/services/in_game/reactive_move.py).
+            "REACTIVE_MOVES": {
+                k: v for source in sources for k, v in source["REACTIVE_MOVES"].items()
+            },
+            # Abilities that rally a friendly Battle-shocked unit (see
+            # app/services/in_game/rally.py), and that repair a friendly model
+            # in their player's Command phase (repair.py).
+            "RALLIES": {k: v for source in sources for k, v in source["RALLIES"].items()},
+            "REPAIRS": {k: v for source in sources for k, v in source["REPAIRS"].items()},
             # {option name: ability name}. Option names are unique across every
             # ability (and every faction ability's options).
             "OPTION_OWNERS": {

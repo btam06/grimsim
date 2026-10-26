@@ -1,7 +1,8 @@
 // Keeping a dragged base off the others: bases are ellipses (round ones
-// just have rx === ry), centred on (x, y) inches and turned `rotation`
-// degrees clockwise. Overlap is checked as the backend checks it (see
-// app/services/in_game/deployment.py): touching is fine.
+// just have rx === ry) - or rectangles, for a hull measured as a box (`box`)
+// - centred on (x, y) inches and turned `rotation` degrees clockwise. Overlap
+// is checked as the backend checks it (see app/services/in_game/deployment.py):
+// touching is fine.
 
 const TOLERANCE = 1e-6
 // Points round an oval base's edge, for checking it against another - as many
@@ -21,12 +22,35 @@ function toUnitCircle(px, py, base) {
 
 function strictlyInside(px, py, base) {
   const [u, v] = toUnitCircle(px, py, base)
+  if (base.box) return Math.max(Math.abs(u), Math.abs(v)) < 1 - TOLERANCE
   return Math.hypot(u, v) < 1 - TOLERANCE
 }
 
 function outline(base) {
   const angle = ((base.rotation ?? 0) * Math.PI) / 180
   const points = []
+  if (base.box) {
+    // Its corners and points along each side.
+    const corners = [
+      [-base.rx, -base.ry],
+      [base.rx, -base.ry],
+      [base.rx, base.ry],
+      [-base.rx, base.ry],
+    ]
+    const perSide = OUTLINE_POINTS / 4
+    corners.forEach(([u0, v0], i) => {
+      const [u1, v1] = corners[(i + 1) % 4]
+      for (let j = 0; j < perSide; j++) {
+        const u = u0 + ((u1 - u0) * j) / perSide
+        const v = v0 + ((v1 - v0) * j) / perSide
+        points.push([
+          base.x + u * Math.cos(angle) - v * Math.sin(angle),
+          base.y + u * Math.sin(angle) + v * Math.cos(angle),
+        ])
+      }
+    })
+    return points
+  }
   for (let i = 0; i < OUTLINE_POINTS; i++) {
     const t = (2 * Math.PI * i) / OUTLINE_POINTS
     const u = base.rx * Math.cos(t)
@@ -40,7 +64,7 @@ function outline(base) {
 }
 
 export function basesOverlap(a, b) {
-  if (a.rx === a.ry && b.rx === b.ry) {
+  if (a.rx === a.ry && b.rx === b.ry && !a.box && !b.box) {
     return Math.hypot(a.x - b.x, a.y - b.y) < a.rx + b.rx - TOLERANCE
   }
   return (
@@ -49,6 +73,11 @@ export function basesOverlap(a, b) {
     outline(a).some(([x, y]) => strictlyInside(x, y, b)) ||
     outline(b).some(([x, y]) => strictlyInside(x, y, a))
   )
+}
+
+// How far a base's edge is from its centre at most (a box's corner).
+function reachOf(base) {
+  return base.box ? Math.hypot(base.rx, base.ry) : Math.max(base.rx, base.ry)
 }
 
 // Where a base being dragged to (x, y) can go without overlapping any of
@@ -74,7 +103,7 @@ export function freeSpot(base, x, y, others, limit = (px, py) => [px, py]) {
     // The nearest distance from its centre along that line that's clear of
     // it: between where it is and fully past both bases.
     let near = length
-    let far = Math.max(hit.rx, hit.ry) + Math.max(base.rx, base.ry) + 0.01
+    let far = reachOf(hit) + reachOf(base) + 0.01
     if (far <= near) far = near + 0.01
     for (let i = 0; i < 25; i++) {
       const mid = (near + far) / 2

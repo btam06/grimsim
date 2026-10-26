@@ -15,7 +15,10 @@ from app.services.in_game.terrain import (
     _distance_to_segment,
     _rotate,
     _to_unit_circle,
+    base_corners,
     base_dimensions,
+    convex_overlap,
+    is_box,
     feature_polygons,
     wholly_within,
 )
@@ -78,7 +81,9 @@ def base_mm(unit_model: UnitModel) -> tuple[float, float, bool]:
 
 def base_at(unit_model: UnitModel, x: float, y: float, rotation: float = 0) -> Base:
     width, height, _ = base_mm(unit_model)
-    return Base(x=x, y=y, width_mm=width, height_mm=height, rotation=rotation)
+    base_size = unit_model.model.base_size
+    box = base_size is not None and is_box(base_size.name)
+    return Base(x=x, y=y, width_mm=width, height_mm=height, rotation=rotation, box=box)
 
 
 def deployable_units(player: GamePlayer) -> list[Unit]:
@@ -241,7 +246,7 @@ def _edges(polygon: list[Point]):
 
 
 def _is_round(base: Base) -> bool:
-    return base.width_mm == base.height_mm
+    return base.width_mm == base.height_mm and not base.box
 
 
 def _radius(base: Base) -> float:
@@ -249,7 +254,16 @@ def _radius(base: Base) -> float:
 
 
 def outline(base: Base, points: int = OUTLINE_POINTS) -> list[Point]:
-    # Points around the edge of a base.
+    # Points around the edge of a base (a box's: its corners and points
+    # along each side).
+    if base.box:
+        corners = base_corners(base)
+        per_side = max(1, points // 4)
+        return [
+            (p[0] + (q[0] - p[0]) * i / per_side, p[1] + (q[1] - p[1]) * i / per_side)
+            for p, q in _edges(corners)
+            for i in range(per_side)
+        ]
     a, b = base.semi_axes
     result = []
     for i in range(points):
@@ -262,7 +276,12 @@ def outline(base: Base, points: int = OUTLINE_POINTS) -> list[Point]:
 def wholly_inside(base: Base, polygon: list[Point]) -> bool:
     # Whether all of a base is over a polygon, convex or not (touching an edge
     # counts as inside). Scaled so the base is a unit circle (edges stay
-    # straight): its centre must be inside, and no edge nearer it than 1.
+    # straight): its centre must be inside, and no edge nearer it than 1. (A
+    # box: its edge all inside, and no corner of the polygon within it.)
+    if base.box:
+        return all(
+            _contains(p, polygon) or _on_edge(p, polygon) for p in outline(base)
+        ) and not any(_inside_base(p, base) for p in polygon)
     shape = [_to_unit_circle(p, base) for p in polygon]
     return _contains((0.0, 0.0), shape) and all(
         _distance_to_segment(p, q) >= 1 - TOLERANCE for p, q in _edges(shape)
@@ -272,11 +291,19 @@ def wholly_inside(base: Base, polygon: list[Point]) -> bool:
 def _inside_base(point: Point, base: Base) -> bool:
     # Whether a point is strictly inside a base (not on its edge).
     x, y = _to_unit_circle(point, base)
+    if base.box:
+        return max(abs(x), abs(y)) < 1 - TOLERANCE
     return math.hypot(x, y) < 1 - TOLERANCE
+
+
+def _on_edge(point: Point, polygon: list[Point]) -> bool:
+    return any(_segment_distance(point, p, q) <= TOLERANCE for p, q in _edges(polygon))
 
 
 def overlaps(first: Base, second: Base) -> bool:
     # Whether two bases overlap (touching doesn't count).
+    if first.box and second.box:
+        return convex_overlap(base_corners(first), base_corners(second), touching=False)
     if _is_round(first) and _is_round(second):
         apart = math.hypot(first.x - second.x, first.y - second.y)
         return apart < _radius(first) + _radius(second) - TOLERANCE
@@ -291,6 +318,8 @@ def overlaps_polygon(base: Base, polygon: list[Point]) -> bool:
     # Whether a base overlaps a convex polygon (touching doesn't count).
     # Scaled so the base is a unit circle: its centre is inside, or an edge
     # passes nearer it than 1.
+    if base.box:
+        return convex_overlap(base_corners(base), polygon, touching=False)
     shape = [_to_unit_circle(p, base) for p in polygon]
     return _contains_origin(shape) or any(
         _distance_to_segment(p, q) < 1 - TOLERANCE for p, q in _edges(shape)
@@ -327,9 +356,19 @@ def gap(first: Base, second: Base) -> float:
     if overlaps(first, second):
         return 0.0
     second_outline = outline(second)
-    return min(
+    nearest = min(
         _segment_distance(p, q, r) for p in outline(first) for q, r in _edges(second_outline)
     )
+    if first.box or second.box:
+        # (Two boxes' nearest points can be a corner of either: both ways.)
+        first_outline = outline(first)
+        nearest = min(
+            nearest,
+            min(
+                _segment_distance(p, q, r) for p in second_outline for q, r in _edges(first_outline)
+            ),
+        )
+    return nearest
 
 
 def distance_to_polygon(base: Base, polygon: list[Point]) -> float:
@@ -341,12 +380,38 @@ def distance_to_polygon(base: Base, polygon: list[Point]) -> float:
             return 0.0
         nearest = min(_segment_distance(centre, p, q) for p, q in _edges(polygon))
         return max(0.0, nearest - _radius(base))
+    if base.box:
+        corners = base_corners(base)
+        if (
+            any(_contains(c, polygon) for c in corners)
+            or any(_inside_base(p, base) for p in polygon)
+            or _edges_cross(corners, polygon)
+        ):
+            return 0.0
+        return min(
+            min(_segment_distance(c, p, q) for c in corners for p, q in _edges(polygon)),
+            min(_segment_distance(p, c, d) for p in polygon for c, d in _edges(corners)),
+        )
     shape = [_to_unit_circle(p, base) for p in polygon]
     if _contains((0.0, 0.0), shape) or any(
         _distance_to_segment(p, q) <= 1 + TOLERANCE for p, q in _edges(shape)
     ):
         return 0.0
     return min(_segment_distance(o, p, q) for o in outline(base) for p, q in _edges(polygon))
+
+
+def _edges_cross(first: list[Point], second: list[Point]) -> bool:
+    # Whether an edge of one polygon crosses (or touches) an edge of the other.
+    def side(a: Point, b: Point, c: Point) -> float:
+        return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+    for p, q in _edges(first):
+        for r, s in _edges(second):
+            d1, d2 = side(r, s, p), side(r, s, q)
+            d3, d4 = side(p, q, r), side(p, q, s)
+            if d1 * d2 <= 0 and d3 * d4 <= 0:
+                return True
+    return False
 
 
 # --- checking a unit's placement ---
