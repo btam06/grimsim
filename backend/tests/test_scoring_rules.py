@@ -222,3 +222,34 @@ async def test_an_embarked_unit_can_be_a_beacon(client: AsyncClient, session, tm
     game_id, t, p = await _transport_game(client, session, tmp_path)
     game = await _load_game(session, game_id)
     assert p["unit_id"] in {u.id for u in mission_state.beacon_candidates(game, 1)}
+
+
+async def test_a_card_drawn_in_the_command_phase_can_be_offered_a_redraw(
+    client: AsyncClient, session, tmp_path, monkeypatch
+):
+    # Newly drawn cards (not yet saved) get their redraw offers - e.g. Behind
+    # Enemy Lines, drawn in the first battle round.
+    from sqlalchemy import select
+
+    game_id, a, d = await _game(client, session, tmp_path, monkeypatch)
+    query = select(SecondaryMission).where(SecondaryMission.name == "Behind Enemy Lines")
+    if (await session.execute(query)).scalar_one_or_none() is None:
+        session.add(
+            SecondaryMission(
+                name="Behind Enemy Lines", completes_on="either", fixed_points=None,
+                tactical_points=3,
+            )
+        )
+        await session.commit()
+    game = await _load_game(session, game_id)
+    assert game.battle_round == 1
+    player = next(p for p in game.players if p.seat == 2)
+    # The whole deck, so it's drawn.
+    drawn = await game_service._draw_tactical(session, game, player, count=100)
+    assert "Behind Enemy Lines" in {c.mission.name for c in drawn}
+    mission_state.cards_drawn(game, 2, drawn)
+    await session.commit()
+    [prompt] = (await client.get(f"/games/{game_id}/mission")).json()["prompts"]
+    behind = next(c for c in drawn if c.mission.name == "Behind Enemy Lines")
+    assert prompt["kind"] == "redraw"
+    assert behind.id in {o["id"] for o in prompt["options"]}

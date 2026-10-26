@@ -88,3 +88,43 @@ async def test_a_unit_without_scouts_on_every_model_cant_scout(
     assert scouts.distance(deployment.find_unit(game, s["unit_id"])) == 6
     a = next(u for u in deployment.deployable_units(game.players[0]) if u.id != s["unit_id"])
     assert scouts.distance(a) == 0
+
+
+async def test_scouts_from_wargear_after_the_roll_off(
+    client: AsyncClient, session, tmp_path, monkeypatch
+):
+    # A unit whose wargear gives it Scouts (e.g. an Orbital Comms Array) - its
+    # abilities have to be loaded with the game.
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from app.models import UnitModel, Wargear, WargearAbility
+
+    rolls = iter([2, 5])
+    monkeypatch.setattr(first_turn.random, "randint", lambda a, b: next(rolls))
+    units = {1: [("A", 1, {}), ("O", 1, {})], 2: [("D", 1, {})]}
+    game = await _game(client, session, tmp_path, units=units, first=None)
+    game_id = game["id"]
+    deployment_ = await _deployment(client, game_id)
+    a, o, d = (_unit_named(deployment_, n) for n in "AOD")
+    unit_model = (
+        await session.execute(
+            select(UnitModel)
+            .options(selectinload(UnitModel.wargear))
+            .where(UnitModel.id == o["models"][0]["unit_model_id"])
+        )
+    ).scalar_one()
+    gear = Wargear(name="Orbital Comms Array", model_id=unit_model.model_id)
+    gear.abilities = [WargearAbility(name='Scouts 6"', description="Scouts")]
+    unit_model.wargear.append(gear)
+    await session.commit()
+    for unit, spot in ((a, (20, 40)), (d, (20, 4)), (o, (40, 40))):
+        response = await _deploy(client, game_id, unit, _row(unit, *spot))
+        assert response.status_code == 200, response.text
+    session.expire_all()
+    response = await client.post(f"/games/{game_id}/first-turn/roll")
+    assert response.status_code == 200, response.text
+    # Seat 2 rolled higher and goes first, but only seat 1 has Scouts.
+    assert response.json()["scouting_seat"] == 1
+    scouts = (await client.get(f"/games/{game_id}/scouts")).json()
+    assert [(u["unit_id"], u["distance"]) for u in scouts["units"]] == [(o["unit_id"], 6)]

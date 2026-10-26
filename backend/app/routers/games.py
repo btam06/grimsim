@@ -16,6 +16,7 @@ from app.models import (
     Stratagem,
     Unit,
     UnitModel,
+    Wargear,
 )
 from app.schemas import (
     ChargeIn,
@@ -303,6 +304,12 @@ def _game_options():
         .selectinload(ArmyList.units)
         .selectinload(Unit.unit_models)
         .selectinload(UnitModel.weapons),
+        # Their wargear's abilities (e.g. an Orbital Comms Array's Scouts 6").
+        players.selectinload(GamePlayer.army_list)
+        .selectinload(ArmyList.units)
+        .selectinload(Unit.unit_models)
+        .selectinload(UnitModel.wargear)
+        .selectinload(Wargear.abilities),
         players.selectinload(GamePlayer.army_list)
         .selectinload(ArmyList.units)
         .selectinload(Unit.unit_models)

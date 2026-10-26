@@ -114,6 +114,21 @@ function ListFormPage({
     const enhancement = enhancements.find((e) => e.id === id)
     return enhancement ? `${enhancement.name} (+${enhancement.points} pts)` : `#${id}`
   }
+  // The list's points: its units', plus their enhancements' and upgrades'.
+  const enhancementPoints = (id) => enhancements.find((e) => e.id === id)?.points ?? 0
+  const unitPoints = unitsInThisList.reduce((sum, u) => sum + u.points, 0)
+  const extraPoints = unitsInThisList.reduce(
+    (sum, u) =>
+      sum +
+      (u.upgrade_id !== null ? enhancementPoints(u.upgrade_id) : 0) +
+      u.unit_models.reduce(
+        (s, m) => s + (m.enhancement_id !== null ? enhancementPoints(m.enhancement_id) : 0),
+        0
+      ),
+    0
+  )
+  const totalPoints = unitPoints + extraPoints
+  const pointsLimit = Number(form.points_limit)
 
   // What the faction's lists select, if anything (e.g. a Space Marines
   // Chapter).
@@ -272,6 +287,16 @@ function ListFormPage({
       {editingList && (
         <>
           <h3>Units</h3>
+          <p className={totalPoints > pointsLimit ? 'error' : 'game-totals'}>
+            <strong>{totalPoints}</strong> / {pointsLimit} pts
+            {extraPoints > 0 && (
+              <span className="hint">
+                {' '}
+                ({unitPoints} units + {extraPoints} enhancements and upgrades)
+              </span>
+            )}
+            {totalPoints > pointsLimit && ` — ${totalPoints - pointsLimit} pts over`}
+          </p>
           <button type="button" onClick={() => onAddUnit(editingList.id)}>
             + Add Unit
           </button>

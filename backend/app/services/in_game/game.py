@@ -233,6 +233,9 @@ async def _draw_tactical(
             # draw's deck already).
             card.status = SHUFFLED
             replacing += 1
+    # Saved now, so the new cards have ids for the choices made about them
+    # (e.g. whether to redraw one - see mission_state.cards_drawn).
+    await session.flush()
     return [c for c in drawn if c.status == "active"]
 
 
