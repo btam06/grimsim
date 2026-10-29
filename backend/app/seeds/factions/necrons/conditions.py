@@ -1,4 +1,5 @@
 from app.combat_rules.conditions import (
+    SET_UP_THIS_TURN,
     attacker_led_by_character,
     critical_hit,
     defender_below_half_strength,
@@ -34,7 +35,7 @@ PROPHET_OF_DESTRUCTION_TARGET = "prophet_of_destruction_target"
 WITHIN_POWER_MATRIX = "within_power_matrix"
 TARGETING_CLOSEST_ELIGIBLE = "targeting_closest_eligible"
 WORTHY_FOES_TARGET = "worthy_foes_target"
-SET_UP_THIS_TURN = "set_up_this_turn"
+# SET_UP_THIS_TURN is a core position (see app/combat_rules/conditions.py).
 COLD_FERVOUR_TRIGGERED = "cold_fervour_triggered"
 TARGET_UNRAVELLING = "target_unravelling"
 NEAR_PROPHET_OF_DESTRUCTION = "near_prophet_of_destruction"

@@ -34,35 +34,40 @@ CORE_ENTRIES = [
     ),
     (
         "Deadly Demise D3",
-        "When this model is destroyed, roll one D6. On a 6, each unit within 6\" of it "
-        "suffers D3 mortal wounds.",
+        "Each time a model in this unit is destroyed, after the units embarked within it (if "
+        "any) have made their emergency disembark moves, roll one D6. On a 6, that model "
+        "suffers a deadly demise; each unit within 6\" of that model suffers D3 mortal wounds.",
         [ALWAYS],
         [DEADLY_DEMISE],
     ),
     (
         "Deadly Demise D6",
-        "When this model is destroyed, roll one D6. On a 6, each unit within 6\" of it "
-        "suffers D6 mortal wounds.",
+        "Each time a model in this unit is destroyed, after the units embarked within it (if "
+        "any) have made their emergency disembark moves, roll one D6. On a 6, that model "
+        "suffers a deadly demise; each unit within 6\" of that model suffers D6 mortal wounds.",
         [ALWAYS],
         [DEADLY_DEMISE],
     ),
     (
         "Deadly Demise 1",
-        "When this model is destroyed, roll one D6. On a 6, each unit within 6\" of it "
-        "suffers 1 mortal wound.",
+        "Each time a model in this unit is destroyed, after the units embarked within it (if "
+        "any) have made their emergency disembark moves, roll one D6. On a 6, that model "
+        "suffers a deadly demise; each unit within 6\" of that model suffers 1 mortal wound.",
         [ALWAYS],
         [DEADLY_DEMISE],
     ),
     (
         "Stealth",
-        "Each time a ranged attack targets this unit, this unit has the Benefit of Cover.",
+        "If every model in a unit has this ability, each time a ranged attack targets that "
+        "unit, that unit has the benefit of cover against that attack.",
         [],
         [],
     ),
     (
         "Infiltrators",
-        "During deployment, this unit can be set up anywhere on the battlefield that is more "
-        "than 9\" horizontally away from the enemy deployment zone and all enemy models.",
+        "During deployment, if every model in a unit has this ability, it can be set up "
+        "anywhere on the battlefield that is more than 8\" horizontally from your opponent's "
+        "deployment zone and all enemy units.",
         [],
         [],
     ),
@@ -76,48 +81,61 @@ CORE_ENTRIES = [
     ),
     (
         "Firing Deck 2",
-        "Each time this TRANSPORT is selected to shoot, it can use the ranged weapons of up to "
-        "2 models embarked within it as if it were equipped with them. Until the end of the "
-        "turn, the units embarked within it are not eligible to shoot.",
+        "In your Shooting phase, each time this TRANSPORT is selected to shoot, if one or more "
+        "units are embarked within it: select up to 2 models embarked within it (excluding "
+        "models whose units have already been selected to shoot this phase); for each, select "
+        "one of its ranged weapons (excluding [ONE SHOT] weapons). Until this TRANSPORT has "
+        "resolved all of its attacks, it has those weapons in addition to its others. Until "
+        "the end of the turn, units embarked within it are not eligible to shoot.",
         [],
         [],
     ),
     (
         "Firing Deck 7",
-        "Each time this TRANSPORT is selected to shoot, it can use the ranged weapons of up to "
-        "7 models embarked within it as if it were equipped with them. Until the end of the "
-        "turn, the units embarked within it are not eligible to shoot.",
+        "In your Shooting phase, each time this TRANSPORT is selected to shoot, if one or more "
+        "units are embarked within it: select up to 7 models embarked within it (excluding "
+        "models whose units have already been selected to shoot this phase); for each, select "
+        "one of its ranged weapons (excluding [ONE SHOT] weapons). Until this TRANSPORT has "
+        "resolved all of its attacks, it has those weapons in addition to its others. Until "
+        "the end of the turn, units embarked within it are not eligible to shoot.",
         [],
         [],
     ),
     (
         "Scouts 9\"",
-        "At the start of the first battle round, before the first turn begins, this unit can "
-        "make a Normal move of up to 9\".",
+        "In the Resolve Pre-battle Abilities step, if every model in a unit has this ability: "
+        "if it's in strategic reserves, you can set it up anywhere wholly within your "
+        "deployment zone; if it's wholly within your deployment zone, it can make a scout move "
+        "of up to 9\", ending more than 8\" horizontally from all enemy units; if it's "
+        "embarked within a DEDICATED TRANSPORT wholly within your deployment zone, and every "
+        "model embarked within it has Scouts, that DEDICATED TRANSPORT can make a scout move.",
         [],
         [],
     ),
     (
         "Scouts 6\"",
-        "At the start of the first battle round, before the first turn begins, this unit can "
-        "make a Normal move of up to 6\".",
+        "In the Resolve Pre-battle Abilities step, if every model in a unit has this ability: "
+        "if it's in strategic reserves, you can set it up anywhere wholly within your "
+        "deployment zone; if it's wholly within your deployment zone, it can make a scout move "
+        "of up to 6\", ending more than 8\" horizontally from all enemy units; if it's "
+        "embarked within a DEDICATED TRANSPORT wholly within your deployment zone, and every "
+        "model embarked within it has Scouts, that DEDICATED TRANSPORT can make a scout move.",
         [],
         [],
     ),
     (
         "Fights First",
-        "Units with this ability that are eligible to fight do so in the Fights First step, "
-        "provided every model in the unit has this ability.",
+        "While every model in a unit has this ability, that unit is a Fights First unit (see "
+        "the Resolve Fights First Combats step of the Fight phase).",
         [],
         [],
     ),
     (
         "Deep Strike",
-        "During the Declare Battle Formations step, if every model in this unit has this "
-        "ability, you can set it up in Reserves instead of setting it up on the battlefield. "
-        "If you do, in the Reinforcements step of one of your Movement phases you can set up "
-        "this unit anywhere on the battlefield that is more than 9\" horizontally away from "
-        "all enemy models.",
+        "Each time this unit makes an ingress move, if every model in this unit has this "
+        "ability, it can be set up anywhere on the battlefield that is more than 8\" "
+        "horizontally from all enemy units, even if that is within your opponent's deployment "
+        "zone.",
         [],
         [],
     ),

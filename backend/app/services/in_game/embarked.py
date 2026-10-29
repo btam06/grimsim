@@ -18,13 +18,21 @@ from app.services.in_game.deployment import TOLERANCE, Base, Placement, gap
 # player's TRANSPORT units at the start of the battle (see
 # app/services/in_game/battle_formations.py) starts the battle inside it:
 # not on the battlefield, but there while its transport is (e.g. as a
-# Beacon unit). In its player's movement phase it can disembark: set up
-# with every model wholly within 3" of its transport, not within Engagement
-# Range of an enemy unit (and on the battlefield, not overlapping, in
-# coherency - as when deploying) - unless its transport Advanced or Fell
-# Back this turn (an assault disembark move). If its transport has already
-# moved this phase, that counts as its Normal move (it can't move again);
-# otherwise it can still move.
+# Beacon unit). In its player's movement phase it can disembark (18.04) -
+# unless its transport Advanced or Fell Back this phase - set up (on the
+# battlefield, not overlapping, in coherency - as when deploying), not
+# engaged, in one of three modes, the first that applies:
+# - rapid: its transport made a Normal (or ingress) move this phase - every
+#   model wholly within 3" of it (after an ingress move, more than 8" from
+#   enemy models, and not in the enemy deployment zone in the first two
+#   battle rounds unless it Deep Struck). It can't move again, nor charge
+#   this turn.
+# - tactical: its transport hasn't moved - wholly within 3"; it can still
+#   make a Normal move or Advance.
+# - combat: if it can't be set up that way (the player says so) - wholly
+#   within 6", engaged only with enemy units its transport is engaged with,
+#   and each model makes a hazard roll; the unit is Battle-shocked, and it
+#   can't move again, nor charge this turn.
 #
 # A transport ability can let its units disembark after it Advanced anyway
 # (datasheet_abilities SHOCK_DISEMBARK_AFTER - e.g. Rapid Disembarkation): a
@@ -46,7 +54,9 @@ from app.services.in_game.deployment import TOLERANCE, Base, Placement, gap
 # app/services/in_game/emergency.py.)
 
 DISEMBARK_RANGE = 3.0
+COMBAT_DISEMBARK_RANGE = 6.0
 EMBARK_RANGE = 3.0
+RAPID, TACTICAL, COMBAT = "rapid", "tactical", "combat"
 ENGAGEMENT_RANGE = 2.0
 # The kind of move (see GameUnitMove) disembarking from a transport that's
 # moved counts as.
@@ -54,6 +64,11 @@ DISEMBARKED = "disembarked"
 # The transit (see GameUnitTransit) recorded, as well as "disembarked", for a
 # shock disembark move.
 SHOCK_DISEMBARKED = "shock_disembarked"
+# The transits recorded, as well as "disembarked", for rapid and combat
+# disembark moves (both stop the unit charging this turn).
+RAPID_DISEMBARKED = "rapid_disembarked"
+COMBAT_DISEMBARKED = "combat_disembarked"
+NO_CHARGE = (SHOCK_DISEMBARKED, RAPID_DISEMBARKED, COMBAT_DISEMBARKED)
 
 
 def _bad_request(detail: str) -> HTTPException:
@@ -162,7 +177,7 @@ def transited(game: Game, unit: Unit, kind: str) -> bool:
     )
 
 
-def _record(game: Game, unit: Unit, kind: str) -> None:
+def record_transit(game: Game, unit: Unit, kind: str) -> None:
     game.unit_transits.append(
         GameUnitTransit(
             unit_id=unit.id, battle_round=game.battle_round, turn_seat=game.turn_seat, kind=kind
@@ -232,6 +247,33 @@ def check_turn(game: Game, unit: Unit) -> Unit:
     return carrier
 
 
+def disembark_mode(game: Game, carrier: Unit, combat: bool = False) -> str:
+    # The disembark mode: rapid if the transport made a Normal (or ingress)
+    # move this phase - or a shock disembark (which is set up the same way);
+    # otherwise tactical, or combat if the player can't set the unit up that
+    # way (`combat`).
+    from app.services.in_game import movement, reinforcements
+
+    moved = movement.unit_move(game, carrier)
+    if moved is not None and moved.completed and moved.kind in (
+        "normal", reinforcements.ARRIVED, "advance", "fall_back"
+    ):
+        return RAPID
+    return COMBAT if combat else TACTICAL
+
+
+def no_charge(game: Game, unit: Unit) -> str | None:
+    # Why the unit can't declare a charge this turn after disembarking, if
+    # it can't.
+    if transited(game, unit, SHOCK_DISEMBARKED):
+        return "it made a shock disembark move this turn"
+    if transited(game, unit, RAPID_DISEMBARKED):
+        return "it made a rapid disembark move this turn"
+    if transited(game, unit, COMBAT_DISEMBARKED):
+        return "it made a combat or emergency disembark move this turn"
+    return None
+
+
 def surviving_models(game: Game, unit: Unit):
     # The unit's models that aren't destroyed (it may have lost some before
     # embarking) - those that disembark.
@@ -240,33 +282,71 @@ def surviving_models(game: Game, unit: Unit):
 
 
 def check_disembark(
-    game: Game, unit: Unit, placement: dict[int, tuple[float, float, float]]
+    game: Game,
+    unit: Unit,
+    placement: dict[int, tuple[float, float, float]],
+    combat: bool = False,
 ) -> Placement:
-    # Whether the unit could disembark with its models at `placement`.
+    # Whether the unit could disembark with its models at `placement` - in a
+    # combat disembark move, if `combat` and it can't be a rapid one.
+    from app.services.in_game import fighting, movement, reinforcements
+
     carrier = transport(game, unit)
+    mode = disembark_mode(game, carrier, combat) if carrier else TACTICAL
+    reach = COMBAT_DISEMBARK_RANGE if mode == COMBAT else DISEMBARK_RANGE
     models, bases = deployment.unit_bases(unit, placement, surviving_models(game, unit))
     others = deployment.placed_bases(game, unit)
     seat = deployment.owner(game, unit).seat
-    enemies = [b for p, _, b in others if p.seat != seat]
     carriers = _transport_bases(game, carrier) if carrier else []
+    # In a combat disembark, models can end engaged with enemy units the
+    # transport is engaged with.
+    allowed = (
+        {m.id for t in fighting.fight_targets(game, carrier) for m in t.unit_models}
+        if mode == COMBAT and carrier
+        else set()
+    )
+    enemies = [b for p, m, b in others if p.seat != seat and m.id not in allowed]
+    # After an ingress move, as the transport had to be set up.
+    move = movement.unit_move(game, carrier) if carrier else None
+    ingress = mode == RAPID and move is not None and move.kind == reinforcements.ARRIVED
+    far_from = [b for p, _, b in others if p.seat != seat]
+    layout = game.layout
+    side = "defender" if seat == game.attacker_seat else "attacker"
+    enemy_zone = layout.deployment.zone(side) if layout and layout.deployment else None
     problems = deployment.physical_problems(game, models, bases, others)
     for model in models:
         base = bases[model.id]
         found = []
-        if not regions.base_wholly_within_of(base, carriers, DISEMBARK_RANGE):
-            found.append('isn\'t wholly within 3" of its transport')
+        if not regions.base_wholly_within_of(base, carriers, reach):
+            found.append(f'isn\'t wholly within {reach:g}" of its transport')
         if any(gap(base, e) <= ENGAGEMENT_RANGE + TOLERANCE for e in enemies):
             found.append("is within Engagement Range of an enemy model")
+        if ingress:
+            if any(gap(base, e) < reinforcements.ENEMY_DISTANCE - TOLERANCE for e in far_from):
+                found.append('is within 8" of an enemy model (its transport arrived this turn)')
+            if (
+                not reinforcements.has_deep_strike(carrier)
+                and game.battle_round <= reinforcements.FIRST_ROUND
+                and enemy_zone
+                and deployment.distance_to_polygon(base, enemy_zone) <= TOLERANCE
+            ):
+                found.append("is in the enemy deployment zone (its transport arrived this turn)")
         problems[model.id] = found + problems[model.id]
     return deployment.summarise(models, problems)
 
 
-def disembark(game: Game, unit: Unit, placement: dict[int, tuple[float, float, float]]) -> None:
-    # The unit disembarks as placed, if it can.
-    from app.services.in_game import movement
+def disembark(
+    game: Game,
+    unit: Unit,
+    placement: dict[int, tuple[float, float, float]],
+    combat: bool = False,
+) -> None:
+    # The unit disembarks as placed, if it can (see disembark_mode).
+    from app.services.in_game import battle_shock
 
     carrier = check_turn(game, unit)
-    result = check_disembark(game, unit, placement)
+    mode = disembark_mode(game, carrier, combat)
+    result = check_disembark(game, unit, placement, combat)
     if not result.valid:
         raise _bad_request("can't disembark there: " + "; ".join(result.problems))
     for unit_model_id, (x, y, rotation) in placement.items():
@@ -274,7 +354,7 @@ def disembark(game: Game, unit: Unit, placement: dict[int, tuple[float, float, f
             GameModelPosition(unit_model_id=unit_model_id, x=x, y=y, rotation=rotation)
         )
     game.battle_formations.remove(deployment.battle_formation(game, unit))
-    _record(game, unit, "disembarked")
+    record_transit(game, unit, "disembarked")
     game.disembarkations.append(
         GameDisembarkation(
             unit_id=unit.id,
@@ -284,9 +364,16 @@ def disembark(game: Game, unit: Unit, placement: dict[int, tuple[float, float, f
         )
     )
     if shock(game, carrier):
-        _record(game, unit, SHOCK_DISEMBARKED)
-    moved = movement.unit_move(game, carrier)
-    if moved is not None and moved.completed:
+        record_transit(game, unit, SHOCK_DISEMBARKED)
+    elif mode == RAPID:
+        record_transit(game, unit, RAPID_DISEMBARKED)
+    elif mode == COMBAT:
+        record_transit(game, unit, COMBAT_DISEMBARKED)
+        battle_shock.battle_shock_outright(game, unit, "combat disembark", 0)
+        for unit_model in placement:
+            _hazard(game, unit, next(m for m in unit.unit_models if m.id == unit_model))
+    if mode != TACTICAL:
+        # It can't move again this phase.
         game.unit_moves.append(
             GameUnitMove(
                 unit_id=unit.id,
@@ -296,6 +383,25 @@ def disembark(game: Game, unit: Unit, placement: dict[int, tuple[float, float, f
                 completed=True,
             )
         )
+
+
+def _hazard(game: Game, unit: Unit, unit_model) -> None:
+    # A combat disembark's hazard roll for the model: on a failure it suffers
+    # mortal wounds by its keywords (see app/services/combat.py).
+    import random
+
+    from app.services.combat import hazard_failed, hazard_wounds
+    from app.services.in_game import casualties
+    from app.services.list_building.enhancements import model_keywords
+
+    if hazard_failed(random.randint(1, 6)):
+        wounds = sum(
+            1
+            for _ in range(hazard_wounds([model_keywords(unit, m) for m in unit.unit_models]))
+            if not casualties.resists(unit_model)
+        )
+        if wounds:
+            casualties._lose(game, unit_model, wounds)
 
 
 # --- embarking during the battle ---
@@ -317,6 +423,10 @@ def embark_reason(game: Game, unit: Unit) -> str | None:
         return "it hasn't made a Normal, Advance or Fall Back move this phase"
     if transited(game, unit, "disembarked"):
         return "it disembarked this phase: it can't embark in the same phase"
+    from app.services.in_game.shooting import set_up_this_turn
+
+    if set_up_this_turn(game, unit):
+        return "it was set up on the battlefield this turn"
     return None
 
 
@@ -383,7 +493,7 @@ def _take_aboard(game: Game, unit: Unit, carrier: Unit) -> None:
     game.battle_formations.append(
         GameBattleFormation(unit_id=unit.id, place="embarked", transport_unit_id=carrier.id)
     )
-    _record(game, unit, "embarked")
+    record_transit(game, unit, "embarked")
 
 
 def embark_now(game: Game, unit: Unit, carrier: Unit) -> None:

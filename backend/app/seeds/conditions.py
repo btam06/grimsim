@@ -46,6 +46,7 @@ from app.combat_rules.conditions import (
     TARGET_WITHIN_9,
     TARGET_LED_BY_CHARACTER,
     TARGET_MODEL_CHARACTER,
+    TARGET_MODEL_VEHICLE,
     TARGET_MONSTER_OR_VEHICLE,
     TARGET_NOT_IMPERIUM_OR_CHAOS,
     TARGET_NOT_MONSTER_OR_VEHICLE,
@@ -215,6 +216,11 @@ CORE_ENTRIES = [
         TARGET_MODEL_CHARACTER,
         "Target Model is a Character",
         "The defending model is a CHARACTER.",
+    ),
+    (
+        TARGET_MODEL_VEHICLE,
+        "Target Model is a Vehicle",
+        "The defending model is a VEHICLE.",
     ),
     (
         STRENGTH_EXCEEDS_TOUGHNESS,

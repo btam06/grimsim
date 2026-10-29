@@ -32,8 +32,9 @@ async def _insane_bravery(session):
 
 
 async def _destroy(session, game_id, unit, count):
-    # Destroys the unit's first `count` models.
-    for model in unit["models"][:count]:
+    # Destroys the unit's last `count` models (those left stay in coherency,
+    # so none are removed at the end of a turn).
+    for model in unit["models"][len(unit["models"]) - count:]:
         session.add(
             GameModelDamage(
                 game_id=game_id,
@@ -95,7 +96,7 @@ async def test_battle_shock_step_at_half_strength(
     deployment_ = await _deployment(client, game_id)
     assert _unit_named(deployment_, "A")["battle_shocked"]
     [objective] = deployment_["objectives"]
-    assert (objective["oc"]["1"], objective["controller"]) == (0, None)
+    assert (objective["oc"]["1"], objective["live_controller"]) == (0, None)
 
     # Its next Battle-shock step: it tests again - 3 + 3 = 6 passes.
     await _advance_to(client, game_id, 2, 1, "command")
@@ -103,7 +104,8 @@ async def test_battle_shock_step_at_half_strength(
     state = (await _take(client, game_id, test)).json()
     assert state["battle_shocked"] == []
     [objective] = (await _deployment(client, game_id))["objectives"]
-    assert (objective["oc"]["1"], objective["controller"]) == (2, 1)
+    # (Seat 1 would control it, as of the end of this phase.)
+    assert (objective["oc"]["1"], objective["live_controller"]) == (2, 1)
 
 
 async def test_no_test_above_half_strength(client: AsyncClient, session, tmp_path):

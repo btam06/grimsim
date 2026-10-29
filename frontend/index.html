@@ -4,9 +4,34 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Grimsim</title>
+    <style>
+      /* While the app loads: the loading skull (see LoadingSkull), until
+         React replaces it. */
+      @keyframes loading-skull-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .loading-skull {
+        position: fixed;
+        top: 0.5rem;
+        left: 0.5rem;
+        width: 1.5rem;
+        height: 1.5rem;
+        z-index: 2000;
+        fill: currentColor;
+        opacity: 0.8;
+        pointer-events: none;
+        animation: loading-skull-spin 1.2s linear infinite;
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <svg class="loading-skull" viewBox="0 0 512 512" role="status" aria-label="Loading">
+        <path d="M416 427.4c58.5-44 96-111.6 96-187.4 0-132.5-114.6-240-256-240S0 107.5 0 240c0 75.8 37.5 143.4 96 187.4L96 464c0 26.5 21.5 48 48 48l32 0 0-40c0-13.3 10.7-24 24-24s24 10.7 24 24l0 40 64 0 0-40c0-13.3 10.7-24 24-24s24 10.7 24 24l0 40 32 0c26.5 0 48-21.5 48-48l0-36.6zM96 256a64 64 0 1 1 128 0 64 64 0 1 1 -128 0zm256-64a64 64 0 1 1 0 128 64 64 0 1 1 0-128z" />
+      </svg>
+    </div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

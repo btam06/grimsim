@@ -14,14 +14,16 @@ from app.models import (
     Unit,
     UnitModel,
 )
-from app.services.in_game import casualties, deployment
+from app.services.in_game import casualties, deployment, regions
 from app.services.in_game.deployment import BOARD, TOLERANCE, Base, Placement, gap
 
-# Emergency disembarking: when a transport is destroyed with units embarked
-# in it, each of them must disembark - set up within 3" of where the
-# transport was (its wreck), not overlapping it, and touching it if they can.
-# Models that can't be set up within 3" (the player leaves them out) are
-# destroyed. Each model set up then takes a hazard roll. Once every unit
+# Emergency disembarking (18.05): when a transport is destroyed with units
+# embarked in it, each of them must disembark - set up wholly within 6" of
+# where the transport was (its wreck), not overlapping it, and as close as
+# possible to it (touching it if they can). Models that can't be set up
+# within 6" (the player leaves them out) are destroyed. Each model set up
+# takes a hazard roll; the unit is Battle-shocked, and can't declare a
+# charge this turn. Once every unit
 # that was inside is out, the transport explodes if it has Deadly Demise: one
 # D6 for each of its models with it, and on a 6, each unit within 6" of it
 # suffers its mortal wounds (1, D3 or D6 - rolled for each unit).
@@ -29,7 +31,7 @@ from app.services.in_game.deployment import BOARD, TOLERANCE, Base, Placement, g
 # Until every unit is out, the game waits (it can't advance) - the
 # transport's owner sets them up, whoever's turn it is.
 
-EMERGENCY_RANGE = 3.0
+EMERGENCY_RANGE = 6.0
 DEADLY_DEMISE_RANGE = 6.0
 # How close a model has to be to the wreck to count as touching it.
 TOUCHING = 0.1
@@ -207,8 +209,8 @@ def check(game: Game, unit: Unit, placement: dict[int, tuple[float, float, float
     for model in models:
         base = bases[model.id]
         found = []
-        if not any(gap(base, w) <= EMERGENCY_RANGE + TOLERANCE for w in wrecks):
-            found.append('isn\'t within 3" of its transport')
+        if not regions.base_wholly_within_of(base, wrecks, EMERGENCY_RANGE):
+            found.append('isn\'t wholly within 6" of its transport')
         if any(deployment.overlaps(base, w) for w in wrecks):
             found.append("overlaps its transport")
         elif not _touching(base, wrecks):
@@ -230,7 +232,7 @@ def _hazard(game: Game, record: GameEmergencyDisembark, unit: Unit, unit_model: 
     roll = random.randint(1, 6)
     wounds = 0
     if hazard_failed(roll):
-        for _ in range(hazard_wounds(model_keywords(unit, unit_model))):
+        for _ in range(hazard_wounds([model_keywords(unit, m) for m in unit.unit_models])):
             if not casualties.resists(unit_model):
                 wounds += 1
     game.emergency_rolls.append(
@@ -333,6 +335,10 @@ def disembark(game: Game, unit: Unit, placement: dict[int, tuple[float, float, f
     for unit_model in survivors:
         if unit_model.id in placement:
             _hazard(game, record, unit, unit_model)
+    from app.services.in_game import battle_shock, embarked
+
+    battle_shock.battle_shock_outright(game, unit, "emergency disembark", 0)
+    embarked.record_transit(game, unit, embarked.COMBAT_DISEMBARKED)
     if not any(e.transport_unit_id == record.transport_unit_id for e in pending(game)):
         _explode(game, record.transport_unit_id)
 

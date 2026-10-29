@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from app.models import Game, GameSecuredObjective, Unit, UnitModel
+from app.models import Game, GameObjectiveControl, GameSecuredObjective, Unit, UnitModel
 from app.models.terrain import TerrainObjective
 from app.services.in_game import battle_shock, deployment
 from app.services.in_game.terrain import area_polygon, within
@@ -12,7 +12,9 @@ from app.services.in_game.terrain import area_polygon, within
 # Each player's Objective Control there is the sum of the OC of their models
 # on it (see model_oc - rules can change a model's OC, and a Battle-shocked
 # unit's models have 0); the player with more controls it, and in a tie
-# neither does.
+# neither does. Who controls it is determined at the end of each phase and
+# turn (14.02), and stays so until the next: control(game) is that; with
+# `live`, who would if it were determined now (a preview).
 #
 # An objective's kind is the layout's: a home objective (the attacker's or
 # the defender's), an expansion objective, or a central one.
@@ -48,14 +50,36 @@ class ObjectiveControl:
     controller: int | None = None
     # The player who's secured it, if anyone has (and it still is).
     secured_by: int | None = None
+    # Who would control it if it were determined now.
+    live_controller: int | None = None
 
 
 def objectives(game: Game) -> list[TerrainObjective]:
     return list(game.layout.objectives) if game.layout is not None else []
 
 
-def control(game: Game) -> list[ObjectiveControl]:
-    # Each objective on the battlefield, and who controls it now.
+def _official(game: Game) -> dict[int, int | None]:
+    return {c.objective_id: c.seat for c in game.objective_controls}
+
+
+def determine(game: Game) -> None:
+    # The end of a phase or turn: who controls each objective is determined
+    # (14.02).
+    live = {c.objective.id: c.controller for c in control(game, live=True)}
+    records = {c.objective_id: c for c in game.objective_controls}
+    for objective_id, seat in live.items():
+        if objective_id in records:
+            records[objective_id].seat = seat
+        else:
+            game.objective_controls.append(
+                GameObjectiveControl(objective_id=objective_id, seat=seat)
+            )
+
+
+def control(game: Game, live: bool = False) -> list[ObjectiveControl]:
+    # Each objective on the battlefield, each player's OC on it now, and who
+    # controls it - as determined at the end of the last phase or turn, or
+    # with `live`, as it would be now.
     placed = deployment.positions(game)
     models = [
         (player.seat, unit_model)
@@ -69,6 +93,7 @@ def control(game: Game) -> list[ObjectiveControl]:
         for _, m in models
     }
     shocked = battle_shock.battle_shocked_ids(game)
+    official = _official(game)
     found = []
     for objective in objectives(game):
         areas = [area_polygon(a) for a in objective.areas]
@@ -80,12 +105,14 @@ def control(game: Game) -> list[ObjectiveControl]:
         leaders = [seat for seat, total in oc.items() if total == best]
         controller = leaders[0] if best > 0 and len(leaders) == 1 else None
         holder = secured_by(game, objective.id)
+        now = holder if holder is not None else controller
         found.append(
             ObjectiveControl(
                 objective=objective,
                 oc=oc,
-                controller=holder if holder is not None else controller,
+                controller=now if live else official.get(objective.id),
                 secured_by=holder,
+                live_controller=now,
             )
         )
     return found
@@ -114,7 +141,7 @@ def refresh_secured(game: Game) -> None:
     # OC on them than they do are no longer secured.
     if not game.secured_objectives:
         return
-    by_id = {c.objective.id: c for c in control(game)}
+    by_id = {c.objective.id: c for c in control(game, live=True)}
     for record in list(game.secured_objectives):
         current = by_id.get(record.objective_id)
         if current is None or _opponent_oc(current.oc, record.seat) > current.oc.get(
@@ -158,7 +185,8 @@ def secure_at_end_of(game: Game, phase: str) -> None:
     ]
     if not securing:
         return
-    current = control(game)
+    # (Controlling at the end of the phase: as determined then.)
+    current = control(game, live=True)
     for unit in securing:
         for objective in current:
             if unit_controls(game, unit, objective):

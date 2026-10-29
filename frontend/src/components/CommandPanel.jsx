@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { chooseCommandOption, getCommand, selectCommandObjective } from '../api'
+import { useBoardOverlay } from '../boardOverlay'
 import CardTextAccordion from './CardTextAccordion'
 import { RuleOptionPicker } from './RuleOptionPicker'
 import Select from './Select'
@@ -16,7 +17,11 @@ import Select from './Select'
 // only be selected once a battle. Models that healed at the start of the
 // phase (e.g. Self-repair Mechanisms) are listed too. Some detachment rules
 // have the player select an objective marker (e.g. Acquisition At Any Cost:
-// their Acquisition objective marker) before the phase ends.
+// their Acquisition objective marker) before the phase ends. A few abilities
+// are selected in another phase instead (e.g. Author of the Codex, in the
+// Movement phase): this panel shows those then. While it's shown, the ranges
+// of abilities that apply to another unit are drawn round their models, and
+// the units they apply to are highlighted.
 
 function abilityKey(ability) {
   if (ability.faction_ability_id !== null) return `rule-${ability.faction_ability_id}`
@@ -92,6 +97,19 @@ function CommandPanel({ game, onError }) {
     }
   }
 
+  // On the board: each ability's range round its model, and the unit it
+  // applies to (picked, or the one it does).
+  const abilities = command?.abilities ?? []
+  useBoardOverlay('command', {
+    ranges: abilities
+      .filter((a) => a.target_range && a.unit_model_id)
+      .map((a) => ({ unitModelId: a.unit_model_id, range: a.target_range, name: a.ability })),
+    unitIds: abilities
+      .filter((a) => a.needs_target && (a.chosen || targets[abilityKey(a)] !== undefined))
+      .map((a) => targetOf(a))
+      .filter((id) => id !== null),
+  })
+
   if (!command || command.seat === null) return null
   const selections = command.objective_selections ?? []
   if (command.abilities.length === 0 && command.heals.length === 0 && selections.length === 0) {
@@ -101,9 +119,10 @@ function CommandPanel({ game, onError }) {
 
   return (
     <div className="deployment-panel">
-      <h3>Command phase</h3>
+      <h3>{command.phase === 'movement' ? 'Movement phase abilities' : 'Command phase'}</h3>
       <p>
-        <strong>{player?.user_name}</strong>&apos;s abilities this Command phase.
+        <strong>{player?.user_name}</strong>&apos;s abilities this{' '}
+        {command.phase === 'movement' ? 'Movement' : 'Command'} phase.
       </p>
       {command.heals.length > 0 && (
         <ul className="round-start-rules">
@@ -235,6 +254,12 @@ function CommandPanel({ game, onError }) {
               )}
               {ability.required && !ability.chosen && !noTargets && (
                 <p className="hint">Select one before the Command phase ends.</p>
+              )}
+              {ability.target_range && (
+                <p className="hint">
+                  Its {ability.target_range}&quot; range is drawn on the board; the unit it applies
+                  to is highlighted.
+                </p>
               )}
               <CardTextAccordion text={ability.description} label="Rule text" />
             </li>

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useBoardOverlay } from '../boardOverlay'
 import Select from './Select'
 
 // Psychic abilities (see app/services/in_game/psychic.py): each PSYKER unit on
@@ -10,6 +11,10 @@ import Select from './Select'
 
 function PsychicPanel({ game, psychic, onUse }) {
   const [targets, setTargets] = useState({})
+  // The units picked as targets, highlighted on the board.
+  useBoardOverlay('psychic', {
+    unitIds: Object.values(targets).filter((id) => id !== null && id !== '').map(Number),
+  })
   if (!psychic || psychic.units.length === 0) return null
   return (
     <div className="deployment-panel">

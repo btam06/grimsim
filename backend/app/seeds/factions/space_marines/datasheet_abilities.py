@@ -1,4 +1,4 @@
-from app.combat_rules import Rule, RuleOption
+from app.combat_rules import CommandChoice, Rule, RuleOption
 from app.combat_rules.conditions import (
     ALWAYS,
     CHARGED,
@@ -339,7 +339,10 @@ CALCULATOR_NOTES = {
         "Pick the doctrines under Faction Rules in the calculator; in a game, all three are "
         "active for this unit."
     ),
-    "Author of the Codex": "Descriptive only: not modelled in a game yet.",
+    "Author of the Codex": (
+        "Pick the doctrine under Faction Rules for the unit selected; in a game, it's selected "
+        "in your Movement phase for a visible friendly ADEPTUS ASTARTES unit within 12\"."
+    ),
     "Terminatus Assault (Deathwatch)": (
         "Descriptive only in the calculator; in a game, the unit can re-roll its charge roll, "
         "and enemy units engaged with it after its charge move take Battle-shock tests."
@@ -361,6 +364,23 @@ CALCULATOR_NOTES = {
 # In a game: abilities that gain their player CP at the start of each battle
 # round while a model with one is their WARLORD (see
 # app/services/in_game/battle_round.py).
+# In a game: abilities whose option is selected in one of their owner's
+# phases (see app/services/in_game/command_phase.py) - Author of the Codex:
+# in the Movement phase, for a visible friendly ADEPTUS ASTARTES unit within
+# 12", until the start of their next Command phase - its options Combat
+# Doctrines' (the doctrine is active for that unit as if its own Combat
+# Doctrines had it, so its rules come from there).
+COMMAND_CHOICES = {
+    "Author of the Codex": CommandChoice(
+        required=False,
+        target_keywords=("ADEPTUS ASTARTES",),
+        target_range=12.0,
+        target_visible=True,
+        phase="movement",
+        faction_options=("Space Marines", "Combat Doctrines"),
+    ),
+}
+
 ROUND_START_CP = {"Transhuman Strategist": 1}
 
 # In a game: abilities that make army rule options active for their unit all

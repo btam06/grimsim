@@ -1,10 +1,12 @@
 // Once everything is set up, the players roll off for who goes first (each
 // rolls a D6, the highest goes first, ties re-roll - see
-// app/services/in_game/first_turn.py); then, at the start of the first battle
-// round, they make Scouts moves (see scouts.py) - the player going first,
-// then their opponent: each unit whose every model has Scouts can make a
-// Normal move of up to that far. Pick a unit, drag its models, save the move;
-// say when you're done.
+// app/services/in_game/first_turn.py); then, before the first battle round
+// (24.31), they make Scouts moves (see scouts.py) - the player going first,
+// then their opponent: each unit whose every model has Scouts can move up to
+// that far, ending more than 8" from enemy units - or, if it's in Strategic
+// Reserves, be set up wholly within its deployment zone (click the board to
+// set it down). Pick a unit, drag its models, save the move; say when you're
+// done.
 
 function rollsByAttempt(rolls) {
   const attempts = {}
@@ -46,7 +48,7 @@ function PreBattlePanel({ game, scouts, draft, checking, onRoll, onPick, onSave,
           ))}
         </ul>
       )}
-      {game.status === 'in_progress' && scouts?.seat && (
+      {game.deployment_step === 'pre_battle' && scouts?.seat && (
         <div>
           <h4>Scouts moves: {name(scouts.seat)}</h4>
           <ul className="round-start-rules">
@@ -55,11 +57,19 @@ function PreBattlePanel({ game, scouts, draft, checking, onRoll, onPick, onSave,
                 <strong>{unit.name}</strong>
                 <span className="hint">
                   {' '}
-                  · Scouts {unit.distance}"{unit.moved ? ' · moved' : ''}
+                  · Scouts {unit.distance}"
+                  {unit.in_reserves ? ' · in Strategic Reserves: set up in your deployment zone' : ''}
+                  {unit.moved ? ' · moved' : ''}
                 </span>
                 <div className="inline-controls">
                   <button type="button" onClick={() => onPick(unit)}>
-                    {picked?.unit_id === unit.unit_id ? 'Moving…' : 'Move'}
+                    {picked?.unit_id === unit.unit_id
+                      ? unit.in_reserves && !draft.positions
+                        ? 'Click the board…'
+                        : 'Moving…'
+                      : unit.in_reserves
+                        ? 'Set up'
+                        : 'Move'}
                   </button>
                   {picked?.unit_id === unit.unit_id && (
                     <button

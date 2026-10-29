@@ -29,7 +29,15 @@ from app.services.in_game.deployment import TOLERANCE, Placement
 #   roll;
 # - Fall Back: up to M - only a unit that starts within Engagement Range of an
 #   enemy model, which can't make a Normal move or Advance (so a unit can only
-#   leave Engagement Range by Falling Back).
+#   leave Engagement Range by Falling Back). Its mode (09.07) is chosen for
+#   it: an Ordered Retreat, unless it's Battle-shocked - then a Desperate
+#   Escape, moving through enemy models, but with a hazard roll for each model
+#   first (once a phase, however often it's moved).
+#
+# Models go round enemy models - but MONSTER/VEHICLE units making a Normal
+# move or Advance go through any but MONSTER/VEHICLE models (17.01). A FLYING
+# unit can take to the skies (21.03): 2" less (none less with Hover), but
+# through models and terrain.
 #
 # How far a model moved is how far its base's centre is from where it started
 # (paths aren't checked). Where the unit ends up must be on the battlefield,
@@ -39,8 +47,8 @@ from app.services.in_game.deployment import TOLERANCE, Placement
 
 # Within 2" (base to base) of an enemy model.
 ENGAGEMENT_RANGE = 2.0
-# A Super-heavy Walker's roll for crossing tall terrain, this phase (kept as
-# a marked unit - see app/services/in_game/mission_state.py).
+# A Super-heavy Walker's roll after a move it made MOBILE for, this phase
+# (kept as a marked unit - see app/services/in_game/mission_state.py).
 SUPER_HEAVY_ROLL = "super_heavy_roll"
 KIND_NAMES = {"normal": "Normal move", "advance": "Advance", "fall_back": "Fall Back"}
 
@@ -113,20 +121,90 @@ def in_engagement_range(game: Game, unit: Unit) -> bool:
     )
 
 
+AIRCRAFT = "AIRCRAFT"
+
+
+def is_aircraft(unit: Unit) -> bool:
+    return any(k.name == AIRCRAFT for m in unit.unit_models for k in m.model.keywords)
+
+
+def _engaged_with_non_aircraft(game: Game, unit: Unit) -> bool:
+    # Engaged with an enemy model that isn't an AIRCRAFT (being engaged only
+    # with AIRCRAFT doesn't stop a Normal move or Advance - 23.02).
+    seat = deployment.owner(game, unit).seat
+    enemies = [
+        b
+        for p, m, b in deployment.placed_bases(game, unit)
+        if p.seat != seat and not any(k.name == AIRCRAFT for k in m.model.keywords)
+    ]
+    return any(
+        deployment.gap(base, enemy) <= ENGAGEMENT_RANGE + TOLERANCE
+        for base in _start_bases(game, unit).values()
+        for enemy in enemies
+    )
+
+
 def allowed_kinds(game: Game, unit: Unit) -> list[str]:
     # The moves the unit can make: Fall Back if it started the phase within
-    # Engagement Range; only an Advance once it's rolled to; otherwise a Normal
-    # move or Advance. (It can move again until the phase ends.)
+    # Engagement Range (of anything but AIRCRAFT); only an Advance once it's
+    # rolled to; otherwise a Normal move or Advance. (It can move again until
+    # the phase ends.) AIRCRAFT only make ingress moves (23.02).
+    if is_aircraft(unit):
+        return []
     move = unit_move(game, unit)
     if move is not None and move.advance_roll is not None:
         return ["advance"]
-    return ["fall_back"] if in_engagement_range(game, unit) else ["normal", "advance"]
+    return ["fall_back"] if _engaged_with_non_aircraft(game, unit) else ["normal", "advance"]
 
 
-def allowance(model: UnitModel, kind: str, move: GameUnitMove | None) -> float:
-    # How far a model can move: its M, plus the D6 if it's Advancing.
+def allowance(
+    model: UnitModel, kind: str, move: GameUnitMove | None, take_to_skies: bool = False
+) -> float:
+    # How far a model can move: its M, plus the D6 if it's Advancing - 2"
+    # less if it takes to the skies (but for Hover).
     extra = move.advance_roll if kind == "advance" and move and move.advance_roll else 0
-    return float(model.model.movement + extra)
+    skies = 2 if take_to_skies and not _hovers(model) else 0
+    return float(model.model.movement + extra - skies)
+
+
+FLY = "FLY"
+HOVER = "Hover"
+DESPERATE_ESCAPE = "desperate_escape"
+
+
+def _hovers(model: UnitModel) -> bool:
+    return any(a.name == HOVER for a in model.model.abilities)
+
+
+def can_fly(unit: Unit) -> bool:
+    # Whether the unit can FLY (a model in it has FLY).
+    return any(k.name == FLY for m in unit.unit_models for k in m.model.keywords)
+
+
+def _big_unit(unit: Unit) -> bool:
+    return bool(unit.unit_models) and all(
+        {k.name for k in m.model.keywords} & pathing.BIG for m in unit.unit_models
+    )
+
+
+def desperate(game: Game, unit: Unit, kind: str) -> bool:
+    # Whether its Fall Back move is a Desperate Escape: it's Battle-shocked.
+    from app.services.in_game import battle_shock
+
+    return kind == "fall_back" and battle_shock.is_battle_shocked(game, unit)
+
+
+def through(game: Game, unit: Unit, kind: str, take_to_skies: bool = False) -> str:
+    # What the unit's models can go through on this move (see pathing).
+    if take_to_skies and can_fly(unit):
+        return "all"
+    if desperate(game, unit, kind):
+        return "enemies"
+    if pathing.is_super_heavy_walker(unit):
+        return "non_titanic"
+    if kind in ("normal", "advance") and _big_unit(unit):
+        return "small"
+    return "none"
 
 
 def _check_unit(game: Game, unit: Unit) -> None:
@@ -198,17 +276,27 @@ def roll_advance(game: Game, unit: Unit) -> GameUnitMove:
 
 
 def check_move(
-    game: Game, unit: Unit, kind: str, placement: dict[int, tuple[float, float, float]]
+    game: Game,
+    unit: Unit,
+    kind: str,
+    placement: dict[int, tuple[float, float, float]],
+    take_to_skies: bool = False,
+    mobile: bool = False,
 ) -> Placement:
     # Whether the unit could make a `kind` move to `placement` ((x, y,
-    # rotation) by unit model id - every model in it, moved or not).
+    # rotation) by unit model id - every model in it, moved or not), taking
+    # to the skies if it says so (and can FLY) - or, for a Super-heavy
+    # Walker, `mobile` (through terrain).
     _check_unit(game, unit)
+    take_to_skies = take_to_skies and can_fly(unit)
     kinds = allowed_kinds(game, unit)
     if kind not in kinds:
         if kinds == ["fall_back"]:
             raise _bad_request("that unit is within Engagement Range: it can only Fall Back")
         if kinds == ["advance"]:
             raise _bad_request("that unit has rolled to Advance: it Advances this phase")
+        if not kinds:
+            raise _bad_request("AIRCRAFT units only make ingress moves")
         raise _bad_request("only a unit within Engagement Range can Fall Back")
     move = unit_move(game, unit)
     if kind == "advance" and (move is None or move.advance_roll is None):
@@ -222,14 +310,17 @@ def check_move(
         game, models, bases, deployment.placed_bases(game, unit)
     )
     enemies = _enemy_bases(game, unit)
-    # How far each model moves: round dense terrain, unless it can go
-    # through it (see app/services/in_game/pathing.py).
+    # How far each model moves: round dense terrain and enemy models, unless
+    # it can go through them (see app/services/in_game/pathing.py).
     pather = pathing.for_unit(
-        game, unit, start, max((allowance(m, kind, move) for m in models), default=0)
+        game, unit, start,
+        max((allowance(m, kind, move, take_to_skies) for m in models), default=0),
+        through(game, unit, kind, take_to_skies),
+        mobile and pathing.is_super_heavy_walker(unit),
     )
     for model in models:
         found = []
-        limit = allowance(model, kind, move)
+        limit = allowance(model, kind, move, take_to_skies)
         if problem := pathing.too_far(pather, start[model.id], bases[model.id], limit):
             found.append(problem)
         if any(
@@ -338,12 +429,24 @@ def place(game: Game, placement: dict[int, tuple[float, float, float]]) -> None:
 
 
 def move_unit(
-    game: Game, unit: Unit, kind: str, placement: dict[int, tuple[float, float, float]]
+    game: Game,
+    unit: Unit,
+    kind: str,
+    placement: dict[int, tuple[float, float, float]],
+    take_to_skies: bool = False,
+    mobile: bool = False,
 ) -> None:
     # Moves the unit, if it can make that move.
-    result = check_move(game, unit, kind, placement)
+    result = check_move(game, unit, kind, placement, take_to_skies, mobile)
     if not result.valid:
         raise _bad_request("can't move it there: " + "; ".join(result.problems))
+    # A Desperate Escape: a hazard roll for each model first (once a phase).
+    if desperate(game, unit, kind):
+        _desperate_escape(game, unit)
+        placed = deployment.positions(game)
+        placement = {i: xyr for i, xyr in placement.items() if i in placed}
+        if not placement:
+            return
     placed = deployment.positions(game)
     start = start_positions(game, unit)
     # How far its furthest-moved model is from where it started the phase
@@ -381,7 +484,8 @@ def move_unit(
     move.distance = round(distance, 3)
     move.completed = True
     mission_state.after_move(game, unit)
-    _super_heavy_walker(game, unit, start, placement)
+    if mobile:
+        _super_heavy_walker(game, unit)
     # Enemy units it ended its move near that can react (e.g. Tactica
     # Obliqua). (Imported here: reactive_move imports this module.)
     from app.services.in_game import reactive_move
@@ -389,32 +493,43 @@ def move_unit(
     reactive_move.after_enemy_move(game, unit)
 
 
-def _super_heavy_walker(game: Game, unit: Unit, start: dict, placement: dict) -> None:
-    # A Super-heavy Walker that moved through a section of terrain over 4"
-    # tall (a ruin wall - terrain heights aren't in the layouts; walls are
-    # taken to be the tall ones) rolls a D6 after it's moved: on a 1, it's
-    # Battle-shocked. Once a phase (moving it again doesn't roll again).
-    # (Imported here: shooting and battle_shock import this module's users.)
+def _desperate_escape(game: Game, unit: Unit) -> None:
+    # A hazard roll for each model in the unit (06.03): each failed one, 1
+    # mortal wound - 3 if every model is a MONSTER/VEHICLE. Once a phase.
+    from app.services.combat import hazard_failed, hazard_wounds
+    from app.services.in_game import casualties
+
+    seat = deployment.owner(game, unit).seat
+    if any(
+        m.unit_id == unit.id and m.battle_round == game.battle_round
+        and m.turn_seat == game.turn_seat
+        for m in mission_state.marked(game, DESPERATE_ESCAPE, seat)
+    ):
+        return
+    mission_state.mark(game, seat, DESPERATE_ESCAPE, unit.id)
+    models = deployment.models_on_battlefield(game, unit)
+    per = hazard_wounds([{k.name for k in m.model.keywords} for m in models])
+    failed = sum(hazard_failed(random.randint(1, 6)) for _ in models)
+    if failed:
+        casualties.mortal_wounds(game, unit, failed * per)
+
+
+def _super_heavy_walker(game: Game, unit: Unit) -> None:
+    # A Super-heavy Walker that was MOBILE for its move rolls a D6 when it
+    # ends: on a 1, it's Battle-shocked (24.35). Once a phase (moving it
+    # again doesn't roll again).
+    # (Imported here: battle_shock imports this module's users.)
     from app.services.in_game import battle_shock
-    from app.services.in_game.shooting import _blocks, dense_terrain
 
     if not pathing.is_super_heavy_walker(unit):
         return
     seat = deployment.owner(game, unit).seat
-    rolled = [
-        m
+    if any(
+        m.unit_id == unit.id
+        and m.battle_round == game.battle_round
+        and m.turn_seat == game.turn_seat
         for m in mission_state.marked(game, SUPER_HEAVY_ROLL, seat)
-        if m.unit_id == unit.id and m.battle_round == game.battle_round
-    ]
-    if any(m.turn_seat == game.turn_seat for m in rolled):
-        return
-    walls = dense_terrain(game)
-    crossed = any(
-        _blocks(start[i][:2], (x, y), wall)
-        for i, (x, y, _) in placement.items()
-        for wall in walls
-    )
-    if not crossed:
+    ):
         return
     mission_state.mark(game, seat, SUPER_HEAVY_ROLL, unit.id)
     roll = random.randint(1, 6)

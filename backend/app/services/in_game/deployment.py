@@ -30,7 +30,7 @@ from app.services.in_game.terrain import (
 # attacker sets up a unit first, then the players take turns; once one has none left, the other
 # sets up the rest of theirs. Each unit is set up wholly within its owner's
 # deployment zone - or, if every model in it has Infiltrators, anywhere more
-# than 9" from the enemy's zone and from every enemy model. Its models mustn't
+# than 8" from the enemy's zone and from every enemy unit (24.20). Its models mustn't
 # overlap any other model, and must be in coherency: each within 9" of every
 # other model in the unit, and within 2" of at least one other - nor any
 # terrain feature (ruin walls and obstacles; terrain
@@ -42,7 +42,7 @@ from app.services.in_game.terrain import (
 BOARD = [(0.0, 0.0), (60.0, 0.0), (60.0, 44.0), (0.0, 44.0)]
 COHERENCY_RANGE = 2.0
 UNIT_SPAN = 9.0
-INFILTRATORS_RANGE = 9.0
+INFILTRATORS_RANGE = 8.0
 INFILTRATORS = "Infiltrators"
 # Positions come from dragging on screen: allow a hair either way at a limit.
 TOLERANCE = 1e-6
@@ -157,16 +157,17 @@ def units_to_deploy(game: Game, player: GamePlayer) -> list[Unit]:
 
 
 def deployment_step(game: Game) -> str | None:
-    # Where deployment is: declaring battle formations, setting up units, then
-    # the roll-off for who goes first ("formations", "deploying",
-    # "first_turn" - see app/services/in_game/first_turn.py); None outside it.
+    # Where deployment is: declaring battle formations, setting up units, the
+    # roll-off for who goes first, then pre-battle abilities (Scouts)
+    # ("formations", "deploying", "first_turn" - see
+    # app/services/in_game/first_turn.py - "pre_battle"); None outside it.
     if game.status != "deployment":
         return None
     if not formations_declared(game):
         return "formations"
     if deploying_seat(game) is not None:
         return "deploying"
-    return "first_turn"
+    return "first_turn" if game.first_seat is None else "pre_battle"
 
 
 def deploying_seat(game: Game) -> int | None:
@@ -543,9 +544,9 @@ def check_placement(
             found.append(f"isn't wholly within the {side}'s deployment zone")
         else:
             if distance_to_polygon(base, enemy_zone) <= INFILTRATORS_RANGE + TOLERANCE:
-                found.append('is within 9" of the enemy deployment zone')
+                found.append('is within 8" of the enemy deployment zone')
             if any(gap(base, e) <= INFILTRATORS_RANGE + TOLERANCE for e in enemies):
-                found.append('is within 9" of an enemy model')
+                found.append('is within 8" of an enemy model')
         problems[model.id] = found + problems[model.id]
     return summarise(models, problems)
 

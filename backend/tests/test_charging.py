@@ -93,7 +93,7 @@ async def test_charge_fails_with_nothing_in_reach(
     assert not target["in_reach"]
     response = await _make(client, game_id, d, a, _shifted(d, dy=8))
     assert response.status_code == 400
-    assert "out of reach" in response.json()["detail"]
+    assert "can't be a charge target" in response.json()["detail"]
 
 
 async def test_charge(client: AsyncClient, session, tmp_path, monkeypatch):
@@ -120,7 +120,7 @@ async def test_charge_has_to_reach_engagement_range(
     await _roll(client, game_id, d)
     # 3" of the 8: still 3" away.
     check = await _check(client, game_id, d, a, _shifted(d, dy=3))
-    assert check["problems"] == ['No model ends within Engagement Range (2") of A']
+    assert check["problems"] == ["The unit must end engaged with A"]
     # And no further than the roll.
     check = await _check(client, game_id, d, a, _shifted(d, dy=8.5))
     assert 'D would move 8.5" (it can move 8")' in check["problems"]
@@ -145,7 +145,7 @@ async def test_models_that_cant_reach_must_get_closer(
     positions = _shifted(d, dy=5, only={0})
     check = await _check(client, game_id, d, a, positions)
     # The two left where they were are no closer.
-    assert "D must end closer to A (x2)" in check["problems"]
+    assert "D must end closer to a charge target (x2)" in check["problems"]
     # Closer (in coherency), though not in Engagement Range: fine.
     positions = _shifted(d, dy=5, only={0})
     for p in positions[1:]:

@@ -153,31 +153,69 @@ def test_roll_dice_multi_die(monkeypatch):
     assert combat.roll_dice("2D6") == 8
 
 
-# --- _target_priority ---
+# --- allocation groups (05.03) ---
 
 
-def test_target_priority_orders_supports_and_leaders_last():
-    normal_worst = _model(save=6)
-    normal_better = _model(save=3)
-    support_worst_save = _model(save=6, is_support=True)
-    leader_best_save = _model(save=2, is_leader=True)
-
-    ordered = sorted(
-        [leader_best_save, support_worst_save, normal_better, normal_worst],
-        key=combat._target_priority,
+def _t(save=3, invulnerable=None, wounds=1, left=None, character=False, uid=None):
+    return combat._Target(
+        4, save, invulnerable, None, wounds if left is None else left,
+        wounds_characteristic=wounds, is_character=character, unit_model_id=uid,
     )
-    assert ordered == [normal_worst, normal_better, support_worst_save, leader_best_save]
 
 
-def test_target_priority_uses_better_of_armor_and_invulnerable_save():
-    bad_armor_great_invulnerable = _model(save=6, invulnerable=2)
-    ok_armor_no_invulnerable = _model(save=4, invulnerable=None)
+def _order(targets, order=None):
+    allocation = combat._Allocation(combat.deque(targets), order)
+    return [[t.unit_model_id for t in g] for g in allocation.groups]
 
-    ordered = sorted(
-        [bad_armor_great_invulnerable, ok_armor_no_invulnerable], key=combat._target_priority
-    )
-    # effective save of 2 (from invulnerable) beats a plain 4+, despite the worse armor save
-    assert ordered == [ok_armor_no_invulnerable, bad_armor_great_invulnerable]
+
+def test_allocation_groups_by_w_sv_and_insv_with_characters_alone():
+    a, b = _t(save=3, uid=1), _t(save=3, uid=2)
+    c = _t(save=6, uid=3)
+    hero, other_hero = _t(save=2, character=True, uid=4), _t(save=2, character=True, uid=5)
+    # The least protected first by default; CHARACTERs last, one group each.
+    assert _order([hero, a, c, b, other_hero]) == [[3], [1, 2], [4], [5]]
+
+
+def test_allocation_better_of_armour_and_invulnerable_counts_as_protection():
+    bad_armour_great_invuln = _t(save=6, invulnerable=2, uid=1)
+    ok_armour = _t(save=4, uid=2)
+    assert _order([bad_armour_great_invuln, ok_armour]) == [[2], [1]]
+
+
+def test_allocation_wounded_groups_come_first_and_the_defender_orders_the_rest():
+    a, b = _t(save=3, uid=1), _t(save=6, uid=2)
+    wounded = _t(save=2, wounds=3, left=1, uid=3)
+    hero = _t(save=2, character=True, uid=4)
+    hurt_hero = _t(save=2, wounds=4, left=2, character=True, uid=5)
+    # The defender's order (by group id), except that a wounded non-CHARACTER
+    # group goes first and CHARACTERs last (wounded ones first).
+    assert _order([a, b, wounded, hero, hurt_hero], order=[4, 1, 2]) == [[3], [1], [2], [5], [4]]
+
+
+def test_allocation_picks_a_wounded_model_in_the_current_group():
+    fresh, hurt = _t(wounds=2, uid=1), _t(wounds=2, left=1, uid=2)
+    allocation = combat._Allocation(combat.deque([fresh, hurt]), None)
+    assert allocation.current() is hurt
+
+
+def test_precision_makes_a_character_group_current():
+    trooper, hero = _t(uid=1), _t(character=True, uid=2)
+    allocation = combat._Allocation(combat.deque([trooper, hero]), None)
+    assert allocation.current() is trooper
+    assert allocation.current(precision=True) is hero
+
+
+def test_mortal_wounds_go_to_non_characters_first():
+    hero, trooper = _t(character=True, uid=1), _t(uid=2)
+    hurt_hero = _t(wounds=3, left=1, character=True, uid=3)
+    assert combat._mortal_wound_target(combat.deque([hero, hurt_hero, trooper])) is trooper
+    assert combat._mortal_wound_target(combat.deque([hero, hurt_hero])) is hurt_hero
+
+
+def test_hazard_wounds_three_only_if_every_model_is_a_monster_or_vehicle():
+    assert combat.hazard_wounds([{"VEHICLE"}, {"MONSTER"}]) == 3
+    assert combat.hazard_wounds([{"VEHICLE"}, {"INFANTRY"}]) == 1
+    assert combat.hazard_wounds([{"INFANTRY"}]) == 1
 
 
 # --- resolve_combat ---
@@ -1419,76 +1457,49 @@ def _precision_defenders():
     return leader, support, trooper
 
 
-def test_precision_order_across_multiple_attacks(monkeypatch):
+def test_precision_attacks_go_to_characters_first(monkeypatch):
     # Every roll is a 6, so a 7+ save on each model guarantees every attack
-    # destroys whichever model it targets.
+    # destroys whichever model it's allocated to.
     monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
     precision = _ability([_condition("always")], [_effect("precision")])
-    leader = _model(name="Leader", is_leader=True, wounds=1, save=7)
-    support = _model(name="Support", is_support=True, wounds=1, save=7)
-    trooper = _model(name="Trooper", wounds=1, save=7)
-
-    picked = []
-    original = combat._precision_target
-
-    def spy(targets):
-        target = original(targets)
-        picked.append("leader" if target.is_leader else "support" if target.is_support else "other")
-        return target
-
-    monkeypatch.setattr(combat, "_precision_target", spy)
-    weapon = _weapon(attacks="3", skill=2, strength=10, ap=0, damage="1")
+    leader, support, trooper = _precision_defenders()
+    for m in (leader, support, trooper):
+        m.save = 7
+    weapon = _weapon(attacks="2", skill=2, strength=10, ap=0, damage="1")
     weapon.id = 1
     weapon.abilities = [precision]
     attacker = _unit([_unit_model(_model(), [weapon])])
-    defender = _unit([_unit_model(m, []) for m in [trooper, support, leader]])
+    units = [_unit_model(m, []) for m in [trooper, support, leader]]
+    for i, um in enumerate(units, 1):
+        um.id = i
+    defender = _unit(units)
     result = combat.resolve_combat(
-        attacker,
-        defender,
-        {weapon.id},
-        in_engagement_range=False,
-        visible=True,
-        in_range=True,
-        in_cover=False,
-        half_range=False,
-        moved_less_than_3=False,
-        advanced=False,
-        apply_precision=True,
+        attacker, defender, {weapon.id}, in_engagement_range=False, visible=True,
+        in_range=True, in_cover=False, half_range=False, moved_less_than_3=False,
+        advanced=False, apply_precision=True,
     )
-    # The wound phase checks who each attack would be allocated to (no one has
-    # died yet, so the leader each time); allocation then picks leader, then
-    # support, then the rest as each dies.
-    assert picked[:3] == ["leader", "leader", "leader"]
-    assert picked[3:] == ["leader", "support", "other"]
-    assert result.models_destroyed == 3
+    # The leader (a CHARACTER) first, then the rest in allocation order.
+    assert result.defender_wounds_remaining[3] == 0
+    assert result.models_destroyed == 2
 
 
-def test_precision_not_applied_uses_normal_targeting(monkeypatch):
+def test_without_precision_characters_go_last(monkeypatch):
     monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
-    precision = _ability([_condition("always")], [_effect("precision")])
-    called = []
-    monkeypatch.setattr(combat, "_precision_target", lambda t: called.append(1) or t[0])
-
-    _precision_combat(list(_precision_defenders()), False, [precision])
-    assert called == []
-
-
-def test_apply_precision_without_precision_weapon_uses_normal_targeting(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
-    called = []
-    monkeypatch.setattr(combat, "_precision_target", lambda t: called.append(1) or t[0])
-
-    _precision_combat(list(_precision_defenders()), True, [])
-    assert called == []
-
-
-def test_precision_target_prefers_leader_then_support():
-    other = combat._Target(4, 3, None, None, 1)
-    support = combat._Target(4, 3, None, None, 1, is_support=True)
-    leader = combat._Target(4, 3, None, None, 1, is_leader=True)
-    assert combat._precision_target(combat.deque([other, support, leader])) is leader
-    assert combat._precision_target(combat.deque([other, support])) is support
-    assert combat._precision_target(combat.deque([other])) is other
+    leader, support, trooper = _precision_defenders()
+    for m in (leader, support, trooper):
+        m.save = 7
+    weapon = _weapon(attacks="2", skill=2, strength=10, ap=0, damage="1")
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    units = [_unit_model(m, []) for m in [trooper, support, leader]]
+    for i, um in enumerate(units, 1):
+        um.id = i
+    result = combat.resolve_combat(
+        attacker, _unit(units), {weapon.id}, in_engagement_range=False, visible=True,
+        in_range=True, in_cover=False, half_range=False, moved_less_than_3=False,
+        advanced=False, apply_precision=True,
+    )
+    assert result.defender_wounds_remaining[3] == 1
 
 
 def test_within_half_range_condition_checks_pre_weapon_step_and_flag():
@@ -1624,13 +1635,14 @@ def test_resolve_combat_hazardous_deals_3_wounds_to_a_vehicle_shooter(monkeypatc
     weapon = _weapon(attacks="0", skill=2)
     weapon.id = 1
     weapon.abilities = [hazardous]
-    shooter = _model(keywords=[_keyword("VEHICLE")], feel_no_pain=None)
+    shooter = _model(keywords=[_keyword("VEHICLE")], feel_no_pain=None, wounds=10)
     attacker = _unit([_unit_model(shooter, [weapon])])
     defender = _unit([_unit_model(_model(wounds=5), [])])
 
     result = combat.resolve_combat(
         attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
+    # A 1-2 fails: 3 mortal wounds, every model in the unit being a VEHICLE.
     assert result.hazardous_rolls == [2]
     assert result.hazardous_wounds == 3
 
@@ -2252,10 +2264,10 @@ async def test_combat_endpoint_applies_seeded_hazardous_and_rapid_fire_abilities
     # Rapid Fire 1 adds a second attack (both hit on a roll of 1 vs skill 1).
     assert len(body["attack_rolls"]) == 2
     # Hazardous makes exactly one hazard roll for the one weapon fired, which
-    # triggers on a 1 and deals 1 wound (no INFANTRY/VEHICLE keyword -> 0).
+    # fails on a 1: 1 mortal wound (the unit isn't all MONSTER/VEHICLE).
     assert len(body["hazardous_rolls"]) == 1
     assert body["hazardous_rolls"][0] == 1
-    assert body["hazardous_wounds"] == 0
+    assert body["hazardous_wounds"] == 1
 
 
 async def test_combat_endpoint_in_cover_worsens_ranged_hit_rolls(
@@ -3771,15 +3783,15 @@ def test_resolve_combat_sustained_hits_join_the_hit_phase(monkeypatch):
 
 
 def test_resolve_combat_still_rolls_every_hit_after_the_unit_is_wiped(monkeypatch):
-    # All the hit and wound rolls happen up front, as at the table; only the
-    # saves stop once there's no one left to allocate to.
+    # All the hit, wound and save rolls happen up front, as at the table
+    # (05.03); only the damage stops once there's no one left.
     monkeypatch.setattr(combat.random, "randint", lambda a, b: 6 if b == 6 else 1)
     weapon = _weapon(attacks="3", skill=2, strength=10, ap=-10, damage="1", weapon_type="ranged")
 
     result = _fire(weapon, [_model(toughness=1, wounds=1, save=7)])
     assert len(result.attack_rolls) == 3
     assert len(result.wound_rolls) == 3
-    assert len(result.save_rolls) == 1
+    assert len(result.save_rolls) == 3
     assert result.models_destroyed == 1
 
 
@@ -3819,10 +3831,17 @@ def test_two_plus_ones_are_capped_at_plus_one(monkeypatch):
 
 
 def test_two_minus_ones_are_capped_at_minus_one(monkeypatch):
-    # Cover counts as a -1 too: cover plus another -1 is still just -1.
+    abilities = [_minus_one(), _minus_one()]
+    assert _hit_with(monkeypatch, 4, skill=3, abilities=abilities)
+    assert not _hit_with(monkeypatch, 3, skill=3, abilities=abilities)
+
+
+def test_cover_worsens_bs_outside_the_cap(monkeypatch):
+    # The benefit of cover worsens BS by 1 (13.08) - not a Hit roll modifier,
+    # so it stacks with a -1 to hit: BS3 then needs a 5.
     abilities = [_minus_one()]
-    assert _hit_with(monkeypatch, 4, skill=3, abilities=abilities, in_cover=True)
-    assert not _hit_with(monkeypatch, 3, skill=3, abilities=abilities, in_cover=True)
+    assert _hit_with(monkeypatch, 5, skill=3, abilities=abilities, in_cover=True)
+    assert not _hit_with(monkeypatch, 4, skill=3, abilities=abilities, in_cover=True)
 
 
 def test_ballistic_skill_improvement_is_outside_the_cap(monkeypatch):
@@ -5547,9 +5566,10 @@ def test_aegis_protocol_gives_kastelans_plus_one_toughness(monkeypatch):
     # S9 vs T9 wounds on a 4; vs T10 it needs a 5.
     assert _shoot_kastelan_unit(monkeypatch, [6, 4, 1], []).total_damage == 1
     assert _shoot_kastelan_unit(monkeypatch, [6, 4, 1], aegis).total_damage == 0
-    # The Datasmith isn't a Kastelan: still T9.
+    # Even a Precision attack on the Datasmith uses the bodyguard's T (19.02):
+    # the Kastelans' T10.
     hit_datasmith = _shoot_kastelan_unit(monkeypatch, [6, 4, 1], aegis, apply_precision=True)
-    assert hit_datasmith.total_damage == 1
+    assert hit_datasmith.total_damage == 0
 
 
 def test_robotic_bodyguard_gives_the_datasmith_fnp_4(monkeypatch):
@@ -6624,3 +6644,89 @@ def test_snap_shots_keep_torrent_and_rapid_fire(monkeypatch):
     )
     # Both attacks (its own and Rapid Fire's) hit automatically.
     assert (result.attack_rolls, len(result.wound_rolls)) == ([], 2)
+
+
+# --- the Core Rules' indirect fire and close-quarters shooting ---
+
+
+def _indirect_gun():
+    weapon = _weapon(attacks="1", skill=2, strength=10, ap=-10, damage="1", weapon_type="ranged")
+    weapon.id = 1
+    ability = _ability([], [])
+    ability.name = "Indirect Fire"
+    weapon.abilities = [ability]
+    return weapon
+
+
+def _indirect_hit(monkeypatch, roll, spotted=False, weapon=None):
+    rolls = iter([roll, 6, 1])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = weapon or _indirect_gun()
+    result = combat.resolve_combat(
+        _unit([_unit_model(_model(), [weapon])]), _unit([_unit_model(_model(wounds=5, save=7), [])]),
+        {weapon.id}, in_engagement_range=False, visible=False, in_range=True, in_cover=False,
+        half_range=False, moved_less_than_3=False, advanced=False, indirect=True,
+        indirect_spotted=spotted,
+    )
+    return result.total_damage == 1
+
+
+def test_indirect_fire_hits_only_on_a_6_or_4_when_spotted(monkeypatch):
+    assert _indirect_hit(monkeypatch, 6)
+    assert not _indirect_hit(monkeypatch, 5)
+    # Spotted: 1-3 fail - and the target still has cover (BS 2+ -> 3+).
+    assert _indirect_hit(monkeypatch, 4, spotted=True)
+    assert not _indirect_hit(monkeypatch, 3, spotted=True)
+
+
+def test_indirect_shooting_only_fires_indirect_weapons(monkeypatch):
+    plain = _weapon(attacks="1", skill=2, strength=10, ap=-10, damage="1", weapon_type="ranged")
+    plain.id = 1
+    assert not _indirect_hit(monkeypatch, 6, weapon=plain)
+
+
+def _engaged_shot(monkeypatch, roll, keywords=(), pistol=False):
+    rolls = iter([roll, 6, 1])
+    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, damage="1", weapon_type="ranged")
+    weapon.id = 1
+    if pistol:
+        weapon.abilities = [_ability([_condition("always")], [_effect("pistol")])]
+    shooter = _model(keywords=[_keyword(k) for k in keywords])
+    result = combat.resolve_combat(
+        _unit([_unit_model(shooter, [weapon])]), _unit([_unit_model(_model(wounds=5, save=7), [])]),
+        {weapon.id}, in_engagement_range=True, visible=True, in_range=True, in_cover=False,
+        half_range=False, moved_less_than_3=False, advanced=False,
+    )
+    return result.total_damage == 1
+
+
+def test_close_quarters_shooting(monkeypatch):
+    # Engaged: an infantry model only fires its close-quarters weapons; a
+    # VEHICLE fires any, at -1 to hit unless it's one of those.
+    assert not _engaged_shot(monkeypatch, 6)
+    assert _engaged_shot(monkeypatch, 3, pistol=True)
+    assert _engaged_shot(monkeypatch, 4, keywords=("VEHICLE",))
+    assert not _engaged_shot(monkeypatch, 3, keywords=("VEHICLE",))
+    assert _engaged_shot(monkeypatch, 3, keywords=("VEHICLE",), pistol=True)
+
+
+def test_plunging_fire_for_a_towering_model_within_12(monkeypatch):
+    def shot(roll, keywords, positions):
+        rolls = iter([roll, 6, 1])
+        monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+        weapon = _weapon(attacks="1", skill=4, strength=10, ap=-10, damage="1", weapon_type="ranged")
+        weapon.id = 1
+        shooter = _model(keywords=[_keyword(k) for k in keywords])
+        return combat.resolve_combat(
+            _unit([_unit_model(shooter, [weapon])]),
+            _unit([_unit_model(_model(wounds=5, save=7), [])]),
+            {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False,
+            half_range=False, moved_less_than_3=False, advanced=False,
+            attacker_positions=positions,
+        ).total_damage == 1
+
+    near = {"within_12_of_target"}
+    assert shot(3, ["TOWERING"], near)
+    assert not shot(3, ["TOWERING"], set())
+    assert not shot(3, [], near)

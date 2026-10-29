@@ -83,6 +83,10 @@ class Game(Base):
     reactive_moves: Mapped[list["GameReactiveMove"]] = relationship(
         cascade="all, delete-orphan", lazy="selectin", order_by="GameReactiveMove.id"
     )
+    # Surge moves a rule let units make (see app/services/in_game/surge.py).
+    surge_moves: Mapped[list["GameSurgeMove"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameSurgeMove.id"
+    )
     # Units disembarking from transports, and from which (see
     # app/services/in_game/embarked.py).
     disembarkations: Mapped[list["GameDisembarkation"]] = relationship(
@@ -119,6 +123,11 @@ class Game(Base):
     # Objectives secured (sticky) by a player.
     secured_objectives: Mapped[list["GameSecuredObjective"]] = relationship(
         cascade="all, delete-orphan", lazy="selectin", order_by="GameSecuredObjective.id"
+    )
+    # Who controls each objective, as determined at the end of the last phase
+    # or turn (see app/services/in_game/objectives.py).
+    objective_controls: Mapped[list["GameObjectiveControl"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameObjectiveControl.id"
     )
     # Objectives players have selected for their rules (e.g. Acquisition At
     # Any Cost - see app/services/in_game/selected_objectives.py).
@@ -216,9 +225,13 @@ class Game(Base):
     pile_ins_done: Mapped[list["GamePileInDone"]] = relationship(
         cascade="all, delete-orphan", lazy="selectin", order_by="GamePileInDone.id"
     )
-    # Which units have fought in fight phases, at what, and in what order.
+    # Which units have fought in fight phases, at what, and in what order -
+    # and players passing in the Fight step.
     unit_fights: Mapped[list["GameUnitFight"]] = relationship(
         cascade="all, delete-orphan", lazy="selectin", order_by="GameUnitFight.id"
+    )
+    fight_passes: Mapped[list["GameFightPass"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameFightPass.id"
     )
     # Options chosen for army rules each battle round (e.g. which Doctrina
     # Imperative is active).
@@ -491,10 +504,33 @@ class GameUnitCharge(Base):
         ForeignKey("units.id", ondelete="CASCADE"), nullable=True
     )
     completed: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Its other charge targets, beyond `target_unit_id` (11.04: one or more).
+    extra_targets: Mapped[list["GameChargeTarget"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin"
+    )
 
     @property
     def roll(self) -> int:
         return self.first_die + self.second_die
+
+    @property
+    def target_unit_ids(self) -> list[int]:
+        # Every charge target, once it's charged.
+        first = [self.target_unit_id] if self.target_unit_id is not None else []
+        return first + [t.unit_id for t in self.extra_targets]
+
+
+class GameChargeTarget(Base):
+    # One of a charge's other targets. Its own table, so existing databases
+    # pick it up without a migration.
+    __tablename__ = "game_charge_targets"
+
+    charge_id: Mapped[int] = mapped_column(
+        ForeignKey("game_unit_charges.id", ondelete="CASCADE"), primary_key=True
+    )
+    unit_id: Mapped[int] = mapped_column(
+        ForeignKey("units.id", ondelete="CASCADE"), primary_key=True
+    )
 
 
 class GameUnitPileIn(Base):
@@ -540,6 +576,20 @@ class GameUnitFight(Base):
     consolidation: Mapped["GameUnitConsolidation | None"] = relationship(
         cascade="all, delete-orphan", uselist=False, lazy="selectin"
     )
+
+
+class GameFightPass(Base):
+    # A player passing in the Fight step (their units able to fight all more
+    # than 5" from enemy units): when (battle round, whose turn), who, and
+    # after how many fights.
+    __tablename__ = "game_fight_passes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int] = mapped_column(Integer)
+    seat: Mapped[int] = mapped_column(Integer)
+    fights: Mapped[int] = mapped_column(Integer)
 
 
 class GameUnitConsolidation(Base):
@@ -606,6 +656,19 @@ class GameSecuredObjective(Base):
         ForeignKey("terrain_objectives.id", ondelete="CASCADE")
     )
     seat: Mapped[int] = mapped_column(Integer)
+
+
+class GameObjectiveControl(Base):
+    # Who controls an objective (None: no one), as determined at the end of
+    # the last phase or turn (14.02).
+    __tablename__ = "game_objective_controls"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    objective_id: Mapped[int] = mapped_column(
+        ForeignKey("terrain_objectives.id", ondelete="CASCADE")
+    )
+    seat: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class GameSelectedObjective(Base):
@@ -723,6 +786,23 @@ class GameReactiveMove(Base):
     battle_round: Mapped[int] = mapped_column(Integer)
     turn_seat: Mapped[int] = mapped_column(Integer)
     roll: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    made: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class GameSurgeMove(Base):
+    # A surge move a rule let a unit make in one phase (21.02): how far it
+    # can go (rolled, if the rule says D6"), its surge target, and whether
+    # it's made it.
+    __tablename__ = "game_surge_moves"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    target_unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int] = mapped_column(Integer)
+    phase: Mapped[str] = mapped_column(String(32))
+    distance: Mapped[int] = mapped_column(Integer)
     made: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
@@ -1156,7 +1236,10 @@ class GameMarkedUnit(Base):
     # A unit a mission marks (by `seat`'s mission): "condemned" (Punishment,
     # until the start of that player's next turn), "surveilled" (Surveil the
     # Foe, until the end of the turn) or "consecration" (Consecrate, until it
-    # consecrates an objective) - from when (battle round, whose turn).
+    # consecrates an objective) - from when (battle round, whose turn). Core
+    # rules mark units too: in the fight phase (see
+    # app/services/in_game/fighting.py), and repositioned units (see
+    # app/services/in_game/reinforcements.py).
     __tablename__ = "game_marked_units"
 
     id: Mapped[int] = mapped_column(primary_key=True)

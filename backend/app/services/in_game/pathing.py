@@ -8,8 +8,9 @@ from app.services.in_game import deployment
 from app.services.in_game.deployment import TOLERANCE, Base, Point
 
 # How far a model moves: the shortest way its base can go from where it
-# started to where it ends. INFANTRY, BEAST and SWARM units move through any
-# terrain, and anything moves through light terrain (obstacles) - a straight
+# started to where it ends. INFANTRY, BEASTS, SWARM and MOBILE units move
+# through dense terrain (13.06), and anything moves through light terrain
+# (obstacles) - a straight
 # line. Everything else has to go round dense terrain (ruin walls): its route
 # is the shortest one that keeps its base off them, found on the walls'
 # corners (a visibility graph), each wall grown by the base's half-width.
@@ -17,9 +18,18 @@ from app.services.in_game.deployment import TOLERANCE, Base, Point
 # An oval base is kept off walls by half its narrow side (it can turn to slip
 # through a gap). A wall a base already touches where it starts or ends
 # doesn't count - a model standing against one can still move away from it.
+#
+# Enemy models are in the way too (03.01) - but for MONSTER/VEHICLE units
+# making a normal or advance move, which go through any but other
+# MONSTER/VEHICLE models (17.01, `through="small"`); a Desperate Escape, which
+# goes through enemy models (09.07, "enemies"); a Super-heavy Walker, which
+# goes through any but TITANIC models (24.35, "non_titanic"); and a FLYING
+# unit taking to the skies, which goes through all models and terrain
+# (21.03, "all").
 
-THROUGH_ANY_TERRAIN = {"INFANTRY", "BEAST", "SWARM"}
-# Abilities that let a unit move through terrain (and roll for it - see
+THROUGH_ANY_TERRAIN = {"INFANTRY", "BEAST", "BEASTS", "SWARM", "MOBILE"}
+# An ability whose unit moves through any models but TITANIC ones, and can
+# be MOBILE for a move - through terrain, then rolling for it (24.35 - see
 # app/services/in_game/movement.py).
 SUPER_HEAVY_WALKER = "Super-heavy Walker"
 # Round each grown wall corner: this many segments, each just outside the
@@ -27,10 +37,10 @@ SUPER_HEAVY_WALKER = "Super-heavy Walker"
 CORNER_SEGMENTS = 2
 
 
-def moves_through_terrain(unit: Unit) -> bool:
-    # Whether the unit moves through any terrain (INFANTRY, BEAST, SWARM, or
-    # a Super-heavy Walker).
-    return is_super_heavy_walker(unit) or any(
+def moves_through_terrain(unit: Unit, mobile: bool = False) -> bool:
+    # Whether the unit moves through any terrain (INFANTRY, BEASTS, SWARM,
+    # MOBILE - or `mobile`: a Super-heavy Walker chose to be).
+    return (mobile and is_super_heavy_walker(unit)) or any(
         k.name in THROUGH_ANY_TERRAIN for m in unit.unit_models for k in m.model.keywords
     )
 
@@ -41,13 +51,13 @@ def is_super_heavy_walker(unit: Unit) -> bool:
     )
 
 
-def blocking_terrain(game: Game, unit: Unit) -> list[list[Point]]:
+def blocking_terrain(game: Game, unit: Unit, mobile: bool = False) -> list[list[Point]]:
     # What the unit has to go round: nothing, or dense terrain (each part of
     # each ruin wall).
     # (Imported here: shooting imports movement, which uses this module.)
     from app.services.in_game.shooting import dense_terrain
 
-    return [] if moves_through_terrain(unit) else dense_terrain(game)
+    return [] if moves_through_terrain(unit, mobile) else dense_terrain(game)
 
 
 def clearance(base: Base) -> float:
@@ -234,12 +244,46 @@ class Obstacles:
         return points
 
 
+ENEMY_OUTLINE_POINTS = 12
+BIG = {"MONSTER", "VEHICLE"}
+
+
+def _enemy_models(game: Game, unit: Unit, through: str) -> list[list[Point]]:
+    # The enemy models the unit's models have to go round, as polygons.
+    if through in ("enemies", "all"):
+        return []
+    seat = deployment.owner(game, unit).seat
+    found = []
+    for player, unit_model, base in deployment.placed_bases(game, unit):
+        if player.seat == seat:
+            continue
+        keywords = {k.name for k in unit_model.model.keywords}
+        # Any model can be moved through AIRCRAFT models (23.02).
+        if "AIRCRAFT" in keywords:
+            continue
+        if through == "small" and not keywords & BIG:
+            continue
+        if through == "non_titanic" and "TITANIC" not in keywords:
+            continue
+        found.append(deployment.outline(base, ENEMY_OUTLINE_POINTS))
+    return found
+
+
 class Pather:
     # Works out how far a unit's models move, going round what they have to:
     # one set of grown walls per base size, built the first time it's needed.
     # It remembers the way each move went (`ways`, by start and end).
-    def __init__(self, game: Game, unit: Unit, around: list[Point], reach: float):
-        self.walls = blocking_terrain(game, unit)
+    def __init__(
+        self,
+        game: Game,
+        unit: Unit,
+        around: list[Point],
+        reach: float,
+        through: str = "none",
+        mobile: bool = False,
+    ):
+        terrain = [] if through == "all" else blocking_terrain(game, unit, mobile)
+        self.walls = terrain + _enemy_models(game, unit, through)
         self.around = around
         self.reach_limit = reach
         self._obstacles: dict[float, Obstacles] = {}
@@ -292,10 +336,18 @@ class Pather:
         return self.obstacles(start).reach(a, distance, rays)
 
 
-def for_unit(game: Game, unit: Unit, starts: dict[int, Base], reach: float) -> Pather:
+def for_unit(
+    game: Game,
+    unit: Unit,
+    starts: dict[int, Base],
+    reach: float,
+    through: str = "none",
+    mobile: bool = False,
+) -> Pather:
     # A Pather for the unit's models setting off from `starts`, moving up to
-    # `reach`.
-    return Pather(game, unit, [(b.x, b.y) for b in starts.values()], reach)
+    # `reach` - going through what `through` says (see above), and through
+    # terrain if `mobile`.
+    return Pather(game, unit, [(b.x, b.y) for b in starts.values()], reach, through, mobile)
 
 
 def too_far(pather: Pather, start: Base, end: Base, limit: float) -> str | None:
@@ -304,8 +356,10 @@ def too_far(pather: Pather, start: Base, end: Base, limit: float) -> str | None:
     straight = math.dist((start.x, start.y), (end.x, end.y))
     moved = pather.distance(start, end, cap=2 * limit + 1)
     if moved is None:
-        return f'can\'t get there within {limit:g}" going round dense terrain'
+        return f'can\'t get there within {limit:g}" going round dense terrain and enemy models'
     if moved <= limit + TOLERANCE:
         return None
-    going_round = " going round dense terrain" if moved > straight + 0.01 else ""
+    going_round = (
+        " going round dense terrain and enemy models" if moved > straight + 0.01 else ""
+    )
     return f'would move {moved:.1f}"{going_round} (it can move {limit:g}")'

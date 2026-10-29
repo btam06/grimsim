@@ -28,24 +28,46 @@ async def test_the_player_with_more_oc_on_it_controls_it(client: AsyncClient, se
     game_id = game["id"]
     a, d = _unit_named(deployment_, "A"), _unit_named(deployment_, "D")
     objective = await _objective(client, game_id)
-    assert (objective["kind"], objective["oc"], objective["controller"]) == (
+    assert (objective["kind"], objective["oc"], objective["live_controller"]) == (
         "centre", {"1": 0, "2": 0}, None
     )
 
-    # D's two models on it: seat 2 controls it.
+    # D's two models on it: seat 2 would control it (as determined at the end
+    # of the phase).
     await _place(session, d, ON_THE_RUIN)
     objective = await _objective(client, game_id)
-    assert (objective["oc"], objective["controller"]) == ({"1": 0, "2": 2}, 2)
+    assert (objective["oc"], objective["live_controller"]) == ({"1": 0, "2": 2}, 2)
 
     # One of A's too (any part of its base over the area counts): 1 to 2.
     await _place(session, a, [(10, 12.5), (10, 14)])
     objective = await _objective(client, game_id)
-    assert (objective["oc"], objective["controller"]) == ({"1": 1, "2": 2}, 2)
+    assert (objective["oc"], objective["live_controller"]) == ({"1": 1, "2": 2}, 2)
 
     # Both of A's: a tie - no one controls it.
     await _place(session, a, [(8, 9), (12, 11)])
     objective = await _objective(client, game_id)
-    assert (objective["oc"], objective["controller"]) == ({"1": 2, "2": 2}, None)
+    assert (objective["oc"], objective["live_controller"]) == ({"1": 2, "2": 2}, None)
+
+
+async def test_control_is_determined_at_the_end_of_each_phase(
+    client: AsyncClient, session, tmp_path
+):
+    # 14.02: D moves onto it mid-phase - nobody controls it until the phase
+    # ends; then seat 2 does, even once D's moved off, until the next ends.
+    game, deployment_ = await _battle(client, session, tmp_path, units=UNITS)
+    game_id = game["id"]
+    d = _unit_named(deployment_, "D")
+    await _place(session, d, ON_THE_RUIN)
+    objective = await _objective(client, game_id)
+    assert (objective["controller"], objective["live_controller"]) == (None, 2)
+    assert (await client.post(f"/games/{game_id}/advance")).status_code == 200
+    objective = await _objective(client, game_id)
+    assert (objective["controller"], objective["live_controller"]) == (2, 2)
+    await _place(session, d, [(30, 6), (31.5, 6)])
+    objective = await _objective(client, game_id)
+    assert (objective["controller"], objective["live_controller"]) == (2, None)
+    assert (await client.post(f"/games/{game_id}/advance")).status_code == 200
+    assert (await _objective(client, game_id))["controller"] is None
 
 
 async def test_no_one_controls_it_with_0_oc(client: AsyncClient, session, tmp_path):

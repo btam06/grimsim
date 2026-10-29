@@ -23,8 +23,9 @@ from app.services.list_building import enhancements as enhancement_rules
 # - "secure_on_destruction" (e.g. Cached Acquisition): used on a unit
 #   destroyed this phase within range of an objective its player controlled
 #   - that objective is secured (see app/services/in_game/objectives.py).
-# - "longer_consolidation" (e.g. Priority Reclamation): used on the unit about
-#   to consolidate, if it isn't within `enemy_clear` of an enemy unit - until
+# - "longer_consolidation" (e.g. Priority Reclamation): used on a unit that's
+#   fought and is still to consolidate, if it isn't within `enemy_clear` of
+#   an enemy unit - until
 #   the end of the phase, it can consolidate up to `distance`, provided it
 #   ends within range of one of its player's `ending_within` objectives.
 # - "extra_selected_objective" (e.g. Infoslave Skull): used on a unit with a
@@ -140,9 +141,8 @@ def target_reason(
     if not deployment.models_on_battlefield(game, unit):
         return "it isn't on the battlefield"
     if action == LONGER_CONSOLIDATION:
-        fight = fighting.just_fought(game)
-        if fight is None or fight.unit_id != unit.id:
-            return "it isn't about to consolidate"
+        if fighting.unconsolidated_fight(game, unit) is None:
+            return "it hasn't fought this phase, or it's already consolidated"
         clear = config.get("enemy_clear", 0.0)
         if any(
             charging.distance(game, unit, enemy) <= clear + deployment.TOLERANCE

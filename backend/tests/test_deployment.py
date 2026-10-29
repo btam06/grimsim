@@ -57,11 +57,14 @@ async def _unit(
     melee=False,
     fights_first=False,
     deep_strike=False,
+    gun_abilities=(),
 ):
     # A unit of `count` identical models in a list - each with a gun of
     # `weapon_range` (1 attack, always hits on 2+) if given, an Assault gun of
     # `assault_range` likewise, a melee blade likewise if `melee`, the Fights
-    # First ability if `fights_first`, and `keywords`.
+    # First ability if `fights_first`, and `keywords`. `gun_abilities`: (name,
+    # effect keyword or None) weapon abilities its gun has (e.g. ("Pistol",
+    # "pistol")).
     abilities = []
     if deep_strike:
         query = select(DatasheetAbility).where(DatasheetAbility.name == "Deep Strike")
@@ -94,10 +97,25 @@ async def _unit(
             )
     weapons = []
     if weapon_range is not None:
+        gun_ability_rows = []
+        for ability_name, keyword in gun_abilities:
+            row = WeaponAbility(name=ability_name)
+            if keyword is not None:
+                query = select(Effect).where(Effect.keyword == keyword)
+                effect = (await session.execute(query)).scalar_one_or_none() or Effect(
+                    keyword=keyword, name=keyword
+                )
+                query = select(Condition).where(Condition.keyword == "always")
+                always = (await session.execute(query)).scalar_one_or_none() or Condition(
+                    keyword="always", name="Always"
+                )
+                row.conditions, row.effects = [always], [effect]
+            gun_ability_rows.append(row)
         weapons = [
             Weapon(
                 name=f"{name} gun", range=weapon_range, attacks="1", skill=2, strength=4,
                 ap=0, damage="1", weapon_type="ranged", model=model,
+                abilities=gun_ability_rows,
             )
         ]
     if melee:
@@ -448,21 +466,21 @@ async def test_infiltrators(client: AsyncClient, session, tmp_path):
     scouts, grunts = _unit_named(deployment, "Scouts"), _unit_named(deployment, "Grunts")
     assert scouts["infiltrators"] and not grunts["infiltrators"]
 
-    # Mid-board, more than 9" from the defender's zone (y 0-12): fine for
+    # Mid-board, more than 8" from the defender's zone (y 0-12): fine for
     # Infiltrators, not for anyone else.
     assert (await _check(client, game["id"], scouts, _row(scouts, 20, 24)))["valid"]
     check = await _check(client, game["id"], grunts, _row(grunts, 20, 24))
     assert any("deployment zone" in p for p in check["problems"])
-    # Within 9" of the defender's zone.
+    # Within 8" of the defender's zone.
     check = await _check(client, game["id"], scouts, _row(scouts, 20, 20))
-    assert any('within 9" of the enemy deployment zone' in p for p in check["problems"])
+    assert any('within 8" of the enemy deployment zone' in p for p in check["problems"])
 
 
 async def test_infiltrators_away_from_an_enemy_model_outside_its_zone(
     client: AsyncClient, session, tmp_path
 ):
     # The attacker's infiltrating unit is set up first, mid-board; the
-    # defender's infiltrators then can't come within 9" of it.
+    # defender's infiltrators then can't come within 8" of it.
     game = await _game(
         client,
         session,
@@ -479,7 +497,7 @@ async def test_infiltrators_away_from_an_enemy_model_outside_its_zone(
     other = _unit_named(deployment, "Other scouts")
     # 21.5" from the attacker's zone, but 5" from their scouts.
     check = await _check(client, game_id, other, _row(other, 15, 22))
-    assert any('within 9" of an enemy model' in p for p in check["problems"])
+    assert any('within 8" of an enemy model' in p for p in check["problems"])
     assert (await _check(client, game_id, other, _row(other, 40, 22)))["valid"]
 
 

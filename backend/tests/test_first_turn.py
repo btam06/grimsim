@@ -25,7 +25,7 @@ async def _rolled_off_game(client, session, tmp_path, rolls):
     return game_id, s
 
 
-async def test_roll_off_then_scouts_moves_at_the_start_of_the_first_round(
+async def test_roll_off_then_scouts_moves_before_the_battle(
     client: AsyncClient, session, tmp_path, monkeypatch
 ):
     rolls = iter([3, 3, 2, 5])
@@ -47,14 +47,12 @@ async def test_roll_off_then_scouts_moves_at_the_start_of_the_first_round(
     response = await client.post(f"/games/{game_id}/first-turn/roll")
     assert response.status_code == 400
 
-    # The battle: its first round starts with Scouts moves - seat 2 has no
-    # Scouts units, so seat 1 makes its.
-    assert (game["status"], game["battle_round"], game["phase"]) == (
-        "in_progress", 1, "start_of_round"
+    # Pre-battle abilities next (24.31): Scouts - seat 2 has no Scouts units,
+    # so seat 1 makes its.
+    assert (game["status"], game["deployment_step"], game["battle_round"]) == (
+        "deployment", "pre_battle", 0
     )
     assert game["scouting_seat"] == 1
-    response = await client.post(f"/games/{game_id}/advance")
-    assert "Scouts moves first" in response.json()["detail"]
     scouts = (await client.get(f"/games/{game_id}/scouts")).json()
     assert [(u["unit_id"], u["distance"]) for u in scouts["units"]] == [(s["unit_id"], 6)]
     model = s["models"][0]["unit_model_id"]
@@ -70,11 +68,14 @@ async def test_roll_off_then_scouts_moves_at_the_start_of_the_first_round(
     assert response.status_code == 200, response.text
     assert response.json()["units"][0]["moved"]
 
+    # Done: the battle begins, seat 2 first.
     response = await client.post(f"/games/{game_id}/scouts/done", json={"seat": 1})
     assert response.status_code == 200, response.text
-    assert response.json()["scouting_seat"] is None
-    game = (await client.post(f"/games/{game_id}/advance")).json()
-    assert (game["phase"], game["turn_seat"]) == ("command", 2)
+    game = (await client.get(f"/games/{game_id}")).json()
+    assert game["scouting_seat"] is None
+    assert (game["status"], game["battle_round"], game["phase"], game["turn_seat"]) == (
+        "in_progress", 1, "command", 2
+    )
 
 
 async def test_a_unit_without_scouts_on_every_model_cant_scout(
@@ -128,3 +129,25 @@ async def test_scouts_from_wargear_after_the_roll_off(
     assert response.json()["scouting_seat"] == 1
     scouts = (await client.get(f"/games/{game_id}/scouts")).json()
     assert [(u["unit_id"], u["distance"]) for u in scouts["units"]] == [(o["unit_id"], 6)]
+
+
+async def test_a_scout_move_ends_more_than_8_from_enemy_units(
+    client: AsyncClient, session, tmp_path, monkeypatch
+):
+    from tests.test_shooting import _place
+
+    rolls = iter([2, 5])
+    monkeypatch.setattr(first_turn.random, "randint", lambda a, b: next(rolls))
+    game_id, s = await _rolled_off_game(client, session, tmp_path, rolls)
+    await client.post(f"/games/{game_id}/first-turn/roll")
+    # An enemy model 13" north of S: moving 5" toward it ends 8" away or less.
+    d = _unit_named(await _deployment(client, game_id), "D")
+    await _place(session, d, [(40, 27)])
+    model = s["models"][0]["unit_model_id"]
+    check = (
+        await client.post(
+            f"/games/{game_id}/scouts/check",
+            json={"unit_id": s["unit_id"], "positions": [{"unit_model_id": model, "x": 40, "y": 36}]},
+        )
+    ).json()
+    assert 'It must end more than 8" from every enemy unit' in check["problems"]

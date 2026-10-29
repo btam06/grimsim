@@ -79,8 +79,9 @@ async def test_only_engaged_units_pile_in(client: AsyncClient, session, tmp_path
     for _ in ("shooting", "charge", "fight"):
         await client.post(f"/games/{game['id']}/advance")
     state = await _pile_in_state(client, game["id"])
+    # Only engaged units are offered.
     units = {u["name"]: (u["engaged"], u["can_pile_in"]) for u in state["units"]}
-    assert units == {"D": (True, True), "E": (False, False)}
+    assert units == {"D": (True, True)}
 
 
 async def test_pile_in(client: AsyncClient, session, tmp_path):
@@ -102,7 +103,7 @@ async def test_pile_in_limits(client: AsyncClient, session, tmp_path):
     game_id = game["id"]
     # Away from the enemy.
     check = await _check(client, game_id, d, _shifted(d, dx=-0.5, dy=-0.5))
-    assert "D must end closer to the nearest enemy model" in check["problems"]
+    assert "D must end closer to the closest pile-in target" in check["problems"]
     # More than 3" (sideways, round A, still closer).
     check = await _check(client, game_id, d, _shifted(d, dx=3.2, dy=1.7))
     assert 'D would move 3.6" (it can move 3")' in check["problems"]
@@ -175,9 +176,23 @@ async def _fight_state(client, game_id):
     return (await client.get(f"/games/{game_id}/fight")).json()
 
 
+async def _skip_consolidations(client, game_id):
+    # In the Consolidate step: every unit that could consolidate doesn't.
+    for _ in range(20):
+        state = (await client.get(f"/games/{game_id}/fight")).json()
+        if state["step"] != "consolidate":
+            return state
+        unit_id = state["consolidations"][0]["unit_id"]
+        skipped = await client.post(
+            f"/games/{game_id}/fight/consolidate/skip", json={"unit_id": unit_id}
+        )
+        assert skipped.status_code == 200, skipped.text
+    raise AssertionError("still consolidating")
+
+
 async def _fight(client, game_id, unit, target, weapon_ids=None, skip=True):
-    # The unit fights the target - then doesn't consolidate, unless `skip` is
-    # False (it's left to consolidate).
+    # The unit fights the target - and if that was the last fight, every unit
+    # that could consolidate doesn't, unless `skip` is False.
     if weapon_ids is None:
         response = await client.get(f"/games/{game_id}/fight/targets?unit_id={unit['unit_id']}")
         assert response.status_code == 200, response.text
@@ -189,12 +204,7 @@ async def _fight(client, game_id, unit, target, weapon_ids=None, skip=True):
               "weapon_ids": weapon_ids},
     )
     if skip and response.status_code == 200:
-        state = (await client.get(f"/games/{game_id}/fight")).json()
-        if state["step"] == "consolidate":
-            skipped = await client.post(
-                f"/games/{game_id}/fight/consolidate/skip", json={"unit_id": unit["unit_id"]}
-            )
-            assert skipped.status_code == 200, skipped.text
+        await _skip_consolidations(client, game_id)
     return response
 
 
@@ -354,7 +364,7 @@ async def _check_consolidation(client, game_id, unit, positions):
     return response.json()
 
 
-async def test_a_unit_consolidates_after_fighting(
+async def test_units_consolidate_once_the_fighting_is_done(
     client: AsyncClient, session, tmp_path, monkeypatch
 ):
     units = {1: [("A", 1, BLADE)], 2: [("D", 1, BLADE)]}
@@ -363,13 +373,24 @@ async def test_a_unit_consolidates_after_fighting(
     )
     d, a = _unit_named(deployment, "D"), _unit_named(deployment, "A")
     assert (await _fight(client, game_id, d, a, skip=False)).status_code == 200
+    # Not straight after fighting: A fights next.
+    state = await _consolidate_state(client, game_id)
+    assert (state["step"], state["seat"], state["consolidations"]) == ("remaining", 1, [])
+    assert (await _fight(client, game_id, a, d, skip=False)).status_code == 200
+
+    # Then the Consolidate step: the player whose turn it is first.
     state = await _consolidate_state(client, game_id)
     assert (state["step"], state["seat"]) == ("consolidate", 2)
-    assert state["consolidating"] == {
-        "unit_id": d["unit_id"], "unit_name": "D", "target_name": "A", "target_destroyed": False
-    }
-    # A has to wait.
-    assert "consolidate" in [u for u in state["units"] if u["name"] == "A"][0]["reason"]
+    assert state["consolidations"] == [
+        {"unit_id": d["unit_id"], "unit_name": "D", "target_name": "A", "target_destroyed": False,
+         # Engaged with A: an ongoing consolidation.
+         "mode": "ongoing", "options": [{"id": a["unit_id"], "name": "A"}]}
+    ]
+    # A has to wait for seat 2.
+    response = await client.post(
+        f"/games/{game_id}/fight/consolidate/skip", json={"unit_id": a["unit_id"]}
+    )
+    assert response.status_code == 400
 
     # Towards A (still there), up to 3".
     d = _unit_named(await _deployment(client, game_id), "D")
@@ -383,64 +404,49 @@ async def test_a_unit_consolidates_after_fighting(
     assert response.status_code == 200, response.text
     moved = _unit_named(await _deployment(client, game_id), "D")["models"][0]
     assert moved["position"]["y"] == 4.5
-    # Then A can fight.
+    # Then A - or not.
     state = await _consolidate_state(client, game_id)
-    assert (state["step"], state["seat"]) == ("remaining", 1)
-
-
-async def test_consolidating_into_another_unit_lets_it_fight(
-    client: AsyncClient, session, tmp_path, monkeypatch
-):
-    # D destroys A, then consolidates 2" into Engagement Range of B - which
-    # hadn't been in a fight, and now gets to fight.
-    units = {1: [("A", 1, BLADE), ("B", 1, BLADE)], 2: [("D", 2, BLADE)]}
-    places = {"D": _row_at(20, 4, 2), "A": [(20.75, 4 + 2 * R32 + 0.5)], "B": [(26, 4)]}
-    game_id, deployment = await _to_fight(client, session, tmp_path, monkeypatch, units, places)
-    d, a = _unit_named(deployment, "D"), _unit_named(deployment, "A")
-    state = await _consolidate_state(client, game_id)
-    assert [u["name"] for u in state["units"] if u["can_fight"]] == ["D"]
-    body = (await _fight(client, game_id, d, a, skip=False)).json()
-    assert body["combat"]["models_destroyed"] == 1
-    state = await _consolidate_state(client, game_id)
-    assert state["consolidating"]["target_destroyed"]
-
-    d = _unit_named(await _deployment(client, game_id), "D")
-    # Nowhere near anything else: it has to end engaged.
-    check = await _check_consolidation(client, game_id, d, _shifted(d, dx=-1))
-    assert "The unit must end within Engagement Range of an enemy unit" in check["problems"]
-    assert "D must end closer to the nearest enemy model (x2)" in check["problems"]
-    # 2" towards B: its second model ends 1.24" from it.
-    positions = _shifted(d, dx=2)
-    assert (await _check_consolidation(client, game_id, d, positions))["valid"]
-    response = await client.post(
-        f"/games/{game_id}/fight/consolidate",
-        json={"unit_id": d["unit_id"], "positions": positions},
-    )
-    assert response.status_code == 200, response.text
-
-    state = await _consolidate_state(client, game_id)
-    assert (state["step"], state["seat"]) == ("remaining", 1)
-    b_unit = [u for u in state["units"] if u["name"] == "B"][0]
-    assert b_unit["can_fight"]
-
-
-async def test_consolidation_can_be_skipped(client: AsyncClient, session, tmp_path, monkeypatch):
-    units = {1: [("A", 1, BLADE)], 2: [("D", 1, BLADE)]}
-    game_id, deployment = await _to_fight(
-        client, session, tmp_path, monkeypatch, units, {"D": [(20, 4)], "A": [(20, 7)]}
-    )
-    d, a = _unit_named(deployment, "D"), _unit_named(deployment, "A")
-    await _fight(client, game_id, d, a, skip=False)
-    # Only the unit that just fought.
+    assert (state["step"], state["seat"]) == ("consolidate", 1)
+    assert [c["unit_name"] for c in state["consolidations"]] == ["A"]
     response = await client.post(
         f"/games/{game_id}/fight/consolidate/skip", json={"unit_id": a["unit_id"]}
     )
-    assert response.status_code == 400
-    response = await client.post(
-        f"/games/{game_id}/fight/consolidate/skip", json={"unit_id": d["unit_id"]}
-    )
     assert response.status_code == 200
-    assert (await _consolidate_state(client, game_id))["step"] == "remaining"
+    assert (await _consolidate_state(client, game_id))["step"] == "done"
+
+
+async def test_a_player_consolidates_their_units_in_any_order(
+    client: AsyncClient, session, tmp_path, monkeypatch
+):
+    units = {1: [("A", 1, BLADE), ("B", 1, BLADE)], 2: [("D", 1, BLADE), ("E", 1, BLADE)]}
+    places = {"D": [(20, 4)], "A": [(20, 7)], "E": [(40, 4)], "B": [(40, 7)]}
+    game_id, deployment = await _to_fight(client, session, tmp_path, monkeypatch, units, places)
+    d, e, a, b = (_unit_named(deployment, n) for n in "DEAB")
+    for unit, target in ((d, a), (a, d), (e, b), (b, e)):
+        assert (await _fight(client, game_id, unit, target, skip=False)).status_code == 200
+    state = await _consolidate_state(client, game_id)
+    assert (state["step"], state["seat"]) == ("consolidate", 2)
+    assert {c["unit_name"] for c in state["consolidations"]} == {"D", "E"}
+    # E before D.
+    for unit in (e, d):
+        response = await client.post(
+            f"/games/{game_id}/fight/consolidate/skip", json={"unit_id": unit["unit_id"]}
+        )
+        assert response.status_code == 200
+    state = await _consolidate_state(client, game_id)
+    assert state["seat"] == 1
+    assert {c["unit_name"] for c in state["consolidations"]} == {"A", "B"}
+
+
+async def test_only_units_in_the_fight_are_listed(
+    client: AsyncClient, session, tmp_path, monkeypatch
+):
+    # B is nowhere near an enemy.
+    units = {1: [("A", 1, BLADE), ("B", 1, BLADE)], 2: [("D", 1, BLADE)]}
+    places = {"D": [(20, 4)], "A": [(20, 7)], "B": [(40, 20)]}
+    game_id, _ = await _to_fight(client, session, tmp_path, monkeypatch, units, places)
+    state = await _fight_state(client, game_id)
+    assert {u["name"] for u in state["units"]} == {"D", "A"}
 
 
 async def test_consolidating_onto_an_objective(
@@ -459,14 +465,16 @@ async def test_consolidating_onto_an_objective(
     await _set_models(session, a, wounds=1)
     body = (await _fight(client, game_id, d, a, skip=False)).json()
     assert body["destroyed_unit_model_ids"] == [a["models"][0]["unit_model_id"]]
+    # (Nothing else fights: on to the Consolidate step.)
+    assert (await _consolidate_state(client, game_id))["step"] == "consolidate"
 
     d = _unit_named(await _deployment(client, game_id), "D")
-    # Away from it: neither engaged nor on an objective.
+    # No enemy within 3": an objective consolidation.
+    assert (await _consolidate_state(client, game_id))["consolidating"]["mode"] == "objective"
+    # Away from it.
     check = await _check_consolidation(client, game_id, d, _shifted(d, dx=1))
-    assert "No model ends within Engagement Range" not in " ".join(check["problems"])
-    assert "(Or it can end on an objective, each model that moves closer to one)" in check[
-        "problems"
-    ]
+    assert "D must end closer to the objective" in check["problems"]
+    assert "The unit must end within range of the objective" in check["problems"]
     # Onto the ruin: its base reaches over x 13.
     positions = [{"unit_model_id": d["models"][0]["unit_model_id"], "x": 13.5, "y": 8.5}]
     check = await _check_consolidation(client, game_id, d, positions)

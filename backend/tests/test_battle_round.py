@@ -91,7 +91,8 @@ async def test_no_rules_no_start_of_round(client: AsyncClient, session, tmp_path
 
 
 async def test_start_of_the_first_battle_round(client: AsyncClient, session, tmp_path):
-    game = await _ready(client, session, tmp_path, abilities=[("D", 'Scouts 6"', FIRST)])
+    # (Not Scouts, which is before the battle - 24.31.)
+    game = await _ready(client, session, tmp_path, abilities=[("D", "Forward Move", FIRST)])
     game_id = game["id"]
     assert (game["battle_round"], game["phase"], game["turn_seat"]) == (1, "start_of_round", 2)
     rules = await _round_start(client, game_id)
@@ -99,14 +100,10 @@ async def test_start_of_the_first_battle_round(client: AsyncClient, session, tmp
     assert by_seat[1] == []
     [rule] = by_seat[2]
     assert (rule["kind"], rule["name"], rule["description"], rule["units"]) == (
-        "ability", 'Scouts 6"', FIRST, ["D"]
+        "ability", "Forward Move", FIRST, ["D"]
     )
     assert rule["options"] == []
-    # D's Scouts move (seat 2 goes first): it can make one, then says it's
-    # done. On to the first turn: its command phase, with its CP.
-    assert game["scouting_seat"] == 2
-    response = await client.post(f"/games/{game_id}/scouts/done", json={"seat": 2})
-    assert response.status_code == 200, response.text
+    # On to the first turn: its command phase, with its CP.
     cp = {p["seat"]: p["cp"] for p in game["players"]}
     game = (await client.post(f"/games/{game_id}/advance")).json()
     assert game["phase"] == "command"
@@ -140,12 +137,12 @@ async def test_a_rule_with_a_decision_lists_the_others_too(
         client,
         session,
         tmp_path,
-        abilities=[("D", "Wafers", AUTOMATIC), ("A", 'Scouts 6"', FIRST)],
+        abilities=[("D", "Wafers", AUTOMATIC), ("A", "Forward Move", FIRST)],
     )
     assert game["phase"] == "start_of_round"
     players = (await _round_start(client, game["id"]))["players"]
     rules = {r["name"]: r["decision"] for p in players for r in p["rules"]}
-    assert rules == {"Wafers": False, 'Scouts 6"': True}
+    assert rules == {"Wafers": False, "Forward Move": True}
 
 
 async def test_every_battle_round(client: AsyncClient, session, tmp_path):

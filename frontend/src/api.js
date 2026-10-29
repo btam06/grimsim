@@ -1,16 +1,24 @@
+import { begin, end } from './loading'
+
 const BASE = '/api'
 
 async function request(path, options) {
-  const response = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  })
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}))
-    throw new Error(body.detail || `Request failed: ${response.status}`)
+  // (Counted while in flight, for the loading skull.)
+  begin()
+  try {
+    const response = await fetch(`${BASE}${path}`, {
+      headers: { 'Content-Type': 'application/json' },
+      ...options,
+    })
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}))
+      throw new Error(body.detail || `Request failed: ${response.status}`)
+    }
+    if (response.status === 204) return null
+    return await response.json()
+  } finally {
+    end()
   }
-  if (response.status === 204) return null
-  return response.json()
 }
 
 export const listFactions = () => request('/factions')
@@ -248,6 +256,22 @@ export const consolidate = (id, payload) =>
   request(`/games/${id}/fight/consolidate`, { method: 'POST', body: JSON.stringify(payload) })
 export const skipConsolidation = (id, payload) =>
   request(`/games/${id}/fight/consolidate/skip`, { method: 'POST', body: JSON.stringify(payload) })
+// The player picking a unit to fight passes (every unit of theirs eligible to
+// fight is more than 5" from every enemy unit).
+export const passFight = (id, payload) =>
+  request(`/games/${id}/fight/pass`, { method: 'POST', body: JSON.stringify(payload) })
+// A unit's allocation groups (05.03), for its player to order before it's
+// attacked.
+export const getAllocationGroups = (id, unitId) =>
+  request(`/games/${id}/allocation-groups?unit_id=${unitId}`)
+// Surge moves (21.02 - see app/services/in_game/surge.py).
+export const listSurgeMoves = (id) => request(`/games/${id}/surge-moves`)
+export const startSurgeMove = (id, payload) =>
+  request(`/games/${id}/surge-moves/start`, { method: 'POST', body: JSON.stringify(payload) })
+export const checkSurgeMove = (id, payload) =>
+  request(`/games/${id}/surge-moves/check`, { method: 'POST', body: JSON.stringify(payload) })
+export const makeSurgeMove = (id, payload) =>
+  request(`/games/${id}/surge-moves`, { method: 'POST', body: JSON.stringify(payload) })
 export const getMissionState = (id) => request(`/games/${id}/mission`)
 export const answerMissionPrompt = (id, promptId, payload) =>
   request(`/games/${id}/mission/prompts/${promptId}`, {
@@ -339,6 +363,9 @@ export const rollFirstTurn = (id) => request(`/games/${id}/first-turn/roll`, { m
 export const getScouts = (id) => request(`/games/${id}/scouts`)
 export const checkScoutMove = (id, payload) =>
   request(`/games/${id}/scouts/check`, { method: 'POST', body: JSON.stringify(payload) })
+// Where a unit in Strategic Reserves making a Scouts move is set down.
+export const getScoutFormation = (id, payload) =>
+  request(`/games/${id}/scouts/formation`, { method: 'POST', body: JSON.stringify(payload) })
 export const scoutMove = (id, payload) =>
   request(`/games/${id}/scouts`, { method: 'POST', body: JSON.stringify(payload) })
 export const finishScouts = (id, payload) =>

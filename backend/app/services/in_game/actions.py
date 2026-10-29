@@ -8,20 +8,21 @@ from app.models import Game, GameAction, GameActionUnitTarget, Unit
 from app.services.in_game import battle_shock, deployment, mission_state, objectives, regions
 from app.services.in_game.terrain import area_polygon
 
-# Actions: what a mission can have a unit do instead of shooting. In its
-# turn's Shooting phase, a unit of the player whose turn it is can start an
-# action one of their mission cards has (their primary mission's, or an
-# active secondary's - e.g. Cleanse, Plunder, Decoy), on an objective,
-# terrain area or enemy unit the action allows - if it hasn't Advanced,
-# Fallen Back or shot this turn, isn't within Engagement Range of an enemy
-# unit, and hasn't started another action this turn.
+# Actions (16): what a mission can have a unit do. In its turn's Shooting
+# phase, a unit of the player whose turn it is can start an action one of
+# their mission cards has (their primary mission's, or an active
+# secondary's - e.g. Cleanse, Plunder, Decoy), on an objective, terrain area
+# or enemy unit the action allows - unless it isn't on the battlefield, is an
+# AIRCRAFT/FORTIFICATION unit, is Battle-shocked, has an OC of 0, is engaged
+# (unless it's TITANIC), Advanced or Fell Back this turn, or started another
+# action this turn.
 #
-# A Battle-shocked unit can't start an action. A unit that's started one
-# can't shoot, declare a charge or fight for the rest of the turn (see
-# `blocks` - where rules that let it act and shoot will go; and `can_act`,
-# for acting after Advancing). If it becomes Battle-shocked, ends up within
-# Engagement Range of an enemy unit or is destroyed before its action
-# completes, the action fails (see `check_started`). An action completes
+# A unit that's started one can't shoot (unless it's TITANIC) or declare a
+# charge for the rest of the turn (see `blocks` - where rules that let it act
+# and shoot will go; and `can_act`, for acting after Advancing). If it makes
+# a move (other than a pile-in or consolidation move), leaves the
+# battlefield or becomes Battle-shocked before its action completes, the
+# action fails (see `check_started`). An action completes
 # straight away, or at the end of the turn if its condition is met then
 # (otherwise it fails): its unit controls its objective (within range of it,
 # and its player controls it), or no enemy units are within its terrain
@@ -109,14 +110,31 @@ def unit_action(game: Game, unit: Unit) -> GameAction | None:
     return next((a for a in game.actions if a.unit_id == unit.id and _this_turn(game, a)), None)
 
 
+# The moves a unit can make without failing the action it's started.
+MOVES_KEEPING_ACTIONS = ("pile_in", "consolidate")
+
+
+def _keywords(unit: Unit) -> set[str]:
+    return {k.name for m in unit.unit_models for k in m.model.keywords}
+
+
 def blocks(game: Game, unit: Unit, what: str) -> str | None:
-    # Why the unit's action stops it doing `what` ("shoot", "charge",
-    # "fight") this turn, or None. (Rules that let a unit act and still shoot,
-    # say, would let it here.)
+    # Why the unit's action stops it doing `what` ("shoot" - unless it's
+    # TITANIC - or "charge") this turn, or None. (Rules that let a unit act
+    # and still shoot, say, would let it here.)
     action = unit_action(game, unit)
     if action is None:
         return None
-    return f"it did an action this turn ({action.action})"
+    if what == "shoot" and "TITANIC" in _keywords(unit):
+        return None
+    return f"it started an action this turn ({action.action})"
+
+
+def moved(game: Game, unit: Unit) -> None:
+    # The unit made a move: an action it started that hasn't completed fails.
+    for record in game.actions:
+        if record.status == "started" and record.unit_id == unit.id:
+            record.status = "failed"
 
 
 def _act_after(unit: Unit) -> set[str]:
@@ -143,32 +161,35 @@ def can_act(game: Game, unit: Unit) -> str | None:
         return "it isn't on the battlefield"
     if unit_action(game, unit) is not None:
         return "it has already started an action this turn"
-    if shooting.unit_shot(game, unit) is not None:
-        return "it has already shot this phase"
+    keywords = _keywords(unit)
+    if keywords & {"AIRCRAFT", "FORTIFICATION"}:
+        return "AIRCRAFT and FORTIFICATION units can't start actions"
+    if battle_shock.is_battle_shocked(game, unit):
+        return "it's Battle-shocked"
+    if all(
+        objectives.model_oc(game, m) <= 0 for m in deployment.models_on_battlefield(game, unit)
+    ):
+        return "its OC is 0"
     status = shooting.move_status(game, unit)
     # (An ability can let it anyway - e.g. Flexible Asset.)
     if status.advanced and "advanced" not in _act_after(unit):
         return "it Advanced this turn"
     if status.fell_back and "fell_back" not in _act_after(unit):
         return "it Fell Back this turn"
-    if movement.in_engagement_range(game, unit):
-        return "it's within Engagement Range of an enemy unit"
+    if movement.in_engagement_range(game, unit) and "TITANIC" not in keywords:
+        return "it's engaged"
     if battle_shock.is_battle_shocked(game, unit):
         return "it's Battle-shocked"
     return None
 
 
 def _invalid(game: Game, unit: Unit) -> bool:
-    # Whether a unit can no longer complete an action it started: it's off
-    # the battlefield (destroyed), Battle-shocked, or within Engagement Range
-    # of an enemy unit.
-    from app.services.in_game import movement
-
-    return (
-        not deployment.is_deployed(unit, deployment.positions(game))
-        or battle_shock.is_battle_shocked(game, unit)
-        or movement.in_engagement_range(game, unit)
-    )
+    # Whether a unit can no longer complete an action it started: it's left
+    # the battlefield (or been destroyed), or it's Battle-shocked. (Making a
+    # move fails it too - see `moved`.)
+    return not deployment.is_deployed(
+        unit, deployment.positions(game)
+    ) or battle_shock.is_battle_shocked(game, unit)
 
 
 def check_started(game: Game) -> None:

@@ -119,6 +119,18 @@ def end_movement(game: Game) -> None:
     )
 
 
+def ingressed(game: Game, unit: Unit) -> bool:
+    # Whether the unit made an ingress move and hasn't reached a Charge phase
+    # since: until then it can't make any other kind of move (20.04).
+    return game.phase in ("movement", "shooting") and any(
+        m.unit_id == unit.id
+        and m.kind == ARRIVED
+        and m.battle_round == game.battle_round
+        and m.turn_seat == game.turn_seat
+        for m in game.unit_moves
+    )
+
+
 def arrival_round(game: Game, unit: Unit | None = None, rapid_ingress: bool = False) -> bool:
     # Whether units can arrive from Reserves this battle round - or, given
     # one, whether that unit can (one that can make an ingress move can in
@@ -245,11 +257,27 @@ def bring_in(
         )
 
 
+# Units placed in Strategic Reserves during the battle (repositioned units -
+# 20.02), kept as marked units (see app/services/in_game/mission_state.py).
+REPOSITIONED = "repositioned"
+
+
 def destroy_unarrived(game: Game) -> None:
-    # At the end of the third battle round: every unit still in Strategic
-    # Reserves is destroyed.
+    # At the end of the third battle round (20.04): every unit still in
+    # Strategic Reserves is destroyed - and those embarked in its transports -
+    # except repositioned units.
+    from app.services.in_game import embarked, mission_state
+
+    repositioned = {m.unit_id for m in mission_state.marked(game, REPOSITIONED)}
     for player in game.players:
-        for unit in reserve_units(game, player.seat):
+        doomed = [u for u in reserve_units(game, player.seat) if u.id not in repositioned]
+        doomed += [
+            u
+            for u in deployment.deployable_units(player)
+            if (carrier := embarked.transport(game, u)) is not None
+            and carrier.id in {d.id for d in doomed}
+        ]
+        for unit in doomed:
             deployment.battle_formation(game, unit).place = RESERVES_DESTROYED
             # Destroyed off the battlefield: not a kill for missions (it isn't
             # in the turn record - see app/services/in_game/turn_record.py).
@@ -261,6 +289,25 @@ def destroy_unarrived(game: Game) -> None:
                         destroyed=True,
                     )
                 )
+
+
+def aircraft_to_reserves(game: Game) -> None:
+    # The end of a turn: the AIRCRAFT units on the battlefield of the player
+    # whose turn it isn't go into Strategic Reserves (23.02) - repositioned
+    # units, so the end of the third battle round doesn't destroy them.
+    from app.services.in_game import mission_state
+    from app.services.in_game.movement import is_aircraft
+
+    player = next(p for p in game.players if p.seat != game.turn_seat)
+    placed = deployment.positions(game)
+    for unit in deployment.deployable_units(player):
+        if not is_aircraft(unit) or not deployment.is_deployed(unit, placed):
+            continue
+        models = {m.id for m in unit.unit_models}
+        for position in [p for p in game.model_positions if p.unit_model_id in models]:
+            game.model_positions.remove(position)
+        game.battle_formations.append(GameBattleFormation(unit_id=unit.id, place="reserves"))
+        mission_state.mark(game, player.seat, REPOSITIONED, unit.id)
 
 
 def extraction_reason(game: Game, seat: int, unit: Unit) -> str | None:
@@ -292,3 +339,6 @@ def place_in_reserves(game: Game, seat: int, unit: Unit) -> None:
     for position in [p for p in game.model_positions if p.unit_model_id in models]:
         game.model_positions.remove(position)
     game.battle_formations.append(GameBattleFormation(unit_id=unit.id, place="reserves"))
+    from app.services.in_game import mission_state
+
+    mission_state.mark(game, seat, REPOSITIONED, unit.id)

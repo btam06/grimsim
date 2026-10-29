@@ -1,9 +1,12 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.migrations import (
+    core_rule_texts,
+    core_stratagems,
     first_seat_nullable,
     hellfire_rounds_conditions,
     hull_boxes,
+    kit_counts,
     reconnaissance_spelling,
     skitarii_marshal_spelling,
 )
@@ -24,6 +27,9 @@ MIGRATIONS = [
     first_seat_nullable,
     skitarii_marshal_spelling,
     hull_boxes,
+    kit_counts,
+    core_rule_texts,
+    core_stratagems,
 ]
 
 

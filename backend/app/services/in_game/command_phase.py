@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from fastapi import HTTPException
 
-from app.combat_rules import CommandChoice
+from app.combat_rules import CommandChoice, RuleOption
 from app.models import (
     FactionAbility,
     Game,
@@ -37,7 +37,11 @@ from app.services.in_game.deployment import TOLERANCE, gap
 #
 # An ability whose option applies to another unit (Rod of the War Forge: a
 # SKITARII or THULIA GHULD unit within 6") has that unit selected with it -
-# then the option is only that unit's. An option that targets an enemy unit
+# then the option is only that unit's. Some are selected in another of their
+# owner's phases instead (CommandChoice.phase - e.g. Author of the Codex: in
+# the Movement phase, for a visible ADEPTUS ASTARTES unit within 12", a
+# combat doctrine active for it as well as any others), and last until the
+# start of their next Command phase all the same. An option that targets an enemy unit
 # (Invocation of Machine Vengeance: any enemy unit on the battlefield, seen
 # or not) has it selected with it - then the option only applies to attacks
 # against that unit.
@@ -76,11 +80,15 @@ class CommandAbility:
     config: CommandChoice
 
 
-def command_abilities(game: Game, seat: int) -> list[CommandAbility]:
+def command_abilities(game: Game, seat: int, phase: str | None = None) -> list[CommandAbility]:
     # The player's units on the battlefield with such abilities (once per
-    # unit and ability), in list order.
+    # unit and ability), in list order - those selected in `phase`, if given.
     player = next(p for p in game.players if p.seat == seat)
-    config = _choices_config()
+    config = {
+        name: choice
+        for name, choice in _choices_config().items()
+        if phase is None or choice.phase == phase
+    }
     found: dict[tuple[int, str], CommandAbility] = {}
     for unit in deployment.deployable_units(player):
         for unit_model in deployment.models_on_battlefield(game, unit):
@@ -93,7 +101,16 @@ def command_abilities(game: Game, seat: int) -> list[CommandAbility]:
 
 
 def options(ability: str) -> dict:
-    # The ability's options: {option name: RuleOption}.
+    # The ability's options: {option name: RuleOption} - or, for one whose
+    # options are an army rule's (e.g. Author of the Codex), that rule's (with
+    # what each does).
+    config = _choices_config().get(ability)
+    if config is not None and config.faction_options is not None:
+        descriptions = faction_seeds.COMMAND_PHASE_DESCRIPTIONS.get(config.faction_options, {})
+        return {
+            name: RuleOption(description=descriptions.get(name, ""))
+            for name in faction_seeds.rule_options(*config.faction_options)
+        }
     return datasheet_ability_seeds.OPTIONS.get(ability, {})
 
 
@@ -197,6 +214,10 @@ def eligible_after(game: Game, unit: Unit, action: str, to: str) -> bool:
         option = options(choice.ability).get(choice.option)
         if option is not None and action in option.eligible_after:
             return True
+        # One named for an army rule's option (e.g. Author of the Codex's
+        # doctrines) lets it as that does.
+        if to in faction_seeds.ELIGIBLE_AFTER.get(choice.option, {}).get(action, ()):
+            return True
     return False
 
 
@@ -221,11 +242,27 @@ def targets(game: Game, ability: CommandAbility) -> list[Unit]:
         keywords = {k.name for m in models for k in m.model.keywords}
         if not keywords & set(config.target_keywords):
             continue
-        if any(
-            gap(source, _base(game, m)) <= (config.target_range or 0) + TOLERANCE for m in models
-        ):
+        near = [
+            m
+            for m in models
+            if gap(source, _base(game, m)) <= (config.target_range or 0) + TOLERANCE
+        ]
+        if near and (not config.target_visible or _sees(game, ability, unit, near)):
             found.append(unit)
     return found
+
+
+def _sees(game: Game, ability: CommandAbility, unit: Unit, models: list[UnitModel]) -> bool:
+    # Whether the model with the ability can see one of `models` (of `unit` -
+    # itself, if it's the same unit).
+    # (Imported here: shooting imports this module.)
+    from app.services.in_game import shooting
+
+    if unit.id == ability.unit.id:
+        return True
+    source = _base(game, ability.model)
+    sight = shooting.Sight(game)
+    return any(sight.sees(source, _base(game, m)) for m in models)
 
 
 def enemy_targets(game: Game, ability: CommandAbility) -> list[Unit]:
@@ -258,9 +295,10 @@ def choose(
     target_unit_id: int | None = None,
 ) -> None:
     # The player selects an option for one of their units' abilities (or, for
-    # one that needn't have one, none) in their Command phase.
-    if not is_command_phase(game) or game.turn_seat != seat:
-        raise _bad_request("abilities' options are selected in their owner's Command phase")
+    # one that needn't have one, none) in their Command phase - or the phase
+    # it's selected in.
+    if game.status != "in_progress" or game.turn_seat != seat:
+        raise _bad_request("abilities' options are selected in their owner's turn")
     ability = next(
         (
             a
@@ -271,6 +309,10 @@ def choose(
     )
     if ability is None:
         raise _bad_request(f"that unit has no {ability_name} to select an option for")
+    if game.phase != ability.config.phase:
+        raise _bad_request(
+            f"{ability_name} is selected in its owner's {ability.config.phase} phase"
+        )
     if option is None:
         if ability.config.required:
             raise _bad_request(f"{ability_name} must have one of its options selected")
@@ -311,7 +353,7 @@ def missing_choices(game: Game) -> list[str]:
     seat = game.turn_seat
     chosen = {(c.unit_id, c.ability) for c in this_phase(game, seat)}
     missing = []
-    for ability in command_abilities(game, seat):
+    for ability in command_abilities(game, seat, "command"):
         if not ability.config.required or (ability.unit.id, ability.ability) in chosen:
             continue
         if ability.config.target_keywords and not targets(game, ability):

@@ -629,6 +629,27 @@ section .app-dialog form {
   fill: #3f6fa026;
 }
 
+/* Who'd control it if it were determined now (at the end of the phase), when
+   that's not who does: a dashed outline in their colour (grey: no one). */
+.objective-live {
+  fill: none;
+  stroke-width: 0.25;
+  stroke-dasharray: 0.6 0.4;
+  pointer-events: none;
+}
+
+.objective-live--attacker {
+  stroke: #c0504a;
+}
+
+.objective-live--defender {
+  stroke: #3f6fa0;
+}
+
+.objective-live--none {
+  stroke: #888;
+}
+
 .objective {
   pointer-events: none;
 }
@@ -871,6 +892,20 @@ section .app-dialog form {
   stroke-width: 3px;
 }
 
+/* A unit being selected for something (a stratagem's target, the unit an
+   ability applies to...): a bright dashed outline. */
+.piece--highlight {
+  stroke: #ffd400;
+  stroke-width: 3px;
+  stroke-dasharray: 4 2;
+}
+
+/* In a list, the unit being selected. */
+.selecting-tag {
+  color: #b8860b;
+  font-weight: 600;
+}
+
 .shooting-outcome {
   border-top: 1px solid #8886;
   margin-top: 0.75rem;
@@ -1054,4 +1089,33 @@ section .app-dialog form {
 .formation-units .select-wrapper {
   flex: 0 1 16rem;
   min-width: 12rem;
+}
+
+/* Splitting a melee weapon's attacks between targets (see FightPanel). */
+.split-attacks {
+  margin-left: 1.5rem;
+}
+
+.split-attacks input[type='number'] {
+  width: 4rem;
+}
+
+/* The defender's allocation order (see AllocationOrder). */
+.allocation-order {
+  margin: 0.5rem 0;
+}
+
+.allocation-order button {
+  margin-left: 0.25rem;
+  padding: 0 0.4rem;
+}
+
+/* A small text box beside a select (e.g. a surge move's distance). */
+.short-input {
+  width: 4rem;
+}
+
+/* A panel heading inside a <summary>. */
+.inline-heading {
+  display: inline;
 }

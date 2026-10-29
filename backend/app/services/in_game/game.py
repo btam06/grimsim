@@ -30,6 +30,7 @@ from app.services.in_game import actions as actions_service
 from app.services.in_game import battle_formations as battle_formations_service
 from app.services.in_game import battle_shock as battle_shock_service
 from app.services.in_game import battle_round as battle_round_service
+from app.services.in_game import coherency as coherency_service
 from app.services.in_game import command_phase as command_phase_service
 from app.services.in_game import deployment as deployment_service
 from app.services.in_game import duty_in_death as duty_in_death_service
@@ -310,10 +311,7 @@ async def _begin_battle_round(session: AsyncSession, game: Game) -> None:
     game.turn_seat = game.first_seat
     for seat, cp in battle_round_service.warlord_cp(game).items():
         player_at(game, seat).cp += cp
-    # (The first one: Scouts moves then, too.)
-    if battle_round_service.needs_decisions(game, game.battle_round) or (
-        game.battle_round == 1 and scouts_service.any_scouts(game)
-    ):
+    if battle_round_service.needs_decisions(game, game.battle_round):
         game.phase = START_OF_ROUND
     else:
         await _begin_command_phase(session, game)
@@ -365,8 +363,9 @@ async def deploy_unit(
 async def _after_deploying(session: AsyncSession, game: Game) -> None:
     # Everything's set up: the roll-off for who goes first (unless it's been
     # decided) - it waits for the players - then (redeploys, when a rule asks
-    # for one, and) the first battle round.
-    if first_turn_service.waiting(game):
+    # for one, and) pre-battle abilities (Scouts - it waits for those too),
+    # and the first battle round.
+    if first_turn_service.waiting(game) or scouts_service.waiting(game):
         return
     await _begin_battle(session, game)
 
@@ -380,8 +379,10 @@ async def roll_first_turn(session: AsyncSession, game: Game) -> None:
 
 
 async def finish_scouts(session: AsyncSession, game: Game, seat: int) -> None:
-    # The player is done making Scouts moves.
+    # The player is done making Scouts moves - once both are, the battle
+    # begins.
     scouts_service.finish(game, seat)
+    await _after_deploying(session, game)
 
 
 async def advance(session: AsyncSession, game: Game) -> None:
@@ -417,7 +418,9 @@ async def advance(session: AsyncSession, game: Game) -> None:
         # Objectives their rules have them select (e.g. Acquisition At Any Cost).
         if missing := selected_objectives_service.missing(game):
             raise _bad_request("select " + ", ".join(missing) + " first")
-        # Its scoring moment (and a pause for any tactical secondary to claim).
+        # Its scoring moment (and a pause for any tactical secondary to claim)
+        # - objective control determined first, as at the end of every phase.
+        objectives_service.determine(game)
         scoring_service.score(game, scoring_service.COMMAND_END)
         if scoring_service.pending_offers(game):
             return
@@ -443,6 +446,7 @@ async def advance(session: AsyncSession, game: Game) -> None:
     duty_in_death_service.remove(game)
     objectives_service.refresh_secured(game)
     objectives_service.secure_at_end_of(game, game.phase)
+    objectives_service.determine(game)
     index = PHASES.index(game.phase)
     if index + 1 < len(PHASES):
         game.phase = PHASES[index + 1]
@@ -450,11 +454,21 @@ async def advance(session: AsyncSession, game: Game) -> None:
             # Its start: rules that make units take Battle-shock tests then
             # (e.g. Voices in the Code).
             battle_shock_service.start_of_fight(game)
+            # If nobody can pile in, the Fight step starts straight away.
+            from app.services.in_game import fighting
+
+            fighting.start_fight_step(game)
         return
     # The end of the turn: actions that complete then do (or fail), then its
     # scoring moment - and after the last turn, the battle's - with a pause
     # for any tactical secondary to claim.
     if not scoring_service.evaluated(game, scoring_service.TURN_END):
+        # Units out of coherency regain it (03.03).
+        coherency_service.regain(game)
+        # The opponent's AIRCRAFT go back into Strategic Reserves (23.02).
+        reinforcements_service.aircraft_to_reserves(game)
+        # Objective control, determined at the end of the turn too.
+        objectives_service.determine(game)
         actions_service.end_of_turn(game)
         mission_state_service.end_of_turn(game)
         if mission_state_service.pending(game):
@@ -600,6 +614,8 @@ def stratagem_target_reason(
     # and its action can be carried out on it.
     if deployment_service.owner(game, unit).seat != player.seat:
         return "it isn't one of their units"
+    if (reason := unit_target_reason(game, player, unit)) is not None:
+        return reason
     if not stratagem.is_unrestricted and not any(
         stratagem.applies_to(enhancement_rules.model_keywords(unit, unit_model))
         for unit_model in unit.unit_models
@@ -611,6 +627,22 @@ def stratagem_target_reason(
         return _stratagem_actions().target_reason(game, player, stratagem, unit)
     if not deployment_service.models_on_battlefield(game, unit):
         return "it isn't on the battlefield"
+    return None
+
+
+def unit_target_reason(game: Game, player: GamePlayer, unit: Unit) -> str | None:
+    # Why none of the player's stratagems can target their unit now (15.01,
+    # 01.07), or None: it's Battle-shocked, or one already has this phase.
+    if battle_shock_service.is_battle_shocked(game, unit):
+        return "it's Battle-shocked"
+    if any(
+        use.target_unit_id == unit.id
+        and use.battle_round == game.battle_round
+        and use.turn_seat == game.turn_seat
+        and use.phase == game.phase
+        for use in player.stratagem_uses
+    ):
+        return "one of their stratagems has already targeted it this phase"
     return None
 
 
@@ -667,6 +699,10 @@ async def use_stratagem(
             raise _bad_request(f"can't use {stratagem.name} on that unit: {reason}")
     elif target_unit_id is not None:
         raise _bad_request(f"{stratagem.name} doesn't target a unit")
+    if targeted_unit is not None:
+        reason = unit_target_reason(game, player, targeted_unit)
+        if reason is not None:
+            raise _bad_request(f"can't use {stratagem.name} on that unit: {reason}")
     if stratagem.game_action in CHOICE_TARGET_ACTIONS:
         choices = stratagem_choices(game, player, stratagem, target_unit)
         if target_choice_id is None and len(choices) == 1:
@@ -703,8 +739,8 @@ async def use_stratagem(
         phase=game.phase,
         cp=cost,
     )
-    if target_unit is not None:
-        use.target_link = GameStratagemTarget(unit_id=target_unit.id)
+    if (target_unit or targeted_unit) is not None:
+        use.target_link = GameStratagemTarget(unit_id=(target_unit or targeted_unit).id)
     player.stratagem_uses.append(use)
     if stratagem.game_action == "strategic_reserves":
         reinforcements_service.place_in_reserves(game, player.seat, target_unit)

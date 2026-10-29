@@ -9,8 +9,8 @@ from app.models import Game, GameFirstTurnRoll
 # Who goes first: once both armies are set up (see
 # app/services/in_game/deployment.py), the players roll off - each rolls one
 # D6, and the highest goes first; if they tie, both roll again. Then come
-# redeploys (no rule asks for one yet), and the battle - its first battle
-# round starting with Scouts moves (see app/services/in_game/scouts.py). A
+# redeploys (no rule asks for one yet), pre-battle abilities - Scouts (see
+# app/services/in_game/scouts.py) - and the battle. A
 # game made with who goes first already decided skips the roll.
 
 SEATS = (1, 2)

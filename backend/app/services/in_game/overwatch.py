@@ -55,6 +55,8 @@ def cant_overwatch_reason(game: Game, unit: Unit) -> str | None:
         return "Fire Overwatch is used at the end of the opponent's movement phase"
     if deployment.owner(game, unit).seat != seat:
         return "only the opponent of the player whose turn it is can Fire Overwatch"
+    if any(k.name == "TITANIC" for m in unit.unit_models for k in m.model.keywords):
+        return "TITANIC units can't Fire Overwatch"
     return _cant_shoot(game, unit)
 
 

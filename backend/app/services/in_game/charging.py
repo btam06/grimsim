@@ -5,7 +5,7 @@ import random
 
 from fastapi import HTTPException
 
-from app.models import Game, GameUnitCharge, Unit
+from app.models import Game, GameChargeTarget, GameUnitCharge, Unit
 from app.seeds import factions as faction_seeds
 from app.services.in_game import (
     actions,
@@ -26,18 +26,20 @@ from app.services.in_game.movement import ENGAGEMENT_RANGE
 # but one that Advanced or Fell Back this turn (unless an ability selected in
 # the Command phase lets it - see app/services/in_game/command_phase.py):
 #
-# - Roll the charge first: 2D6, kept for the phase (rolling again gives the
-#   same roll).
-# - Its targets are the enemy units it could reach: one of its models within
-#   the roll of one of theirs, base to base (terrain and other units aren't
-#   in the way of that). If none is, the charge fails - it doesn't move.
+# - It declares a charge (11.02) - only if it's unengaged and within 12" of
+#   an enemy unit - and rolls it: 2D6, kept for the phase (rolling again gives
+#   the same roll).
+# - Its charge targets (11.04) are one or more enemy units within 12" and
+#   within the roll: one of its models within the roll of one of theirs, base
+#   to base. If none is, the charge fails - it doesn't move.
 # - Its models then move up to the roll each (how far its base's centre goes,
-#   as with moving - see app/services/in_game/movement.py), into Engagement Range of
-#   the target with every model they can: at least one must get there, and
-#   each one that doesn't (no room, or no way through) must end closer to the
-#   target than it started. Where they end up must be on the battlefield, not
-#   overlapping other models or terrain features, and in coherency (see
-#   app/services/in_game/deployment.py).
+#   round terrain and enemy models - see app/services/in_game/movement.py),
+#   each ending closer to a charge target. The unit must end engaged with
+#   every charge target, and with no other enemy unit. Where they end up must
+#   be on the battlefield, not overlapping other models or terrain features,
+#   and in coherency (see app/services/in_game/deployment.py). A FLYING unit
+#   can take to the skies: 2" less (none less with Hover), over models and
+#   terrain.
 #
 # A detachment rule can add to the charge rolls of the units it reaches
 # (faction_seeds.CHARGE_BONUSES - e.g. Death Blow: +1 for ADEPTUS ASTARTES
@@ -50,6 +52,9 @@ from app.services.in_game.movement import ENGAGEMENT_RANGE
 # CHAOS).
 
 CHARGE_DICE = 2
+# How close an enemy unit has to be to declare a charge, and to be a charge
+# target.
+CHARGE_RANGE = 12.0
 # A re-rolled charge, this phase (kept as a marked unit - see
 # app/services/in_game/mission_state.py).
 CHARGE_REROLLED = "charge_rerolled"
@@ -106,8 +111,10 @@ def cant_charge_reason(game: Game, unit: Unit) -> str | None:
 
     if (reason := actions.blocks(game, unit, "charge")) is not None:
         return reason
-    if embarked.transited(game, unit, embarked.SHOCK_DISEMBARKED):
-        return "it made a shock disembark move this turn"
+    if movement.is_aircraft(unit):
+        return "AIRCRAFT units can't declare a charge"
+    if (reason := embarked.no_charge(game, unit)) is not None:
+        return reason
     if shoot_scoot.no_charge(game, unit):
         return "it moved after shooting this turn"
     status = move_status(game, unit)
@@ -118,7 +125,22 @@ def cant_charge_reason(game: Game, unit: Unit) -> str | None:
     return None
 
 
-def _check_unit(game: Game, unit: Unit) -> None:
+def declare_reason(game: Game, unit: Unit) -> str | None:
+    # Why the unit can't declare a charge now (11.01), or None: what it did
+    # this turn (cant_charge_reason), or it's engaged, or no enemy unit is
+    # within 12".
+    if (reason := cant_charge_reason(game, unit)) is not None:
+        return reason
+    if movement.in_engagement_range(game, unit):
+        return "it's engaged"
+    if not any(
+        distance(game, unit, enemy) <= CHARGE_RANGE + TOLERANCE for enemy in enemy_units(game, unit)
+    ):
+        return 'no enemy unit is within 12"'
+    return None
+
+
+def _check_unit(game: Game, unit: Unit, declaring: bool = False) -> None:
     # That the unit can charge now: the charge phase of its owner's turn, it's
     # on the battlefield, it didn't Advance or Fall Back this turn, and it
     # hasn't charged yet this phase.
@@ -131,14 +153,16 @@ def _check_unit(game: Game, unit: Unit) -> None:
     charge = unit_charge(game, unit)
     if charge is not None and charge.completed:
         raise _bad_request("that unit has already charged this phase")
-    if (reason := cant_charge_reason(game, unit)) is not None:
+    check = declare_reason if declaring else cant_charge_reason
+    if (reason := check(game, unit)) is not None:
         raise _bad_request(f"it can't charge: {reason}")
 
 
 def roll_charge(game: Game, unit: Unit) -> GameUnitCharge:
     # Rolls the unit's charge (2D6) - once a phase: if it's already rolled,
-    # that roll stands.
-    _check_unit(game, unit)
+    # that roll stands. (Rolling is declaring it: it must be unengaged, with
+    # an enemy unit within 12".)
+    _check_unit(game, unit, declaring=unit_charge(game, unit) is None)
     if (charge := unit_charge(game, unit)) is not None:
         return charge
     first, second = (random.randint(1, 6) for _ in range(CHARGE_DICE))
@@ -259,8 +283,9 @@ def distance(game: Game, unit: Unit, target: Unit) -> float:
 
 
 def in_reach(game: Game, unit: Unit, target: Unit, roll: int) -> bool:
-    # Whether the unit can charge the target with that roll.
-    return distance(game, unit, target) <= roll + TOLERANCE
+    # Whether the target can be a charge target with that roll: within it,
+    # and within 12".
+    return distance(game, unit, target) <= min(roll, CHARGE_RANGE) + TOLERANCE
 
 
 def failed(game: Game, unit: Unit) -> bool:
@@ -280,61 +305,83 @@ def _nearest(base: Base, targets: list[Base]) -> float:
 
 
 def check_charge(
-    game: Game, unit: Unit, target: Unit, placement: dict[int, tuple[float, float, float]]
+    game: Game,
+    unit: Unit,
+    targets: list[Unit],
+    placement: dict[int, tuple[float, float, float]],
+    take_to_skies: bool = False,
 ) -> Placement:
-    # Whether the unit could charge the target, its models ending at
+    # Whether the unit could charge the targets, its models ending at
     # `placement` ((x, y, rotation) by unit model id - every one it has left,
-    # moved or not).
+    # moved or not) - taking to the skies, if it says so and can FLY.
     _check_unit(game, unit)
     charge = unit_charge(game, unit)
     if charge is None:
         raise _bad_request("roll the charge first")
+    if not targets:
+        raise _bad_request("select one or more charge targets")
     roll = charge_roll(game, unit)
-    if target.id not in {u.id for u in enemy_units(game, unit)}:
-        raise _bad_request("the target must be an enemy unit on the battlefield")
-    if not in_reach(game, unit, target, roll):
-        raise _bad_request(
-            f"{target.faction_unit.name} is out of reach: the closest model is "
-            f'{distance(game, unit, target):.1f}" away (rolled {roll})'
-        )
+    enemies_now = {u.id for u in enemy_units(game, unit)}
+    for target in targets:
+        if target.id not in enemies_now:
+            raise _bad_request("each charge target must be an enemy unit on the battlefield")
+        if movement.is_aircraft(target) and not movement.can_fly(unit):
+            raise _bad_request("only FLYING units can charge AIRCRAFT")
+        if not in_reach(game, unit, target, roll):
+            raise _bad_request(
+                f"{target.label} can't be a charge target: the closest model is "
+                f'{distance(game, unit, target):.1f}" away (rolled {roll}; at most 12")'
+            )
+    take_to_skies = take_to_skies and movement.can_fly(unit)
     models, bases = deployment.unit_bases(
         unit, placement, deployment.models_on_battlefield(game, unit)
     )
     start = _bases(game, unit)
-    targets = list(_bases(game, target).values())
+    target_bases = [b for t in targets for b in _bases(game, t).values()]
     problems = deployment.physical_problems(
         game, models, bases, deployment.placed_bases(game, unit)
     )
-    engaged = 0
-    # Round dense terrain, unless it can go through it.
-    pather = pathing.for_unit(game, unit, start, roll)
+    pather = pathing.for_unit(game, unit, start, roll, "all" if take_to_skies else "none")
     for model in models:
         found = []
-        if problem := pathing.too_far(pather, start[model.id], bases[model.id], roll):
+        limit = roll - (2 if take_to_skies and not movement._hovers(model) else 0)
+        if problem := pathing.too_far(pather, start[model.id], bases[model.id], limit):
             found.append(problem)
-        before = _nearest(start[model.id], targets)
-        after = _nearest(bases[model.id], targets)
-        if after <= ENGAGEMENT_RANGE + TOLERANCE:
-            engaged += 1
-        elif before <= ENGAGEMENT_RANGE + TOLERANCE:
-            found.append(f"would leave Engagement Range of {target.faction_unit.name}")
-        elif after >= before - TOLERANCE:
-            found.append(f"must end closer to {target.faction_unit.name}")
+        # Each model ends closer to a charge target - if it doesn't end
+        # engaged with one.
+        before = _nearest(start[model.id], target_bases)
+        after = _nearest(bases[model.id], target_bases)
+        if after > ENGAGEMENT_RANGE + TOLERANCE and after >= before - TOLERANCE:
+            found.append("must end closer to a charge target")
         problems[model.id] = found + problems[model.id]
     result = deployment.summarise(models, problems)
     result.paths = pather.bends(start, bases)
-    if not engaged:
-        result.problems.append(
-            f"No model ends within Engagement Range (2\") of {target.faction_unit.name}"
-        )
+    # Engaged with every charge target - and no other enemy unit.
+    for target in targets:
+        theirs = list(_bases(game, target).values())
+        if not any(_nearest(b, theirs) <= ENGAGEMENT_RANGE + TOLERANCE for b in bases.values()):
+            result.problems.append(f"The unit must end engaged with {target.label}")
+    chosen = {t.id for t in targets}
+    for enemy in enemy_units(game, unit):
+        if enemy.id in chosen:
+            continue
+        theirs = list(_bases(game, enemy).values())
+        if any(_nearest(b, theirs) <= ENGAGEMENT_RANGE + TOLERANCE for b in bases.values()):
+            result.problems.append(
+                f"The unit can't end engaged with {enemy.label}, which isn't a charge target"
+            )
     return result
 
 
 def make_charge(
-    game: Game, unit: Unit, target: Unit, placement: dict[int, tuple[float, float, float]]
+    game: Game,
+    unit: Unit,
+    targets: list[Unit],
+    placement: dict[int, tuple[float, float, float]],
+    take_to_skies: bool = False,
 ) -> None:
     # Moves the unit into the charge, if it can.
-    result = check_charge(game, unit, target, placement)
+    result = check_charge(game, unit, targets, placement, take_to_skies)
     if not result.valid:
         raise _bad_request("can't charge like that: " + "; ".join(result.problems))
     placed = deployment.positions(game)
@@ -342,7 +389,8 @@ def make_charge(
         position = placed[unit_model_id]
         position.x, position.y, position.rotation = x, y, rotation
     charge = unit_charge(game, unit)
-    charge.target_unit_id = target.id
+    charge.target_unit_id = targets[0].id
+    charge.extra_targets = [GameChargeTarget(unit_id=t.id) for t in targets[1:]]
     charge.completed = True
     mission_state.after_move(game, unit)
     _after_charge(game, unit)

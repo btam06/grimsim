@@ -49,3 +49,73 @@ async def test_hellfire_rounds_loses_its_old_condition(session: AsyncSession):
     assert stratagem.conditions == [] and stratagem.effects == []
     keywords = (await session.execute(select(Condition.keyword))).scalars().all()
     assert "hellfire_anti_non_vehicle_4" not in keywords
+
+
+async def test_kit_counts_rise_to_the_data_files(session: AsyncSession, monkeypatch):
+    from app.migrations import kit_counts
+    from app.models import TerrainFeatureShape
+
+    shape = TerrainFeatureShape(name="Ruin wall L (2.75 x 6.25)", kind="ruin_wall", count=2)
+    shape.parts = []
+    other = TerrainFeatureShape(name="Obstacle bar (4.5)", kind="obstacle", count=3)
+    other.parts = []
+    session.add_all([shape, other])
+    await session.commit()
+    monkeypatch.setattr(
+        kit_counts.terrain_seed, "load",
+        lambda path=None: {
+            "area_shapes": [],
+            "feature_shapes": [
+                {"name": "Ruin wall L (2.75 x 6.25)", "count": 4},
+                # Never lowered.
+                {"name": "Obstacle bar (4.5)", "count": 2},
+            ],
+        },
+    )
+    await run_all(session)
+    await session.refresh(shape)
+    await session.refresh(other)
+    assert (shape.count, other.count) == (4, 3)
+
+
+async def test_core_rule_texts_follow_the_seed_data(session: AsyncSession):
+    from app.models import DatasheetAbility
+    from app.seeds import datasheet_abilities
+
+    old = DatasheetAbility(name="Deep Strike", description="more than 9 inches")
+    session.add(old)
+    await session.commit()
+    await run_all(session)
+    await session.refresh(old)
+    expected = {e[0]: e[1] for e in datasheet_abilities.CORE_ENTRIES}["Deep Strike"]
+    assert old.description == expected and '8"' in expected
+
+
+async def test_core_stratagems_follow_the_core_rules(session: AsyncSession, monkeypatch):
+    from sqlalchemy import select
+
+    from app.models import Keyword, Stratagem, StratagemTiming
+
+    grenades = Keyword(name="GRENADES")
+    session.add_all([
+        Stratagem(name="Grenade", cp=1, is_core=True, description="old", keywords=[grenades],
+                  timings=[StratagemTiming(phase="shooting", turn="your_turn")]),
+        Stratagem(name="Go to Ground", cp=1, is_core=True),
+        Stratagem(name="Heroic Intervention", cp=2, is_core=True, description="old"),
+    ])
+    await session.commit()
+    entries = [
+        {"name": "Explosives", "cp": 1, "core": True, "description": "8 inches",
+         "keyword_options": [["EXPLOSIVES"], ["GRENADES"]]},
+        {"name": "Heroic Intervention", "cp": 1, "core": True, "description": "new",
+         "timings": [{"phase": "charge", "turn": "opponent_turn"}]},
+    ]
+    monkeypatch.setattr("app.seeds.stratagems.load", lambda path=None: entries)
+    await run_all(session)
+    session.expire_all()
+    names = {
+        s.name: s
+        for s in (await session.execute(select(Stratagem).where(Stratagem.is_core))).scalars()
+    }
+    assert "Go to Ground" not in names and "Grenade" not in names
+    assert (names["Explosives"].description, names["Heroic Intervention"].cp) == ("8 inches", 1)

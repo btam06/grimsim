@@ -7,6 +7,7 @@ import {
   shoot,
   startAction,
 } from '../api'
+import AllocationOrder from './AllocationOrder'
 import CombatResults from './CombatResults'
 import { onePerProfile, otherProfile } from '../weaponProfiles'
 
@@ -51,8 +52,12 @@ function ShootingPanel({ game, player, shooting, overwatch, focus, onFocus, onSh
   // The actions each unit could start instead (not for Fire Overwatch).
   const [actions, setActions] = useState(null)
   const selected = shooting?.units.find((u) => u.unit_id === focus.unitId) ?? null
-  // Only one it can see (a click on the board can pick any unit).
-  const target = targets.find((t) => t.unit_id === focus.targetId && t.visible) ?? null
+  // Only one it can see - or shoot with Indirect Fire weapons (a click on
+  // the board can pick any unit).
+  const target =
+    targets.find((t) => t.unit_id === focus.targetId && (t.visible || t.indirect)) ?? null
+  // The defending player's allocation order for the target (05.03).
+  const [order, setOrder] = useState([])
   const key = (w) => `${w.firing_deck ? 'd' : w.enhancement ? 'e' : 'w'}${w.id}`
 
   // The selected unit's possible targets.
@@ -122,6 +127,7 @@ function ShootingPanel({ game, player, shooting, overwatch, focus, onFocus, onSh
         enhancement_weapon_ids: chosen.filter((w) => w.enhancement).map((w) => w.id),
         // Its embarked models' weapons (a TRANSPORT with Firing Deck).
         firing_deck_weapon_ids: chosen.filter((w) => w.firing_deck).map((w) => w.id),
+        allocation_order: order,
       })
       setOutcome({ unit: selected.name, target: target.name, ...result })
       onShot()
@@ -203,13 +209,18 @@ function ShootingPanel({ game, player, shooting, overwatch, focus, onFocus, onSh
                 <input
                   type="radio"
                   name="shoot-target"
-                  disabled={!t.visible}
+                  disabled={!t.visible && !t.indirect}
                   checked={focus.targetId === t.unit_id}
                   onChange={() => onFocus({ ...focus, targetId: t.unit_id })}
                 />
                 {t.name}
                 <span className="hint">
-                  {!t.visible && (overwatch ? ' · not visible within 24"' : ' · not visible')}
+                  {!t.visible &&
+                    (overwatch
+                      ? ' · not visible within 24"'
+                      : t.indirect
+                        ? ' · not visible: Indirect Fire only (hits on 6s, or 4+ if spotted)'
+                        : ' · not visible')}
                   {t.visible && !t.weapons.some((w) => w.in_range) && ' · out of range'}
                   {t.in_cover && ' · in cover'}
                 </span>
@@ -250,6 +261,13 @@ function ShootingPanel({ game, player, shooting, overwatch, focus, onFocus, onSh
               {target.in_cover ? ` · ${target.name} has the Benefit of Cover` : ''}
             </p>
           )}
+          <AllocationOrder
+            gameId={game.id}
+            unitId={target.unit_id}
+            defender={`${game.players.find((p) => p.seat !== player?.seat)?.user_name} (${target.name})`}
+            order={order}
+            onChange={setOrder}
+          />
           <div className="inline-controls">
             <button type="button" disabled={busy || weaponKeys.size === 0} onClick={fire}>
               {overwatch

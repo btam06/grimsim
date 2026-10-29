@@ -111,4 +111,11 @@ def declare(game: Game, seat: int) -> None:
         raise _bad_request("battle formations are declared at the start of deployment")
     if done(game, seat):
         raise _bad_request("that player has already declared their battle formations")
+    # AIRCRAFT start in Strategic Reserves (23.01).
+    from app.services.in_game.movement import is_aircraft
+
+    for unit in deployment.deployable_units(_player(game, seat)):
+        formation = deployment.battle_formation(game, unit)
+        if is_aircraft(unit) and (formation is None or formation.place != "reserves"):
+            raise _bad_request(f"{unit.label} is an AIRCRAFT: it must start in Strategic Reserves")
     game.formations_done.append(GameFormationsDone(seat=seat))

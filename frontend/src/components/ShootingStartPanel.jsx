@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useBoardOverlay } from '../boardOverlay'
 import { getShootingStart, applyShootingStart } from '../api'
 import Select from './Select'
 
@@ -10,6 +11,10 @@ function ShootingStartPanel({ game, refreshKey, onUsed, onError }) {
   const [abilities, setAbilities] = useState([])
   const [targets, setTargets] = useState({})
   const [results, setResults] = useState([])
+  // The units picked, highlighted on the board.
+  useBoardOverlay('shooting-start', {
+    unitIds: Object.values(targets).filter(Boolean).map(Number),
+  })
 
   useEffect(() => {
     let cancelled = false

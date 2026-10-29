@@ -270,10 +270,12 @@ def battle_shock_outright(game: Game, unit: Unit, reason: str, roll: int) -> Non
 
 
 def insane_bravery_reason(game: Game, seat: int, stratagem: Stratagem | None) -> str | None:
-    # Why the player can't use Insane Bravery now, or None if they can: it's
-    # once per battle, and costs CP.
+    # Why the player can't use Insane Bravery now, or None if they can: in the
+    # Battle-shock step of their own Command phase, once per battle, for CP.
     if stratagem is None:
         return "there's no Insane Bravery stratagem"
+    if game.phase != "command" or game.turn_seat != seat:
+        return "it's used in the Battle-shock step of your own Command phase"
     player = next(p for p in game.players if p.seat == seat)
     if any(u.stratagem_id == stratagem.id for u in player.stratagem_uses):
         return "it has already been used this battle"

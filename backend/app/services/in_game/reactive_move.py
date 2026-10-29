@@ -5,7 +5,7 @@ import random
 from fastapi import HTTPException
 
 from app.models import Game, GameReactiveMove, Unit
-from app.services.in_game import deployment, mission_state, movement
+from app.services.in_game import deployment, mission_state, movement, reinforcements
 from app.services.in_game.deployment import TOLERANCE, Placement, gap
 
 # Reactive moves: some abilities let a unit move in its opponent's Movement
@@ -115,6 +115,8 @@ def reason(game: Game, unit: Unit) -> str | None:
         return "it isn't on the battlefield"
     if movement.in_engagement_range(game, unit):
         return "it's within Engagement Range of an enemy unit"
+    if reinforcements.ingressed(game, unit):
+        return "it made an ingress move: no other move until the Charge phase"
     return None
 
 

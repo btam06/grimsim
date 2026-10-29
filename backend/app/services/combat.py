@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 
 from app.combat_rules import CONDITIONS, EFFECTS, Rule
+from app.combat_rules.conditions import TARGET_ENGAGED, WITHIN_12_OF_TARGET
 from app.combat_rules.effects import OWN_UNIT_EFFECTS
 from app.models import DetachmentRule, Model, Stratagem, Unit, WargearAbility, WeaponAbility
 from app.services.list_building import detachment_rules as detachment_rule_service
@@ -68,11 +69,13 @@ def _effective_save(model: Model) -> int:
     return model.save
 
 
-def _target_priority(model: Model) -> tuple[int, int]:
-    # Supports and leaders are targeted last, regardless of their save. Within that
-    # grouping, the worst-saving models (highest save value) are targeted first.
-    is_priority_target = not (model.is_support or model.is_leader)
-    return (0 if is_priority_target else 1, -_effective_save(model))
+# The weapon ability that lets a weapon shoot targets it can't see (24.19).
+INDIRECT_FIRE = "Indirect Fire"
+
+
+def _blast(weapon) -> bool:
+    # A [BLAST] weapon (Blast, Blast 2...).
+    return any(a.name.startswith("Blast") for a in getattr(weapon, "abilities", []))
 
 
 def hazard_failed(roll: int) -> bool:
@@ -80,14 +83,12 @@ def hazard_failed(roll: int) -> bool:
     return roll <= 2
 
 
-def hazard_wounds(keywords: set[str]) -> int:
-    # The mortal wounds a model suffers for a failed hazard roll, by its
-    # keywords: 3 for a VEHICLE, 1 for INFANTRY, otherwise none.
-    if "VEHICLE" in keywords:
+def hazard_wounds(model_keywords: list[set[str]]) -> int:
+    # The mortal wounds a unit suffers for a failed hazard roll (06.03): 3 if
+    # every model in it is a MONSTER/VEHICLE, otherwise 1.
+    if model_keywords and all(k & {"MONSTER", "VEHICLE"} for k in model_keywords):
         return 3
-    if "INFANTRY" in keywords:
-        return 1
-    return 0
+    return 1
 
 
 def _keyword(item) -> str:
@@ -145,6 +146,10 @@ class _Target:
     invulnerable_ranged_only: bool = False
     is_leader        : bool = False
     is_support       : bool = False
+    # Its W characteristic, and whether it's a CHARACTER model (for its
+    # allocation group - see _Allocation).
+    wounds_characteristic: int = 0
+    is_character     : bool = False
     # Rolls to explode when destroyed (a datasheet ability with the
     # deadly_demise effect, e.g. "Deadly Demise D3").
     deadly_demise    : bool = False
@@ -156,13 +161,111 @@ class _Target:
     unit_model_id    : int | None = None
 
 
-def _precision_target(targets: deque[_Target]) -> _Target:
-    # Precision picks leaders first, then supports, then everything else -
-    # within each group, the queue's existing order (worst save first) holds.
-    return min(
-        targets,
-        key=lambda target: 0 if target.is_leader else 1 if target.is_support else 2,
+def _group_id(group: list[_Target]) -> int:
+    # An allocation group is known by its first model's unit model id.
+    return min(t.unit_model_id if t.unit_model_id is not None else id(t) for t in group)
+
+
+def _wounded(target: _Target) -> bool:
+    return target.remaining_wounds < target.wounds_characteristic
+
+
+class _Allocation:
+    # The defending unit's allocation groups (05.03), in allocation order:
+    # one group for each CHARACTER model, and one for all other models with the
+    # same W, Sv and InSv. A non-CHARACTER group with a wounded model is first,
+    # CHARACTER groups last (wounded ones before the rest); otherwise in the
+    # defender's `order` (group ids - see _group_id), or with the least
+    # protected first. Attacks are allocated to the current group - the first
+    # with models left - each to a wounded model in it if there is one.
+
+    def __init__(self, targets: deque[_Target], order: list[int] | None):
+        groups: dict[tuple, list[_Target]] = {}
+        for t in targets:
+            key = (
+                ("character", id(t))
+                if t.is_character
+                else ("group", t.wounds_characteristic, t.save, t.invulnerable)
+            )
+            groups.setdefault(key, []).append(t)
+        preference = {group_id: i for i, group_id in enumerate(order or [])}
+
+        def rank(group: list[_Target]) -> tuple:
+            return (
+                not any(_wounded(t) for t in group),
+                preference.get(_group_id(group), len(preference)),
+                -min(_effective_save_of(t) for t in group),
+            )
+
+        regular = sorted((g for g in groups.values() if not g[0].is_character), key=rank)
+        characters = sorted((g for g in groups.values() if g[0].is_character), key=rank)
+        self.groups = regular + characters
+        self.targets = targets
+
+    def _alive(self, group: list[_Target]) -> list[_Target]:
+        return [t for t in group if t in self.targets]
+
+    def current(self, precision: bool = False) -> _Target:
+        # The model the next attack is allocated to. With Precision, the
+        # first CHARACTER group with models left is the current one instead.
+        groups = [g for g in (self._alive(g) for g in self.groups) if g]
+        if precision:
+            groups = [g for g in groups if g[0].is_character] or groups
+        group = groups[0]
+        return next((t for t in group if _wounded(t)), group[0])
+
+
+@dataclass
+class AllocationGroup:
+    # One of a unit's allocation groups (05.03), for its player to order: its
+    # id, models, and whether it's a CHARACTER's or has a wounded model (the
+    # rules fix where those go).
+    id: int
+    unit_model_ids: list[int]
+    character: bool
+    wounded: bool
+
+
+def allocation_groups(unit: Unit, wounds: dict[int, int] | None = None) -> list[AllocationGroup]:
+    # The unit's allocation groups in their default order (the least protected
+    # first) - only its models with wounds left, if `wounds` ({unit model id:
+    # wounds left}) is given.
+    targets = deque(
+        _Target(
+            toughness=m.model.toughness, save=m.model.save, invulnerable=m.model.invulnerable,
+            feel_no_pain=None,
+            remaining_wounds=m.wounds if wounds is None else wounds[m.id],
+            unit_model_id=m.id, wounds_characteristic=m.wounds,
+            is_character=bool(m.model.is_leader)
+            or "CHARACTER" in enhancement_rules.model_keywords(unit, m),
+        )
+        for m in unit.unit_models
+        if wounds is None or m.id in wounds
     )
+    return [
+        AllocationGroup(
+            id=_group_id(group),
+            unit_model_ids=[t.unit_model_id for t in group],
+            character=group[0].is_character,
+            wounded=any(_wounded(t) for t in group),
+        )
+        for group in _Allocation(targets, None).groups
+    ]
+
+
+def _effective_save_of(target: _Target) -> int:
+    if target.invulnerable is not None:
+        return min(target.save, target.invulnerable)
+    return target.save
+
+
+def _mortal_wound_target(targets: deque[_Target]) -> _Target:
+    # Who suffers the next mortal wound (06.02): a wounded non-CHARACTER
+    # model, then any non-CHARACTER model, then a wounded CHARACTER, then any.
+    def rank(t: _Target) -> tuple:
+        return (t.is_character, not _wounded(t))
+
+    return min(targets, key=rank)
 
 
 @dataclass
@@ -260,7 +363,23 @@ def resolve_combat(
     snap_shots: bool = False,
     extra_weapons: dict[int, list] | None = None,
     defender_model_rules: dict[int, list[Rule]] | None = None,
+    allocation_order: list[int] | None = None,
+    indirect: bool = False,
+    indirect_spotted: bool = False,
+    attack_limits: dict | None = None,
+    hazards_rolled: set | None = None,
 ) -> CombatResult:
+    # `attack_limits`: how many attacks each weapon (by id) makes at most
+    # against this target, across the models with it - when a unit splits
+    # its melee attacks between targets (04.02); it's counted down.
+    # `hazards_rolled`: the weapons (by id) whose hazard roll was already made
+    # in this unit's attacks (against another target); added to.
+    # `allocation_order`: the defender's order for its allocation groups (by
+    # group id - see _Allocation), where the rules leave it to them.
+    # `indirect` (10.07): the target isn't visible, so only [INDIRECT FIRE]
+    # weapons shoot it - the target has the benefit of cover, Hit rolls can't
+    # be re-rolled, and only an unmodified 6 hits (4+ if `indirect_spotted`:
+    # the unit remained stationary and a friendly unit can see the target).
     # `defender_model_rules`: more rules for attacks allocated to particular
     # defending models, by unit model id (e.g. a repaired VEHICLE's Feel No
     # Pain).
@@ -277,13 +396,11 @@ def resolve_combat(
     # can't be re-rolled, and triggers nothing (no Sustained or Lethal Hits) -
     # attacks that hit automatically (Torrent) still do, and extra attacks
     # (Rapid Fire) are still made.
-    # The defending unit is a queue of individual models, each with its own wound pool.
-    # Each attack targets whichever model is at the front of the queue; once that
-    # model is destroyed it's popped, and the *next* attack targets the model now
-    # at the front - a single attack's damage never spills onto a second model.
-    # The queue is pre-sorted so supports/leaders die last, and otherwise worst
-    # saves (including invulnerable) die before better ones.
-    # In a game, a model that's already lost wounds takes the next attack.
+    # The defending unit is its models, each with its own wound pool, in
+    # allocation groups (see _Allocation): each attack is allocated to a model
+    # in the current group, and a single attack's damage never spills onto a
+    # second model. In a game, models that have lost wounds are already
+    # wounded.
     def wounded(unit_model) -> bool:
         return (
             defender_wounds is not None
@@ -296,7 +413,7 @@ def resolve_combat(
             for unit_model in defender.unit_models
             if defender_wounds is None or unit_model.id in defender_wounds
         ),
-        key=lambda unit_model: (not wounded(unit_model), _target_priority(unit_model.model)),
+        key=lambda unit_model: not wounded(unit_model),
     )
     # The full set of keywords across every model in the defending unit's
     # original composition - used by conditions like "target has INFANTRY"
@@ -411,6 +528,8 @@ def resolve_combat(
     defender_positions = set(defender_positions or ())
     # A unit that Remained Stationary moved less than 3" (e.g. for [HEAVY]).
     moved_less_than_3 = moved_less_than_3 or "remained_stationary" in attacker_positions
+    # The defending unit is engaged (17.03).
+    target_engaged = TARGET_ENGAGED in defender_positions
     all_unit_wide_abilities = [
         ability
         for unit_model in attacker.unit_models
@@ -483,6 +602,11 @@ def resolve_combat(
             unit_model_id=unit_model.id,
             is_leader=bool(unit_model.model.is_leader),
             is_support=bool(unit_model.model.is_support),
+            wounds_characteristic=unit_model.wounds,
+            # (A leader model is a CHARACTER, even if its keywords weren't
+            # entered.)
+            is_character=bool(unit_model.model.is_leader)
+            or "CHARACTER" in enhancement_rules.model_keywords(defender, unit_model),
             deadly_demise=any(
                 effect.keyword == "deadly_demise"
                 for ability in unit_model.model.abilities
@@ -514,6 +638,14 @@ def resolve_combat(
     )
     # Every model attacked, destroyed or not (the queue loses them as they die).
     all_targets = list(targets)
+    allocation = _Allocation(targets, allocation_order)
+
+    def unit_toughness() -> int:
+        # The T an attack against the unit uses (19.02): the highest of its
+        # bodyguard models' left (not its leaders' or supports'), or if only
+        # those are left, the highest of theirs.
+        bodyguard = [t for t in targets if not (t.is_leader or t.is_support)]
+        return max(t.toughness for t in (bodyguard or targets))
 
     result = CombatResult()
     # Accumulates the same breakdown as `result`, but bucketed per weapon name
@@ -529,10 +661,15 @@ def resolve_combat(
     # all hit rolls, then all wound rolls, then saves and damage.
     profiles: dict[str, list[tuple[dict, dict]]] = {}
 
+    # Failed hazard rolls (the weapon each was for), and each attacking model's
+    # Feel No Pain against mortal wounds.
+    failed_hazards: list[WeaponCombatResult] = []
+    attacker_fnps: dict[int, int | None] = {}
+
     # A unit that can't see its target makes no attacks at all - this is checked
     # once for the whole attacking unit, since visibility is a property of the
     # engagement as a whole, not of any one model within it.
-    if visible:
+    if visible or indirect:
         for unit_model in attacker.unit_models:
             # Range, by contrast, is checked per attacking model: models within the
             # same unit can be spread out, so one model being out of range doesn't
@@ -594,10 +731,7 @@ def resolve_combat(
                 "attacker",
             )
 
-            # Hazardous wounds taken by this model accumulate across every one
-            # of its weapons, in case more than one is hazardous - checked
-            # against its own wounds once it's done firing (see below).
-            model_hazardous_damage = 0
+            attacker_fnps[unit_model.id] = shooter_fnp
 
             # Its own weapons, any its enhancement gives it (e.g. TL-4Ø9), and any
             # more it fires (e.g. a Firing Deck's).
@@ -608,6 +742,12 @@ def resolve_combat(
             ):
                 # Only weapons the caller chose to fire/swing with this attack count.
                 if weapon.id not in selected_weapon_ids:
+                    continue
+                # Shooting a target it can't see: only [INDIRECT FIRE] weapons.
+                is_indirect = indirect and any(
+                    a.name == INDIRECT_FIRE for a in weapon.abilities
+                )
+                if indirect and not is_indirect:
                     continue
                 # Only those it can fire where it is (in range of a target it
                 # can see), if that's known.
@@ -685,16 +825,21 @@ def resolve_combat(
                 if eligibility_state.get("cannot_attack"):
                     continue
 
-                # Being in engagement range normally swaps which weapons are
-                # usable: melee weapons fight instead of ranged weapons
-                # shooting - Pistol is the one exception, letting a ranged
-                # weapon fire while its bearer is in engagement range without
-                # becoming a melee weapon.
-                if is_ranged == in_engagement_range:
-                    if not (
-                        is_ranged and in_engagement_range and eligibility_state.get("pistol")
-                    ):
-                        continue
+                # Fighting: melee weapons. Shooting while engaged (close-quarters
+                # shooting, 10.06): a non-MONSTER/VEHICLE model only fires its
+                # [CLOSE-QUARTERS] (Pistol) weapons; a MONSTER/VEHICLE model
+                # fires any - at -1 to hit unless it's one of those - but no
+                # [BLAST] weapon at a unit it's engaged with.
+                big = bool(
+                    enhancement_rules.model_keywords(attacker, unit_model) & {"MONSTER", "VEHICLE"}
+                )
+                close_quarters = eligibility_state.get("pistol", False)
+                if not is_ranged and not in_engagement_range:
+                    continue
+                if is_ranged and in_engagement_range and not (close_quarters or big):
+                    continue
+                if is_ranged and (in_engagement_range or target_engaged) and _blast(weapon):
+                    continue
 
                 # A unit that advanced can't shoot with ranged weapons this
                 # turn, unless the weapon has Assault.
@@ -718,12 +863,27 @@ def resolve_combat(
                     "uses_precision": apply_precision and eligibility_state.get("precision", False),
                     "result": weapon_result,
                     "half_range": weapon_half_range,
+                    "indirect": is_indirect,
+                    # -1 to hit: a MONSTER/VEHICLE model shooting while
+                    # engaged (other than a close-quarters weapon at the unit
+                    # it's engaged with), or any shot at an engaged
+                    # MONSTER/VEHICLE (17.03 - other than a close-quarters
+                    # weapon fired by a unit engaged with it).
+                    "engaged_penalty": is_ranged
+                    and (in_engagement_range or target_engaged)
+                    and not close_quarters,
                 }
 
                 # Attacks characteristic: how many attacks this weapon makes,
                 # rolled once per weapon (flat or dice notation, e.g. "2", "D3", "2D6").
+                attack_count = roll_dice(weapon.attacks)
+                if attack_limits is not None and weapon.id in attack_limits:
+                    attack_count = min(attack_count, attack_limits[weapon.id])
+                    attack_limits[weapon.id] -= attack_count
+                    if not attack_count:
+                        continue
                 pending_attacks: deque[dict] = deque(
-                    {"auto_hit": False} for _ in range(roll_dice(weapon.attacks))
+                    {"auto_hit": False} for _ in range(attack_count)
                 )
 
                 # Pre-weapon: checked once per weapon (not per individual attack),
@@ -751,40 +911,78 @@ def resolve_combat(
                     # Torrent: every attack hits automatically.
                     for pending_attack in pending_attacks:
                         pending_attack["auto_hit"] = True
-                if pre_weapon_state.get("hazardous"):
-                    # Hazard roll: a 1-2 means the firing model takes mortal
-                    # wounds based on its own keywords, reduced by its own feel
-                    # no pain (against mortal wounds - see shooter_fnp).
+                hazard_key = (unit_model.id, weapon.id)
+                if pre_weapon_state.get("hazardous") and (
+                    hazards_rolled is None or hazard_key not in hazards_rolled
+                ):
+                    if hazards_rolled is not None:
+                        hazards_rolled.add(hazard_key)
+                    # A hazard roll for each [HAZARDOUS] weapon selected; a
+                    # 1-2 fails, and the unit suffers mortal wounds once its
+                    # attacks are resolved (see below).
                     hazard_roll = random.randint(1, 6)
                     result.hazardous_rolls.append(hazard_roll)
                     weapon_result.hazardous_rolls.append(hazard_roll)
                     if hazard_failed(hazard_roll):
-                        self_wounds = hazard_wounds(
-                            enhancement_rules.model_keywords(attacker, unit_model)
-                        )
-                        for _ in range(self_wounds):
-                            if shooter_fnp is not None and random.randint(1, 6) >= shooter_fnp:
-                                continue  # feel no pain negated this point of damage
-                            result.hazardous_wounds += 1
-                            weapon_result.hazardous_wounds += 1
-                            model_hazardous_damage += 1
+                        failed_hazards.append(weapon_result)
 
                 profiles.setdefault(weapon.name, []).extend(
                     (attack, fired) for attack in pending_attacks
                 )
 
-            # End of combat for this attacking model: if the hazardous wounds it
-            # took while firing added up to (or past) its own wounds, it died.
-            if model_hazardous_damage:
-                result.attacker_damage[unit_model.id] = model_hazardous_damage
-            wounds = (attacker_wounds or {}).get(unit_model.id, unit_model.wounds)
-            if model_hazardous_damage >= wounds:
-                result.hazardous_models_destroyed += 1
 
     def target_for(fired: dict) -> _Target:
-        # The model an attack is allocated to: whoever is at the front of the
-        # queue, or a Precision weapon's pick.
-        return _precision_target(targets) if fired["uses_precision"] else targets[0]
+        # The model an attack is allocated to: in the current allocation group
+        # (a CHARACTER's, for a Precision weapon - see _Allocation).
+        return allocation.current(precision=fired["uses_precision"])
+
+    def _inflict(target: _Target, attack: dict, fired: dict, mortal: bool) -> None:
+        # The attack inflicts damage on the model it's allocated to: its D
+        # (rolled, plus any bonus), a point at a time, each negated on a Feel
+        # No Pain - one against mortal wounds too, if they are. The model
+        # destroyed, the rest is lost: damage never spills onto another model.
+        weapon = fired["weapon"]
+        weapon_result = fired["result"]
+        rolled_damage, damage_faces = roll_dice_faces(weapon.damage)
+        # A damage roll that can be re-rolled is, if it's below average.
+        if (
+            damage_faces
+            and attack.get("reroll_damage")
+            and rolled_damage < average_damage(weapon.damage)
+        ):
+            weapon_result.damage_rolls.extend(damage_faces)
+            rolled_damage, damage_faces = roll_dice_faces(weapon.damage)
+        weapon_result.damage_rolls.extend(damage_faces)
+        damage = (
+            rolled_damage + fired["damage_bonus"] + (1 if attack.get("plus_one_damage") else 0)
+        )
+        # e.g. Nanoassembly Protocols: -1 Damage, to a minimum of 1.
+        if attack.get("minus_one_damage"):
+            damage = max(1, damage - 1)
+        fnps = [target.feel_no_pain, attack.get("feel_no_pain")]
+        if mortal:
+            fnps += [target.feel_no_pain_mortal, attack.get("feel_no_pain_mortal")]
+        feel_no_pain = min((fnp for fnp in fnps if fnp is not None), default=None)
+        for _ in range(damage):
+            if feel_no_pain is not None:
+                fnp_roll = random.randint(1, 6)
+                result.fnp_rolls.append(fnp_roll)
+                weapon_result.fnp_rolls.append(fnp_roll)
+                if fnp_roll >= feel_no_pain:
+                    continue  # feel no pain negated this point of damage
+            result.total_damage += 1
+            weapon_result.total_damage += 1
+            target.remaining_wounds -= 1
+            if target.remaining_wounds <= 0:
+                targets.remove(target)
+                if target.deadly_demise:
+                    demise_roll = random.randint(1, 6)
+                    result.deadly_demise_rolls.append(demise_roll)
+                    if demise_roll == 6:
+                        result.deadly_demise_explosions += 1
+                result.models_destroyed += 1
+                weapon_result.models_destroyed += 1
+                break
 
     for profile_attacks in profiles.values():
         # Hit phase: every attack of this profile rolls to hit. Extra attacks
@@ -812,6 +1010,7 @@ def resolve_combat(
                 {
                     "step": "pre_hit",
                     "moved_less_than_3": moved_less_than_3,
+                    "in_engagement_range": in_engagement_range,
                     "half_range": fired["half_range"],
                     **weapon_context,
                 },
@@ -826,18 +1025,13 @@ def resolve_combat(
             # Targeting) keeps only the bonuses.
             ignore_penalties = attack.get("ignore_hit_penalties", False)
             hit_modifier = attack.get("plus_one_to_hit", 0) - (
-                0 if ignore_penalties else attack.get("minus_one_to_hit", 0)
+                0
+                if ignore_penalties
+                else attack.get("minus_one_to_hit", 0) + (1 if fired["engaged_penalty"] else 0)
             )
             # [HEAVY] is one +1, however many sources grant it.
             if attack.get("heavy"):
                 hit_modifier += 1
-            if (
-                (in_cover or attack.get("benefit_of_cover"))
-                and is_ranged
-                and not attack.get("ignore_cover")
-                and not ignore_penalties
-            ):
-                hit_modifier -= 1
             hit_modifier = max(-1, min(1, hit_modifier))
             # Setting the characteristic (e.g. "a Ballistic Skill of 3+") comes
             # before any modifiers or improvements.
@@ -847,6 +1041,25 @@ def resolve_combat(
             # Imperative) isn't a hit roll modifier, so it's outside the cap.
             if is_ranged and attack.get("plus_one_skill_ranged"):
                 effective_skill -= 1
+            # Plunging Fire (22.05): a TOWERING model's ranged attack at a
+            # target within 12" has +1 BS (not by or at AIRCRAFT).
+            if (
+                is_ranged
+                and "TOWERING" in weapon_context["attacker_model_keywords"]
+                and WITHIN_12_OF_TARGET in attacker_positions
+                and "AIRCRAFT" not in weapon_context["attacker_model_keywords"]
+                and "AIRCRAFT" not in defender_keywords
+            ):
+                effective_skill -= 1
+            # The benefit of cover worsens a ranged attack's BS by 1 (13.08) -
+            # an indirect fire attack's target always has it.
+            if (
+                (in_cover or attack.get("benefit_of_cover") or fired["indirect"])
+                and is_ranged
+                and not attack.get("ignore_cover")
+                and not ignore_penalties
+            ):
+                effective_skill += 1
             if not is_ranged and attack.get("plus_one_skill_melee"):
                 effective_skill -= 1
 
@@ -855,9 +1068,14 @@ def resolve_combat(
             critical_hit_on = attack.get("critical_hit_on", 6)
             hit_context = {"critical_hit_on": critical_hit_on, **weapon_context}
 
+            # Indirect fire: an unmodified 1-5 fails (1-3 if spotted).
+            indirect_needs = (4 if indirect_spotted else 6) if fired["indirect"] else 0
+
             def hits(roll: int) -> bool:
                 # A Critical Hit always hits and a 1 always fails, whatever the
                 # modifiers.
+                if roll < indirect_needs:
+                    return False
                 return roll != 1 and (roll >= critical_hit_on or roll >= effective_skill)
 
             # Hit roll: succeeds (hits) on a roll equal to or greater than skill.
@@ -872,7 +1090,7 @@ def resolve_combat(
             _apply_triggered_effects(
                 abilities, {"step": "hit", "roll": hit_roll, **hit_context}, attack, spawned
             )
-            if not hits(hit_roll) and (
+            if not hits(hit_roll) and not fired["indirect"] and (
                 attack.get("reroll_failed_hits")
                 or unit_rerolls_failed_hits
                 or (hit_roll == 1 and attack.get("reroll_hit_ones"))
@@ -907,7 +1125,7 @@ def resolve_combat(
                 + (1 if attack.get("plus_one_strength") else 0)
                 + (2 if attack.get("plus_two_strength") else 0)
             )
-            toughness = target_for(fired).toughness
+            toughness = unit_toughness()
             threshold = wound_threshold(strength, toughness)
             # The wound step's checks can compare the two (e.g. "if the
             # Strength of that attack is greater than the Toughness").
@@ -979,116 +1197,108 @@ def resolve_combat(
             if wound_passed:
                 wounds.append((attack, fired))
 
-        # Saves and damage: each wound is allocated to a model and resolved in
-        # turn - its save is rolled against the model it's allocated to, which
-        # can change as earlier wounds destroy models.
-        for attack, fired in wounds:
+        # Save rolls (05.03): one for each wound, made together; then resolved
+        # from the lowest result to the highest, each allocated to the current
+        # allocation group (05.04) - which can change as models are destroyed.
+        # Attacks that allow no save (Devastating Wounds) inflict mortal
+        # wounds instead, after the normal damage.
+        saving = [(a, f) for a, f in wounds if not a.get("no_save")]
+        devastating = [(a, f) for a, f in wounds if a.get("no_save")]
+        rolled = []
+        for attack, fired in saving:
+            save_roll = random.randint(1, 6)
+            result.save_rolls.append(save_roll)
+            fired["result"].save_rolls.append(save_roll)
+            _apply_triggered_effects(
+                fired["abilities"],
+                {"step": "save", "roll": save_roll, **fired["context"]},
+                attack,
+                deque(),
+            )
+            rolled.append((save_roll, attack, fired))
+        rolled.sort(key=lambda r: r[0])
+
+        def allocated(attack: dict, target: _Target, fired: dict) -> dict:
+            # Rules only the model it's allocated to has (e.g. a TECH-PRIEST's
+            # 4+ invulnerable save) apply to this attack from here on.
+            if not target.rules:
+                return attack
+            attack = dict(attack)
+            _apply_triggered_effects(
+                target.rules, {"step": "allocated", **fired["context"]}, attack, deque()
+            )
+            return attack
+
+        for save_roll, attack, fired in rolled:
             if not targets:
                 break  # defending unit has no models left
             weapon = fired["weapon"]
-            abilities = fired["abilities"]
-            weapon_context = fired["context"]
-            weapon_result = fired["result"]
             target = target_for(fired)
-            if target.rules:
-                # Rules only the model it's allocated to has (e.g. a
-                # TECH-PRIEST's 4+ invulnerable save) apply to this attack from
-                # here on - its save and damage.
-                attack = dict(attack)
-                _apply_triggered_effects(
-                    target.rules, {"step": "allocated", **weapon_context}, attack, deque()
-                )
-
-            # Save roll: armor save is worsened by the weapon's AP, but the
-            # defender may use their invulnerable save instead if it's better.
-            # An effect (e.g. devastating wounds) can mark this attack to skip
-            # the roll entirely - no save of any kind, armor or invulnerable.
-            if attack.get("no_save"):
-                save_passed = False
-            else:
-                ap = weapon.ap - 1 if attack.get("improve_ap") else weapon.ap
-                if attack.get("worsen_ap"):
-                    ap = min(0, ap + 1)
-                save_needed = target.save - ap
-                # (A ranged-only invulnerable save, e.g. an ion shield, doesn't
-                # help against melee attacks.)
-                if target.invulnerable is not None and (
-                    fired["is_ranged"] or not target.invulnerable_ranged_only
-                ):
-                    save_needed = min(save_needed, target.invulnerable)
-                # An invulnerable save granted by a rule (e.g. Waaagh!'s 5+ while
-                # riled up) - also unaffected by AP.
-                if attack.get("invulnerable_save") is not None:
-                    save_needed = min(save_needed, attack["invulnerable_save"])
-                save_roll = random.randint(1, 6)
-                result.save_rolls.append(save_roll)
-                weapon_result.save_rolls.append(save_roll)
-                _apply_triggered_effects(
-                    abilities,
-                    {"step": "save", "roll": save_roll, **weapon_context},
-                    attack,
-                    deque(),
-                )
-                # +1 to the save roll (an unmodified 1 still fails).
-                bonus = 1 if attack.get("plus_one_to_save") else 0
-                save_passed = save_roll != 1 and save_roll + bonus >= save_needed
-            if save_passed:
-                continue  # save succeeded - no damage from this attack
-
-            # Damage roll: how many wounds this one failed save inflicts, plus any
-            # bonus for the weapon (e.g. Melta within half range).
-            rolled_damage, damage_faces = roll_dice_faces(weapon.damage)
-            # A damage roll that can be re-rolled is, if it's below average.
-            if (
-                damage_faces
-                and attack.get("reroll_damage")
-                and rolled_damage < average_damage(weapon.damage)
+            attack = allocated(attack, target, fired)
+            # The invulnerable save if the roll beats it (unaffected by AP),
+            # otherwise the armour save, worsened by the weapon's AP.
+            ap = weapon.ap - 1 if attack.get("improve_ap") else weapon.ap
+            if attack.get("worsen_ap"):
+                ap = min(0, ap + 1)
+            save_needed = target.save - ap
+            # (A ranged-only invulnerable save, e.g. an ion shield, doesn't
+            # help against melee attacks.)
+            if target.invulnerable is not None and (
+                fired["is_ranged"] or not target.invulnerable_ranged_only
             ):
-                weapon_result.damage_rolls.extend(damage_faces)
-                rolled_damage, damage_faces = roll_dice_faces(weapon.damage)
-            weapon_result.damage_rolls.extend(damage_faces)
-            damage = (
-                rolled_damage
-                + fired["damage_bonus"]
-                + (1 if attack.get("plus_one_damage") else 0)
+                save_needed = min(save_needed, target.invulnerable)
+            # An invulnerable save granted by a rule (e.g. Waaagh!'s 5+ while
+            # riled up) - also unaffected by AP.
+            if attack.get("invulnerable_save") is not None:
+                save_needed = min(save_needed, attack["invulnerable_save"])
+            # +1 to the save roll (an unmodified 1 still fails).
+            bonus = 1 if attack.get("plus_one_to_save") else 0
+            if save_roll != 1 and save_roll + bonus >= save_needed:
+                continue  # save succeeded - no damage from this attack
+            _inflict(target, attack, fired, mortal=False)
+
+        for attack, fired in devastating:
+            if not targets:
+                break
+            target = _mortal_wound_target(targets)
+            _inflict(target, allocated(attack, target, fired), fired, mortal=True)
+
+    # Failed hazard rolls: once its attacks are resolved, the attacking unit
+    # suffers mortal wounds for each (06.03, 24.15), allocated as mortal
+    # wounds are (06.02) - each negated on the model's Feel No Pain.
+    if failed_hazards:
+        own = [
+            _Target(
+                toughness=0, save=7, invulnerable=None, feel_no_pain=None,
+                remaining_wounds=(attacker_wounds or {}).get(m.id, m.wounds),
+                unit_model_id=m.id, wounds_characteristic=m.wounds,
+                is_character="CHARACTER" in enhancement_rules.model_keywords(attacker, m),
             )
-            # e.g. Nanoassembly Protocols: -1 Damage, to a minimum of 1.
-            if attack.get("minus_one_damage"):
-                damage = max(1, damage - 1)
-
-            # Apply damage a single point at a time, each rolling feel no pain
-            # separately, against the one model this attack is allocated to. If
-            # that model dies partway through, this attack's remaining damage is
-            # wasted rather than carrying onto the next model.
-            # The model's own feel no pain, or a better one granted by a rule
-            # (e.g. a leader's Lord of the Machine Cult). An attack that allows
-            # no save (e.g. Devastating Wounds) inflicts mortal wounds, so a
-            # Feel No Pain against mortal wounds counts too, if it's better.
-            fnps = [target.feel_no_pain, attack.get("feel_no_pain")]
-            if attack.get("no_save"):
-                fnps += [target.feel_no_pain_mortal, attack.get("feel_no_pain_mortal")]
-            feel_no_pain = min((fnp for fnp in fnps if fnp is not None), default=None)
-            for _ in range(damage):
-                if feel_no_pain is not None:
-                    fnp_roll = random.randint(1, 6)
-                    result.fnp_rolls.append(fnp_roll)
-                    weapon_result.fnp_rolls.append(fnp_roll)
-                    if fnp_roll >= feel_no_pain:
-                        continue  # feel no pain negated this point of damage
-
-                result.total_damage += 1
-                weapon_result.total_damage += 1
-                target.remaining_wounds -= 1
-                if target.remaining_wounds <= 0:
-                    targets.remove(target)
-                    if target.deadly_demise:
-                        demise_roll = random.randint(1, 6)
-                        result.deadly_demise_rolls.append(demise_roll)
-                        if demise_roll == 6:
-                            result.deadly_demise_explosions += 1
-                    result.models_destroyed += 1
-                    weapon_result.models_destroyed += 1
-                    break  # this model is destroyed - no spillover to the next
+            for m in attacker.unit_models
+            if attacker_wounds is None or m.id in attacker_wounds
+        ]
+        alive = deque(t for t in own if t.remaining_wounds > 0)
+        per_failure = hazard_wounds(
+            [enhancement_rules.model_keywords(attacker, m) for m in attacker.unit_models
+             if attacker_wounds is None or m.id in attacker_wounds]
+        )
+        for weapon_result in failed_hazards:
+            for _ in range(per_failure):
+                if not alive:
+                    break
+                victim = _mortal_wound_target(alive)
+                fnp = attacker_fnps.get(victim.unit_model_id)
+                if fnp is not None and random.randint(1, 6) >= fnp:
+                    continue
+                result.hazardous_wounds += 1
+                weapon_result.hazardous_wounds += 1
+                result.attacker_damage[victim.unit_model_id] = (
+                    result.attacker_damage.get(victim.unit_model_id, 0) + 1
+                )
+                victim.remaining_wounds -= 1
+                if victim.remaining_wounds <= 0:
+                    alive.remove(victim)
+                    result.hazardous_models_destroyed += 1
 
     result.defending_models_remaining = len(targets)
     result.weapon_results = list(weapon_results_by_name.values())

@@ -149,19 +149,24 @@ ENTRIES = [
     ),
     (
         "Assault",
-        "This weapon may still be fired even if the attacking unit advanced this turn.",
+        "Units containing one or more models with an [ASSAULT] weapon can shoot using assault "
+        "shooting: after an advance move, firing only their [ASSAULT] weapons.",
         [ALWAYS],
         [ASSAULT],
     ),
     (
         "Blast",
-        "This weapon makes 1 additional attack for every five models in the target unit.",
+        "Each time you gather attack dice for this weapon, add one additional attack dice for "
+        "every five models that were in the target unit in the Select Targets step (rounding "
+        "down). [BLAST] weapons can't target engaged units.",
         [ALWAYS],
         [BLAST],
     ),
     (
         "Blast 2",
-        "This weapon makes 2 additional attacks for every five models in the target unit.",
+        "Each time you gather attack dice for this weapon, add two additional attack dice for "
+        "every five models that were in the target unit in the Select Targets step (rounding "
+        "down). [BLAST] weapons can't target engaged units.",
         [ALWAYS],
         [BLAST_2],
     ),
@@ -185,7 +190,9 @@ ENTRIES = [
     ),
     (
         "Close-Quarters",
-        "This weapon may be fired while the attacking unit is in engagement range (as Pistol).",
+        "Units with this weapon can shoot using close-quarters shooting while engaged. In "
+        "other shooting, each model (excluding MONSTER/VEHICLE models) fires either its "
+        "[CLOSE-QUARTERS] weapons or its other ranged weapons.",
         [ALWAYS],
         [PISTOL],
     ),
@@ -201,15 +208,18 @@ ENTRIES = [
     ),
     (
         "Devastating Wounds",
-        "Each critical wound (an unmodified roll of 6 to wound) allows no save.",
+        "Each time an attack made with this weapon results in a critical wound, the attack "
+        "sequence ends and the target unit suffers mortal wounds equal to this weapon's D "
+        "(after normal damage) - damaging at most one model.",
         [CRITICAL_WOUND],
         [NO_SAVE],
     ),
     (
         # Blast 2, for melee weapons.
         "Cleave 2",
-        "This melee weapon makes 2 additional attacks for every five models in the target unit "
-        "(Blast 2, for melee).",
+        "Each time you gather attack dice for this weapon, if you selected only one target "
+        "for all of its attacks, add two additional attack dice for every five models that "
+        "were in the target unit in the Select Targets step (rounding down).",
         [ALWAYS],
         [BLAST_2],
     ),
@@ -228,19 +238,24 @@ ENTRIES = [
     (
         # Descriptive only: the calculator already fires every weapon ticked.
         "Extra Attacks",
-        "This weapon can be used in addition to the bearer's other melee weapons.",
+        "Each time this unit fights, models with this weapon make attacks with it in addition "
+        "to one of their other melee weapons.",
         [],
         [],
     ),
     (
         "Hazardous",
-        "After shooting, the firing model makes a hazard roll, risking a self-inflicted wound.",
+        "Each time this unit shoots or fights, after it has resolved its attacks, make a "
+        "hazard roll for it for each [HAZARDOUS] weapon selected: on a 1-2, it suffers 1 "
+        "mortal wound (3 if every model in it is a MONSTER/VEHICLE).",
         [ALWAYS],
         [HAZARDOUS],
     ),
     (
         "Heavy",
-        "If the attacking unit moved less than 3\" this turn, this weapon's attacks get +1 to hit.",
+        "In your Shooting phase, add 1 to the hit roll if the attacking unit is unengaged, "
+        "wasn't set up on the battlefield this turn, and no model in it has moved more than "
+        "3\" this turn.",
         [MOVED_LESS_THAN_3],
         [HEAVY],
     ),
@@ -252,7 +267,8 @@ ENTRIES = [
     ),
     (
         "Ignores Cover",
-        "This weapon's attacks are not worsened by the defender being in cover.",
+        "The target cannot have the benefit of cover against this weapon's attacks, including "
+        "from rules that give it the benefit of cover (e.g. Stealth).",
         [ALWAYS],
         [IGNORE_COVER],
     ),
@@ -266,19 +282,24 @@ ENTRIES = [
         # Descriptive only: the calculator doesn't model line of sight, and
         # Indirect Fire only changes anything against a target that isn't visible.
         "Indirect Fire",
-        "This weapon can target units that are not visible to the attacking model.",
+        "Units with this weapon can shoot using indirect shooting: it can target units that "
+        "aren't visible; the target has the benefit of cover, hit rolls can't be re-rolled, "
+        "and an unmodified hit roll of 1-5 fails (1-3 if the unit remained stationary and the "
+        "target is visible to a friendly unit).",
         [],
         [],
     ),
     (
         "Lance",
-        "If the bearer made a Charge move this turn, add 1 to this weapon's Wound rolls.",
+        "Each time an attack is made with this weapon, if the attacking model's unit made a "
+        "charge move this turn, add 1 to the wound roll.",
         [CHARGED],
         [PLUS_ONE_TO_WOUND],
     ),
     (
         "Lethal Hits",
-        "Each critical hit (an unmodified roll of 6 to hit) automatically wounds.",
+        "Each time an attack made with this weapon results in a critical hit, it "
+        "automatically wounds the target.",
         [CRITICAL_HIT],
         [AUTO_PASS_WOUND],
     ),
@@ -314,13 +335,16 @@ ENTRIES = [
     ),
     (
         "Pistol",
-        "This weapon may be fired while the attacking unit is in engagement range, without becoming a melee weapon.",
+        "Identical to [CLOSE-QUARTERS] for all rules purposes: usable in close-quarters "
+        "shooting while engaged.",
         [ALWAYS],
         [PISTOL],
     ),
     (
         "Precision",
-        "If the attacker applies precision, attacks target leaders first, then supports, then other models.",
+        "While resolving attacks made with this weapon, the attacker can select an allocation "
+        "group containing a CHARACTER model visible to it; that group is the current "
+        "allocation group until those attacks are resolved or it's destroyed.",
         [ALWAYS],
         [PRECISION],
     ),
@@ -392,13 +416,14 @@ ENTRIES = [
     ),
     (
         "Torrent",
-        "Every attack this weapon makes hits automatically.",
+        "Each time an attack is made with this weapon, that attack automatically hits the "
+        "target.",
         [PRE_WEAPON],
         [TORRENT],
     ),
     (
         "Twin-linked",
-        "Each time an attack is made with this weapon, you can re-roll that attack's Wound roll.",
+        "Each time an attack is made with this weapon, you can re-roll the wound roll.",
         [ALWAYS],
         [REROLL_FAILED_WOUNDS],
     ),

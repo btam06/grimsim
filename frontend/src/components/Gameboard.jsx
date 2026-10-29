@@ -18,7 +18,8 @@ const GRID_INCHES = 1
 // and obstacles, each made of rectangles placed relative to its position),
 // turned clockwise by their rotation - all in inches, like the board.
 //
-// `control` ({area id: {side, title}}) marks objectives a player controls:
+// `control` ({area id: {side, title, live}}) marks objectives a player
+// controls (and `live`: who would at the end of the phase, if different):
 // their areas are lightly shaded in that player's colour.
 function areaShape(a, key, className, title = null) {
   return a.points.length > 0 ? (
@@ -61,6 +62,12 @@ function Terrain({ layout, control = {} }) {
       )}
       {layout.areas.map((a) =>
         areaShape(a, `area-${a.id}`, areaClass(a), control[a.id]?.title ?? null)
+      )}
+      {/* Who'd control it at the end of the phase, if that's different. */}
+      {layout.areas.map(
+        (a) =>
+          control[a.id]?.live &&
+          areaShape(a, `live-${a.id}`, `objective-live objective-live--${control[a.id].live}`)
       )}
       {layout.features.map((f) => (
         <g
@@ -241,6 +248,7 @@ function Pieces({ pieces, onPointerDown, onClick }) {
             p.ghost && 'piece--ghost',
             p.shooter && 'piece--shooter',
             p.target && 'piece--target',
+            p.highlight && 'piece--highlight',
             p.shocked && 'piece--shocked',
             onClick && !p.ghost && !p.draft && 'piece--clickable',
           ]

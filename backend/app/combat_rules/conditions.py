@@ -42,6 +42,7 @@ MELEE_ATTACK = "melee_attack"
 HALF_RANGE_ATTACK = "half_range_attack"
 ATTACKER_LED_BY_CHARACTER = "attacker_led_by_character"
 TARGET_MODEL_CHARACTER = "target_model_character"
+TARGET_MODEL_VEHICLE = "target_model_vehicle"
 STRENGTH_EXCEEDS_TOUGHNESS = "strength_exceeds_toughness"
 ANTI_INFANTRY_5 = "anti_infantry_5"
 DEFENDER_BELOW_STARTING_STRENGTH = "defender_below_starting_strength"
@@ -189,10 +190,32 @@ def within_half_range(context: dict) -> bool:
     return context.get("step") == "pre_weapon" and context.get("half_range", False)
 
 
+# The calculator's Positioning: the target is within 12" of the attacking
+# unit - for Plunging Fire (22.05): a TOWERING model's ranged attacks then have
+# +1 BS (not by or at AIRCRAFT).
+WITHIN_12_OF_TARGET = "within_12_of_target"
+
+# The calculator's Positioning: the defending unit is engaged (with units of
+# the attacking army). Only a MONSTER/VEHICLE unit can then be shot - at -1
+# to hit, and not with [BLAST] weapons (17.03).
+TARGET_ENGAGED = "target_engaged"
+
+# The calculator's Positioning: the attacking unit was set up on the
+# battlefield this turn (e.g. it arrived from Reserves, or disembarked) - in a
+# game, worked out (see app/routers/games.py).
+SET_UP_THIS_TURN = "set_up_this_turn"
+
+
 def moved_less_than_3(context: dict) -> bool:
-    # True at the pre-hit check if the attacking unit moved less than 3"
-    # this turn (e.g. for a Heavy weapon ability).
-    return context.get("step") == "pre_hit" and context.get("moved_less_than_3", False)
+    # True at the pre-hit check if the attacking unit is unengaged, wasn't set
+    # up on the battlefield this turn and no model in it moved more than 3"
+    # this turn ([HEAVY], 24.16).
+    return (
+        context.get("step") == "pre_hit"
+        and context.get("moved_less_than_3", False)
+        and not context.get("in_engagement_range", False)
+        and SET_UP_THIS_TURN not in context.get("attacker_positions", set())
+    )
 
 
 def target_monster_or_vehicle(context: dict) -> bool:
@@ -338,6 +361,12 @@ def target_model_character(context: dict) -> bool:
     # A defending CHARACTER model (checked per model) - e.g. an enhancement's
     # Feel No Pain for its bearer alone, rather than the unit it's leading.
     return "CHARACTER" in context.get("target_model_keywords", set())
+
+
+def target_model_vehicle(context: dict) -> bool:
+    # A defending VEHICLE model (checked per model) - e.g. Omnissiah's
+    # Blessing's Feel No Pain for a VEHICLE model it repaired.
+    return "VEHICLE" in context.get("target_model_keywords", set())
 
 
 def target_infantry(context: dict) -> bool:
@@ -499,6 +528,7 @@ CORE_CONDITIONS = {
     HALF_RANGE_ATTACK: half_range_attack,
     ATTACKER_LED_BY_CHARACTER: attacker_led_by_character,
     TARGET_MODEL_CHARACTER: target_model_character,
+    TARGET_MODEL_VEHICLE: target_model_vehicle,
     STRENGTH_EXCEEDS_TOUGHNESS: strength_exceeds_toughness,
     ANTI_INFANTRY_5: anti_infantry_5,
     DEFENDER_BELOW_STARTING_STRENGTH: defender_below_starting_strength,

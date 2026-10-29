@@ -4,7 +4,10 @@
 // from then on it Advances this phase - no going back to a Normal move, even
 // after a reset) - or, within Engagement Range, it Falls Back - and drags any of
 // its models: each valid move is saved as it's made, and can be changed (or
-// reset) until the phase ends. Units left alone remain stationary.
+// reset) until the phase ends. Units left alone remain stationary. A FLYING
+// unit can take to the skies (2" less - none with Hover - but through models
+// and terrain); a Super-heavy Walker can be MOBILE for its move (through
+// terrain, then a D6: on a 1 it's Battle-shocked).
 
 // How a unit stands this phase.
 function unitStatus(unit) {
@@ -26,6 +29,7 @@ function MovementPanel({
   checking,
   onSelectUnit,
   onToggleAdvance,
+  onOptions,
   onReset,
 }) {
   if (!movement) return null
@@ -34,6 +38,7 @@ function MovementPanel({
   const canMove = Boolean(selected)
   const check = draft.check
   const kinds = selected?.allowed_kinds ?? []
+  const options = draft.options ?? {}
 
   return (
     <div className="deployment-panel">
@@ -80,6 +85,28 @@ function MovementPanel({
                   ? ` (rolled ${selected.advance_roll}: M + ${selected.advance_roll}" - now Advancing)`
                   : ' (rolls a D6)'}
               </span>
+            </label>
+          )}
+          {selected.can_fly && (
+            <label className="radio-option">
+              <input
+                type="checkbox"
+                checked={Boolean(options.take_to_skies)}
+                onChange={(e) => onOptions({ take_to_skies: e.target.checked })}
+              />
+              Take to the skies
+              <span className="hint"> (2" less, through models and terrain)</span>
+            </label>
+          )}
+          {selected.super_heavy_walker && (
+            <label className="radio-option">
+              <input
+                type="checkbox"
+                checked={Boolean(options.mobile)}
+                onChange={(e) => onOptions({ mobile: e.target.checked })}
+              />
+              MOBILE
+              <span className="hint"> (through terrain; then a D6 - on a 1, Battle-shocked)</span>
             </label>
           )}
         </div>

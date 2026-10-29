@@ -45,7 +45,7 @@ async def test_cleanse_instead_of_shooting(client: AsyncClient, session, tmp_pat
     # It can't shoot now (nor start another action).
     shooting = (await client.get(f"/games/{game_id}/shooting")).json()["units"]
     assert next(u for u in shooting if u["unit_id"] == d["unit_id"])["reason"] == (
-        "it did an action this turn (Cleanse)"
+        "it started an action this turn (Cleanse)"
     )
     response = await _start(client, game_id, d, "Cleanse", target["id"])
     assert "already started an action" in response.json()["detail"]
@@ -134,7 +134,7 @@ async def test_plunder_completes_at_once_and_stops_charging(
     await client.post(f"/games/{game_id}/advance")
     charge = (await client.get(f"/games/{game_id}/charge")).json()["units"]
     assert next(u for u in charge if u["unit_id"] == a["unit_id"])["reason"] == (
-        "it did an action this turn (Plunder)"
+        "it started an action this turn (Plunder)"
     )
     await _end_turn(client, game_id)
     [offer] = (await client.get(f"/games/{game_id}/scoring")).json()["offers"]
@@ -192,9 +192,11 @@ async def test_an_action_fails_if_its_unit_becomes_battle_shocked(
     assert (await client.get(f"/games/{game_id}/scoring")).json()["offers"] == []
 
 
-async def test_an_action_fails_if_its_unit_ends_up_in_engagement(
+async def test_an_action_survives_an_enemy_engaging_its_unit(
     client: AsyncClient, session, tmp_path, monkeypatch
 ):
+    # 16: becoming engaged doesn't stop an action completing - making a move
+    # does (see the next test).
     game_id, a, d = await _game(client, session, tmp_path, monkeypatch)
     await _secondary(session, game_id, 2, "Cleanse")
     await _place(session, d, ON_THE_RUIN)
@@ -204,4 +206,25 @@ async def test_an_action_fails_if_its_unit_ends_up_in_engagement(
     # An enemy unit next to it by the end of the turn.
     await _place(session, a, [(12.5, 11.5)])
     await _end_turn(client, game_id)
-    assert (await client.get(f"/games/{game_id}/scoring")).json()["offers"] == []
+    assert (await client.get(f"/games/{game_id}/scoring")).json()["offers"] != []
+
+
+async def test_an_action_fails_if_its_unit_moves(
+    client: AsyncClient, session, tmp_path, monkeypatch
+):
+    from app.routers.games import _load_game
+    from app.services.in_game import deployment, mission_state
+
+    game_id, a, d = await _game(client, session, tmp_path, monkeypatch)
+    await _secondary(session, game_id, 2, "Cleanse")
+    await _place(session, d, ON_THE_RUIN)
+    await _to_shooting(client, game_id)
+    [option] = (await _actions(client, game_id))["options"][str(d["unit_id"])]
+    await _start(client, game_id, d, "Cleanse", option["targets"][0]["id"])
+    game = await _load_game(session, game_id)
+    unit = deployment.find_unit(game, d["unit_id"])
+    # A pile-in or consolidation move doesn't fail it; any other move does.
+    mission_state.after_move(game, unit, "consolidate")
+    assert [r.status for r in game.actions] == ["started"]
+    mission_state.after_move(game, unit)
+    assert [r.status for r in game.actions] == ["failed"]

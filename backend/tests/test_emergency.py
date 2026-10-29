@@ -64,11 +64,11 @@ async def test_emergency_disembark_when_the_transport_is_destroyed(
 
     first, second = (m["unit_model_id"] for m in p["models"])
     url = f"/games/{game_id}/emergency"
-    # Further than 3" away, or not touching it with room to: not allowed.
+    # Further than 6" away, or not touching it with room to: not allowed.
     check = (
         await client.post(f"{url}/check", json=_payload(p, {first: (30, 38), second: (31.5, 38)}))
     ).json()
-    assert 'P isn\'t within 3" of its transport (x2)' in check["problems"]
+    assert 'P isn\'t wholly within 6" of its transport (x2)' in check["problems"]
     check = (
         await client.post(f"{url}/check", json=_payload(p, {first: (22.5, 38), second: (24, 38)}))
     ).json()

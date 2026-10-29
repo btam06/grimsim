@@ -201,11 +201,12 @@ def area_within(game: Game, area, polygon) -> bool:
     return polygon is not None and any(regions.point_in(p, polygon) for p in area_polygon(area))
 
 
-def after_move(game: Game, unit: Unit) -> None:
-    # A unit ended a move: its opponent's Teleport Homer tokens within 1" are
-    # removed (see app/seeds/factions/space_marines/teleport_homer.py);
-    # actions waiting to complete whose unit is now within Engagement Range
-    # fail (see app/services/in_game/actions.py); and
+def after_move(game: Game, unit: Unit, kind: str | None = None) -> None:
+    # A unit ended a move (`kind`: "pile_in" or "consolidate" for those):
+    # its opponent's Teleport Homer tokens within 1" are removed (see
+    # app/seeds/factions/space_marines/teleport_homer.py); an action it's
+    # waiting to complete fails, unless it was a pile-in or consolidation
+    # move (see app/services/in_game/actions.py); and
     # for Surveil the Foe, if it's within range of an objective with any of
     # its opponent's operation markers within range, those markers are
     # removed.
@@ -213,6 +214,8 @@ def after_move(game: Game, unit: Unit) -> None:
     from app.seeds.factions.space_marines import teleport_homer
     from app.services.in_game import actions
 
+    if kind not in actions.MOVES_KEEPING_ACTIONS:
+        actions.moved(game, unit)
     actions.check_started(game)
     teleport_homer.after_move(game, unit)
     seat = deployment.owner(game, unit).seat

@@ -69,7 +69,7 @@ async def test_has_to_go_round_dense_terrain(client: AsyncClient, session, tmp_p
     # 5" straight down - but the wall's in the way: round it is over 6".
     check = await _check(client, game_id, d, "normal", _shifted(d, dy=5))
     [problem] = check["problems"]
-    assert "going round dense terrain (it can move 6\")" in problem
+    assert "going round dense terrain and enemy models (it can move 6\")" in problem
     # Somewhere it can reach round the wall's end: fine.
     assert (await _check(client, game_id, d, "normal", _shifted(d, dx=3, dy=3)))["valid"]
 

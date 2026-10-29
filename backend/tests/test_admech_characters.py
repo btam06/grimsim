@@ -214,3 +214,16 @@ async def test_enhanced_data_tether(client: AsyncClient, session, tmp_path, monk
     monkeypatch.setattr(game_service.random, "randint", lambda a, b: 5)
     game_service._stratagem_targeted(player, deployment.find_unit(game_, r["unit_id"]))
     assert player.cp == cp + 1
+
+
+def test_omnissiahs_blessing_in_the_calculator():
+    # Army-wide: picked for a defending unit in a list with an Enginseer, its
+    # VEHICLE models have Feel No Pain 5+ (others don't).
+    from app.seeds import datasheet_abilities as datasheet_ability_seeds
+    from tests.test_space_marines import _applies
+
+    option = datasheet_ability_seeds.OPTIONS["Omnissiah's Blessing"]["Omnissiah's Blessing"]
+    assert option.army_wide
+    assert {r.side for r in option.rules} == {"defender"}
+    assert _applies(option.rules, {"target_model_keywords": {"VEHICLE", "ADEPTUS MECHANICUS"}})
+    assert not _applies(option.rules, {"target_model_keywords": {"INFANTRY"}})

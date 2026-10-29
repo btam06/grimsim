@@ -117,12 +117,16 @@ async def test_the_targets_state_goes_to_the_calculator(client: AsyncClient, ses
     await _destroy(session, game_id, a, 1)
     loaded = await _load_game(session, game_id)
     assert _defender_positions(loaded, unit) == ["below_starting_strength"]
-    # 1 of 3, and on the objective (controlling it, with no enemy there).
+    # 1 of 3, and on the objective (controlling it, with no enemy there, as
+    # determined at the end of a phase).
+    from app.services.in_game import objectives
+
     await _destroy(session, game_id, a, 2)
     a = _unit_named(await _deployment(client, game_id), "A")
     survivors = {**a, "models": [m for m in a["models"] if m["position"]]}
     await _place(session, survivors, [(10, 10)])
     loaded = await _load_game(session, game_id)
+    objectives.determine(loaded)
     assert _defender_positions(loaded, unit) == [
         "below_starting_strength", "below_half_strength", "in_range_of_objective",
         "controlling_objective",
@@ -270,10 +274,16 @@ async def test_super_heavy_walker(client: AsyncClient, session, tmp_path, monkey
     game_id = game["id"]
     k = _unit_named(deployment_, "K")
     await _chaos_knights_ability(session, k, "Super-heavy Walker")
-    # Straight through the wall at y 8 - it can, and rolls a 1.
+    # Straight through the wall at y 8: only MOBILE (24.35) - then it rolls a
+    # 1.
     monkeypatch.setattr("app.services.in_game.movement.random.randint", lambda a, b: 1)
     to = [{"unit_model_id": k["models"][0]["unit_model_id"], "x": 9, "y": 10.5}]
     response = await _move(client, game_id, k, "normal", to)
+    assert response.status_code == 400
+    response = await client.post(
+        f"/games/{game_id}/movement",
+        json={"unit_id": k["unit_id"], "kind": "normal", "positions": to, "mobile": True},
+    )
     assert response.status_code == 200, response.text
     state = (await client.get(f"/games/{game_id}/battle-shock")).json()
     assert [u["name"] for u in state["battle_shocked"]] == ["K"]

@@ -138,3 +138,59 @@ async def test_no_disembarking_after_the_transport_advanced(
     assert response.status_code == 200, response.text
     response = await _disembark(client, game_id, p, [(21.5, 32), (21.5, 33.5)])
     assert "its transport Advanced this turn" in response.json()["detail"]
+
+
+async def test_a_rapid_disembark_after_the_transport_moved(
+    client: AsyncClient, session, tmp_path
+):
+    # T makes a Normal move: P's disembark is rapid - it can't move or charge.
+    game_id, t, p = await _transport_game(client, session, tmp_path)
+    await _advance_to(client, game_id, 1, 1, "movement")
+    assert (await _embarked(client, game_id))["units"][0]["mode"] == "tactical"
+    assert (await _move(client, game_id, t, [(20, 34)])).status_code == 200
+    assert (await _embarked(client, game_id))["units"][0]["mode"] == "rapid"
+    response = await _disembark(client, game_id, p, [(21.5, 34), (21.5, 35.5)])
+    assert response.status_code == 200, response.text
+    response = await _move(client, game_id, p, [(21.5, 33), (21.5, 34.5)])
+    assert response.status_code == 400
+    session.expire_all()
+    game = await _load_game(session, game_id)
+    from app.services.in_game import embarked
+
+    unit = deployment.find_unit(game, p["unit_id"])
+    assert embarked.no_charge(game, unit) == "it made a rapid disembark move this turn"
+
+
+async def test_a_combat_disembark(client: AsyncClient, session, tmp_path, monkeypatch):
+    # Within 6" (not 3"), with hazard rolls - then Battle-shocked.
+    from app.services.in_game import battle_shock
+
+    monkeypatch.setattr("random.randint", lambda a, b: 6)
+    game_id, t, p = await _transport_game(client, session, tmp_path)
+    await _advance_to(client, game_id, 1, 1, "movement")
+    spots = [(25, 38), (25, 39.5)]
+    url = f"/games/{game_id}/embarked"
+    payload = {"unit_id": p["unit_id"], "positions": _at(p, spots)}
+    check = (await client.post(f"{url}/check", json=payload)).json()
+    assert 'P isn\'t wholly within 3" of its transport (x2)' in check["problems"]
+    payload["combat_disembark"] = True
+    assert (await client.post(f"{url}/check", json=payload)).json()["valid"]
+    response = await client.post(url, json=payload)
+    assert response.status_code == 200, response.text
+    session.expire_all()
+    game = await _load_game(session, game_id)
+    assert battle_shock.is_battle_shocked(game, deployment.find_unit(game, p["unit_id"]))
+
+
+async def test_no_embarking_after_being_set_up_this_turn(
+    client: AsyncClient, session, tmp_path
+):
+    game_id, t, p = await _transport_game(client, session, tmp_path)
+    await _advance_to(client, game_id, 1, 1, "movement")
+    assert (await _disembark(client, game_id, p, NEXT_TO_T)).status_code == 200
+    from app.services.in_game import embarked
+
+    session.expire_all()
+    game = await _load_game(session, game_id)
+    reason = embarked.embark_reason(game, deployment.find_unit(game, p["unit_id"]))
+    assert reason is not None

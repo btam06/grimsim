@@ -26,10 +26,11 @@ async def _secure_for(session, game_id, seat):
 
 
 async def _refresh(session, game_id):
-    # The end of a phase.
+    # The end of a phase: control is determined.
     session.expire_all()
     game = await _load_game(session, game_id)
     objectives.refresh_secured(game)
+    objectives.determine(game)
     await session.commit()
 
 
@@ -52,12 +53,12 @@ async def test_a_secured_objective_stays_until_outscored_at_a_phase_end(
     await _secure_for(session, game_id, 1)
     # No models on it: still seat 1's.
     objective = await _objective(client, game_id)
-    assert (objective["controller"], objective["secured_by"]) == (1, 1)
+    assert (objective["live_controller"], objective["secured_by"]) == (1, 1)
 
     # D on it, more OC than seat 1's 0: still seat 1's until the phase ends...
     await _place(session, d, ON_THE_RUIN)
     objective = await _objective(client, game_id)
-    assert (objective["oc"], objective["controller"]) == ({"1": 0, "2": 2}, 1)
+    assert (objective["oc"], objective["live_controller"]) == ({"1": 0, "2": 2}, 1)
     # ...then it's no longer secured, and seat 2 controls it.
     await _refresh(session, game_id)
     objective = await _objective(client, game_id)

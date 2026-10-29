@@ -175,7 +175,8 @@ async def test_assault_doctrine_charges_after_advancing(client: AsyncClient, ses
     assert shooting["A"]["reason"] == "it Advanced, and has no Assault weapons"
     await _advance_to(client, game_id, 1, 1, "charge")
     charge = {u["name"]: u for u in (await client.get(f"/games/{game_id}/charge")).json()["units"]}
-    assert charge["A"]["reason"] is None
+    # Advancing doesn't stop it (nothing's within 12" here, though).
+    assert charge["A"]["reason"] in (None, 'no enemy unit is within 12"')
     assert charge["B"]["reason"] == "it Advanced this turn"
 
 

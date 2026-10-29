@@ -4,11 +4,20 @@ import Select from './Select'
 // Disembarking from transports (see app/services/in_game/embarked.py, which
 // decides where a unit can disembark). In their movement phase, a player
 // picks a unit embarked in one of their transports on the battlefield,
-// clicks near the transport to set it down, arranges its models (each wholly
-// within 3" of the transport) and disembarks it. If the transport has
-// already moved this phase, that's the unit's move. A unit that's made its
+// clicks near the transport to set it down, arranges its models and
+// disembarks it (18.04): a rapid disembark if the transport's made a Normal
+// (or ingress) move - wholly within 3", and the unit can't move or charge
+// after; otherwise tactical - wholly within 3", and it can still move; or,
+// if it can't be set up that way, combat - wholly within 6", with a hazard
+// roll per model, then Battle-shocked and no charge. A unit that's made its
 // move with every model within 3" of one of their transports can embark in
-// it instead (not in the same phase as disembarking).
+// it instead (not in the same phase as disembarking, nor if it was set up
+// this turn).
+
+const MODES = {
+  rapid: 'Rapid disembark: wholly within 3"; it can\'t move again or charge this turn',
+  tactical: 'Tactical disembark: wholly within 3"; it can still make a Normal move or Advance',
+}
 
 function EmbarkSection({ embarkable, onEmbark }) {
   // The transport picked for each unit (the first it can reach, until changed).
@@ -61,6 +70,7 @@ function EmbarkedPanel({
   onPickUp,
   onDisembark,
   onEmbark,
+  onToggleCombat,
 }) {
   if (!embarked || embarked.seat === null) return null
   const embarkable = embarked.embarkable ?? []
@@ -77,6 +87,7 @@ function EmbarkedPanel({
   const selected = embarked.units.find((u) => u.unit_id === draft.unitId) ?? null
   const placed = selected && draft.kind === 'disembark' && draft.positions !== null
   const check = draft.kind === 'disembark' ? draft.check : null
+  const combat = Boolean(draft.options?.combat_disembark)
 
   return (
     <div className="deployment-panel">
@@ -84,8 +95,7 @@ function EmbarkedPanel({
       <p>
         <strong>{player?.user_name}</strong> can disembark units from their transports.{' '}
         <span className="hint">
-          Every model wholly within 3" of its transport, not within Engagement Range of an
-          enemy. If the transport has already moved this phase, that's the unit's move.
+          Not after the transport Advanced or Fell Back; no model engaged with an enemy unit.
         </span>
       </p>
       <div className="radio-group">
@@ -98,10 +108,33 @@ function EmbarkedPanel({
               onChange={() => onSelectUnit(unit.unit_id)}
             />
             {unit.name}
-            <span className="hint"> · in {unit.transport_name}</span>
+            <span className="hint">
+              {' '}
+              · in {unit.transport_name} · {unit.mode === 'rapid' ? 'rapid' : 'tactical'} disembark
+            </span>
           </label>
         ))}
       </div>
+      {selected && (
+        <div className="move-kinds">
+          <p className="hint">
+            {combat
+              ? 'Combat disembark: wholly within 6"; each model makes a hazard roll; the unit is Battle-shocked and can\'t charge this turn.'
+              : MODES[selected.mode] ?? MODES.tactical}
+          </p>
+          {selected.mode !== 'rapid' && (
+            <label className="radio-option">
+              <input
+                type="checkbox"
+                checked={combat}
+                onChange={(e) => onToggleCombat(e.target.checked)}
+              />
+              Combat disembark
+              <span className="hint"> (only if it can't be set up within 3")</span>
+            </label>
+          )}
+        </div>
+      )}
       <div className="deployment-status">
         {!selected && <p className="hint">Choose a unit to disembark.</p>}
         {selected && !placed && (

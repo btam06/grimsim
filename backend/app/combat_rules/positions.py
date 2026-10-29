@@ -1,4 +1,6 @@
 from app.combat_rules.conditions import (
+    TARGET_ENGAGED,
+    WITHIN_12_OF_TARGET,
     BELOW_HALF_STRENGTH,
     BELOW_STARTING_STRENGTH,
     CONTROLLING_OBJECTIVE,
@@ -55,6 +57,8 @@ from app.seeds.factions.necrons.conditions import (
 # Positions the calculator asks about, since it can't measure the table:
 # {position: label}. A combat request lists each side's positions.
 POSITIONS = {
+    TARGET_ENGAGED: "Engaged (a MONSTER/VEHICLE: -1 to hit, no [BLAST])",
+    WITHIN_12_OF_TARGET: 'Target is within 12" (Plunging Fire, for a TOWERING attacker)',
     NEAR_ADMECH_BATTLELINE: 'Within 6" of a friendly ADEPTUS MECHANICUS BATTLELINE unit',
     IN_RANGE_OF_OBJECTIVE: "Within range of an objective marker",
     REMAINED_STATIONARY: "Remained Stationary this turn",
@@ -87,6 +91,8 @@ POSITIONS = {
 # a position is only asked about for a unit with a rule using one of them
 # (e.g. Doctrina Imperatives, Breaching Command).
 POSITION_CONDITIONS = {
+    TARGET_ENGAGED: {"attacker": set(), "defender": set()},
+    WITHIN_12_OF_TARGET: {"attacker": set(), "defender": set()},
     NEAR_ADMECH_BATTLELINE: {
         "attacker": {
             ATTACKER_NEAR_ADMECH_BATTLELINE,
@@ -149,6 +155,9 @@ NEAR_FRIENDLY = {NEAR_ADMECH_BATTLELINE: (("ADEPTUS MECHANICUS", "BATTLELINE"), 
 ALWAYS_ASKED = {
     IN_RANGE_OF_OBJECTIVE: {"defender"},
     REMAINED_STATIONARY: {"attacker"},
+    # (e.g. for [HEAVY], which needs the unit not set up this turn.)
+    SET_UP_THIS_TURN: {"attacker"},
+    TARGET_ENGAGED: {"defender"},
     BELOW_STARTING_STRENGTH: {"defender"},
     BELOW_HALF_STRENGTH: {"defender"},
 }

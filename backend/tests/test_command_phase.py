@@ -190,6 +190,10 @@ async def test_fanatical_devotion_shoots_and_charges_after_advancing(
     assert shooting["Skitarii"]["can_shoot"], shooting["Skitarii"]
     assert shooting["Far"]["reason"] == "it Advanced, and has no Assault weapons"
 
+    # An enemy unit within 12" of the Skitarii (11.01).
+    from tests.test_shooting import _place
+
+    await _place(session, units["D"], [(24, 28)])
     await _advance_to(client, game_id, 1, 1, "charge")
     response = await client.get(f"/games/{game_id}/charge")
     charge = {u["name"]: u for u in response.json()["units"]}

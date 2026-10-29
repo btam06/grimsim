@@ -5,6 +5,7 @@ from sqlalchemy.orm import selectinload
 
 from app.db import get_session
 from app.combat_rules import Rule, RuleOption
+from app.combat_rules.conditions import WITHIN_12_OF_TARGET
 from app.combat_rules.positions import ALWAYS_ASKED, POSITION_CONDITIONS, POSITIONS
 from app.models import (
     ArmyList,
@@ -438,11 +439,16 @@ async def relevant_positions(
         if rule.side == side
         for condition in rule.conditions
     }
+    # (Plunging Fire, for a TOWERING attacker.)
+    towering = side == "attacker" and any(
+        k.name == "TOWERING" for m in unit.unit_models for k in m.model.keywords
+    )
     return [
         PositionOut(id=position, label=label)
         for position, label in POSITIONS.items()
         if side in ALWAYS_ASKED.get(position, set())
         or POSITION_CONDITIONS[position][side] & conditions
+        or (towering and position == WITHIN_12_OF_TARGET)
     ]
 
 
@@ -504,6 +510,8 @@ async def calculate(
     firing_deck: list[tuple[int, int, int]] | None = None,
     attacker_extra_rules: list[Rule] | None = None,
     defender_model_rules: dict[int, list[Rule]] | None = None,
+    attack_limits: dict | None = None,
+    hazards_rolled: set | None = None,
 ) -> CombatOut:
     # Resolves an attack (see app/services/combat.py). `firing` is which
     # weapons each attacking model can fire and at half range or not, when
@@ -621,6 +629,11 @@ async def calculate(
         defender_wounds=defender_wounds,
         attacker_wounds=attacker_wounds,
         snap_shots=payload.snap_shots,
+        allocation_order=list(payload.allocation_order),
+        indirect=payload.indirect,
+        indirect_spotted=payload.indirect_spotted,
+        attack_limits=attack_limits,
+        hazards_rolled=hazards_rolled,
     )
 
     return CombatOut(

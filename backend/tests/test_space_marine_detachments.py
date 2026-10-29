@@ -224,6 +224,11 @@ async def test_death_blow_adds_one_to_terminator_charge_rolls(
         assert response.status_code == 200, response.text
 
     await _advance_to(client, game_id, 1, 1, "charge")
+    # (Within 12" of D, to declare a charge.)
+    from tests.test_shooting import _place
+
+    await _place(session, t, [(20, 20)])
+    await _place(session, a, [(23, 20)])
     for unit in (t, a):
         response = await client.post(
             f"/games/{game_id}/charge/roll", json={"unit_id": unit["unit_id"]}

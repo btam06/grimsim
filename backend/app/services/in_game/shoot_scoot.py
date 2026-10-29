@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import HTTPException
 
 from app.models import Game, Unit
-from app.services.in_game import deployment, mission_state, movement
+from app.services.in_game import deployment, mission_state, movement, reinforcements
 from app.services.in_game.deployment import Placement
 
 # Moving after shooting (shoot and scoot): some abilities let a unit, in its
@@ -88,6 +88,8 @@ def reason(game: Game, unit: Unit) -> str | None:
         return f"{found[0]} is used after it has shot"
     if moved(game, unit):
         return "it has already moved after shooting this turn"
+    if reinforcements.ingressed(game, unit):
+        return "it made an ingress move: no other move until the Charge phase"
     if movement.in_engagement_range(game, unit):
         return "it's within Engagement Range of an enemy unit"
     return None

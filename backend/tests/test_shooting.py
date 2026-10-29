@@ -487,6 +487,8 @@ async def test_fell_back_cant_shoot(client: AsyncClient, session, tmp_path):
 
 
 async def test_engaged_unit_cant_shoot(client: AsyncClient, session, tmp_path):
+    # Without [CLOSE-QUARTERS] weapons (and not a MONSTER/VEHICLE), an engaged
+    # unit can't use close-quarters shooting (10.06).
     game, deployment = await _shooting_game(client, session, tmp_path)
     game_id = game["id"]
     d, a = _unit_named(deployment, "D"), _unit_named(deployment, "A")
@@ -494,4 +496,4 @@ async def test_engaged_unit_cant_shoot(client: AsyncClient, session, tmp_path):
     await _to_shooting(client, game_id)
     await _place(session, a, [(x + 2 * R32 + 0.5, 4)])
     [unit] = (await _shooting(client, game_id))["units"]
-    assert unit["reason"] == "it's within Engagement Range of an enemy unit"
+    assert unit["reason"] == "it's engaged, and has no [CLOSE-QUARTERS] weapons"

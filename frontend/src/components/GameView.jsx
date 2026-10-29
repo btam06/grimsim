@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   achieveSecondary,
   advanceGame,
@@ -33,6 +33,10 @@ import {
   rollFirstTurn,
   scoutMove,
   checkPileIn,
+  checkSurgeMove,
+  listSurgeMoves,
+  makeSurgeMove,
+  startSurgeMove,
   consolidate,
   rollAdvance,
   declareFormations,
@@ -54,6 +58,7 @@ import {
   placeReanimated,
   getReserves,
   getReservesFormation,
+  getScoutFormation,
   getReach,
   getShooting,
   getShootingBubble,
@@ -78,6 +83,7 @@ import DeploymentPanel from './DeploymentPanel'
 import AbilityActionsPanel from './AbilityActionsPanel'
 import PreBattlePanel from './PreBattlePanel'
 import ReactiveMovePanel from './ReactiveMovePanel'
+import SurgePanel from './SurgePanel'
 import ShootScootPanel from './ShootScootPanel'
 import ShootingStartPanel from './ShootingStartPanel'
 import FightPanel from './FightPanel'
@@ -85,6 +91,7 @@ import FormationsPanel from './FormationsPanel'
 import Gameboard from './Gameboard'
 import MovementPanel from './MovementPanel'
 import PileInPanel from './PileInPanel'
+import { BoardOverlayContext, useBoardOverlay } from '../boardOverlay'
 import BattleShockPanel from './BattleShockPanel'
 import CommandPanel from './CommandPanel'
 import MissionPanel from './MissionPanel'
@@ -208,6 +215,12 @@ function PlayerCard({ game, player, onAction }) {
   const targetsUnit = UNIT_TARGET_ACTIONS.includes(selectedStratagem?.game_action)
   const choiceLabel = CHOICE_LABELS[selectedStratagem?.game_action]
   const choices = targets.find((t) => String(t.unit_id) === String(targetUnitId))?.choices ?? []
+  useBoardOverlay(`stratagem-${player.seat}`, {
+    unitIds: [
+      ...(targetsUnit && targetUnitId ? [Number(targetUnitId)] : []),
+      ...(choiceLabel === 'transport' && targetChoiceId ? [Number(targetChoiceId)] : []),
+    ],
+  })
 
   useEffect(() => {
     setTargetUnitId('')
@@ -435,7 +448,7 @@ const MOVE_KINDS = ['normal', 'advance', 'fall_back']
 // (draft - draggable, marked where the backend's check found a problem). A
 // moving unit's models also leave a ghost where they started. `focus` marks
 // a shooting unit and its target.
-function boardPieces(game, deployment, draft, focus = {}) {
+function boardPieces(game, deployment, draft, focus = {}, highlighted = new Set()) {
   if (!deployment) return []
   const problems = new Set((draft.check?.models ?? []).map((m) => m.unit_model_id))
   const pieces = []
@@ -478,8 +491,9 @@ function boardPieces(game, deployment, draft, focus = {}) {
         draft: draftPosition !== undefined && !locked.has(model.unit_model_id),
         invalid: isDraft && problems.has(model.unit_model_id),
         shooter: unit.unit_id === focus.unitId,
+        highlight: highlighted.has(unit.unit_id),
         shocked: unit.battle_shocked,
-        target: unit.unit_id === focus.targetId,
+        target: unit.unit_id === focus.targetId || Boolean(focus.targetIds?.includes(unit.unit_id)),
         title:
           `${unit.name}: ${model.name} (${model.base_size ?? 'no base size'})` +
           (model.wounds_remaining < model.wounds
@@ -495,23 +509,30 @@ function boardPieces(game, deployment, draft, focus = {}) {
 // Who controls each objective (see the deployment's `objectives`), by the
 // terrain areas it is: the controller's side (none in a tie) and each
 // player's OC there, for the board to shade and show.
+// Who controls each objective - as determined at the end of the last phase
+// or turn (14.02) - and, if it differs, who would if it were determined now
+// (`live`: drawn as a dashed outline).
 function objectiveControl(game, deployment) {
   const found = {}
+  const sideOf = (seat) =>
+    seat == null ? null : seat === game.attacker_seat ? 'attacker' : 'defender'
   for (const objective of deployment?.objectives ?? []) {
-    const side =
-      objective.controller === null
-        ? null
-        : objective.controller === game.attacker_seat
-          ? 'attacker'
-          : 'defender'
+    const side = sideOf(objective.controller)
+    const liveSeat = objective.live_controller ?? null
     const oc = game.players
       .map((p) => `${p.user_name} OC ${objective.oc[p.seat] ?? 0}`)
       .join(' · ')
     const holder = game.players.find((p) => p.seat === objective.controller)
     // Secured (e.g. Raise the Banner): theirs until outscored at a phase's end.
     const secured = objective.secured_by != null ? ', secured' : ''
-    const title = `${holder ? `Controlled by ${holder.user_name}${secured}` : 'Not controlled'} (${oc})`
-    for (const id of objective.area_ids) found[id] = { side, title }
+    const changing = liveSeat !== (objective.controller ?? null)
+    const liveHolder = game.players.find((p) => p.seat === liveSeat)
+    const preview = changing
+      ? ` - at the end of the phase: ${liveHolder ? liveHolder.user_name : 'no one'}`
+      : ''
+    const title = `${holder ? `Controlled by ${holder.user_name}${secured}` : 'Not controlled'} (${oc})${preview}`
+    const live = changing ? (sideOf(liveSeat) ?? 'none') : null
+    for (const id of objective.area_ids) found[id] = { side, title, live }
   }
   return found
 }
@@ -565,6 +586,34 @@ function auraCircles(deployment, draft) {
   })
 }
 
+// Ranges panels want drawn round models (see boardOverlay.js - e.g. Rod of
+// the War Forge's 6" while it's being selected), drawn like auras.
+function overlayRanges(deployment, overlays) {
+  if (!deployment) return []
+  const models = new Map(
+    deployment.units.flatMap((u) => u.models.map((m) => [m.unit_model_id, m]))
+  )
+  return Object.values(overlays).flatMap((o) =>
+    (o?.ranges ?? []).flatMap((r) => {
+      const model = models.get(r.unitModelId)
+      if (!model?.position) return []
+      return [
+        {
+          id: `range-${r.unitModelId}-${r.name}`,
+          x: model.position.x,
+          y: model.position.y,
+          rotation: model.position.rotation,
+          rx: model.width / 2,
+          ry: model.height / 2,
+          range: r.range,
+          name: r.name,
+          colour: 1,
+        },
+      ]
+    })
+  )
+}
+
 // How far each model of the moving unit can go: a ring around where it
 // started, as far as its centre can move (M, plus its Advance roll if it's
 // Advancing) - and where it is now, tethered to its start.
@@ -576,7 +625,10 @@ function moveRings(deployment, movement, draft) {
   // move). A move: its M, plus its Advance roll if it's Advancing.
   const locked = new Set(draft.locked ?? [])
   let allowance = (id) => (locked.has(id) ? 0 : draft.allowance)
-  if (!['charge', 'pile_in', 'consolidate', 'scout', 'scoot', 'react'].includes(draft.kind)) {
+  const fixedReach = ['charge', 'pile_in', 'consolidate', 'scout', 'scoot', 'react', 'surge']
+  // (A unit set up from Strategic Reserves for a Scouts move: no ring.)
+  if (fixedReach.includes(draft.kind) && draft.allowance == null) return []
+  if (!fixedReach.includes(draft.kind)) {
     const moving = movement?.units.find((u) => u.unit_id === draft.unitId)
     if (!moving) return []
     const extra = draft.kind === 'advance' ? (moving.advance_roll ?? 0) : 0
@@ -649,6 +701,21 @@ function tethered(ring, x, y) {
 
 function GameView({ gameId, onBack }) {
   const [game, setGame] = useState(null)
+  // What panels want shown on the board: units being selected for something,
+  // and ranges round models (see boardOverlay.js).
+  const [overlays, setOverlays] = useState({})
+  const setOverlay = useCallback((key, value) => {
+    setOverlays((current) => {
+      if (value === null) {
+        if (!(key in current)) return current
+        const rest = { ...current }
+        delete rest[key]
+        return rest
+      }
+      return { ...current, [key]: value }
+    })
+  }, [])
+  const highlighted = new Set(Object.values(overlays).flatMap((o) => o?.unitIds ?? []))
   const [layout, setLayout] = useState(null)
   const [error, setError] = useState(null)
   // Both armies' units and where they're deployed; and the unit being set up:
@@ -738,8 +805,9 @@ function GameView({ gameId, onBack }) {
   // At the start of the first battle round: whose turn it is to make Scouts
   // moves, and their units that can.
   const [scouts, setScouts] = useState(null)
-  const scouting =
-    game?.status === 'in_progress' && game?.battle_round === 1 && game?.phase === 'start_of_round'
+  // Pre-battle (24.31): once the first turn's decided, before the first
+  // battle round.
+  const scouting = game?.status === 'deployment' && game?.deployment_step === 'pre_battle'
   useEffect(() => {
     if (!game || !scouting) {
       setScouts(null)
@@ -756,6 +824,21 @@ function GameView({ gameId, onBack }) {
 
   // In the movement phase: the reactive moves the other player can make (e.g.
   // Tactica Obliqua).
+  // Surge moves waiting to be made this phase (see SurgePanel).
+  const [surges, setSurges] = useState([])
+  useEffect(() => {
+    if (!game || game.status !== 'in_progress') {
+      setSurges([])
+      return
+    }
+    let cancelled = false
+    listSurgeMoves(game.id)
+      .then((m) => !cancelled && setSurges(m))
+      .catch((err) => setError(err.message))
+    return () => {
+      cancelled = true
+    }
+  }, [game])
   const [reactiveMoves, setReactiveMoves] = useState([])
   const inMovement = game?.status === 'in_progress' && game?.phase === 'movement'
   useEffect(() => {
@@ -963,14 +1046,20 @@ function GameView({ gameId, onBack }) {
   }, [game, fightPhase, fights])
   const fighting = fightPhase && fightState !== null && fightState.step !== 'pile_in'
 
-  // The unit that's just fought, while it can consolidate: its models
-  // draggable from where they are now.
-  const consolidatingId = fightState?.consolidating?.unit_id ?? null
-  // Which consolidation that is (the unit, and how many fights there have
-  // been) - and the last one finished, so it isn't started again while the
-  // fight state catches up.
+  // In the Consolidate step, the unit consolidating: the one its player
+  // picked of those that can, or the first - its models draggable from where
+  // they are now.
+  const [consolidationPick, setConsolidationPick] = useState(null)
+  const consolidations = fightState?.consolidations ?? []
+  const consolidatingId =
+    consolidations.find((c) => c.unit_id === consolidationPick)?.unit_id ??
+    consolidations[0]?.unit_id ??
+    null
+  // Which consolidation that is (the unit, and how many are left to do) -
+  // and the last one finished, so it isn't started again while the fight
+  // state catches up.
   const consolidationKey =
-    consolidatingId === null ? null : `${consolidatingId}-${fightState.fights.length}`
+    consolidatingId === null ? null : `${consolidatingId}-${consolidations.length}`
   const finishedConsolidation = useRef(null)
   useEffect(() => {
     if (consolidationKey === null || !deployment) {
@@ -1073,12 +1162,42 @@ function GameView({ gameId, onBack }) {
     positions: Object.entries(positions).map(([id, p]) => ({ unit_model_id: Number(id), ...p })),
   })
 
+  const draftOptions = (unitId) => {
+    const current = draftRef.current
+    return current.unitId === unitId ? (current.options ?? {}) : {}
+  }
+  const moveOptions = (options) => ({
+    take_to_skies: Boolean(options.take_to_skies),
+    mobile: Boolean(options.mobile),
+  })
+  // A charge's targets: the first picked, and every one (13.04).
+  const chargePayload = (unitId, positions, targetId, options) => ({
+    ...asPayload(unitId, positions),
+    target_unit_id: targetId,
+    target_unit_ids: options.target_unit_ids ?? (targetId === null ? [] : [targetId]),
+    take_to_skies: Boolean(options.take_to_skies),
+  })
+  // Changes the draft's options and checks it again (straight away: the
+  // check reads them from the draft).
+  const setDraftOptions = (changes) => {
+    const current = draftRef.current
+    const next = { ...current, options: { ...(current.options ?? {}), ...changes }, check: null }
+    draftRef.current = next
+    setDraft(next)
+    if (next.positions) {
+      runCheck(next.unitId, next.positions, next.kind, next.targetId ?? null, moving)
+    }
+  }
+
   // Asks the backend whether the draft can be deployed - or, with a kind of
   // move, moved, or charge `targetId` - as placed (only the latest answer
   // counts). A move that's fine is saved straight away if `save`.
   const runCheck = async (unitId, positions, kind = null, targetId = null, save = false) => {
     if (kind === 'charge' && targetId === null) return
     const seq = ++checkSeq.current
+    // The draft's options (taking to the skies, a combat disembark, the
+    // units a consolidation goes towards...), if they're for this unit.
+    const options = draftOptions(unitId)
     setChecking(true)
     try {
       let check
@@ -1088,13 +1207,19 @@ function GameView({ gameId, onBack }) {
           teleport_homer: homerRef.current,
         })
       } else if (kind === 'disembark') {
-        check = await checkDisembark(game.id, asPayload(unitId, positions))
+        check = await checkDisembark(game.id, {
+          ...asPayload(unitId, positions),
+          combat_disembark: Boolean(options.combat_disembark),
+        })
       } else if (kind === 'reanimate') {
         check = await checkReanimation(game.id, asPayload(unitId, positions))
       } else if (kind === 'emergency') {
         check = await checkEmergency(game.id, asPayload(unitId, positions))
       } else if (kind === 'consolidate') {
-        check = await checkConsolidation(game.id, asPayload(unitId, positions))
+        check = await checkConsolidation(game.id, {
+          ...asPayload(unitId, positions),
+          pick_ids: options.pick_ids ?? [],
+        })
       } else if (kind === 'scout') {
         check = await checkScoutMove(game.id, asPayload(unitId, positions))
       } else if (kind === 'scoot') {
@@ -1104,17 +1229,18 @@ function GameView({ gameId, onBack }) {
       } else if (kind === 'pile_in') {
         check = await checkPileIn(game.id, asPayload(unitId, positions))
       } else if (kind === 'charge') {
-        const payload = { ...asPayload(unitId, positions), target_unit_id: targetId }
-        check = await checkCharge(game.id, payload)
+        check = await checkCharge(game.id, chargePayload(unitId, positions, targetId, options))
+      } else if (kind === 'surge') {
+        check = await checkSurgeMove(game.id, asPayload(unitId, positions))
       } else if (kind) {
-        check = await checkMove(game.id, { ...asPayload(unitId, positions), kind })
+        check = await checkMove(game.id, { ...asPayload(unitId, positions), kind, ...moveOptions(options) })
       } else {
         check = await checkDeployment(game.id, asPayload(unitId, positions))
       }
       if (seq !== checkSeq.current) return
       setDraft((d) => (d.unitId === unitId ? { ...d, check } : d))
       if (save && check.valid && MOVE_KINDS.includes(kind)) {
-        await saveMove(unitId, positions, kind)
+        await saveMove(unitId, positions, kind, options)
       }
     } catch (err) {
       if (seq === checkSeq.current) setError(err.message)
@@ -1134,12 +1260,22 @@ function GameView({ gameId, onBack }) {
           ? getReservesFormation
           : kind === 'disembark'
             ? getDisembarkFormation
-            : getDeploymentFormation
+            : kind === 'scout'
+              ? getScoutFormation
+              : getDeploymentFormation
       const formation = await getFormation(game.id, { unit_id: unitId, x, y })
       const positions = Object.fromEntries(
         formation.map((p) => [p.unit_model_id, { x: p.x, y: p.y, rotation: p.rotation }])
       )
-      setDraft({ unitId, positions, check: null, kind: kind ?? null, homer: homerRef.current })
+      setDraft({
+        unitId,
+        positions,
+        check: null,
+        kind: kind ?? null,
+        homer: homerRef.current,
+        allowance: draftRef.current.allowance,
+        options: draftRef.current.options,
+      })
       runCheck(unitId, positions, kind ?? null)
     } catch (err) {
       setError(err.message)
@@ -1207,6 +1343,11 @@ function GameView({ gameId, onBack }) {
     } else if (fighting && fightState) {
       const unit = fightState.units.find((u) => u.unit_id === unitId)
       if (!unit) return
+      // One that makes an overrun fight's pile-in first (12.06).
+      if (unit.overrun) {
+        if (unit.unit_id !== draftRef.current.unitId) startPileIn({ ...unit, locked_unit_model_ids: [] })
+        return
+      }
       // The picking player's unit: only one that can fight now.
       if (unit.seat === fightState.seat && !unit.can_fight) return
       pickFocus(unit.seat === fightState.seat, unitId)
@@ -1272,9 +1413,9 @@ function GameView({ gameId, onBack }) {
 
   // Saves a valid move (when a model's dropped, or a moved unit's move
   // changes kind): no Move button - it's locked when the phase ends.
-  const saveMove = async (unitId, positions, kind) => {
+  const saveMove = async (unitId, positions, kind, options = {}) => {
     try {
-      await moveUnit(game.id, { ...asPayload(unitId, positions), kind })
+      await moveUnit(game.id, { ...asPayload(unitId, positions), kind, ...moveOptions(options) })
       setGame(await getGame(game.id))
     } catch (err) {
       setError(err.message)
@@ -1354,8 +1495,10 @@ function GameView({ gameId, onBack }) {
   }
 
   const consolidateDraft = () => {
-    const { unitId, positions } = draftRef.current
-    return finishConsolidation(() => consolidate(game.id, asPayload(unitId, positions)))
+    const { unitId, positions, options } = draftRef.current
+    return finishConsolidation(() =>
+      consolidate(game.id, { ...asPayload(unitId, positions), pick_ids: options?.pick_ids ?? [] })
+    )
   }
 
   const skipConsolidating = () =>
@@ -1386,7 +1529,11 @@ function GameView({ gameId, onBack }) {
 
   const pileInDraft = async () => {
     const { unitId, positions } = draftRef.current
-    if (await act(() => pileInUnit(game.id, asPayload(unitId, positions)))) setDraft(NO_DRAFT)
+    if (await act(() => pileInUnit(game.id, asPayload(unitId, positions)))) {
+      setDraft(NO_DRAFT)
+      // (An overrun fight's pile-in: the unit can fight now.)
+      setFights((n) => n + 1)
+    }
   }
 
   const donePilingIn = async (seat) => {
@@ -1423,10 +1570,23 @@ function GameView({ gameId, onBack }) {
     }
   }
 
-  const chooseChargeTarget = (targetId) => {
-    const { unitId, positions } = draftRef.current
-    setDraft((d) => ({ ...d, targetId, check: null }))
-    runCheck(unitId, positions, 'charge', targetId)
+  // Ticking a charge target adds it to (or takes it off) the charge's
+  // targets - the first of them the draft's `targetId`.
+  const chooseChargeTarget = (unitIdToToggle) => {
+    const current = draftRef.current
+    const ids = current.options?.target_unit_ids ?? (current.targetId ? [current.targetId] : [])
+    const targetIds = ids.includes(unitIdToToggle)
+      ? ids.filter((i) => i !== unitIdToToggle)
+      : [...ids, unitIdToToggle]
+    const next = {
+      ...current,
+      targetId: targetIds[0] ?? null,
+      options: { ...(current.options ?? {}), target_unit_ids: targetIds },
+      check: null,
+    }
+    draftRef.current = next
+    setDraft(next)
+    runCheck(next.unitId, next.positions, 'charge', next.targetId)
   }
 
   const resetCharge = () => {
@@ -1437,8 +1597,8 @@ function GameView({ gameId, onBack }) {
   }
 
   const chargeDraft = async () => {
-    const { unitId, positions, targetId } = draftRef.current
-    const payload = { ...asPayload(unitId, positions), target_unit_id: targetId }
+    const { unitId, positions, targetId, options } = draftRef.current
+    const payload = chargePayload(unitId, positions, targetId, options ?? {})
     if (await act(() => makeCharge(game.id, payload))) setDraft(NO_DRAFT)
   }
 
@@ -1466,6 +1626,7 @@ function GameView({ gameId, onBack }) {
   }
 
   return (
+    <BoardOverlayContext.Provider value={setOverlay}>
     <section>
       <button type="button" onClick={onBack}>
         ← All games
@@ -1496,16 +1657,17 @@ function GameView({ gameId, onBack }) {
             checking={checking}
             onRoll={() => act(() => rollFirstTurn(game.id))}
             onPick={(unit) => {
-              const positions = startPositions(unit.unit_id)
               checkSeq.current++
+              // One in Strategic Reserves is set down on the board first.
+              const positions = unit.in_reserves ? null : startPositions(unit.unit_id)
               setDraft({
                 ...NO_DRAFT,
                 unitId: unit.unit_id,
                 positions,
                 kind: 'scout',
-                allowance: unit.distance,
+                allowance: unit.in_reserves ? undefined : unit.distance,
               })
-              runCheck(unit.unit_id, positions, 'scout')
+              if (positions) runCheck(unit.unit_id, positions, 'scout')
             }}
             onSave={async () => {
               const { unitId, positions } = draftRef.current
@@ -1608,14 +1770,19 @@ function GameView({ gameId, onBack }) {
           }}
           onPickUp={() => {
             checkSeq.current++
-            setDraft((d) => ({ ...NO_DRAFT, unitId: d.unitId, kind: 'disembark' }))
+            setDraft((d) => ({ ...NO_DRAFT, unitId: d.unitId, kind: 'disembark', options: d.options }))
           }}
           onEmbark={(unitId, transportId) =>
             act(() => embark(game.id, { unit_id: unitId, transport_unit_id: transportId }))
           }
+          onToggleCombat={(on) => setDraftOptions({ combat_disembark: on })}
           onDisembark={async () => {
-            const { unitId, positions } = draftRef.current
-            if (await act(() => disembark(game.id, asPayload(unitId, positions)))) {
+            const { unitId, positions, options } = draftRef.current
+            const payload = {
+              ...asPayload(unitId, positions),
+              combat_disembark: Boolean(options?.combat_disembark),
+            }
+            if (await act(() => disembark(game.id, payload))) {
               setDraft(NO_DRAFT)
             }
           }}
@@ -1717,7 +1884,9 @@ function GameView({ gameId, onBack }) {
           }
         }}
       />
-      {commandPhase && !reanimation?.placing && <CommandPanel game={game} onError={setError} />}
+      {(commandPhase || game?.phase === 'movement') && !reanimation?.placing && (
+        <CommandPanel game={game} onError={setError} />
+      )}
       {commandPhase && (
         <ReanimationPanel
           game={game}
@@ -1767,6 +1936,7 @@ function GameView({ gameId, onBack }) {
           checking={checking}
           onSelectUnit={selectMoveUnit}
           onToggleAdvance={toggleAdvance}
+          onOptions={setDraftOptions}
           onReset={resetMove}
         />
       )}
@@ -1801,6 +1971,35 @@ function GameView({ gameId, onBack }) {
           }}
         />
       )}
+      <SurgePanel
+        game={game}
+        deployment={deployment}
+        surges={surges}
+        draft={draft}
+        checking={checking}
+        onStart={async (payload) => {
+          setError(null)
+          try {
+            setSurges(await startSurgeMove(game.id, payload))
+          } catch (err) {
+            setError(err.message)
+          }
+        }}
+        onPick={(m) => {
+          const positions = startPositions(m.unit_id)
+          checkSeq.current++
+          setDraft({ ...NO_DRAFT, unitId: m.unit_id, positions, kind: 'surge', allowance: m.distance })
+          runCheck(m.unit_id, positions, 'surge')
+        }}
+        onSave={async () => {
+          const { unitId, positions } = draftRef.current
+          if (await act(() => makeSurgeMove(game.id, asPayload(unitId, positions)))) {
+            setDraft(NO_DRAFT)
+            setFights((n) => n + 1)
+            setShots((n) => n + 1)
+          }
+        }}
+      />
       {fighting && (
         <FightPanel
           game={game}
@@ -1817,6 +2016,12 @@ function GameView({ gameId, onBack }) {
           onError={setError}
           draft={draft}
           checking={checking}
+          consolidatingId={consolidatingId}
+          onPickConsolidation={setConsolidationPick}
+          onConsolidationPicks={(pickIds) => setDraftOptions({ pick_ids: pickIds })}
+          onStartOverrun={(unit) => startPileIn({ ...unit, locked_unit_model_ids: [] })}
+          onPileIn={pileInDraft}
+          onResetPileIn={resetPileIn}
           onConsolidate={consolidateDraft}
           onResetConsolidation={resetConsolidation}
           onSkipConsolidation={skipConsolidating}
@@ -1844,6 +2049,7 @@ function GameView({ gameId, onBack }) {
           onSelectUnit={startCharge}
           onRoll={rollUnitCharge}
           onTarget={chooseChargeTarget}
+          onOptions={setDraftOptions}
           onReset={resetCharge}
           onCharge={chargeDraft}
           onError={setError}
@@ -1924,11 +2130,16 @@ function GameView({ gameId, onBack }) {
           shootingPhase || fighting || overwatching
             ? shootingFocus
             : chargePhase
-              ? { targetId: draft.targetId }
-              : {}
+              ? { targetId: draft.targetId, targetIds: draft.options?.target_unit_ids }
+              : {},
+          highlighted
         )}
         rings={moveRings(deployment, movement, draft)}
-        auras={[...auraCircles(deployment, draft), ...wreckRings(emergency)]}
+        auras={[
+          ...auraCircles(deployment, draft),
+          ...wreckRings(emergency),
+          ...overlayRanges(deployment, overlays),
+        ]}
         objectiveControl={objectiveControl(game, deployment)}
         territoryLine={deployment?.territory?.line ?? null}
         markers={[
@@ -1972,7 +2183,8 @@ function GameView({ gameId, onBack }) {
               }
             : (game.status === 'deployment' ||
             draft.kind === 'reinforce' ||
-            draft.kind === 'disembark') &&
+            draft.kind === 'disembark' ||
+            draft.kind === 'scout') &&
           draft.unitId !== null &&
           draft.positions === null
             ? setDown
@@ -2003,6 +2215,7 @@ function GameView({ gameId, onBack }) {
         ))}
       </div>
     </section>
+    </BoardOverlayContext.Provider>
   )
 }
 

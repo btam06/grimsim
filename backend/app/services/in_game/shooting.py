@@ -23,7 +23,7 @@ from app.services import weapon_profiles
 from app.services.in_game import actions, command_phase, deployment, embarked
 from app.services.in_game import movement
 from app.services.in_game.deployment import TOLERANCE, Base, Point, gap, outline
-from app.services.in_game.terrain import area_polygon, feature_polygons, within
+from app.services.in_game.terrain import area_polygon, convex_overlap, feature_polygons, within
 from app.services.list_building import detachment_rules as detachment_rule_service
 from app.services.list_building import enhancements
 from app.services.list_building.enhancements import granted_weapons
@@ -40,14 +40,28 @@ from app.services.list_building.enhancements import granted_weapons
 #   Command phase lets it (see app/services/in_game/command_phase.py).
 # - What each model can see: a line from some point of its base to some point
 #   of a target model's base not passing through anything solid. Ruin walls
-#   (green) are dense: always solid. Terrain areas (the ruins' footprints) are
-#   solid too - unless a model of the shooting unit or of its target is
-#   touching that area. Obstacles (orange) are light and can be shot through,
-#   and models don't block sight.
+#   (green) are dense: always solid. Terrain areas with a ruin wall or an
+#   obstacle in them are obscuring (13.10): solid too - unless one of the two
+#   models is within that area. Obstacles (orange) are light and can be shot
+#   through, and models don't block sight. A hidden model (13.09) - INFANTRY,
+#   BEASTS or SWARM within a terrain area with a ruin wall, whose unit hasn't
+#   made ranged attacks this turn or last - is only visible within 15".
 # - Which weapons each model can fire: those with a visible target model
 #   within range (base to base) - at half range if one is within half.
-# - Whether the target is in cover: it's INFANTRY, BEAST or SWARM, and every
-#   model in it is on a terrain area.
+# - Targets must be unengaged (04.02), but for an engaged MONSTER/VEHICLE
+#   unit: -1 to hit, and not with [BLAST] weapons (17.03).
+# - An engaged unit shoots using close-quarters shooting (10.06), if it has
+#   [CLOSE-QUARTERS] (Pistol) weapons or is a MONSTER/VEHICLE unit: its
+#   non-MONSTER/VEHICLE models only fire those, and only at units their unit
+#   is engaged with; its MONSTER/VEHICLE models fire any (at -1 to hit, but
+#   close-quarters weapons at a unit they're engaged with), never [BLAST]
+#   at an engaged unit. In other shooting, each non-MONSTER/VEHICLE model
+#   fires either its close-quarters weapons or its other ranged weapons.
+# - A target none of its models can see: indirect shooting (10.07), with
+#   only its [INDIRECT FIRE] weapons.
+# - Whether the target has the benefit of cover (13.08): every model in it is
+#   INFANTRY/BEASTS/SWARM within a terrain area, or isn't fully visible to the
+#   shooting unit's models because of terrain.
 # - A TRANSPORT with Firing Deck N can also fire the ranged weapons of up to N
 #   models embarked in it, as if it had them (measured from it). Its
 #   firing-deck weapons are grouped by weapon (ids ("deck", weapon id)): each
@@ -57,7 +71,7 @@ from app.services.list_building.enhancements import granted_weapons
 
 FIRING_DECK = re.compile(r"^Firing Deck (\d+)$")
 DENSE = "ruin_wall"
-COVER_KEYWORDS = {"INFANTRY", "BEAST", "SWARM"}
+COVER_KEYWORDS = {"INFANTRY", "BEAST", "BEASTS", "SWARM"}
 # Points around each base sight lines are drawn between (and its centre).
 SIGHT_POINTS = 8
 
@@ -111,19 +125,27 @@ def deck_weapons(
     game: Game, transport: Unit, weapon_ids: set[int] | None = None
 ) -> list[tuple[UnitModel, object]]:
     # The (embarked model, ranged weapon) pairs the transport's Firing Deck
-    # fires: with `weapon_ids`, those weapons, from the first N models carrying
-    # any of them; without, every embarked model's (to show what it could).
+    # fires (24.14): with `weapon_ids`, up to N models carrying one of those
+    # weapons, each firing one of them; without, every embarked model's (to
+    # show what it could). Not [ONE SHOT] weapons, nor models whose units have
+    # already shot this phase.
     limit = firing_deck(transport)
     if not limit:
         return []
     pairs = []
     chosen = 0
     for unit_model in deck_models(game, transport):
+        own_unit = deployment.find_unit(game, unit_model.unit_id)
+        if unit_shot(game, own_unit) is not None:
+            continue
         # (Their own weapons - not an enhancement's.)
         weapons = [
             w
             for w in unit_model.weapons
-            if w.weapon_type != "melee" and w.range and (weapon_ids is None or w.id in weapon_ids)
+            if w.weapon_type != "melee"
+            and w.range
+            and not any(a.name == "One Shot" for a in w.abilities)
+            and (weapon_ids is None or w.id in weapon_ids)
         ]
         if not weapons:
             continue
@@ -131,6 +153,7 @@ def deck_weapons(
             if chosen == limit:
                 break
             chosen += 1
+            weapons = weapons[:1]
         pairs += [(unit_model, w) for w in weapons]
     return pairs
 
@@ -265,14 +288,228 @@ def dense_terrain(game: Game) -> list[list[Point]]:
     ]
 
 
+# Terrain areas this close together count as touching: sight can't pass
+# through the gap between them (see _bridges).
+AREA_GAP = 1.0
+# The bridges between each layout's areas, worked out once: {the areas'
+# corners: [(first area index, second area index, polygon)]}.
+_BRIDGES: dict[tuple, list[tuple[int, int, list[Point]]]] = {}
+
+
+def _segment_distance(p: Point, a: Point, b: Point) -> float:
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    length2 = dx * dx + dy * dy
+    along = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / length2 if length2 else 0.0
+    t = max(0.0, min(1.0, along))
+    return math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy))
+
+
+def _polygon_distance(p: Point, polygon: list[Point]) -> float:
+    return min(_segment_distance(p, a, b) for a, b in zip(polygon, polygon[1:] + polygon[:1]))
+
+
+def _edge_points(polygon: list[Point], step: float = 0.2) -> list[Point]:
+    # Points along a polygon's edges, about `step` apart (its corners too).
+    found = []
+    for a, b in zip(polygon, polygon[1:] + polygon[:1]):
+        count = max(1, math.ceil(math.dist(a, b) / step))
+        found += [(a[0] + (b[0] - a[0]) * i / count, a[1] + (b[1] - a[1]) * i / count)
+                  for i in range(count)]
+    return found
+
+
+def _hull(points: list[Point]) -> list[Point]:
+    # The convex hull (monotone chain), corners in order.
+    pts = sorted(set(points))
+    if len(pts) < 3:
+        return pts
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower, upper = [], []
+    for p in pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+    for p in reversed(pts):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    return lower[:-1] + upper[:-1]
+
+
+def _widened(polygon: list[Point], by: float) -> list[Point]:
+    # Each corner pushed `by` further from the centre (so a bridge along a
+    # seam has some width).
+    cx = sum(p[0] for p in polygon) / len(polygon)
+    cy = sum(p[1] for p in polygon) / len(polygon)
+    out = []
+    for x, y in polygon:
+        d = math.hypot(x - cx, y - cy) or 1.0
+        out.append((x + (x - cx) / d * by, y + (y - cy) / d * by))
+    return out
+
+
+def _bridges(areas: list[list[Point]]) -> list[tuple[int, int, list[Point]]]:
+    # Between each two terrain areas within AREA_GAP of each other: the gap
+    # between them, as a solid convex shape - the hull of each one's edge
+    # points within AREA_GAP of the other.
+    key = tuple(tuple(round(c, 3) for p in a for c in p) for a in areas)
+    if key in _BRIDGES:
+        return _BRIDGES[key]
+    edges = [_edge_points(a) for a in areas]
+    found = []
+    for i in range(len(areas)):
+        for j in range(i + 1, len(areas)):
+            near = [p for p in edges[i] if _polygon_distance(p, areas[j]) <= AREA_GAP]
+            near += [p for p in edges[j] if _polygon_distance(p, areas[i]) <= AREA_GAP]
+            if len(near) < 2:
+                continue
+            hull = _hull(near)
+            if len(hull) < 3:
+                # Along a straight seam: give it some width.
+                (ax, ay), (bx, by) = hull[0], hull[-1]
+                length = math.hypot(bx - ax, by - ay) or 1.0
+                nx, ny = -(by - ay) / length * 0.05, (bx - ax) / length * 0.05
+                hull = [
+                    (ax + nx, ay + ny), (bx + nx, by + ny), (bx - nx, by - ny), (ax - nx, ay - ny)
+                ]
+            found.append((i, j, _widened(hull, 0.05)))
+    _BRIDGES[key] = found
+    return found
+
+
 def obscuring_areas(game: Game, bases: list[Base]) -> list[list[Point]]:
     # The battlefield's terrain areas that block sight between two units:
-    # those none of their models (`bases`) is touching.
+    # those none of their models (`bases`) is touching - and the gaps between
+    # any two of those that are next to each other (within AREA_GAP), which
+    # count as touching, so sight can't slip between them.
+    t = terrain(game)
+    solid = [
+        obscures and not any(within(base, area) for base in bases)
+        for area, obscures in zip(t.areas, t.obscuring)
+    ]
+    bridges = [
+        polygon
+        for i, j, polygon in t.bridges
+        if solid[i] and solid[j] and not any(within(base, polygon) for base in bases)
+    ]
+    return [area for area, blocks in zip(t.areas, solid) if blocks] + bridges
+
+
+@dataclass
+class _Terrain:
+    # A layout's terrain, for sight: its ruin walls' parts, its terrain areas
+    # (each with whether it's obscuring - has a ruin wall or obstacle in it -
+    # and whether it has a ruin wall, for Hidden), and the gaps between
+    # neighbouring areas (see _bridges).
+    dense: list[list[Point]]
+    areas: list[list[Point]]
+    obscuring: list[bool]
+    has_dense: list[bool]
+    bridges: list[tuple[int, int, list[Point]]]
+
+
+def terrain(game: Game) -> _Terrain:
     layout = game.layout
     if layout is None:
-        return []
+        return _Terrain([], [], [], [], [])
     areas = [area_polygon(a) for a in layout.areas]
-    return [area for area in areas if not any(within(base, area) for base in bases)]
+    features = [
+        (feature.shape.kind, polygon)
+        for feature in layout.features
+        for polygon in feature_polygons(feature)
+    ]
+
+    def has(area, kinds) -> bool:
+        return any(
+            kind in kinds and convex_overlap(part, area, touching=False) for kind, part in features
+        )
+
+    return _Terrain(
+        dense=[polygon for kind, polygon in features if kind == DENSE],
+        areas=areas,
+        obscuring=[has(a, {DENSE, "obstacle"}) for a in areas],
+        has_dense=[has(a, {DENSE}) for a in areas],
+        bridges=_bridges(areas),
+    )
+
+
+class Sight:
+    # Line of sight on a battlefield, between two models' bases: through no
+    # ruin wall, and no obscuring terrain area neither of them is within (nor
+    # the gap between two such areas next to each other).
+
+    def __init__(self, game: Game):
+        self.terrain = terrain(game)
+
+    def walls(self, a: Base, b: Base) -> list[list[Point]]:
+        t = self.terrain
+        solid = [
+            obscures and not within(a, area) and not within(b, area)
+            for area, obscures in zip(t.areas, t.obscuring)
+        ]
+        bridges = [
+            polygon
+            for i, j, polygon in t.bridges
+            if solid[i] and solid[j] and not within(a, polygon) and not within(b, polygon)
+        ]
+        return t.dense + [area for area, s in zip(t.areas, solid) if s] + bridges
+
+    def sees(self, a: Base, b: Base) -> bool:
+        return can_see(a, b, self.walls(a, b))
+
+    def fully_sees(self, a: Base, b: Base) -> bool:
+        # Whether every point round the target model's base can be seen from
+        # some point of the observer's (13.08 - not fully visible: cover).
+        walls = self.walls(a, b)
+        sources = _sight_points(a)
+        return all(
+            any(not any(_blocks(v, p, w) for w in walls) for v in sources)
+            for p in _sight_points(b)
+        )
+
+    def in_area(self, base: Base, dense_only: bool = False) -> bool:
+        # Whether the base is within a terrain area (one with a ruin wall).
+        return any(
+            within(base, area)
+            for area, dense in zip(self.terrain.areas, self.terrain.has_dense)
+            if dense or not dense_only
+        )
+
+
+DETECTION_RANGE = 15.0
+
+
+def hidden_models(game: Game, unit: Unit, sight: Sight) -> set[int]:
+    # The unit's hidden models (13.09): INFANTRY/BEASTS/SWARM models within a
+    # terrain area with a ruin wall in it, if the unit hasn't made ranged
+    # attacks this turn or the previous one.
+    if _shot_recently(game, unit):
+        return set()
+    bases = _bases(game, unit)
+    return {
+        m.id
+        for m in unit.unit_models
+        if m.id in bases
+        and enhancements.model_keywords(unit, m) & COVER_KEYWORDS
+        and sight.in_area(bases[m.id], dense_only=True)
+    }
+
+
+def _turn_index(battle_round: int, turn_seat: int, first_seat: int | None) -> int:
+    return battle_round * 2 + (0 if turn_seat == first_seat else 1)
+
+
+def _shot_recently(game: Game, unit: Unit) -> bool:
+    # Whether the unit made ranged attacks this turn or the previous one.
+    now = _turn_index(game.battle_round, game.turn_seat, game.first_seat)
+    return any(
+        s.unit_id == unit.id
+        and now - _turn_index(s.battle_round, s.turn_seat, game.first_seat) <= 1
+        for s in game.unit_shots
+    )
 
 
 def can_see(viewer: Base, target: Base, walls: list[list[Point]]) -> bool:
@@ -359,6 +596,10 @@ class WeaponReach:
     # Chosen to start with: for melee, each model's first weapon (a model with
     # several usually fights with one of them).
     default: bool = False
+    # For melee: its Attacks characteristic, and whether it's an [EXTRA
+    # ATTACKS] weapon (always used, as well as one other).
+    attacks: str = ""
+    extra_attacks: bool = False
 
 
 @dataclass
@@ -374,6 +615,12 @@ class TargetReach:
     weapons: list[WeaponReach]
     firing: dict[int, dict] = field(default_factory=dict)
     distance: float | None = None
+    # Indirect shooting (10.07): none of its models can see the target, so
+    # only its [INDIRECT FIRE] weapons can shoot it (with their penalties) -
+    # `spotted` if the unit remained stationary and a friendly unit can see
+    # the target.
+    indirect: bool = False
+    spotted: bool = False
 
 
 def _bases(game: Game, unit: Unit) -> dict[int, Base]:
@@ -385,14 +632,26 @@ def _bases(game: Game, unit: Unit) -> dict[int, Base]:
     }
 
 
-def in_cover(game: Game, unit: Unit) -> bool:
-    # INFANTRY, BEAST or SWARM, with every model on a terrain area.
-    keywords = {k.name for m in unit.unit_models for k in m.model.keywords}
-    if not keywords & COVER_KEYWORDS or game.layout is None:
+def in_cover(
+    game: Game, unit: Unit, shooters: list[Base] | None = None, sight: Sight | None = None
+) -> bool:
+    # The benefit of cover (13.08): every model in the unit is
+    # INFANTRY/BEASTS/SWARM within a terrain area, or isn't fully visible to
+    # any of the shooting models (`shooters`) because of terrain.
+    if game.layout is None:
         return False
-    areas = [area_polygon(a) for a in game.layout.areas]
-    bases = _bases(game, unit).values()
-    return bool(bases) and all(any(within(base, area) for area in areas) for base in bases)
+    sight = sight or Sight(game)
+    bases = _bases(game, unit)
+    if not bases:
+        return False
+
+    def covered(unit_model) -> bool:
+        base = bases[unit_model.id]
+        if enhancements.model_keywords(unit, unit_model) & COVER_KEYWORDS and sight.in_area(base):
+            return True
+        return bool(shooters) and not any(sight.fully_sees(s, base) for s in shooters)
+
+    return all(covered(m) for m in unit.unit_models if m.id in bases)
 
 
 # Lone Operative: a unit with it can only be targeted by ranged attacks
@@ -443,6 +702,49 @@ def lone_operative(game: Game, unit: Unit) -> bool:
     return False
 
 
+CLOSE_QUARTERS = {"Pistol", "Close-Quarters"}
+BIG = {"MONSTER", "VEHICLE"}
+
+
+def close_quarters(weapon) -> bool:
+    # A [CLOSE-QUARTERS] (or [PISTOL] - the same, 24.27) weapon.
+    return any(a.name in CLOSE_QUARTERS for a in getattr(weapon, "abilities", []))
+
+
+def _blast(weapon) -> bool:
+    return any(a.name.startswith("Blast") for a in getattr(weapon, "abilities", []))
+
+
+def _big(unit: Unit, unit_model: UnitModel | None = None) -> bool:
+    # A MONSTER/VEHICLE model (or, without one, unit: all of its models).
+    models = [unit_model] if unit_model is not None else unit.unit_models
+    return all(enhancements.model_keywords(unit, m) & BIG for m in models)
+
+
+def engaged_with(game: Game, unit: Unit, other: Unit) -> bool:
+    # Whether the two units are engaged with each other.
+    from app.services.in_game.charging import distance
+
+    return distance(game, unit, other) <= movement.ENGAGEMENT_RANGE + TOLERANCE
+
+
+def _weapon_allowed(
+    game: Game, unit: Unit, unit_model: UnitModel, weapon, target: Unit
+) -> bool:
+    # Whether the model can fire the weapon at the target at all, by who's
+    # engaged (see above).
+    big = _big(unit, unit_model)
+    if movement.in_engagement_range(game, unit):
+        if _blast(weapon) and movement.in_engagement_range(game, target):
+            return False
+        if big:
+            return True
+        return close_quarters(weapon) and engaged_with(game, unit, target)
+    if movement.in_engagement_range(game, target):
+        return _big(target) and not _blast(weapon)
+    return True
+
+
 def reach(game: Game, unit: Unit, target: Unit, assault: set | None = None) -> TargetReach:
     # `assault` is the unit's Assault weapons (see assault_weapons): if it
     # Advanced, only those can fire. A target with Lone Operative is only in
@@ -458,20 +760,33 @@ def reach(game: Game, unit: Unit, target: Unit, assault: set | None = None) -> T
     target_limit = min(limits, default=None)
     advanced = move_status(game, unit).advanced
     shooters = _bases(game, unit)
-    targets = list(_bases(game, target).values())
-    # Ruin walls, and terrain areas neither unit is touching.
-    walls = dense_terrain(game) + obscuring_areas(game, list(shooters.values()) + targets)
+    target_bases = _bases(game, target)
+    targets = list(target_bases.values())
+    sight = Sight(game)
+    hidden = hidden_models(game, target, sight)
+
+    def sees(base: Base) -> list[Base]:
+        # The target models the base can see: hidden ones only within 15".
+        return [
+            t
+            for i, t in target_bases.items()
+            if sight.sees(base, t)
+            and (i not in hidden or gap(base, t) <= DETECTION_RANGE + TOLERANCE)
+        ]
     reaches: dict[object, WeaponReach] = {}
     firing: dict[int, dict] = {}
     visible = False
     closest = None
+    # Each model's nearest target model, seen or not (for indirect fire).
+    unseen: dict[int, float] = {}
     for unit_model in deployment.unit_models(unit):
         base = shooters.get(unit_model.id)
         weapons = ranged_weapons(unit_model)
         if base is None or not weapons:
             continue
+        unseen[unit_model.id] = min((gap(base, t) for t in targets), default=math.inf)
         # How far it is from each target model it can see.
-        gaps = [gap(base, t) for t in targets if can_see(base, t, walls)]
+        gaps = [gap(base, t) for t in sees(base)]
         visible = visible or bool(gaps)
         nearest = min(gaps, default=None)
         if nearest is not None:
@@ -488,7 +803,7 @@ def reach(game: Game, unit: Unit, target: Unit, assault: set | None = None) -> T
                 ),
             )
             entry.carried_by += 1
-            if entry.unusable:
+            if entry.unusable or not _weapon_allowed(game, unit, unit_model, weapon, target):
                 continue
             limit = min(weapon.range, target_limit) if target_limit else weapon.range
             if nearest is not None and nearest <= limit + TOLERANCE:
@@ -501,7 +816,7 @@ def reach(game: Game, unit: Unit, target: Unit, assault: set | None = None) -> T
     carrier = _deck_carrier(unit)
     base = shooters.get(carrier.id) if carrier is not None else None
     if base is not None:
-        gaps = [gap(base, t) for t in targets if can_see(base, t, walls)]
+        gaps = [gap(base, t) for t in sees(base)]
         nearest = min(gaps, default=None)
         for embarked_model, weapon in deck_weapons(game, unit):
             entry = reaches.setdefault(
@@ -523,17 +838,82 @@ def reach(game: Game, unit: Unit, target: Unit, assault: set | None = None) -> T
                 entry.in_range += 1
                 entry.half_range = entry.half_range or half
                 firing.setdefault(carrier.id, {})[deck_id(embarked_model, weapon)] = half
+    # No model can see it: indirect shooting - only [INDIRECT FIRE] weapons,
+    # each model's within range of the target (seen or not).
+    indirect = False
+    if not visible:
+        firing = {}
+        for entry in reaches.values():
+            entry.in_range, entry.half_range = 0, False
+        for unit_model in deployment.unit_models(unit):
+            nearest = unseen.get(unit_model.id)
+            if nearest is None:
+                continue
+            for weapon in ranged_weapons(unit_model):
+                entry = reaches[weapon.id]
+                if (
+                    entry.unusable
+                    or not _indirect(weapon)
+                    or not _weapon_allowed(game, unit, unit_model, weapon, target)
+                ):
+                    continue
+                limit = min(weapon.range, target_limit) if target_limit else weapon.range
+                if nearest <= limit + TOLERANCE:
+                    half = nearest <= weapon.range / 2 + TOLERANCE
+                    entry.in_range += 1
+                    entry.half_range = entry.half_range or half
+                    firing.setdefault(unit_model.id, {})[weapon.id] = half
+                    indirect = True
     # (Soul Sight: ranged attacks that target it ignore cover this phase.)
     from app.services.in_game import psychic
 
     return TargetReach(
         unit=target,
         visible=visible,
-        in_cover=in_cover(game, target) and not psychic.soul_sighted(game, target),
+        in_cover=in_cover(game, target, list(shooters.values()), sight)
+        and not psychic.soul_sighted(game, target),
         weapons=list(reaches.values()),
         firing=firing,
         distance=closest,
+        indirect=indirect,
+        spotted=indirect and move_status(game, unit).remained_stationary
+        and _seen_by_friends(game, unit, target),
     )
+
+
+def set_up_this_turn(game: Game, unit: Unit) -> bool:
+    # Whether the unit was set up on the battlefield this turn: it arrived
+    # from Reserves, or disembarked (e.g. for [HEAVY]).
+    from app.services.in_game.reinforcements import ARRIVED
+
+    arrived = any(
+        m.unit_id == unit.id and m.kind == ARRIVED and _this_turn(game, m)
+        for m in game.unit_moves
+    )
+    return arrived or any(
+        d.unit_id == unit.id and _this_turn(game, d) for d in game.disembarkations
+    )
+
+
+def _indirect(weapon) -> bool:
+    from app.services.combat import INDIRECT_FIRE
+
+    return any(a.name == INDIRECT_FIRE for a in getattr(weapon, "abilities", []))
+
+
+def _seen_by_friends(game: Game, unit: Unit, target: Unit) -> bool:
+    # Whether another of the unit's player's units on the battlefield can see
+    # the target (for indirect fire: unmodified 4+ hits).
+    player = deployment.owner(game, unit)
+    targets = list(_bases(game, target).values())
+    sight = Sight(game)
+    for other in deployment.deployable_units(player):
+        if other.id == unit.id:
+            continue
+        bases = list(_bases(game, other).values())
+        if any(sight.sees(b, t) for b in bases for t in targets):
+            return True
+    return False
 
 
 # --- where it can shoot (to show it) ---
@@ -683,7 +1063,15 @@ def cant_shoot_reason(game: Game, unit: Unit, assault: set | None = None) -> str
     ):
         return "it Fell Back this turn"
     if movement.in_engagement_range(game, unit):
-        return "it's within Engagement Range of an enemy unit"
+        # Close-quarters shooting: not after Advancing, and only with
+        # close-quarters weapons or as a MONSTER/VEHICLE unit.
+        if move_status(game, unit).advanced:
+            return "it's engaged, and it Advanced this turn"
+        models = deployment.models_on_battlefield(game, unit)
+        if not _big(unit) and not any(
+            close_quarters(w) for m in models for w in ranged_weapons(m)
+        ):
+            return "it's engaged, and has no [CLOSE-QUARTERS] weapons"
     if not any(
         ranged_weapons(m) for m in deployment.models_on_battlefield(game, unit)
     ) and not deck_weapons(game, unit):
@@ -704,12 +1092,23 @@ def check_shot(
     if target.id not in {u.id for u in enemy_units(game, unit)}:
         raise _bad_request("the target must be an enemy unit on the battlefield")
     result = reach(game, unit, target, assault)
-    if not result.visible:
+    if not result.visible and not result.indirect:
         raise _bad_request("none of its models can see the target")
     if not weapon_ids:
         raise _bad_request("choose at least one weapon to shoot with")
     if (conflict := weapon_profiles.unit_conflict(unit, weapon_ids)) is not None:
         raise _bad_request(conflict)
+    # Each non-MONSTER/VEHICLE model fires either its close-quarters weapons
+    # or its other ranged weapons, not both (24.07).
+    for unit_model in deployment.models_on_battlefield(game, unit):
+        if _big(unit, unit_model):
+            continue
+        chosen = [w for w in ranged_weapons(unit_model) if w.id in weapon_ids]
+        if {close_quarters(w) for w in chosen} == {True, False}:
+            raise _bad_request(
+                "a model fires either its [CLOSE-QUARTERS] weapons or its other ranged "
+                "weapons, not both"
+            )
     if any(w.unusable for w in result.weapons if w.id in weapon_ids):
         raise _bad_request("it Advanced: it can only shoot Assault weapons")
     usable = {w.id for w in result.weapons if w.in_range}

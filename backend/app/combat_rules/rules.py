@@ -63,9 +63,17 @@ class CommandChoice:
     # selected, starting as `default`. With `target_keywords`, the option
     # applies to one friendly unit with one of those keywords within
     # `target_range` of the model with the ability (e.g. Rod of the War
-    # Forge), selected with it.
+    # Forge), selected with it - and that it can see, if `target_visible`.
+    # Some are selected in another of their owner's phases instead (`phase` -
+    # e.g. Author of the Codex, the Movement phase), until the start of their
+    # next Command phase all the same. With `faction_options` ((faction name,
+    # faction ability name)), its options are that army rule's (e.g. Author of
+    # the Codex: Combat Doctrines' doctrines) rather than its own.
     required: bool = True
     persistent: bool = False
     default: str | None = None
     target_keywords: tuple[str, ...] = ()
     target_range: float | None = None
+    target_visible: bool = False
+    phase: str = "command"
+    faction_options: tuple[str, str] | None = None

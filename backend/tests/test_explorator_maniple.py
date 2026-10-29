@@ -284,9 +284,13 @@ async def test_cached_acquisition_secures_where_the_unit_died(
     usable = (await client.get(f"/games/{game_id}/stratagems", params={"seat": 1})).json()
     assert stratagem_id not in [s["id"] for s in usable]
 
-    # A, controlling the ruin, is destroyed.
+    # A, controlling the ruin (as determined at the end of the last phase),
+    # is destroyed.
+    from app.services.in_game import objectives
+
     await _place(session, a, ON_THE_RUIN)
     game_ = await _load_game(session, game_id)
+    objectives.determine(game_)
     a_, d_ = (deployment.find_unit(game_, u["unit_id"]) for u in (a, d))
     before = casualties.wounds_remaining(game_, a_)
     casualties.apply_attack(game_, d_, a_, before, {i: 0 for i in before}, {})

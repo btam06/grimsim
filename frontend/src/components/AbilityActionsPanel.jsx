@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useBoardOverlay } from '../boardOverlay'
 import { listRallies, listRepairs, rallyUnit, repairModel } from '../api'
 import Select from './Select'
 
@@ -11,6 +12,12 @@ function AbilityActionsPanel({ game, onAction, onError }) {
   const [rallies, setRallies] = useState([])
   const [repairs, setRepairs] = useState([])
   const [picked, setPicked] = useState({})
+  // The units picked to rally, highlighted on the board.
+  useBoardOverlay('ability-actions', {
+    unitIds: Object.entries(picked)
+      .filter(([k, id]) => k.startsWith('rally') && id)
+      .map(([, id]) => Number(id)),
+  })
 
   useEffect(() => {
     let cancelled = false

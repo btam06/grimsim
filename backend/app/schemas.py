@@ -548,9 +548,17 @@ class CombatIn(BaseModel):
     # The attacking model is on its Damaged profile (e.g. a War Dog with 1-5
     # wounds remaining: -1 to hit).
     attacker_damaged: bool = False
-    # Whether attacks from weapons with the Precision effect pick off leaders
-    # (then supports) first, rather than following normal targeting.
+    # Whether attacks from weapons with [PRECISION] go to the target's
+    # CHARACTER allocation group (24.28) rather than in allocation order.
     apply_precision: bool = False
+    # The defender's order for its allocation groups (by group id - see GET
+    # /games/{id}/allocation-groups), where the rules leave it to them (05.03).
+    allocation_order: list[int] = []
+    # Indirect shooting (10.07): the target isn't visible, so only [INDIRECT
+    # FIRE] weapons shoot - `indirect_spotted`: the unit remained stationary
+    # and a friendly unit can see the target.
+    indirect: bool = False
+    indirect_spotted: bool = False
     # Active rule options from faction abilities (e.g. "Protector Imperative"
     # for Doctrina Imperatives), per side. A unit only gains an option if one
     # of its models has the faction ability that grants it.
@@ -984,6 +992,10 @@ class DeployUnitIn(BaseModel):
     unit_id: int
     positions: list[ModelPositionIn]
     teleport_homer: bool = False
+    # Disembarking: a combat disembark move (6", hazard rolls, then
+    # Battle-shocked) - when the unit can't be set up within 3" of its
+    # transport.
+    combat_disembark: bool = False
 
 
 class DeploymentModelOut(BaseModel):
@@ -1049,6 +1061,9 @@ class ObjectiveControlOut(BaseModel):
     # The player who's secured it (it stays theirs until their opponent has
     # OC on it), if anyone has.
     secured_by: int | None = None
+    # `controller` is as determined at the end of the last phase or turn;
+    # this is who would control it if it were determined now.
+    live_controller: int | None = None
 
 
 class TerritoryOut(BaseModel):
@@ -1097,6 +1112,12 @@ class UnitMoveIn(BaseModel):
     unit_id: int
     kind: Literal["normal", "advance", "fall_back"]
     positions: list[ModelPositionIn]
+    # A FLYING unit takes to the skies (21.03): 2" less, through models and
+    # terrain.
+    take_to_skies: bool = False
+    # A Super-heavy Walker is MOBILE for the move (24.35): through terrain,
+    # then a D6 - on a 1, it's Battle-shocked.
+    mobile: bool = False
 
 
 class UnitIdIn(BaseModel):
@@ -1127,6 +1148,9 @@ class MovementUnitOut(BaseModel):
     moved: bool = False
     # It arrived from Reserves this phase (it can't move again).
     arrived: bool = False
+    # It can take to the skies (FLY), or be MOBILE (a Super-heavy Walker).
+    can_fly: bool = False
+    super_heavy_walker: bool = False
     models: list[MovementModelOut]
 
 
@@ -1196,19 +1220,36 @@ class ShootingWeaponOut(BaseModel):
     # Whether it has Assault; and whether it can't be fired at all this phase
     # (the unit Advanced and it isn't Assault).
     assault: bool = False
+    # A melee weapon's Attacks characteristic, and whether it's an [EXTRA
+    # ATTACKS] one (used as well as one other melee weapon).
+    attacks: str = ""
+    extra_attacks: bool = False
     unusable: bool = False
     # Chosen to start with (for melee: each model's first weapon).
     default: bool = False
+
+
+class AllocationGroupOut(BaseModel):
+    # One of a unit's allocation groups (05.03): the models in it, and whether
+    # the rules fix where it goes - a wounded non-CHARACTER group first,
+    # CHARACTER groups last (wounded ones first among them).
+    id: int
+    model_names: list[str]
+    unit_model_ids: list[int]
+    character: bool
+    wounded: bool
 
 
 class ShootingTargetOut(BaseModel):
     unit_id: int
     name: str
     # Whether any of the unit's models can see it (dense terrain blocks
-    # sight), and whether it's in cover.
+    # sight), and whether it's in cover - and if none can, whether its
+    # [INDIRECT FIRE] weapons can shoot it anyway (indirect shooting).
     visible: bool
     in_cover: bool
     weapons: list[ShootingWeaponOut]
+    indirect: bool = False
 
 
 class ShootIn(BaseModel):
@@ -1216,6 +1257,10 @@ class ShootIn(BaseModel):
     target_unit_id: int
     weapon_ids: list[int] = []
     enhancement_weapon_ids: list[int] = []
+    # The defending player's order for the target's allocation groups (by
+    # group id - see GET /games/{id}/allocation-groups); otherwise the least
+    # protected first.
+    allocation_order: list[int] = []
     # A transport's Firing Deck weapons (embarked models' weapons, by weapon
     # id): each fired by the embarked models carrying it, up to its limit.
     firing_deck_weapon_ids: list[int] = []
@@ -1256,6 +1301,11 @@ class ChargeUnitOut(BaseModel):
     failed: bool = False
     charged: bool = False
     target_unit_id: int | None = None
+    # Every charge target, once it's charged.
+    target_unit_ids: list[int] = []
+    target_names: list[str] = []
+    # It can FLY: it can take to the skies (21.03).
+    can_fly: bool = False
     target_name: str | None = None
     # Why it can't charge this turn (it Advanced or Fell Back), if it can't.
     reason: str | None = None
@@ -1275,11 +1325,20 @@ class ChargeTargetOut(BaseModel):
 
 
 class ChargeIn(BaseModel):
-    # A charge: the target, and where each of the unit's models ends up
-    # (every one it has left, moved or not).
+    # A charge: its targets (one or more - `target_unit_ids`, or just
+    # `target_unit_id`), and where each of the unit's models ends up (every
+    # one it has left, moved or not) - taking to the skies, for a FLYING unit.
     unit_id: int
-    target_unit_id: int
+    target_unit_id: int | None = None
+    target_unit_ids: list[int] = []
     positions: list[ModelPositionIn]
+    take_to_skies: bool = False
+
+    @property
+    def targets(self) -> list[int]:
+        return self.target_unit_ids or (
+            [self.target_unit_id] if self.target_unit_id is not None else []
+        )
 
 
 class PileInUnitOut(BaseModel):
@@ -1306,6 +1365,12 @@ class UnitPlacementIn(BaseModel):
     # Where each of a unit's models ends up (every one it has left).
     unit_id: int
     positions: list[ModelPositionIn]
+
+
+class ConsolidateIn(UnitPlacementIn):
+    # For an engaging consolidation, the enemy units picked to move towards;
+    # for an objective one, the objective (by default, the first offered).
+    pick_ids: list[int] = []
 
 
 class SeatIn(BaseModel):
@@ -1365,6 +1430,9 @@ class FightUnitOut(BaseModel):
     fought: bool
     can_fight: bool
     reason: str | None = None
+    # Eligible to fight but not engaged: it makes an overrun fight's pile-in
+    # move first (12.06).
+    overrun: bool = False
 
 
 class FightLogOut(BaseModel):
@@ -1379,23 +1447,35 @@ class FightLogOut(BaseModel):
 
 
 class ConsolidatingOut(BaseModel):
-    # The unit that's just fought, which can consolidate now: the unit it
-    # fought, and whether that's been destroyed.
+    # A unit that's fought, which can consolidate now: the unit it fought,
+    # and whether that's been destroyed; its consolidation mode ("ongoing",
+    # "engaging" or "objective" - see app/services/in_game/fighting.py) and
+    # the enemy units (or objectives) it can pick from to move towards (an
+    # ongoing consolidation's are all of them).
     unit_id: int
     unit_name: str
     target_name: str
     target_destroyed: bool
+    mode: str | None = None
+    options: list[IdNameOut] = []
 
 
 class FightOut(BaseModel):
-    # The fight phase's step ("pile_in", "consolidate", "fights_first",
-    # "remaining" or "done"), who's to act (pick the next unit to fight, or
-    # consolidate), both players' units, and what's fought so far.
+    # The fight phase's step ("pile_in", "fights_first", "remaining",
+    # "consolidate" or "done"), who's to act (pick the next unit to fight, or
+    # consolidate), both players' units in the fight (within Engagement Range
+    # of an enemy, or that have fought), and what's fought so far. In the
+    # Consolidate step, the units that can consolidate now (`consolidations`
+    # - the first of them `consolidating`).
     step: str | None
     seat: int | None
     units: list[FightUnitOut]
     fights: list[FightLogOut]
     consolidating: ConsolidatingOut | None = None
+    consolidations: list[ConsolidatingOut] = []
+    # Whether the player picking can pass instead (every unit of theirs
+    # eligible to fight is more than 5" from every enemy unit).
+    can_pass: bool = False
 
 
 class FightTargetOut(BaseModel):
@@ -1406,12 +1486,40 @@ class FightTargetOut(BaseModel):
     weapons: list[ShootingWeaponOut]
 
 
+class FightSplitIn(BaseModel):
+    # How many of a melee weapon's attacks are made against one of the units
+    # it targets (04.02: splitting melee attacks). `enhancement`: it's a
+    # weapon an enhancement gives (an enhancement weapon id).
+    weapon_id: int
+    enhancement: bool = False
+    target_unit_id: int
+    attacks: int
+
+
+class FightIn(ShootIn):
+    # As shooting: every chosen weapon attacks the target - except those in
+    # `splits`, whose attacks are split as declared. `allocation_orders`:
+    # the defending player's allocation order for each other target unit (by
+    # unit id - see ShootIn.allocation_order).
+    splits: list[FightSplitIn] = []
+    allocation_orders: dict[int, list[int]] = {}
+
+
+class SplitCombatOut(BaseModel):
+    # The attacks against another of a unit's targets.
+    unit_id: int
+    name: str
+    combat: CombatOut
+
+
 class FightResultOut(BaseModel):
     # The calculator's result, and the models it destroyed (taken off the
-    # battlefield).
+    # battlefield) - against the target, and any other targets it split its
+    # attacks between (`split_combats`).
     charged: bool
     fights_first: bool
     combat: CombatOut
+    split_combats: list[SplitCombatOut] = []
     destroyed_unit_model_ids: list[int] = []
 
 
@@ -1549,6 +1657,23 @@ class StartOfShootingResultOut(BaseModel):
     destroyed_unit_model_ids: list[int]
 
 
+class SurgeStartIn(BaseModel):
+    # A rule's let the unit make a surge move (21.02) of up to `distance`:
+    # "D6" (rolled) or a number of inches.
+    unit_id: int
+    distance: str
+
+
+class SurgeMoveOut(BaseModel):
+    # A surge move waiting to be made this phase: how far, and towards what.
+    unit_id: int
+    name: str
+    seat: int
+    distance: int
+    target_unit_id: int
+    target_name: str
+
+
 class ReactiveMoveOut(BaseModel):
     # A unit that can make a reactive move now (e.g. Tactica Obliqua): its
     # ability, the enemy unit that set it off, its roll for how far (once
@@ -1563,11 +1688,13 @@ class ReactiveMoveOut(BaseModel):
 
 
 class ScoutsUnitOut(BaseModel):
-    # A unit that can make a Scouts move, and how far.
+    # A unit that can make a Scouts move, and how far - set up from Strategic
+    # Reserves, if `in_reserves` (see app/services/in_game/scouts.py).
     unit_id: int
     name: str
     distance: int
     moved: bool
+    in_reserves: bool = False
 
 
 class ScoutsOut(BaseModel):
@@ -1690,6 +1817,10 @@ class CommandAbilityOut(BaseModel):
     # Options that target an enemy unit (e.g. Invocation of Machine
     # Vengeance), and the enemy units each could.
     option_targets: dict[str, list[UnitIdNameOut]] = {}
+    # The model with it, and how far away a unit it applies to can be (e.g.
+    # Rod of the War Forge's 6") - for drawing that range.
+    unit_model_id: int | None = None
+    target_range: float | None = None
 
 
 class CommandHealOut(BaseModel):
@@ -1721,6 +1852,8 @@ class CommandOut(BaseModel):
     abilities: list[CommandAbilityOut]
     heals: list[CommandHealOut]
     objective_selections: list[ObjectiveSelectionOut] = []
+    # The phase it is ("command", or another some abilities are selected in).
+    phase: str | None = None
 
 
 class ObjectiveSelectionIn(BaseModel):
@@ -1948,6 +2081,10 @@ class EmbarkedUnitOut(BaseModel):
     name: str
     transport_unit_id: int
     transport_name: str
+    # Its disembark mode now ("rapid" or "tactical" - the player can make a
+    # "tactical" one a combat disembark instead): see
+    # app/services/in_game/embarked.py.
+    mode: str = "tactical"
 
 
 class EmbarkableUnitOut(BaseModel):

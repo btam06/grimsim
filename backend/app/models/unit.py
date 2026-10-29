@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Integer
+from sqlalchemy import ForeignKey, Integer, inspect
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.associations import unit_upgrades
@@ -36,6 +36,22 @@ class Unit(Base):
     rule_selection_links: Mapped[list["UnitRuleSelection"]] = relationship(
         cascade="all, delete-orphan", lazy="selectin"
     )
+
+    @property
+    def label(self) -> str:
+        # Its datasheet's name - numbered when its list has more than one unit
+        # of it, in the list's order (e.g. "Skitarii Rangers 2"), to tell them
+        # apart. Just the name if its list isn't loaded with it.
+        name = self.faction_unit.name
+        state = inspect(self)
+        if "army_list" in state.unloaded or self.army_list is None:
+            return name
+        if "units" in inspect(self.army_list).unloaded:
+            return name
+        same = sorted(
+            u.id for u in self.army_list.units if u.faction_unit_id == self.faction_unit_id
+        )
+        return f"{name} {same.index(self.id) + 1}" if len(same) > 1 and self.id in same else name
 
     @property
     def selected_rule_ids(self) -> list[int]:

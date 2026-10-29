@@ -6,6 +6,7 @@ from app.combat_rules.conditions import (
     TARGET_HAS_CHARACTER,
     TARGET_MONSTER_OR_VEHICLE,
     TARGET_LED_BY_CHARACTER,
+    TARGET_MODEL_VEHICLE,
 )
 from app.combat_rules.effects import (
     ADD_THREE_ATTACKS,
@@ -366,7 +367,8 @@ CALCULATOR_NOTES = {
         "leading one."
     ),
     "Omnissiah's Blessing": (
-        "Descriptive only in the calculator; in a game, used in your Command phase on a model "
+        "Pick Omnissiah's Blessing under Faction Rules for a defending VEHICLE unit in a list "
+        "with an Enginseer (Feel No Pain 5+); in a game, used in your Command phase on a model "
         "within 3\"."
     ),
     "Tactica Obliqua": (
@@ -562,6 +564,24 @@ RULES = {
 # Selectable options for abilities above: {ability name: {option name:
 # RuleOption}}.
 OPTIONS = {
+    "Omnissiah's Blessing": {
+        "Omnissiah's Blessing": RuleOption(
+            rules=(
+                Rule(
+                    conditions=(TARGET_MODEL_VEHICLE,),
+                    effects=(FEEL_NO_PAIN_5,),
+                    side="defender",
+                    description="Its VEHICLE models have Feel No Pain 5+.",
+                ),
+            ),
+            army_wide=True,
+            description=(
+                "The defending unit's VEHICLE models were repaired by a Tech-priest Enginseer in "
+                "its army list (until the start of its next Command phase): Feel No Pain 5+. In "
+                "a game, it's used in your Command phase on a model within 3\"."
+            ),
+        ),
+    },
     "Canticles of the Omnissiah": {
         "Invocation of Machine Vengeance": RuleOption(
             rules=(
