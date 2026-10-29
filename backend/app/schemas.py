@@ -764,6 +764,9 @@ class GameStratagemUseOut(BaseModel):
     cp: int
     # The unit it was used on, for one whose game action targets one.
     target_unit_id: int | None = None
+    # What it did, if its game action rolls dice or picks something (e.g.
+    # Explosives: its D6 and the mortal wounds).
+    outcome: str | None = None
 
 
 class GamePlayerOut(BaseModel):
@@ -843,10 +846,13 @@ class IdNameOut(BaseModel):
 
 
 class StratagemTargetOut(BaseModel):
-    # A unit a stratagem whose game action targets one could be used on - and
-    # for one that also targets an objective or a transport, those it could.
+    # A unit a stratagem could be used on (one whose game action targets one
+    # needs it; any other can be given its target too) - what it costs on it
+    # (an ability can change that - e.g. Shock Charge), and for one that also
+    # targets an objective or a transport, those it could.
     unit_id: int
     name: str
+    cp: int = 0
     choices: list[IdNameOut] = []
 
 
@@ -1309,10 +1315,15 @@ class ChargeUnitOut(BaseModel):
     target_name: str | None = None
     # Why it can't charge this turn (it Advanced or Fell Back), if it can't.
     reason: str | None = None
+    # One of the opponent's, charging with Heroic Intervention.
+    heroic: bool = False
 
 
 class ChargeOut(BaseModel):
     units: list[ChargeUnitOut]
+    # The player whose turn it is has finished charging: it's the end of the
+    # phase, when their opponent can use Heroic Intervention.
+    charges_ended: bool = False
 
 
 class ChargeTargetOut(BaseModel):

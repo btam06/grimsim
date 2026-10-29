@@ -142,6 +142,11 @@ class Game(Base):
     movements_ended: Mapped[list["GameMovementEnded"]] = relationship(
         cascade="all, delete-orphan", lazy="selectin", order_by="GameMovementEnded.id"
     )
+    # Charge phases the player whose turn it was has finished charging in
+    # (for Heroic Intervention at the end of them).
+    charges_ended: Mapped[list["GameChargeEnded"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="GameChargeEnded.id"
+    )
     # Options selected for abilities in command phases, and wounds healed at
     # their start.
     command_choices: Mapped[list["GameCommandChoice"]] = relationship(
@@ -355,6 +360,20 @@ class GameStratagemUse(Base):
     target_link: Mapped["GameStratagemTarget | None"] = relationship(
         cascade="all, delete-orphan", uselist=False, lazy="selectin"
     )
+    outcome_link: Mapped["GameStratagemOutcome | None"] = relationship(
+        cascade="all, delete-orphan", uselist=False, lazy="selectin"
+    )
+
+    @property
+    def outcome(self) -> str | None:
+        # What it did, for one whose game action rolls dice or picks
+        # something (e.g. Explosives: its six D6 and the mortal wounds).
+        return self.outcome_link.text if self.outcome_link else None
+
+    @property
+    def choice_id(self) -> int | None:
+        # What else its use targeted (see GameStratagemOutcome).
+        return self.outcome_link.choice_id if self.outcome_link else None
 
     @property
     def target_unit_id(self) -> int | None:
@@ -373,6 +392,19 @@ class GameStratagemTarget(Base):
         ForeignKey("game_stratagem_uses.id"), primary_key=True
     )
     unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"))
+
+
+class GameStratagemOutcome(Base):
+    # What a stratagem use did (one at most), and what else it targeted - an
+    # enemy unit, a model, a mode (e.g. Heroic Intervention's) - by id. Its own
+    # table, so existing databases pick it up without a migration.
+    __tablename__ = "game_stratagem_outcomes"
+
+    stratagem_use_id: Mapped[int] = mapped_column(
+        ForeignKey("game_stratagem_uses.id"), primary_key=True
+    )
+    text: Mapped[str | None] = mapped_column(String, nullable=True)
+    choice_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class GameModelPosition(Base):
@@ -934,6 +966,18 @@ class GameMovementEnded(Base):
     # its end, when their opponent can use Rapid Ingress (see
     # app/services/in_game/reinforcements.py).
     __tablename__ = "game_movements_ended"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    battle_round: Mapped[int] = mapped_column(Integer)
+    turn_seat: Mapped[int] = mapped_column(Integer)
+
+
+class GameChargeEnded(Base):
+    # The player whose turn it is has finished charging in this Charge phase:
+    # its end, when their opponent can use Heroic Intervention (see
+    # app/services/in_game/core_stratagems.py).
+    __tablename__ = "game_charges_ended"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))

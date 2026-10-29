@@ -20,6 +20,33 @@ def damage(game: Game) -> dict[int, GameModelDamage]:
     return {d.unit_model_id: d for d in game.model_damage}
 
 
+def damaged_profile(game: Game, unit_model) -> tuple[int, int] | None:
+    # The model's Damaged profile (see datasheet_abilities DAMAGED_PROFILES)
+    # if it's on it now: (its wounds range's top, OC lost) - None if it isn't.
+    from app.seeds.datasheet_abilities import DAMAGED_PROFILES
+
+    profile = next(
+        (
+            DAMAGED_PROFILES[a.name]
+            for a in unit_model.model.abilities
+            if a.name in DAMAGED_PROFILES
+        ),
+        None,
+    )
+    if profile is None:
+        return None
+    record = damage(game).get(unit_model.id)
+    if record is None or record.destroyed:
+        return None
+    left = unit_model.wounds - record.wounds_lost
+    return profile if 0 < left <= profile[0] else None
+
+
+def damaged(game: Game, unit: Unit) -> bool:
+    # Whether a model in the unit is on its Damaged profile (for its attacks).
+    return any(damaged_profile(game, m) is not None for m in unit.unit_models)
+
+
 def wounds_remaining(game: Game, unit: Unit) -> dict[int, int]:
     # The wounds each of the unit's models on the battlefield has left, by
     # unit model id (destroyed ones aren't there).

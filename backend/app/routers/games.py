@@ -171,6 +171,7 @@ from app.seeds.factions.adeptus_mechanicus.conditions import VENGEANCE
 from app.services.in_game import rally as rally_service
 from app.services.in_game import reactive_move as reactive_move_service
 from app.services.in_game import surge as surge_service
+from app.services.in_game import core_stratagems as core_stratagems_service
 from app.services.in_game import repair as repair_service
 from app.services.in_game import shoot_scoot as shoot_scoot_service
 from app.services.in_game import shooting_start as shooting_start_service
@@ -281,6 +282,7 @@ def _player_out(player: GamePlayer) -> GamePlayerOut:
                 phase=u.phase,
                 cp=u.cp,
                 target_unit_id=u.target_unit_id,
+                outcome=u.outcome,
             )
             for u in player.stratagem_uses
         ],
@@ -495,8 +497,9 @@ async def use_stratagem(
 async def stratagem_targets(
     game_id: int, stratagem_id: int, seat: int, session: AsyncSession = Depends(get_session)
 ):
-    # The player's units a stratagem whose game action targets one (e.g.
-    # Gunship Extraction) could be used on now.
+    # The player's units the stratagem could be used on now (one whose game
+    # action targets one needs it - e.g. Gunship Extraction; any other can be
+    # given the unit it targets), and what it costs on each.
     game = await _load_game(session, game_id)
     stratagems = await _load_stratagems(session, [stratagem_id])
     if not stratagems:
@@ -506,12 +509,14 @@ async def stratagem_targets(
         StratagemTargetOut(
             unit_id=u.id,
             name=u.label,
+            cp=game_service.stratagem_cost(stratagems[0], u)[0],
             choices=[
                 IdNameOut(id=c.id, name=c.name)
                 for c in game_service.stratagem_choices(game, player, stratagems[0], u)
             ],
         )
         for u in game_service.stratagem_targets(game, player, stratagems[0])
+        if game_service.stratagem_unavailable_reason(game, player, stratagems[0], target=u) is None
     ]
 
 
@@ -1118,6 +1123,8 @@ async def _fire(
             game_id=game.id,
             attacking_unit_id=unit.id,
             defending_unit_id=target.id,
+            # On its Damaged profile, it's -1 to hit.
+            attacker_damaged=casualties_service.damaged(game, unit),
             selected_weapon_ids=payload.weapon_ids,
             selected_enhancement_weapon_ids=payload.enhancement_weapon_ids,
             attacker_positions=_attacker_positions(
@@ -1324,7 +1331,11 @@ def _charge_out(game: Game) -> ChargeOut:
                 failed=charging_service.failed(game, unit),
                 charged=bool(charge and charge.completed),
                 reason=(
-                    charging_service.cant_charge_reason(game, unit)
+                    "the player whose turn it is has finished charging"
+                    if core_stratagems_service.charge_ended(game)
+                    and core_stratagems_service.heroic_mode(game, unit) is None
+                    and not charge
+                    else charging_service.cant_charge_reason(game, unit)
                     if charge
                     else charging_service.declare_reason(game, unit)
                 ),
@@ -1339,9 +1350,12 @@ def _charge_out(game: Game) -> ChargeOut:
                 if charge
                 else [],
                 can_fly=movement_service.can_fly(unit),
+                heroic=core_stratagems_service.heroic_mode(game, unit) is not None,
             )
         )
-    return ChargeOut(units=units)
+    return ChargeOut(
+        units=units, charges_ended=core_stratagems_service.charge_ended(game)
+    )
 
 
 @router.get("/{game_id}/charge", response_model=ChargeOut)
@@ -1643,6 +1657,8 @@ async def fight(game_id: int, payload: FightIn, session: AsyncSession = Depends(
                 game_id=game.id,
                 attacking_unit_id=unit.id,
                 defending_unit_id=defender.id,
+                # On its Damaged profile, it's -1 to hit.
+                attacker_damaged=casualties_service.damaged(game, unit),
                 selected_weapon_ids=[w for w in chosen if isinstance(w, int)],
                 selected_enhancement_weapon_ids=[w[1] for w in chosen if isinstance(w, tuple)],
                 in_engagement_range=True,
@@ -1665,6 +1681,9 @@ async def fight(game_id: int, payload: FightIn, session: AsyncSession = Depends(
             defender_model_rules=repair_service.model_rules(game, defender),
             attack_limits=limits,
             hazards_rolled=hazards_rolled,
+            # Epic Challenge: its CHARACTER model's melee weapons have
+            # [PRECISION].
+            precision_models=core_stratagems_service.precision_models(game, unit),
         )
         destroyed += casualties_service.apply_attack(
             game,

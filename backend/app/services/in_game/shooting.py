@@ -638,6 +638,11 @@ def in_cover(
     # The benefit of cover (13.08): every model in the unit is
     # INFANTRY/BEASTS/SWARM within a terrain area, or isn't fully visible to
     # any of the shooting models (`shooters`) because of terrain.
+    # Smokescreen: the benefit of cover this phase.
+    from app.services.in_game import core_stratagems
+
+    if core_stratagems.smokescreened(game, unit):
+        return True
     if game.layout is None:
         return False
     sight = sight or Sight(game)

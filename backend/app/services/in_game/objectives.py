@@ -33,12 +33,16 @@ HOME_KINDS = {"attacker": "attacker_home", "defender": "defender_home"}
 def model_oc(game: Game, unit_model: UnitModel, shocked: set[int] | None = None) -> int:
     # A model's Objective Control characteristic in this game now: 0 if its
     # unit is Battle-shocked (`shocked`: those units' ids, if worked out
-    # already). Other rules that change it go here.
+    # already), less on a Damaged profile. Other rules that change it go here.
     if shocked is None:
         shocked = battle_shock.battle_shocked_ids(game)
     if unit_model.unit_id in shocked:
         return 0
-    return unit_model.model.oc or 0
+    # A Damaged profile takes some off (e.g. a Knight on 1-10 wounds: 5).
+    from app.services.in_game.casualties import damaged_profile
+
+    profile = damaged_profile(game, unit_model)
+    return max(0, (unit_model.model.oc or 0) - (profile[1] if profile else 0))
 
 
 @dataclass

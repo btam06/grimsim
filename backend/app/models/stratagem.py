@@ -172,6 +172,14 @@ STRATAGEM_GAME_ACTIONS = (
     "longer_consolidation",
     "extra_selected_objective",
     "reactive_embark",
+    # The core stratagems' (see app/services/in_game/core_stratagems.py).
+    "explosives",
+    "crushing_impact",
+    "smokescreen",
+    "epic_challenge",
+    "counteroffensive",
+    "heroic_intervention",
+    "command_reroll",
 )
 # Those whose target is one of the player's units.
 UNIT_TARGET_ACTIONS = (
@@ -181,10 +189,27 @@ UNIT_TARGET_ACTIONS = (
     "longer_consolidation",
     "extra_selected_objective",
     "reactive_embark",
+    "explosives",
+    "crushing_impact",
+    "smokescreen",
+    "epic_challenge",
+    "counteroffensive",
+    "heroic_intervention",
+    "command_reroll",
 )
 # Those that also target something else, picked from the unit's choices (an
-# objective, or a transport - see app/services/in_game/stratagem_actions.py).
-CHOICE_TARGET_ACTIONS = ("secure_on_destruction", "extra_selected_objective", "reactive_embark")
+# objective, a transport, an enemy unit, a model, a mode - see
+# app/services/in_game/stratagem_actions.py).
+CHOICE_TARGET_ACTIONS = (
+    "secure_on_destruction",
+    "extra_selected_objective",
+    "reactive_embark",
+    "explosives",
+    "crushing_impact",
+    "epic_challenge",
+    "heroic_intervention",
+    "command_reroll",
+)
 
 
 class StratagemGameAction(Base):

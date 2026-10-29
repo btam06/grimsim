@@ -249,11 +249,10 @@ def _hazard(game: Game, record: GameEmergencyDisembark, unit: Unit, unit_model: 
 
 
 def _dice(amount: str) -> int:
-    if amount == "D3":
-        return random.randint(1, 3)
-    if amount == "D6":
-        return random.randint(1, 6)
-    return int(amount)
+    # A Deadly Demise amount: "1", "D3", "D6", "D6+2"...
+    from app.services.combat import roll_dice
+
+    return roll_dice(amount)
 
 
 def _explode(game: Game, transport_unit_id: int) -> None:

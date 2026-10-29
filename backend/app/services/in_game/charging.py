@@ -45,6 +45,13 @@ from app.services.in_game.movement import ENGAGEMENT_RANGE
 # (faction_seeds.CHARGE_BONUSES - e.g. Death Blow: +1 for ADEPTUS ASTARTES
 # TERMINATOR units).
 #
+# At the end of the Charge phase, the opponent can use Heroic Intervention
+# (see app/services/in_game/core_stratagems.py): then the player whose turn
+# it is can't charge any more, and the intervening unit charges as above -
+# Leaping to Defend (only enemy units that charged this phase can be its
+# targets) or Into the Fray (its charge roll is at most 6, and any enemy
+# units within 6" can be).
+#
 # Some abilities let a unit re-roll its charge roll, once, before it charges
 # (datasheet_abilities CHARGE_REROLLS); some make each enemy unit engaged with
 # it after its charge move take a Battle-shock test (AFTER_CHARGE_BATTLE_SHOCK
@@ -82,14 +89,31 @@ def unit_charge(game: Game, unit: Unit) -> GameUnitCharge | None:
     )
 
 
+def _heroic(game: Game, unit: Unit) -> int | None:
+    # Its Heroic Intervention mode this phase, if it's intervening.
+    from app.services.in_game import core_stratagems
+
+    return core_stratagems.heroic_mode(game, unit)
+
+
+def _charges_over(game: Game) -> bool:
+    from app.services.in_game import core_stratagems
+
+    return core_stratagems.charge_ended(game)
+
+
 def charging_units(game: Game) -> list[Unit]:
-    # The units the player whose turn it is has on the battlefield.
+    # The units the player whose turn it is has on the battlefield - and any
+    # of their opponent's intervening heroically.
     if game.turn_seat is None:
         return []
-    player = next(p for p in game.players if p.seat == game.turn_seat)
     placed = deployment.positions(game)
     return [
-        u for u in deployment.deployable_units(player) if deployment.is_deployed(u, placed)
+        u
+        for player in game.players
+        for u in deployment.deployable_units(player)
+        if deployment.is_deployed(u, placed)
+        and (player.seat == game.turn_seat or _heroic(game, u) is not None)
     ]
 
 
@@ -146,8 +170,11 @@ def _check_unit(game: Game, unit: Unit, declaring: bool = False) -> None:
     # hasn't charged yet this phase.
     if not is_charge_phase(game):
         raise _bad_request("units can only charge in the charge phase")
-    if deployment.owner(game, unit).seat != game.turn_seat:
+    heroic = _heroic(game, unit) is not None
+    if deployment.owner(game, unit).seat != game.turn_seat and not heroic:
         raise _bad_request("only the player whose turn it is can charge with their units")
+    if _charges_over(game) and not heroic:
+        raise _bad_request("the player whose turn it is has finished charging")
     if not deployment.is_deployed(unit, deployment.positions(game)):
         raise _bad_request("that unit isn't on the battlefield")
     charge = unit_charge(game, unit)
@@ -256,8 +283,15 @@ def charge_bonus(game: Game, unit: Unit) -> int:
 def charge_roll(game: Game, unit: Unit) -> int | None:
     # The unit's charge roll this phase, with any bonus - None if it hasn't
     # rolled.
+    from app.services.in_game import core_stratagems
+
     charge = unit_charge(game, unit)
-    return charge.roll + charge_bonus(game, unit) if charge is not None else None
+    if charge is None:
+        return None
+    roll = charge.roll + charge_bonus(game, unit)
+    if _heroic(game, unit) == core_stratagems.INTO_THE_FRAY:
+        roll = min(roll, core_stratagems.FRAY_MAX_ROLL)
+    return roll
 
 
 def enemy_units(game: Game, unit: Unit) -> list[Unit]:
@@ -284,8 +318,19 @@ def distance(game: Game, unit: Unit, target: Unit) -> float:
 
 def in_reach(game: Game, unit: Unit, target: Unit, roll: int) -> bool:
     # Whether the target can be a charge target with that roll: within it,
-    # and within 12".
-    return distance(game, unit, target) <= min(roll, CHARGE_RANGE) + TOLERANCE
+    # and within 12" - and for a Heroic Intervention, one that charged this
+    # phase (Leap to Defend) or within 6" (Into the Fray).
+    from app.services.in_game import core_stratagems
+
+    if distance(game, unit, target) > min(roll, CHARGE_RANGE) + TOLERANCE:
+        return False
+    mode = _heroic(game, unit)
+    if mode == core_stratagems.LEAP_TO_DEFEND:
+        charge = unit_charge(game, target)
+        return charge is not None and charge.completed
+    if mode == core_stratagems.INTO_THE_FRAY:
+        return distance(game, unit, target) <= core_stratagems.FRAY_RANGE + TOLERANCE
+    return True
 
 
 def failed(game: Game, unit: Unit) -> bool:

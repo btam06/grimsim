@@ -49,6 +49,15 @@ CORE_ENTRIES = [
         [DEADLY_DEMISE],
     ),
     (
+        "Deadly Demise D6+2",
+        "Each time a model in this unit is destroyed, after the units embarked within it (if "
+        "any) have made their emergency disembark moves, roll one D6. On a 6, that model "
+        "suffers a deadly demise; each unit within 6\" of that model suffers D6+2 mortal "
+        "wounds.",
+        [ALWAYS],
+        [DEADLY_DEMISE],
+    ),
+    (
         "Deadly Demise 1",
         "Each time a model in this unit is destroyed, after the units embarked within it (if "
         "any) have made their emergency disembark moves, roll one D6. On a 6, that model "
@@ -74,6 +83,14 @@ CORE_ENTRIES = [
     (
         "Damaged: 1-5 Wounds Remaining",
         "While this model has 1-5 wounds remaining, subtract 3 from this model's Objective "
+        "Control characteristic and each time this model makes an attack, subtract 1 from the "
+        "Hit roll.",
+        [],
+        [],
+    ),
+    (
+        "Damaged: 1-10 Wounds Remaining",
+        "While this model has 1-10 wounds remaining, subtract 5 from this model's Objective "
         "Control characteristic and each time this model makes an attack, subtract 1 from the "
         "Hit roll.",
         [],
@@ -148,6 +165,7 @@ CORE_CALCULATOR_NOTES = {
     "Deadly Demise D3": "Only whether it explodes is resolved, not the D3 mortal wounds.",
     "Deadly Demise 1": "Only whether it explodes is resolved, not the mortal wound.",
     "Deadly Demise D6": "Only whether it explodes is resolved, not the D6 mortal wounds.",
+    "Deadly Demise D6+2": "Only whether it explodes is resolved, not the D6+2 mortal wounds.",
     "Infiltrators": "Descriptive only: a deployment rule.",
     "Deep Strike": "Descriptive only: a deployment rule.",
     "Fights First": "Descriptive only here: in a game, it decides the fight order.",
@@ -175,17 +193,27 @@ CORE_CALCULATOR_NOTES = {
 # modifies its own unit's attacks, while a Rule with side="defender" modifies
 # attacks made against its unit. Applied to a unit if any of its models has the
 # ability. Rows listed here are seeded with no conditions/effects of their own.
+_DAMAGED_RULE = Rule(
+    conditions=(ATTACKER_DAMAGED,),
+    effects=(MINUS_ONE_TO_HIT,),
+    description=(
+        "-1 to hit when \"Attacking model is Damaged\" is ticked under Modifiers (in a game, "
+        "when it's on that many wounds; the OC change is outside the calculator)."
+    ),
+)
+
+# Damaged profiles: {ability name: (the most wounds remaining it applies at,
+# what it takes off the model's OC)}. In a game, a model on that few wounds
+# is Damaged (see app/services/in_game/casualties.py): -1 to its Hit rolls,
+# and less OC.
+DAMAGED_PROFILES = {
+    "Damaged: 1-5 Wounds Remaining": (5, 3),
+    "Damaged: 1-10 Wounds Remaining": (10, 5),
+}
+
 CORE_RULES = {
-    "Damaged: 1-5 Wounds Remaining": [
-        Rule(
-            conditions=(ATTACKER_DAMAGED,),
-            effects=(MINUS_ONE_TO_HIT,),
-            description=(
-                "-1 to hit when \"Attacking model is Damaged\" is ticked under Modifiers (the "
-                "OC change is outside the calculator)."
-            ),
-        ),
-    ],
+    "Damaged: 1-5 Wounds Remaining": [_DAMAGED_RULE],
+    "Damaged: 1-10 Wounds Remaining": [_DAMAGED_RULE],
     "Stealth": [
         Rule(
             conditions=(RANGED_ATTACK,),
@@ -279,6 +307,7 @@ COMBINED = (
     "ROLL_BONUSES",
     "SHOOT_SCOOT",
     "STRATAGEM_TARGET_CP",
+    "STRATAGEM_COSTS",
     "START_OF_SHOOTING",
     "REACTIVE_MOVES",
     "RALLIES",
@@ -317,6 +346,7 @@ def _combine() -> dict:
                 "ROLL_BONUSES": {},
                 "SHOOT_SCOOT": {},
                 "STRATAGEM_TARGET_CP": {},
+                "STRATAGEM_COSTS": {},
                 "START_OF_SHOOTING": {},
                 "REACTIVE_MOVES": {},
                 "RALLIES": {},
@@ -349,6 +379,7 @@ def _combine() -> dict:
                     ("ROLL_BONUSES", {}),
                     ("SHOOT_SCOOT", {}),
                     ("STRATAGEM_TARGET_CP", {}),
+                    ("STRATAGEM_COSTS", {}),
                     ("START_OF_SHOOTING", {}),
                     ("REACTIVE_MOVES", {}),
                     ("RALLIES", {}),
@@ -455,6 +486,13 @@ def _combine() -> dict:
             # app/services/in_game/game.py use_stratagem).
             "STRATAGEM_TARGET_CP": {
                 k: v for source in sources for k, v in source["STRATAGEM_TARGET_CP"].items()
+            },
+            # Abilities that change what a Stratagem costs when it targets
+            # their unit (see app/services/in_game/game.py stratagem_cost):
+            # {ability name: {stratagem name: (CP, whether it can be used on
+            # it even if already used this phase)}} - e.g. Shock Charge.
+            "STRATAGEM_COSTS": {
+                k: v for source in sources for k, v in source["STRATAGEM_COSTS"].items()
             },
             # Abilities used at the start of their player's Shooting phase on
             # an enemy unit (see app/services/in_game/shooting_start.py).

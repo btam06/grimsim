@@ -386,7 +386,12 @@ def charged(game: Game, unit: Unit) -> bool:
 
 
 def has_fights_first(game: Game, unit: Unit) -> bool:
-    # It charged this turn, or every model in it has Fights First.
+    # It charged this turn, every model in it has Fights First, or it used
+    # Counteroffensive this phase.
+    from app.services.in_game import core_stratagems
+
+    if core_stratagems.used_on(game, core_stratagems.COUNTEROFFENSIVE, unit) is not None:
+        return True
     models = deployment.models_on_battlefield(game, unit)
     return charged(game, unit) or (
         bool(models)
@@ -521,7 +526,16 @@ def step_units(game: Game) -> list[Unit]:
         return []
     eligible = _eligible(game)
     if step == "fights_first":
-        return [u for u in eligible if has_fights_first(game, u)]
+        eligible = [u for u in eligible if has_fights_first(game, u)]
+    # A unit that used Counteroffensive is the next its player picks.
+    from app.services.in_game import core_stratagems
+
+    for seat in (1, 2):
+        pending = core_stratagems.counteroffensive_unit(game, seat)
+        if pending is not None:
+            eligible = [
+                u for u in eligible if deployment.owner(game, u).seat != seat or u.id == pending
+            ]
     return eligible
 
 

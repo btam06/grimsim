@@ -174,11 +174,24 @@ const UNIT_TARGET_ACTIONS = [
   'longer_consolidation',
   'extra_selected_objective',
   'reactive_embark',
+  // The core stratagems' (see app/services/in_game/core_stratagems.py).
+  'explosives',
+  'crushing_impact',
+  'smokescreen',
+  'epic_challenge',
+  'counteroffensive',
+  'heroic_intervention',
+  'command_reroll',
 ]
 const CHOICE_LABELS = {
   secure_on_destruction: 'objective',
   extra_selected_objective: 'objective',
   reactive_embark: 'transport',
+  explosives: 'enemy unit',
+  crushing_impact: 'enemy unit',
+  epic_challenge: 'CHARACTER model',
+  heroic_intervention: 'mode',
+  command_reroll: 'roll',
 }
 
 function PlayerCard({ game, player, onAction }) {
@@ -213,25 +226,30 @@ function PlayerCard({ game, player, onAction }) {
   const done = player.secondaries.filter((c) => c.status !== 'active')
   const selectedStratagem = usable.find((s) => String(s.id) === String(stratagemId))
   const targetsUnit = UNIT_TARGET_ACTIONS.includes(selectedStratagem?.game_action)
+  // Any other stratagem (bar replacing a secondary) can be given the unit it
+  // targets: then it's one stratagem per unit per phase, and it costs what it
+  // does on that unit (e.g. Shock Charge: Crushing Impact for 0CP).
+  const canTargetUnit =
+    Boolean(selectedStratagem) && selectedStratagem.game_action !== 'replace_secondary'
   const choiceLabel = CHOICE_LABELS[selectedStratagem?.game_action]
   const choices = targets.find((t) => String(t.unit_id) === String(targetUnitId))?.choices ?? []
   useBoardOverlay(`stratagem-${player.seat}`, {
     unitIds: [
-      ...(targetsUnit && targetUnitId ? [Number(targetUnitId)] : []),
+      ...(canTargetUnit && targetUnitId ? [Number(targetUnitId)] : []),
       ...(choiceLabel === 'transport' && targetChoiceId ? [Number(targetChoiceId)] : []),
     ],
   })
 
   useEffect(() => {
     setTargetUnitId('')
-    if (!targetsUnit) {
+    if (!canTargetUnit) {
       setTargets([])
       return
     }
     listStratagemTargets(game.id, stratagemId, player.seat)
       .then(setTargets)
       .catch(() => setTargets([]))
-  }, [game, player.seat, stratagemId, targetsUnit])
+  }, [game, player.seat, stratagemId, canTargetUnit])
 
   const spendStratagem = (targetSecondaryId = null) =>
     onAction(() =>
@@ -239,7 +257,7 @@ function PlayerCard({ game, player, onAction }) {
         seat: player.seat,
         stratagem_id: Number(stratagemId),
         target_secondary_id: targetSecondaryId,
-        target_unit_id: targetsUnit ? Number(targetUnitId) : null,
+        target_unit_id: canTargetUnit && targetUnitId ? Number(targetUnitId) : null,
         target_choice_id: choiceLabel && targetChoiceId ? Number(targetChoiceId) : null,
       })
     )
@@ -374,15 +392,24 @@ function PlayerCard({ game, player, onAction }) {
             onChange={setStratagemId}
             placeholder={usable.length ? 'Select stratagem' : 'None usable now'}
           />
-          {targetsUnit && (
+          {canTargetUnit && (
             <Select
-              options={targets.map((t) => ({ id: t.unit_id, name: t.name }))}
+              options={targets.map((t) => ({
+                id: t.unit_id,
+                name: t.cp !== selectedStratagem.cp ? `${t.name} (${t.cp} CP)` : t.name,
+              }))}
               value={targetUnitId}
               onChange={(value) => {
                 setTargetUnitId(value)
                 setTargetChoiceId('')
               }}
-              placeholder={targets.length ? 'Select unit' : 'No unit it can target'}
+              placeholder={
+                targetsUnit
+                  ? targets.length
+                    ? 'Select unit'
+                    : 'No unit it can target'
+                  : 'Target unit (optional)'
+              }
             />
           )}
           {choiceLabel && targetUnitId && (
@@ -426,7 +453,7 @@ function PlayerCard({ game, player, onAction }) {
           {player.stratagem_uses.map((u) => (
             <li key={u.id} className="hint">
               {u.name} — round {u.battle_round}, {phaseName(u.phase).toLowerCase()} phase, {u.cp}{' '}
-              CP
+              CP{u.outcome ? ` · ${u.outcome}` : ''}
             </li>
           ))}
         </ul>

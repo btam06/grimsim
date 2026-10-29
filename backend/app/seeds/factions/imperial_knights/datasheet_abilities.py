@@ -17,6 +17,23 @@ ENTRIES = [
         [],
     ),
     (
+        # Its effect is the "Lancer's Duty" option in OPTIONS: in a game, it
+        # lets the unit declare a charge after Advancing.
+        "Lancer's Duty (Bondsman)",
+        "While a model is affected by this ability, it is eligible to declare a charge in a "
+        "turn in which it Advanced.",
+        [],
+        [],
+    ),
+    (
+        # In a game, see STRATAGEM_COSTS.
+        "Shock Charge",
+        "You can target this model with the Crushing Impact Stratagem for 0CP, and can do so "
+        "even if you have already targeted a different unit with that Stratagem this phase.",
+        [],
+        [],
+    ),
+    (
         # Its effect is in RULES, read from the calculator's Positioning.
         "Punishing Salvoes",
         "In your Movement phase, if this model Remains Stationary, until the end of the turn, "
@@ -39,7 +56,23 @@ OPTIONS = {
             ),
         ),
     },
+    "Lancer's Duty (Bondsman)": {
+        "Lancer's Duty": RuleOption(
+            army_wide=True,
+            eligible_after=("advanced",),
+            eligible_for=("charge",),
+            description=(
+                "Not modelled in the calculator: in a game, the unit it's picked for can "
+                "declare a charge after Advancing."
+            ),
+        ),
+    },
 }
+
+# In a game: abilities that change what a Stratagem costs when it targets
+# their unit - Shock Charge: Crushing Impact for 0CP, even if it's already
+# been used this phase.
+STRATAGEM_COSTS = {"Shock Charge": {"Crushing Impact": (0, True)}}
 
 # Code-defined rules for abilities above, by name.
 RULES = {

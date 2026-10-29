@@ -512,6 +512,7 @@ async def calculate(
     defender_model_rules: dict[int, list[Rule]] | None = None,
     attack_limits: dict | None = None,
     hazards_rolled: set | None = None,
+    precision_models: set | None = None,
 ) -> CombatOut:
     # Resolves an attack (see app/services/combat.py). `firing` is which
     # weapons each attacking model can fire and at half range or not, when
@@ -634,6 +635,7 @@ async def calculate(
         indirect_spotted=payload.indirect_spotted,
         attack_limits=attack_limits,
         hazards_rolled=hazards_rolled,
+        precision_models=precision_models,
     )
 
     return CombatOut(

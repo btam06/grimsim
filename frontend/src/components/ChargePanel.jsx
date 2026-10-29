@@ -64,7 +64,16 @@ function ChargePanel({
     <div className="deployment-panel">
       <h3>Charge</h3>
       <p>
-        <strong>{player?.user_name}</strong> charges.{' '}
+        {charge.charges_ended ? (
+          <>
+            <strong>{player?.user_name}</strong> has finished charging: their opponent can use
+            Heroic Intervention (from their stratagems), then charge with that unit here.{' '}
+          </>
+        ) : (
+          <>
+            <strong>{player?.user_name}</strong> charges.{' '}
+          </>
+        )}
         <span className="hint">
           Any unit can charge once a phase, unless it Advanced or Fell Back.
         </span>
@@ -80,7 +89,9 @@ function ChargePanel({
               onChange={() => onSelectUnit(unit)}
             />
             {unit.name}
-            <span className="hint"> · {unitStatus(unit)}</span>
+            <span className="hint">
+              {unit.heroic ? ' · Heroic Intervention' : ''} · {unitStatus(unit)}
+            </span>
           </label>
         ))}
       </div>

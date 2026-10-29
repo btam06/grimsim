@@ -368,7 +368,10 @@ def resolve_combat(
     indirect_spotted: bool = False,
     attack_limits: dict | None = None,
     hazards_rolled: set | None = None,
+    precision_models: set | None = None,
 ) -> CombatResult:
+    # `precision_models`: attacking models (by unit model id) whose melee
+    # weapons have [PRECISION] (e.g. after Epic Challenge).
     # `attack_limits`: how many attacks each weapon (by id) makes at most
     # against this target, across the models with it - when a unit splits
     # its melee attacks between targets (04.02); it's counted down.
@@ -860,7 +863,10 @@ def resolve_combat(
                     "context": weapon_context,
                     "is_ranged": is_ranged,
                     # Precision only changes targeting when the attacker opts in.
-                    "uses_precision": apply_precision and eligibility_state.get("precision", False),
+                    "uses_precision": (
+                        apply_precision and eligibility_state.get("precision", False)
+                    )
+                    or (not is_ranged and unit_model.id in (precision_models or ())),
                     "result": weapon_result,
                     "half_range": weapon_half_range,
                     "indirect": is_indirect,

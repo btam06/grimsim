@@ -434,6 +434,10 @@ async def advance(session: AsyncSession, game: Game) -> None:
                 return
         # Enhancements that gain CP then (e.g. Magos).
         selected_objectives_service.end_of_command(game)
+    if game.phase == "charge" and await heroic_intervention_open(session, game):
+        # The end of the charge phase: the opponent can use Heroic
+        # Intervention - it pauses here for them to.
+        return
     if game.phase == "movement" and not reinforcements_service.movement_ended(game):
         # The end of the movement phase: if the opponent could use Rapid
         # Ingress or Fire Overwatch, it pauses here for them to.
@@ -517,6 +521,46 @@ async def overwatch_stratagem(session: AsyncSession) -> Stratagem | None:
     return await core_stratagem(session, overwatch_service.OVERWATCH)
 
 
+async def heroic_intervention_open(session: AsyncSession, game: Game) -> bool:
+    # Whether to pause at the end of this charge phase for the opponent of
+    # the player whose turn it is to use Heroic Intervention: once (the
+    # first time it's advanced), if they could on one of their units.
+    from app.services.in_game import core_stratagems
+
+    if core_stratagems.charge_ended(game):
+        return False
+    stratagem = next(
+        (
+            s
+            for s in (
+                await session.execute(
+                    select(Stratagem)
+                    .options(
+                        selectinload(Stratagem.detachments),
+                        selectinload(Stratagem.timings),
+                        selectinload(Stratagem.game_action_link),
+                        selectinload(Stratagem.keywords),
+                        selectinload(Stratagem.excluded_keywords),
+                        selectinload(Stratagem.keyword_option_links),
+                    )
+                    .where(Stratagem.is_core)
+                )
+            ).scalars()
+            if s.game_action == core_stratagems.HEROIC_INTERVENTION
+        ),
+        None,
+    )
+    if stratagem is None:
+        return False
+    core_stratagems.end_charges(game)
+    opponent = player_at(game, other_seat(game.turn_seat))
+    if stratagem_unavailable_reason(game, opponent, stratagem) is None:
+        return True
+    # Nothing to intervene with: the phase just ends.
+    game.charges_ended.pop()
+    return False
+
+
 async def rapid_ingress_open(session: AsyncSession, game: Game) -> bool:
     # Whether, at the end of this movement phase, the opponent of the player
     # whose turn it is could use Rapid Ingress: units can arrive this round,
@@ -558,10 +602,58 @@ async def overwatch_open(session: AsyncSession, game: Game) -> bool:
     return overwatch_service.can_overwatch(game, opponent.seat)
 
 
+def _ability_names(unit: Unit) -> set[str]:
+    # Its models' abilities, and their wargear's.
+    return {a.name for m in unit.unit_models for a in m.model.abilities} | {
+        a.name for m in unit.unit_models for g in m.wargear for a in g.abilities
+    }
+
+
+def stratagem_cost(stratagem: Stratagem, unit: Unit | None) -> tuple[int, bool]:
+    # What the stratagem costs used on the unit, and whether it can be even
+    # if it's already been used this phase - an ability can change that for
+    # its unit (datasheet_abilities STRATAGEM_COSTS - e.g. Shock Charge:
+    # Crushing Impact for 0CP).
+    from app.seeds import datasheet_abilities
+
+    if unit is not None:
+        config = datasheet_abilities.STRATAGEM_COSTS
+        for name in sorted(_ability_names(unit) & set(config)):
+            if stratagem.name in config[name]:
+                return config[name][stratagem.name]
+    return stratagem.cp, False
+
+
 def stratagem_unavailable_reason(
-    game: Game, player: GamePlayer, stratagem: Stratagem, cp_discount: int = 0
+    game: Game,
+    player: GamePlayer,
+    stratagem: Stratagem,
+    cp_discount: int = 0,
+    target: Unit | None = None,
 ) -> str | None:
-    # Why a player can't use a stratagem right now, or None if they can.
+    # Why a player can't use a stratagem right now (on `target`, if given),
+    # or None if they can. Without a target, it's available if it is on
+    # one of their units an ability makes it cheaper for (see stratagem_cost).
+    if target is None and stratagem.game_action not in UNIT_TARGET_ACTIONS:
+        reason = _unavailable(game, player, stratagem, cp_discount, None)
+        if reason is not None and any(
+            stratagem_cost(stratagem, u) != (stratagem.cp, False)
+            and _unavailable(game, player, stratagem, cp_discount, u) is None
+            for u in deployment_service.deployable_units(player)
+        ):
+            return None
+        return reason
+    return _unavailable(game, player, stratagem, cp_discount, target)
+
+
+def _unavailable(
+    game: Game,
+    player: GamePlayer,
+    stratagem: Stratagem,
+    cp_discount: int,
+    target: Unit | None,
+) -> str | None:
+    cp, repeatable = stratagem_cost(stratagem, target)
     if game.status != "in_progress":
         return "the game isn't in progress"
     if not stratagem.is_core and not (
@@ -574,7 +666,7 @@ def stratagem_unavailable_reason(
             t.phase == game.phase and t.turn in (whose, "either") for t in stratagem.timings
         ):
             return f"it can't be used in the {game.phase} phase of this turn"
-    if any(
+    if not repeatable and any(
         use.stratagem_id == stratagem.id
         and use.battle_round == game.battle_round
         and use.turn_seat == game.turn_seat
@@ -583,7 +675,7 @@ def stratagem_unavailable_reason(
     ):
         # Each stratagem can be used once per phase (by each player).
         return "it has already been used this phase"
-    if player.cp < max(0, stratagem.cp - cp_discount):
+    if player.cp < max(0, cp - cp_discount):
         return "not enough CP"
     if stratagem.game_action == "replace_secondary" and not replaceable_secondaries(player):
         return "they have no active tactical Secondary Mission to replace"
@@ -684,22 +776,28 @@ async def use_stratagem(
     # a Teleport Homer token: 1CP). `target_unit_id`: the unit a stratagem
     # whose game action targets one is used on (e.g. Gunship Extraction) -
     # and `target_choice_id`, for one that also targets an objective or a
-    # transport, which (e.g. Cached Acquisition's objective).
-    reason = stratagem_unavailable_reason(game, player, stratagem, cp_discount)
-    if reason is not None:
-        raise _bad_request(f"can't use {stratagem.name}: {reason}")
-
+    # transport, which (e.g. Cached Acquisition's objective). Any other
+    # stratagem can be given the unit it targets (`target_unit_id`): then
+    # it's checked it can be (15.01), and costs what it does for that unit.
     target_unit = None
     if stratagem.game_action in UNIT_TARGET_ACTIONS:
         if target_unit_id is None:
             raise _bad_request(f"{stratagem.name} needs one of their units as its target")
         target_unit = deployment_service.find_unit(game, target_unit_id)
-        reason = stratagem_target_reason(game, player, stratagem, target_unit)
+    elif target_unit_id is not None:
+        targeted_unit = deployment_service.find_unit(game, target_unit_id)
+    reason = stratagem_unavailable_reason(
+        game, player, stratagem, cp_discount, target_unit or targeted_unit
+    )
+    if reason is not None:
+        raise _bad_request(f"can't use {stratagem.name}: {reason}")
+    if target_unit is not None or target_unit_id is not None:
+        reason = stratagem_target_reason(
+            game, player, stratagem, target_unit or targeted_unit
+        )
         if reason is not None:
             raise _bad_request(f"can't use {stratagem.name} on that unit: {reason}")
-    elif target_unit_id is not None:
-        raise _bad_request(f"{stratagem.name} doesn't target a unit")
-    if targeted_unit is not None:
+    if targeted_unit is not None and target_unit_id is None:
         reason = unit_target_reason(game, player, targeted_unit)
         if reason is not None:
             raise _bad_request(f"can't use {stratagem.name} on that unit: {reason}")
@@ -729,7 +827,7 @@ async def use_stratagem(
     elif target_secondary_id is not None:
         raise _bad_request(f"{stratagem.name} doesn't take a target")
 
-    cost = max(0, stratagem.cp - cp_discount)
+    cost = max(0, stratagem_cost(stratagem, target_unit or targeted_unit)[0] - cp_discount)
     player.cp -= cost
     use = GameStratagemUse(
         stratagem_id=stratagem.id,
@@ -745,7 +843,9 @@ async def use_stratagem(
     if stratagem.game_action == "strategic_reserves":
         reinforcements_service.place_in_reserves(game, player.seat, target_unit)
     if stratagem.game_action in _stratagem_actions().ACTIONS:
-        _stratagem_actions().carry_out(game, player, stratagem, target_unit, target_choice_id)
+        _stratagem_actions().carry_out(
+            game, player, stratagem, target_unit, target_choice_id, use
+        )
     # The unit it targeted (its target, or one it's used on - e.g. Rapid
     # Ingress): abilities that gain CP then (e.g. Broad Spectrum Data-tether).
     _stratagem_targeted(player, target_unit or targeted_unit)
@@ -766,10 +866,7 @@ def _stratagem_targeted(player: GamePlayer, unit: Unit | None) -> None:
     config = datasheet_abilities.STRATAGEM_TARGET_CP
     # (Its models' abilities, and their wargear's - e.g. an enhanced
     # data-tether.)
-    names = {a.name for m in unit.unit_models for a in m.model.abilities} | {
-        a.name for m in unit.unit_models for g in m.wargear for a in g.abilities
-    }
-    for name in sorted(names & set(config)):
+    for name in sorted(_ability_names(unit) & set(config)):
         if random.randint(1, 6) >= config[name]:
             player.cp += 1
 

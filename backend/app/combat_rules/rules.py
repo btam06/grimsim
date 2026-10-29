@@ -42,8 +42,10 @@ class RuleOption:
     grants_options: tuple[str, ...] = ()
     # In a game: what the unit it applies to can still shoot and declare a
     # charge after doing in its turn - "advanced", "fell_back" (e.g.
-    # Fanatical Devotion, Adaptive Tactics).
+    # Fanatical Devotion, Adaptive Tactics) - or just do what `eligible_for`
+    # says ("shoot", "charge" - e.g. Lancer's Duty: only charge).
     eligible_after: tuple[str, ...] = ()
+    eligible_for: tuple[str, ...] = ("shoot", "charge")
     # In a game: an aura's range (inches) - the option applies to friendly
     # units with a model within it of the model with the ability, rather than
     # to every unit it reaches in the list (see app/services/in_game/auras.py).

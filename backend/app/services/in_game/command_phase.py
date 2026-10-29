@@ -212,7 +212,7 @@ def eligible_after(game: Game, unit: Unit, action: str, to: str) -> bool:
         if choice.target_unit_id is None and choice.unit_id != unit.id:
             continue
         option = options(choice.ability).get(choice.option)
-        if option is not None and action in option.eligible_after:
+        if option is not None and action in option.eligible_after and to in option.eligible_for:
             return True
         # One named for an army rule's option (e.g. Author of the Codex's
         # doctrines) lets it as that does.

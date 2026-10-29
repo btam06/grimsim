@@ -7,6 +7,7 @@ from app.seeds import stratagems as stratagem_seeds
 from app.services.in_game import (
     battle_formations,
     charging,
+    core_stratagems,
     deployment,
     embarked,
     fighting,
@@ -39,13 +40,20 @@ from app.services.list_building import enhancements as enhancement_rules
 #   player's `transport_keywords` TRANSPORTs it's wholly within 3" of, with
 #   room for it.
 #
-# The objective or transport is picked from the unit's choices.
+# The objective or transport is picked from the unit's choices. The core
+# stratagems' game actions are in app/services/in_game/core_stratagems.py.
 
 SECURE_ON_DESTRUCTION = "secure_on_destruction"
 LONGER_CONSOLIDATION = "longer_consolidation"
 EXTRA_SELECTED_OBJECTIVE = "extra_selected_objective"
 REACTIVE_EMBARK = "reactive_embark"
-ACTIONS = (SECURE_ON_DESTRUCTION, LONGER_CONSOLIDATION, EXTRA_SELECTED_OBJECTIVE, REACTIVE_EMBARK)
+ACTIONS = (
+    SECURE_ON_DESTRUCTION,
+    LONGER_CONSOLIDATION,
+    EXTRA_SELECTED_OBJECTIVE,
+    REACTIVE_EMBARK,
+    *core_stratagems.ACTIONS,
+)
 
 
 @dataclass
@@ -92,6 +100,8 @@ def choices(game: Game, player: GamePlayer, stratagem: Stratagem, unit: Unit) ->
     # What else the stratagem's use on the unit could target now.
     config = stratagem_seeds.action_config(stratagem.name)
     action = stratagem.game_action
+    if action in core_stratagems.ACTIONS:
+        return core_stratagems.choices(game, player, stratagem, unit)
     if action == SECURE_ON_DESTRUCTION:
         record = _just_destroyed(game, unit)
         if record is None:
@@ -132,6 +142,8 @@ def target_reason(
     # keywords already checked), or None if it can.
     config = stratagem_seeds.action_config(stratagem.name)
     action = stratagem.game_action
+    if action in core_stratagems.ACTIONS:
+        return core_stratagems.target_reason(game, player, stratagem, unit)
     if action == SECURE_ON_DESTRUCTION:
         if _just_destroyed(game, unit) is None:
             return "it wasn't just destroyed"
@@ -170,12 +182,20 @@ def target_reason(
 
 
 def carry_out(
-    game: Game, player: GamePlayer, stratagem: Stratagem, unit: Unit, choice_id: int | None
+    game: Game,
+    player: GamePlayer,
+    stratagem: Stratagem,
+    unit: Unit,
+    choice_id: int | None,
+    use=None,
 ) -> None:
-    # The stratagem's used on the unit (already checked it can be), with the
-    # objective or transport picked.
+    # The stratagem's used (`use`) on the unit (already checked it can be),
+    # with the objective or transport picked.
     config = stratagem_seeds.action_config(stratagem.name)
     action = stratagem.game_action
+    if action in core_stratagems.ACTIONS:
+        core_stratagems.carry_out(game, player, stratagem, unit, choice_id, use)
+        return
     if action == LONGER_CONSOLIDATION:
         return
     if choice_id not in {c.id for c in choices(game, player, stratagem, unit)}:
