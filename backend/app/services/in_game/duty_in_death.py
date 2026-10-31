@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import random
 
 from app.models import Game, GameLingeringModel, Unit
+from app.services import dice
 from app.services.in_game import deployment
 
 # Duty in Death (a stratagem with game action "duty_in_death"): used in the
@@ -62,7 +62,7 @@ def lingers(game: Game, unit: Unit, unit_model, destroyed_by: Unit | None = None
 
     if not active(game, unit) or fighting.fought(game, unit):
         return False
-    roll = random.randint(1, 6) + (1 if _assault_doctrine(game, unit) else 0)
+    roll = dice.randint(1, 6) + (1 if _assault_doctrine(game, unit) else 0)
     if roll < LINGERS_ON:
         return False
     game.lingering_models.append(

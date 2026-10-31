@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import random
 
 from fastapi import HTTPException
 
 from app.models import Game, GameReactiveMove, Unit
+from app.services import dice
 from app.services.in_game import deployment, mission_state, movement, reinforcements
 from app.services.in_game.deployment import TOLERANCE, Placement, gap
 
@@ -131,7 +131,7 @@ def roll(game: Game, unit: Unit) -> GameReactiveMove:
     record = offer(game, unit)
     if record.roll is None:
         _, how = move_of(unit)
-        record.roll = random.randint(1, 6) if how["reach"] == "D6" else int(how["reach"])
+        record.roll = dice.randint(1, 6) if how["reach"] == "D6" else int(how["reach"])
     return record
 
 

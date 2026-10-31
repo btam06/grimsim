@@ -1,3 +1,7 @@
+import functools
+import random
+import statistics
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,12 +31,22 @@ from app.models import (
     Weapon,
     WeaponAbility,
 )
-from app.schemas import CombatIn, CombatOut, PositionOut, StratagemOut, WeaponCombatResultOut
+from app.schemas import (
+    CombatIn,
+    CombatOut,
+    PositionOut,
+    SimulationIn,
+    SimulationOut,
+    StatOut,
+    StratagemOut,
+    WeaponCombatResultOut,
+)
 from app.seeds import datasheet_abilities as datasheet_ability_seeds
 from app.seeds import factions as faction_seeds
 from app.seeds import stratagems as stratagem_seeds
 from app.routers.stratagems import _to_out as stratagem_to_out
 from app.services import combat as combat_service
+from app.services import dice
 from app.services import weapon_profiles
 from app.services import stratagem_availability
 from app.services.list_building import detachment_rules as detachment_rule_service
@@ -498,10 +512,60 @@ async def _deck_weapons(
 
 @router.post("", response_model=CombatOut)
 async def run_combat(payload: CombatIn, session: AsyncSession = Depends(get_session)):
-    return await calculate(session, payload)
+    # (The calculator's dice are its own, not the game's - see
+    # app/services/dice.py.)
+    with dice.using(random.Random()):
+        return await calculate(session, payload)
 
 
-async def calculate(
+@router.post("/simulate", response_model=SimulationOut)
+async def simulate(payload: SimulationIn, session: AsyncSession = Depends(get_session)):
+    # A Monte Carlo simulation: the attack resolved `runs` times, fresh dice
+    # each time - each measure's average and standard deviation, and what
+    # the defender's points removed come to per attacking point.
+    with dice.using(random.Random()):
+        return await _simulate(session, payload)
+
+
+async def _simulate(session: AsyncSession, payload: SimulationIn) -> SimulationOut:
+    resolve, _, _ = await _prepared(session, payload)
+    attacker = await _load_unit(session, payload.attacking_unit_id)
+    defender = await _load_unit(session, payload.defending_unit_id)
+    starting = {m.id: m.wounds for m in defender.unit_models}
+    total_wounds = sum(starting.values())
+    hits, wounds, damage, destroyed, removed = [], [], [], [], []
+    # (Nothing changes the models' keywords between runs.)
+    with enhancement_rules.cached_keywords():
+        results = [resolve() for _ in range(payload.runs)]
+    for result in results:
+        lost = total_wounds - sum(
+            result.defender_wounds_remaining.get(i, w) for i, w in starting.items()
+        )
+        hits.append(result.hits)
+        wounds.append(result.wounds)
+        damage.append(lost)
+        destroyed.append(result.models_destroyed)
+        removed.append(defender.points * lost / total_wounds if total_wounds else 0)
+
+    def stat(values: list[float]) -> StatOut:
+        return StatOut(mean=statistics.fmean(values), sd=statistics.pstdev(values))
+
+    points_removed = stat(removed)
+    return SimulationOut(
+        runs=payload.runs,
+        hits=stat(hits),
+        wounds=stat(wounds),
+        damage=stat(damage),
+        models_destroyed=stat(destroyed),
+        attacker_points=attacker.points,
+        defender_points=defender.points,
+        defender_wounds=total_wounds,
+        points_removed=points_removed,
+        efficiency=points_removed.mean / attacker.points if attacker.points else None,
+    )
+
+
+async def _prepared(
     session: AsyncSession,
     payload: CombatIn,
     firing: dict[int, dict] | None = None,
@@ -513,7 +577,10 @@ async def calculate(
     attack_limits: dict | None = None,
     hazards_rolled: set | None = None,
     precision_models: set | None = None,
-) -> CombatOut:
+) -> tuple:
+    # Everything an attack needs to be resolved, once: a function that
+    # resolves it (rolling its dice afresh each time), and whether the target
+    # was visible and in range. (See calculate.)
     # Resolves an attack (see app/services/combat.py). `firing` is which
     # weapons each attacking model can fire and at half range or not, when
     # that's known from the battlefield (see app/services/in_game/shooting.py); the
@@ -589,7 +656,8 @@ async def calculate(
     visible = True if payload.game_id is None else payload.defender_visible
     in_range = True if payload.game_id is None else payload.defender_in_range
 
-    result = combat_service.resolve_combat(
+    resolve = functools.partial(
+        combat_service.resolve_combat,
         attacker=attacker,
         defender=defender,
         selected_weapon_ids=set(payload.selected_weapon_ids)
@@ -637,7 +705,38 @@ async def calculate(
         hazards_rolled=hazards_rolled,
         precision_models=precision_models,
     )
+    return resolve, visible, in_range
 
+
+async def calculate(
+    session: AsyncSession,
+    payload: CombatIn,
+    firing: dict[int, dict] | None = None,
+    defender_wounds: dict[int, int] | None = None,
+    attacker_wounds: dict[int, int] | None = None,
+    firing_deck: list[tuple[int, int, int]] | None = None,
+    attacker_extra_rules: list[Rule] | None = None,
+    defender_model_rules: dict[int, list[Rule]] | None = None,
+    attack_limits: dict | None = None,
+    hazards_rolled: set | None = None,
+    precision_models: set | None = None,
+) -> CombatOut:
+    # Resolves an attack (see app/services/combat.py). See _prepared for
+    # what the arguments are.
+    resolve, visible, in_range = await _prepared(
+        session,
+        payload,
+        firing=firing,
+        defender_wounds=defender_wounds,
+        attacker_wounds=attacker_wounds,
+        firing_deck=firing_deck,
+        attacker_extra_rules=attacker_extra_rules,
+        defender_model_rules=defender_model_rules,
+        attack_limits=attack_limits,
+        hazards_rolled=hazards_rolled,
+        precision_models=precision_models,
+    )
+    result = resolve()
     return CombatOut(
         visible=visible,
         in_range=in_range,

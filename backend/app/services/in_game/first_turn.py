@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import random
 
 from fastapi import HTTPException
 
 from app.models import Game, GameFirstTurnRoll
+from app.services import dice
 
 # Who goes first: once both armies are set up (see
 # app/services/in_game/deployment.py), the players roll off - each rolls one
@@ -40,7 +40,7 @@ def roll(game: Game) -> int:
     attempt = 0
     while True:
         attempt += 1
-        rolls = {seat: random.randint(1, 6) for seat in SEATS}
+        rolls = {seat: dice.randint(1, 6) for seat in SEATS}
         for seat, value in rolls.items():
             game.first_turn_rolls.append(
                 GameFirstTurnRoll(attempt=attempt, seat=seat, roll=value)

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-import random
 
 from fastapi import HTTPException
 
@@ -14,6 +13,7 @@ from app.models import (
     Unit,
     UnitModel,
 )
+from app.services import dice
 from app.services.in_game import casualties, deployment, regions
 from app.services.in_game.deployment import BOARD, TOLERANCE, Base, Placement, gap
 
@@ -229,7 +229,7 @@ def _hazard(game: Game, record: GameEmergencyDisembark, unit: Unit, unit_model: 
     from app.services.combat import hazard_failed, hazard_wounds
     from app.services.list_building.enhancements import model_keywords
 
-    roll = random.randint(1, 6)
+    roll = dice.randint(1, 6)
     wounds = 0
     if hazard_failed(roll):
         for _ in range(hazard_wounds([model_keywords(unit, m) for m in unit.unit_models])):
@@ -276,7 +276,7 @@ def _explode(game: Game, transport_unit_id: int) -> None:
         wreck = wrecks.get(unit_model.id)
         if amount is None or wreck is None:
             continue
-        roll = random.randint(1, 6)
+        roll = dice.randint(1, 6)
         game.emergency_rolls.append(
             GameEmergencyRoll(transport_unit_id=transport.id, kind="deadly_demise", roll=roll)
         )

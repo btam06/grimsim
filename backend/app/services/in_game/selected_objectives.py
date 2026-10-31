@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import random
 
 from fastapi import HTTPException
 
 from app.models import Game, GameSelectedObjective, Unit
 from app.models.terrain import TerrainObjective
 from app.seeds import factions as faction_seeds
+from app.services import dice
 from app.services.in_game import deployment, mission_state, objectives
 from app.services.in_game.deployment import TOLERANCE
 from app.services.in_game.terrain import area_polygon
@@ -194,5 +194,5 @@ def end_of_command(game: Game) -> None:
             config = faction_seeds.END_OF_COMMAND_CP.get(enhancement.name) if enhancement else None
             if config is None or not unit_within(game, unit, config["within"]):
                 continue
-            if random.randint(1, 6) >= config["roll"]:
+            if dice.randint(1, 6) >= config["roll"]:
                 player.cp += 1

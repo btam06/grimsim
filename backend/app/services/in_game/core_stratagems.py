@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import random
 
 from fastapi import HTTPException
 
 from app.models import Game, GamePlayer, GameStratagemOutcome, GameStratagemUse, Stratagem, Unit
+from app.services import dice
 from app.services.in_game import casualties, charging, deployment, fighting, movement, shooting
 from app.services.in_game.deployment import TOLERANCE, gap
 from app.services.list_building import enhancements as enhancement_rules
@@ -304,7 +304,7 @@ def carry_out(
         raise _bad_request(f"{stratagem.name} needs one of its choices for that unit")
     if action == EXPLOSIVES:
         enemy = deployment.find_unit(game, choice_id)
-        rolls = [random.randint(1, 6) for _ in range(EXPLOSIVES_DICE)]
+        rolls = [dice.randint(1, 6) for _ in range(EXPLOSIVES_DICE)]
         wounds = sum(1 for r in rolls if r >= 4)
         casualties.mortal_wounds(game, enemy, wounds, destroyed_by=unit)
         _outcome(
@@ -323,7 +323,7 @@ def carry_out(
             and any(gap(mine[m.id], t) <= movement.ENGAGEMENT_RANGE + TOLERANCE for t in theirs)
         ]
         model = max(engaged, key=lambda m: m.model.toughness)
-        rolls = [random.randint(1, 6) for _ in range(model.model.toughness)]
+        rolls = [dice.randint(1, 6) for _ in range(model.model.toughness)]
         to_enemy = min(sum(1 for r in rolls if r >= 5), CRUSHING_MAX)
         to_self = min(sum(1 for r in rolls if r == 1), CRUSHING_MAX)
         casualties.mortal_wounds(game, enemy, to_enemy, destroyed_by=unit)
@@ -349,13 +349,13 @@ def carry_out(
         if choice_id == ADVANCE_ROLL:
             move = movement.unit_move(game, unit)
             before = move.advance_roll
-            move.advance_roll = random.randint(1, 6)
+            move.advance_roll = dice.randint(1, 6)
             _outcome(use, f"Advance roll {before} re-rolled: {move.advance_roll}", choice_id)
         else:
             charge = charging.unit_charge(game, unit)
             before = charge.roll
             charge.first_die, charge.second_die = (
-                random.randint(1, 6) for _ in range(charging.CHARGE_DICE)
+                dice.randint(1, 6) for _ in range(charging.CHARGE_DICE)
             )
             _outcome(use, f"Charge roll {before} re-rolled: {charge.roll}", choice_id)
 

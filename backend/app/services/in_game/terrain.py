@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-import random
 import re
 from dataclasses import dataclass
 
@@ -9,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import TerrainArea, TerrainFeature, TerrainLayout
+from app.services import dice
 
 # Where a model's base is relative to the battlefield's terrain: whether it's
 # within (any part of it over) or wholly within (all of it over) a terrain area
@@ -298,4 +298,4 @@ async def pick_layout(
             )
         ).scalars()
     )
-    return random.choice(layouts) if layouts else None
+    return dice.choice(layouts) if layouts else None

@@ -20,7 +20,7 @@ def _dice(monkeypatch, *rolls):
     # Battle-shock tests roll these, two at a time.
     values = iter(rolls)
     monkeypatch.setattr(
-        "app.services.in_game.battle_shock.random.randint", lambda a, b: next(values)
+        "app.services.dice.randint", lambda a, b: next(values)
     )
 
 

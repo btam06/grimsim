@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import random
 import re
 from collections import deque
 from dataclasses import dataclass, field
@@ -10,6 +9,7 @@ from app.combat_rules import CONDITIONS, EFFECTS, Rule
 from app.combat_rules.conditions import TARGET_ENGAGED, WITHIN_12_OF_TARGET
 from app.combat_rules.effects import OWN_UNIT_EFFECTS
 from app.models import DetachmentRule, Model, Stratagem, Unit, WargearAbility, WeaponAbility
+from app.services import dice
 from app.services.list_building import detachment_rules as detachment_rule_service
 from app.services.list_building import enhancements as enhancement_rules
 
@@ -33,7 +33,7 @@ def roll_dice_faces(notation: str) -> tuple[int, list[int]]:
     count = int(match["count"]) if match["count"] else 1
     die = int(match["die"])
     plus = int(match["plus"]) if match["plus"] else 0
-    faces = [random.randint(1, die) for _ in range(count)]
+    faces = [dice.randint(1, die) for _ in range(count)]
     return sum(faces) + plus, faces
 
 
@@ -308,6 +308,9 @@ class CombatResult:
     # How many hits were scored (rolled or automatic, and any extra ones -
     # e.g. Sustained Hits).
     hits                       : int       = field(default=0)
+    # How many of those wounded (rolled, or automatically - e.g. Lethal
+    # Hits).
+    wounds                     : int       = field(default=0)
     models_destroyed           : int       = field(default=0)
     defending_models_remaining : int       = field(default=0)
     # Self-inflicted hazard checks made by the attacking unit (one per
@@ -926,7 +929,7 @@ def resolve_combat(
                     # A hazard roll for each [HAZARDOUS] weapon selected; a
                     # 1-2 fails, and the unit suffers mortal wounds once its
                     # attacks are resolved (see below).
-                    hazard_roll = random.randint(1, 6)
+                    hazard_roll = dice.randint(1, 6)
                     result.hazardous_rolls.append(hazard_roll)
                     weapon_result.hazardous_rolls.append(hazard_roll)
                     if hazard_failed(hazard_roll):
@@ -971,7 +974,7 @@ def resolve_combat(
         feel_no_pain = min((fnp for fnp in fnps if fnp is not None), default=None)
         for _ in range(damage):
             if feel_no_pain is not None:
-                fnp_roll = random.randint(1, 6)
+                fnp_roll = dice.randint(1, 6)
                 result.fnp_rolls.append(fnp_roll)
                 weapon_result.fnp_rolls.append(fnp_roll)
                 if fnp_roll >= feel_no_pain:
@@ -982,7 +985,7 @@ def resolve_combat(
             if target.remaining_wounds <= 0:
                 targets.remove(target)
                 if target.deadly_demise:
-                    demise_roll = random.randint(1, 6)
+                    demise_roll = dice.randint(1, 6)
                     result.deadly_demise_rolls.append(demise_roll)
                     if demise_roll == 6:
                         result.deadly_demise_explosions += 1
@@ -1085,7 +1088,7 @@ def resolve_combat(
                 return roll != 1 and (roll >= critical_hit_on or roll >= effective_skill)
 
             # Hit roll: succeeds (hits) on a roll equal to or greater than skill.
-            hit_roll = random.randint(1, 6)
+            hit_roll = dice.randint(1, 6)
             result.attack_rolls.append(hit_roll)
             weapon_result.attack_rolls.append(hit_roll)
             if snap_shots:
@@ -1104,7 +1107,7 @@ def resolve_combat(
                 # Re-roll a failed hit (or just a 1) once, replacing the
                 # original result - hit-step triggers (e.g. Sustained Hits)
                 # are re-checked against the new roll too.
-                hit_roll = random.randint(1, 6)
+                hit_roll = dice.randint(1, 6)
                 result.attack_rerolls.append(hit_roll)
                 weapon_result.attack_rerolls.append(hit_roll)
                 _apply_triggered_effects(
@@ -1151,7 +1154,7 @@ def resolve_combat(
                         or (wound_roll == 1 and attack.get("reroll_wound_ones"))
                     ):
                         break
-                    wound_roll = random.randint(1, 6)
+                    wound_roll = dice.randint(1, 6)
                     if is_reroll:
                         result.wound_rerolls.append(wound_roll)
                         weapon_result.wound_rerolls.append(wound_roll)
@@ -1202,6 +1205,7 @@ def resolve_combat(
                         break
             if wound_passed:
                 wounds.append((attack, fired))
+        result.wounds += len(wounds)
 
         # Save rolls (05.03): one for each wound, made together; then resolved
         # from the lowest result to the highest, each allocated to the current
@@ -1212,7 +1216,7 @@ def resolve_combat(
         devastating = [(a, f) for a, f in wounds if a.get("no_save")]
         rolled = []
         for attack, fired in saving:
-            save_roll = random.randint(1, 6)
+            save_roll = dice.randint(1, 6)
             result.save_rolls.append(save_roll)
             fired["result"].save_rolls.append(save_roll)
             _apply_triggered_effects(
@@ -1294,7 +1298,7 @@ def resolve_combat(
                     break
                 victim = _mortal_wound_target(alive)
                 fnp = attacker_fnps.get(victim.unit_model_id)
-                if fnp is not None and random.randint(1, 6) >= fnp:
+                if fnp is not None and dice.randint(1, 6) >= fnp:
                     continue
                 result.hazardous_wounds += 1
                 weapon_result.hazardous_wounds += 1

@@ -36,8 +36,8 @@ async def _add_weapon(session, unit, name, attacks="1", abilities=()):
 async def _charged_game(client, session, tmp_path, monkeypatch, then_at):
     # D charges A (8" roll), then A is moved `then_at` inches (base to base)
     # in front of D's model - as if something moved it away.
-    monkeypatch.setattr("app.services.in_game.charging.random.randint", lambda a, b: 4)
-    monkeypatch.setattr("app.services.combat.random.randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 4)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     units = {1: [("A", 1, BLADE)], 2: [("D", 1, BLADE)]}
     game, deployment = await _battle(client, session, tmp_path, units=units)
     game_id = game["id"]

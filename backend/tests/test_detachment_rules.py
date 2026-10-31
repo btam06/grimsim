@@ -87,7 +87,7 @@ def test_rule_without_options_reaches_every_unit():
 
 def test_rule_grants_weapon_abilities_in_combat(monkeypatch):
     # +1 to hit on ranged weapons for INFANTRY units: a 3 hits against BS4.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 3)
     plus_one = WeaponAbility(name="+1", description=None)
     plus_one.conditions = [Condition(keyword="always", name="always", description=None)]
     plus_one.effects = [Effect(keyword="plus_one_to_hit", name="+1", description=None)]
@@ -235,7 +235,7 @@ async def test_combat_endpoint_applies_detachment_rule_stealth(
     # The defender's list has a detachment giving its INFANTRY units Stealth:
     # ranged attacks against them are -1 to hit. Every roll is a 4 vs BS4.
     await _seed_abilities(session)
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 4)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 4)
     infantry = (await client.post("/keywords", json={"name": "INFANTRY"})).json()["id"]
     detachment = await _detachment(client, faction_id)
     rule = await client.post(
@@ -411,7 +411,7 @@ MANTLE_RULES = {
 def _shot_at(monkeypatch, defender: Unit, rules, apply_precision=False, save_roll=4):
     # One AP-4 attack (3+ saves need a 7): only a 4+ invulnerable save stops a 4.
     rolls = iter([6, 6, save_roll])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     gun = Weapon(
         name="Gun",
         model_id=1,
@@ -465,7 +465,7 @@ def test_per_model_defender_rule_protects_only_the_matching_model(monkeypatch):
 
 def test_per_model_attacker_rule_reaches_only_matching_models_weapons(monkeypatch):
     # +1 to hit on ranged weapons for TECH-PRIEST models: a 3 hits against BS4.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 3)
     plus_one = WeaponAbility(name="+1", description=None)
     plus_one.conditions = [Condition(keyword="always", name="always", description=None)]
     plus_one.effects = [Effect(keyword="plus_one_to_hit", name="+1", description=None)]

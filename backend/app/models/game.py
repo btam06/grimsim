@@ -3,10 +3,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
+from app.services import dice
 
 if TYPE_CHECKING:
     from app.models.army_list import ArmyList
@@ -40,6 +41,10 @@ class Game(Base):
     battle_round: Mapped[int] = mapped_column(Integer, default=0)
     turn_seat: Mapped[int | None] = mapped_column(Integer, nullable=True)
     phase: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Its dice: every roll comes from a stream seeded with this, and how many
+    # rolls it's made so far (see app/services/dice.py).
+    rng_seed: Mapped[int] = mapped_column(BigInteger, default=dice.new_seed)
+    rng_rolls: Mapped[int] = mapped_column(Integer, default=0)
 
     players: Mapped[list["GamePlayer"]] = relationship(
         back_populates="game", cascade="all, delete-orphan", order_by="GamePlayer.seat"
@@ -253,6 +258,10 @@ class Game(Base):
         # The terrain layout it's played on, if one fits the players'
         # dispositions (see app/services/in_game/terrain.py).
         return self.layout_link.layout if self.layout_link else None
+
+
+# A game's rolls come from its own dice once it's loaded (or made).
+dice.listen(Game)
 
 
 class GamePlayer(Base):
@@ -971,6 +980,27 @@ class GameMovementEnded(Base):
     game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
     battle_round: Mapped[int] = mapped_column(Integer)
     turn_seat: Mapped[int] = mapped_column(Integer)
+
+
+class GameAgentLog(Base):
+    # An action applied through the agent interface (see
+    # app/routers/agent.py), for its debug log: when (game state), by whom,
+    # what, whether it was among the legal actions listed then, whether it
+    # worked (or why not), and how long it took.
+    __tablename__ = "game_agent_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    state: Mapped[str] = mapped_column(String(128))
+    seat: Mapped[int] = mapped_column(Integer)
+    action_type: Mapped[str] = mapped_column(String(64))
+    params: Mapped[str] = mapped_column(String)
+    listed: Mapped[bool] = mapped_column(Boolean)
+    ok: Mapped[bool] = mapped_column(Boolean)
+    error: Mapped[str | None] = mapped_column(String, nullable=True)
+    result: Mapped[str | None] = mapped_column(String, nullable=True)
+    ms: Mapped[float] = mapped_column(Float)
 
 
 class GameChargeEnded(Base):

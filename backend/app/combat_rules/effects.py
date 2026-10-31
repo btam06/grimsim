@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import random
 from collections import deque
 from typing import Any
+
+from app.services import dice
 
 # Each effect is a hardcoded keyword + a function that mutates the current
 # attack's state and/or the queue of pending attacks for the weapon still being
@@ -380,7 +381,7 @@ def melta_2(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
 
 def add_d3_extra_hits(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
     # Queues D3 additional hits onto the attack chain (e.g. Sustained Hits D3).
-    for _ in range(random.randint(1, 3)):
+    for _ in range(dice.randint(1, 3)):
         pending.append({"auto_hit": True})
 
 
@@ -402,7 +403,7 @@ def melta_6(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
 def add_d6_plus_3_attacks(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
     # Queues D6+3 additional attacks for this weapon, each with its own hit
     # roll (e.g. Rapid Fire D6+3 within half range).
-    for _ in range(random.randint(1, 6) + 3):
+    for _ in range(dice.randint(1, 6) + 3):
         pending.append({"auto_hit": False})
 
 

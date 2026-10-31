@@ -14,7 +14,7 @@ ROLL_URL = "/games/{}/charge/roll"
 async def _charge_game(client, session, tmp_path, monkeypatch, d=1, a=1, die=4, gap=6.0):
     # D (at x 20, y 4, in a row) charging A, whose models stand `gap` inches
     # from D's first model, base to base, straight down the board.
-    monkeypatch.setattr("app.services.in_game.charging.random.randint", lambda a_, b: die)
+    monkeypatch.setattr("app.services.dice.randint", lambda a_, b: die)
     units = {1: [("A", a, {})], 2: [("D", d, {})]}
     game, deployment = await _battle(client, session, tmp_path, units=units)
     a_unit = _unit_named(deployment, "A")
@@ -68,7 +68,7 @@ async def test_roll_the_charge(client: AsyncClient, session, tmp_path, monkeypat
     [unit] = (await _roll(client, game_id, d))["units"]
     assert (unit["dice"], unit["roll"], unit["failed"]) == ([4, 4], 8, False)
     # Rolling again keeps it.
-    monkeypatch.setattr("app.services.in_game.charging.random.randint", lambda a_, b: 1)
+    monkeypatch.setattr("app.services.dice.randint", lambda a_, b: 1)
     [unit] = (await _roll(client, game_id, d))["units"]
     assert unit["roll"] == 8
 

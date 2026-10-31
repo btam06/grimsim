@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import math
-import random
 
 from fastapi import HTTPException
 
 from app.models import Game, GameUnitMove, GameUnitMoveStart, Unit, UnitModel
+from app.services import dice
 from app.services.in_game import (
     deployment,
     embarked,
@@ -261,14 +261,14 @@ def roll_advance(game: Game, unit: Unit) -> GameUnitMove:
         # Already moved (normally) this phase: roll now; already rolled: that
         # roll stands.
         if move.advance_roll is None:
-            move.advance_roll = random.randint(1, 6) + roll_bonus(game, unit, "advance")
+            move.advance_roll = dice.randint(1, 6) + roll_bonus(game, unit, "advance")
         return move
     move = GameUnitMove(
         unit_id=unit.id,
         battle_round=game.battle_round,
         turn_seat=game.turn_seat,
         kind="advance",
-        advance_roll=random.randint(1, 6) + roll_bonus(game, unit, "advance"),
+        advance_roll=dice.randint(1, 6) + roll_bonus(game, unit, "advance"),
         completed=False,
     )
     game.unit_moves.append(move)
@@ -509,7 +509,7 @@ def _desperate_escape(game: Game, unit: Unit) -> None:
     mission_state.mark(game, seat, DESPERATE_ESCAPE, unit.id)
     models = deployment.models_on_battlefield(game, unit)
     per = hazard_wounds([{k.name for k in m.model.keywords} for m in models])
-    failed = sum(hazard_failed(random.randint(1, 6)) for _ in models)
+    failed = sum(hazard_failed(dice.randint(1, 6)) for _ in models)
     if failed:
         casualties.mortal_wounds(game, unit, failed * per)
 
@@ -532,7 +532,7 @@ def _super_heavy_walker(game: Game, unit: Unit) -> None:
     ):
         return
     mission_state.mark(game, seat, SUPER_HEAVY_ROLL, unit.id)
-    roll = random.randint(1, 6)
+    roll = dice.randint(1, 6)
     if roll == 1:
         battle_shock.battle_shock_outright(game, unit, pathing.SUPER_HEAVY_WALKER, roll)
 

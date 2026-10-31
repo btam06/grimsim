@@ -98,7 +98,7 @@ async def _rule_test(client, game_id, unit):
 def _dice(monkeypatch, *rolls):
     values = iter(rolls)
     monkeypatch.setattr(
-        "app.services.in_game.battle_shock.random.randint", lambda a, b: next(values)
+        "app.services.dice.randint", lambda a, b: next(values)
     )
 
 
@@ -212,7 +212,7 @@ async def test_dread_abilities_last_and_can_be_rolled(
     assert "Doom" not in rule["options"] and "Roll two D6" in rule["options"]
     rolls = iter([2, 5])
     monkeypatch.setattr(
-        "app.services.in_game.battle_round.random.randint", lambda a, b: next(rolls)
+        "app.services.dice.randint", lambda a, b: next(rolls)
     )
     response = await client.post(
         f"/games/{game_id}/round-start/choice",
@@ -248,7 +248,7 @@ async def test_voices_in_the_code(client: AsyncClient, session, tmp_path):
 
 async def test_executioner(client: AsyncClient, session, tmp_path, monkeypatch):
     # D destroys A; seat 1's B is within 3" of A's last model.
-    monkeypatch.setattr("app.services.combat.random.randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     units = {1: [("A", 1, {}), ("B", 1, {})], 2: [("D", 2, {"weapon_range": 24})]}
     spots = {"A": (20, 38), "B": (30, 38), "D": (20, 4)}
     game, deployment_ = await _battle(client, session, tmp_path, units=units, spots=spots)
@@ -276,7 +276,7 @@ async def test_super_heavy_walker(client: AsyncClient, session, tmp_path, monkey
     await _chaos_knights_ability(session, k, "Super-heavy Walker")
     # Straight through the wall at y 8: only MOBILE (24.35) - then it rolls a
     # 1.
-    monkeypatch.setattr("app.services.in_game.movement.random.randint", lambda a, b: 1)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 1)
     to = [{"unit_model_id": k["models"][0]["unit_model_id"], "x": 9, "y": 10.5}]
     response = await _move(client, game_id, k, "normal", to)
     assert response.status_code == 400

@@ -145,17 +145,15 @@ async def test_broad_spectrum_data_tether(client: AsyncClient, session, tmp_path
     player = next(pl for pl in game.players if pl.seat == 2)
     p = deployment.find_unit(game, named["P"]["unit_id"])
     cp = player.cp
-    monkeypatch.setattr(game_service.random, "randint", lambda a, b: 4)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 4)
     game_service._stratagem_targeted(player, p)
     assert player.cp == cp
-    monkeypatch.setattr(game_service.random, "randint", lambda a, b: 5)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 5)
     game_service._stratagem_targeted(player, p)
     assert player.cp == cp + 1
 
 
 async def test_secutor_of_olympus(client: AsyncClient, session, tmp_path, monkeypatch):
-    from app.services.in_game import shooting_start
-
     units = {1: [("V", 1, {"keywords": ("VEHICLE",)}), ("A", 1, {})], 2: [("T", 1, {})]}
     spots = {"V": (20, 38), "A": (40, 38), "T": (20, 4)}
     game, deployment_ = await _battle(client, session, tmp_path, units=units, spots=spots)
@@ -180,7 +178,7 @@ async def test_secutor_of_olympus(client: AsyncClient, session, tmp_path, monkey
     )
     assert "VEHICLE" in response.json()["detail"]
     # Every die a 4: on a 2+, D3+1 (4+1) mortal wounds - V's 2 wounds gone.
-    monkeypatch.setattr(shooting_start.random, "randint", lambda lo, hi: 4)
+    monkeypatch.setattr("app.services.dice.randint", lambda lo, hi: 4)
     response = await client.post(
         f"/games/{game_id}/shooting-start", json={**payload, "target_unit_id": v["unit_id"]}
     )

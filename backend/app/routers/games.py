@@ -298,6 +298,7 @@ def _game_out(game: Game) -> GameOut:
         battle_round=game.battle_round,
         turn_seat=game.turn_seat,
         phase=game.phase,
+        seed=game.rng_seed,
         players=[_player_out(p) for p in game.players],
         terrain_layout_id=game.layout.id if game.layout else None,
         terrain_layout_name=game.layout.name if game.layout else None,

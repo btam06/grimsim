@@ -136,7 +136,7 @@ def test_unyielding_in_the_face_of_the_foe_while_controlling_an_objective():
 
 def _attack(monkeypatch, roll, attacker_gear=(), defender_gear=(), **kwargs):
     # One S8 AP-1 attack against a 3+ save, every die rolling `roll`.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: roll)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: roll)
     weapon = _weapon(attacks="1", skill=3, strength=8, ap=kwargs.pop("ap", -1), weapon_type="ranged")
     weapon.id = 1
     attacker = _unit([_unit_model(_model(), [weapon], wargear=list(attacker_gear))])
@@ -254,7 +254,7 @@ def _damage(monkeypatch, rolls, rules=None):
     # One D3+2 ranged attack that hits, wounds and isn't saved, against a
     # 10-wound model: the damage done, with the dice rolling `rolls` in turn.
     dice = iter(rolls)
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(dice))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(dice))
     weapon = _weapon(attacks="1", skill=3, strength=8, ap=0, damage="D3+2", weapon_type="ranged")
     weapon.id = 1
     attacker = _unit([_unit_model(_model(), [weapon])])

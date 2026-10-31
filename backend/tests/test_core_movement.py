@@ -74,7 +74,7 @@ async def test_battle_shocked_units_fall_back_with_a_desperate_escape(
     battle_shock.battle_shock_outright(game, d, "test", 1)
     await session.commit()
     assert movement.through(game, d, "fall_back") == "enemies"
-    monkeypatch.setattr(movement.random, "randint", lambda lo, hi: 1)
+    monkeypatch.setattr("app.services.dice.randint", lambda lo, hi: 1)
     response = await client.post(
         f"/games/{game_id}/movement",
         json={"unit_id": u["D"]["unit_id"], "kind": "fall_back", "positions": _to(u["D"], 20, 1)},

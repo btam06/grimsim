@@ -19,10 +19,12 @@ import {
   listWeaponAbilities,
   listWeapons,
   runCombat,
+  simulateCombat,
 } from '../api'
 import Field from './Field'
 import { Described, RuleOptionPicker } from './RuleOptionPicker'
 import CombatResults from './CombatResults'
+import SimulationChart from './SimulationChart'
 import Select from './Select'
 import UnitDatasheet from './UnitDatasheet'
 import { onePerProfile, otherProfile } from '../weaponProfiles'
@@ -146,6 +148,9 @@ function StratagemPicker({ side, stratagems, selectedIds, onChange }) {
   )
 }
 
+// How many times Simulate resolves the attack (see SimulationChart).
+const SIMULATION_RUNS = 1000
+
 function CalculatorPanel() {
   const [units, setUnits] = useState([])
   const [factionUnits, setFactionUnits] = useState([])
@@ -184,12 +189,16 @@ function CalculatorPanel() {
   const [defenderPositionIds, setDefenderPositionIds] = useState([])
   const [applyPrecision, setApplyPrecision] = useState(false)
   const [result, setResult] = useState(null)
+  // The Monte Carlo simulation's averages (see SimulationChart).
+  const [simulation, setSimulation] = useState(null)
+  const [simulating, setSimulating] = useState(false)
   const [error, setError] = useState(null)
 
   // Results are for the options they were calculated with, so changing any
   // option clears them.
   useEffect(() => {
     setResult(null)
+    setSimulation(null)
   }, [
     attackerRuleChoices,
     defenderRuleChoices,
@@ -495,6 +504,54 @@ function CalculatorPanel() {
     )
   }
 
+  // The combat calculator's request for the options chosen.
+  const combatPayload = () => {
+    const selectedWeaponIds = visibleWeaponGroups
+      .filter((g) => selectedWeaponNames.includes(g.name))
+      .flatMap((g) => g.weaponIds)
+    return {
+      attacking_unit_id: Number(attackingUnitId),
+      defending_unit_id: Number(defendingUnitId),
+      selected_weapon_ids: selectedWeaponIds.filter((id) => typeof id === 'number'),
+      selected_enhancement_weapon_ids: selectedWeaponIds
+        .map((id) => knownWeapons.find((w) => w.id === id)?.enhancementWeaponId)
+        .filter((id) => id !== undefined),
+      stratagem_ids: selectedStratagemIds,
+      defender_stratagem_ids: selectedDefenderStratagemIds,
+      attacker_positions: attackerPositionIds,
+      defender_positions: defenderPositionIds,
+      apply_precision: hasPrecision && applyPrecision,
+      attacker_rule_options: selectedRuleOptions(attackerRuleAbilities, attackerRuleChoices),
+      defender_rule_options: selectedRuleOptions(defenderRuleAbilities, defenderRuleChoices),
+      in_engagement_range: inEngagementRange,
+      in_cover: inCover,
+      half_range: halfRange,
+      moved_less_than_3: movedLessThan3,
+      charged: inEngagementRange && charged,
+      defender_battle_shocked: defenderBattleShocked,
+      attacker_damaged: attackerDamaged,
+      advanced,
+    }
+  }
+
+  // The attack resolved SIMULATION_RUNS times: averages and spreads.
+  const handleSimulate = async () => {
+    setError(null)
+    setSimulation(null)
+    if (!attackingUnitId || !defendingUnitId) {
+      setError('Attacking and defending units are required')
+      return
+    }
+    setSimulating(true)
+    try {
+      setSimulation(await simulateCombat({ ...combatPayload(), runs: SIMULATION_RUNS }))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSimulating(false)
+    }
+  }
+
   const handleCalculate = async (e) => {
     e.preventDefault()
     setError(null)
@@ -504,32 +561,7 @@ function CalculatorPanel() {
       return
     }
     try {
-      const selectedWeaponIds = visibleWeaponGroups
-        .filter((g) => selectedWeaponNames.includes(g.name))
-        .flatMap((g) => g.weaponIds)
-      const response = await runCombat({
-        attacking_unit_id: Number(attackingUnitId),
-        defending_unit_id: Number(defendingUnitId),
-        selected_weapon_ids: selectedWeaponIds.filter((id) => typeof id === 'number'),
-        selected_enhancement_weapon_ids: selectedWeaponIds
-          .map((id) => knownWeapons.find((w) => w.id === id)?.enhancementWeaponId)
-          .filter((id) => id !== undefined),
-        stratagem_ids: selectedStratagemIds,
-        defender_stratagem_ids: selectedDefenderStratagemIds,
-        attacker_positions: attackerPositionIds,
-        defender_positions: defenderPositionIds,
-        apply_precision: hasPrecision && applyPrecision,
-        attacker_rule_options: selectedRuleOptions(attackerRuleAbilities, attackerRuleChoices),
-        defender_rule_options: selectedRuleOptions(defenderRuleAbilities, defenderRuleChoices),
-        in_engagement_range: inEngagementRange,
-        in_cover: inCover,
-        half_range: halfRange,
-        moved_less_than_3: movedLessThan3,
-        charged: inEngagementRange && charged,
-        defender_battle_shocked: defenderBattleShocked,
-        attacker_damaged: attackerDamaged,
-        advanced,
-      })
+      const response = await runCombat(combatPayload())
       // Feel no pain rolls are only worth showing if the defender has FNP -
       // its own, or granted by a rule (e.g. a leader), which shows up as FNP
       // rolls having been made. Captured now, so changing the defender
@@ -782,9 +814,21 @@ function CalculatorPanel() {
             </label>
           )}
         </fieldset>
-        <button type="submit">Calculate</button>
+        <div className="inline-controls">
+          <button type="submit">Calculate</button>
+          <button type="button" disabled={simulating} onClick={handleSimulate}>
+            {simulating ? 'Simulating…' : `Simulate ${SIMULATION_RUNS.toLocaleString()} runs`}
+          </button>
+        </div>
       </form>
 
+      {simulation && (
+        <SimulationChart
+          result={simulation}
+          attackerName={attackingUnit ? unitLabel(attackingUnit) : 'the attacker'}
+          defenderName={defendingUnit ? unitLabel(defendingUnit) : 'the defender'}
+        />
+      )}
       {result && <CombatResults result={result} showFnp={result.defenderHasFnp} />}
     </section>
   )

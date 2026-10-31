@@ -547,9 +547,7 @@ async def test_enhancement_with_a_weapon_and_granted_keywords(
 async def test_combat_endpoint_fires_a_selected_enhancement_weapon(
     client: AsyncClient, army, monkeypatch
 ):
-    from app.services import combat
-
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     casket = await client.post(
         "/enhancements",
         json={

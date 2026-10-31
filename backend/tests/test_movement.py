@@ -145,7 +145,7 @@ async def test_reset_puts_it_back(client: AsyncClient, session, tmp_path):
 async def test_reset_keeps_the_advance_roll(
     client: AsyncClient, session, tmp_path, monkeypatch
 ):
-    monkeypatch.setattr("app.services.in_game.movement.random.randint", lambda a, b: 4)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 4)
     game, deployment = await _battle(client, session, tmp_path)
     game_id = game["id"]
     d = _unit_named(deployment, "D")
@@ -158,7 +158,7 @@ async def test_reset_keeps_the_advance_roll(
 
 async def test_advance_after_a_normal_move(client: AsyncClient, session, tmp_path, monkeypatch):
     # Moved normally, then decides to Advance after all: it rolls then.
-    monkeypatch.setattr("app.services.in_game.movement.random.randint", lambda a, b: 2)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 2)
     game, deployment = await _battle(client, session, tmp_path)
     game_id = game["id"]
     d = _unit_named(deployment, "D")
@@ -209,7 +209,7 @@ async def test_moved_unit_must_stay_in_coherency(client: AsyncClient, session, t
 
 
 async def test_advance(client: AsyncClient, session, tmp_path, monkeypatch):
-    monkeypatch.setattr("app.services.in_game.movement.random.randint", lambda a, b: 3)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 3)
     game, deployment = await _battle(client, session, tmp_path)
     game_id = game["id"]
     d = _unit_named(deployment, "D")
@@ -238,7 +238,7 @@ async def test_advance(client: AsyncClient, session, tmp_path, monkeypatch):
 async def test_advance_roll_stands(client: AsyncClient, session, tmp_path, monkeypatch):
     # Rolling again (e.g. unticking and ticking Advance) keeps the first roll.
     rolls = iter([2, 6])
-    monkeypatch.setattr("app.services.in_game.movement.random.randint", lambda a, b: next(rolls))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls))
     game, deployment = await _battle(client, session, tmp_path)
     d = _unit_named(deployment, "D")
     url = f"/games/{game['id']}/movement/advance"

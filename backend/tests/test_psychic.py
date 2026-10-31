@@ -60,7 +60,7 @@ async def test_soul_sight_and_the_psyker_level(client: AsyncClient, session, tmp
     response = await _use(client, game_id, a, "Soul Sight", d)
     assert "Shooting phase" in response.json()["detail"]
     await _advance_to(client, game_id, 1, 1, "shooting")
-    monkeypatch.setattr("app.services.in_game.psychic.random.randint", lambda a, b: 4)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 4)
     response = await _use(client, game_id, a, "Soul Sight", d)
     assert response.status_code == 200, response.text
     game = await _load_game(session, game_id)
@@ -78,7 +78,7 @@ async def test_shrouding_and_a_psychic_roll_of_1(
     game_id, a, d = await _game_with_psyker(client, session, tmp_path)
     # Seat 2's Shooting phase: D could attack it.
     await _advance_to(client, game_id, 1, 2, "shooting")
-    monkeypatch.setattr("app.services.in_game.psychic.random.randint", lambda a, b: 1)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 1)
     response = await _use(client, game_id, a, "Shrouding")
     assert response.status_code == 200, response.text
     game = await _load_game(session, game_id)

@@ -432,7 +432,7 @@ async def test_duty_in_death_leaves_a_destroyed_model_until_its_unit_fights(
     client: AsyncClient, session, tmp_path, monkeypatch
 ):
     game_id, a, d = await _duty_game(client, session, tmp_path)
-    monkeypatch.setattr(duty_in_death.random, "randint", lambda lo, hi: 4)
+    monkeypatch.setattr("app.services.dice.randint", lambda lo, hi: 4)
     game_, a_, first = await _kill_one(session, game_id, a, d)
     # Destroyed (no wounds left, not attacked again), but still there.
     assert first in deployment.positions(game_)
@@ -449,7 +449,7 @@ async def test_duty_in_death_failed_roll_removes_the_model(
     client: AsyncClient, session, tmp_path, monkeypatch
 ):
     game_id, a, d = await _duty_game(client, session, tmp_path)
-    monkeypatch.setattr(duty_in_death.random, "randint", lambda lo, hi: 3)
+    monkeypatch.setattr("app.services.dice.randint", lambda lo, hi: 3)
     game_, _, first = await _kill_one(session, game_id, a, d)
     assert first not in deployment.positions(game_)
     # +1 with the Assault Doctrine active.
@@ -462,7 +462,7 @@ async def test_duty_in_death_models_go_at_the_end_of_the_phase(
     client: AsyncClient, session, tmp_path, monkeypatch
 ):
     game_id, a, d = await _duty_game(client, session, tmp_path)
-    monkeypatch.setattr(duty_in_death.random, "randint", lambda lo, hi: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda lo, hi: 6)
     _, _, first = await _kill_one(session, game_id, a, d)
     await session.commit()
     response = await client.post(f"/games/{game_id}/advance")

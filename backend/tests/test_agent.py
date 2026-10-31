@@ -1,0 +1,104 @@
+from httpx import AsyncClient
+
+from tests.test_deployment import _game
+from tests.test_movement import _battle
+
+# The agent interface (see app/routers/agent.py): the decision a game is
+# waiting on, its legal actions, and applying them - checked by playing
+# whole stretches of games with random legal actions.
+
+
+async def _decision(client, game_id):
+    response = await client.get(f"/games/{game_id}/agent")
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+async def _random_steps(client, game_id, steps):
+    # Up to `steps` random legal actions; the log of them.
+    for _ in range(steps):
+        response = await client.post(f"/games/{game_id}/agent/random")
+        if response.status_code != 200:
+            break
+    return (await client.get(f"/games/{game_id}/agent/log?limit=1000")).json()
+
+
+def _summary(problems):
+    # Each kind of problem, how often.
+    import collections
+
+    return collections.Counter((e["type"], (e["error"] or "")[:150]) for e in problems)
+
+
+def _problems(log):
+    # Crashes (not a refusal - an exception), and actions listed as legal
+    # that were then refused.
+    return [e for e in log if e["mismatch"] or (e["error"] and ":" in e["error"].split(" ")[0])]
+
+
+async def test_the_decision_and_its_actions(client: AsyncClient, session, tmp_path):
+    game, _ = await _battle(client, session, tmp_path)
+    decision = await _decision(client, game["id"])
+    assert decision["waiting_for"] == {"seat": 2, "reason": "their movement phase"}
+    types = set(decision["counts"])
+    assert {"advance", "move", "roll_advance"} <= types
+    move = next(a for a in decision["actions"] if a["type"] == "move")
+    assert move["placement"]["default"] is not None
+    assert move["concrete"]
+
+
+async def test_applying_an_action_is_logged(client: AsyncClient, session, tmp_path):
+    game, _ = await _battle(client, session, tmp_path)
+    decision = await _decision(client, game["id"])
+    advance = next(a for a in decision["actions"] if a["type"] == "advance")
+    response = await client.post(
+        f"/games/{game['id']}/agent/apply",
+        json={"action": {"type": "advance", "seat": advance["seat"], "params": {}}},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert (body["log"]["ok"], body["log"]["listed"]) == (True, True)
+    assert body["decision"]["state"].endswith("shooting")
+    # Not a legal action now: logged as refused (not listed, so no mismatch).
+    response = await client.post(
+        f"/games/{game['id']}/agent/apply",
+        json={"action": {"type": "roll_charge", "seat": 2, "params": {"unit_id": 1}}},
+    )
+    log = response.json()["log"]
+    assert (log["ok"], log["listed"], log["mismatch"]) == (False, False, False)
+
+
+async def test_random_play_through_the_battle(
+    client: AsyncClient, session, tmp_path, monkeypatch
+):
+    # Two armed units, starting 30" apart. (Seeded: the same game each time,
+    # so a failure can be replayed.)
+    monkeypatch.setattr("app.services.dice.new_seed", lambda: 40)
+    armed = {"weapon_range": 24, "melee": True}
+    units = {1: [("A", 5, armed)], 2: [("D", 5, armed)]}
+    game, _ = await _battle(client, session, tmp_path, units=units)
+    log = await _random_steps(client, game["id"], 150)
+    assert len(log) > 20
+    assert "shoot" in {e["type"] for e in log if e["ok"]}
+    assert _problems(log) == [], _summary(_problems(log))
+
+
+async def test_random_play_through_deployment(client: AsyncClient, session, tmp_path):
+    game = await _game(client, session, tmp_path, declare=False)
+    log = await _random_steps(client, game["id"], 60)
+    assert _problems(log) == [], _summary(_problems(log))
+    assert (await _decision(client, game["id"]))["state"] != game["status"]
+
+
+async def test_random_play_through_a_fight(client: AsyncClient, session, tmp_path, monkeypatch):
+    # Engaged units in the fight phase (piling in done): fights, consolidating
+    # and the next turn, at random.
+    from tests.test_fighting import BLADE, _to_fight
+
+    units = {1: [("A", 2, BLADE)], 2: [("D", 2, BLADE)]}
+    places = {"D": [(20, 4), (21.5, 4)], "A": [(20, 6), (21.5, 6)]}
+    game_id, _ = await _to_fight(client, session, tmp_path, monkeypatch, units, places)
+    log = await _random_steps(client, game_id, 30)
+    types = {e["type"] for e in log if e["ok"]}
+    assert "fight" in types, log
+    assert _problems(log) == [], _summary(_problems(log))

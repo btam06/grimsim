@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import random
 
 from app.models import Game, GameReanimation, Unit
+from app.services import dice
 from app.services.in_game import deployment, heal
 
 # The Necrons' Reanimation Protocols, in a game. At the end of a player's
@@ -47,7 +47,7 @@ def reanimate(game: Game) -> None:
     if reanimations(game):
         return
     for unit in reanimating_units(game, game.turn_seat):
-        roll = random.randint(1, HEAL_DICE)
+        roll = dice.randint(1, HEAL_DICE)
         healed, returned = heal.heal(game, unit, roll)
         game.reanimations.append(
             GameReanimation(

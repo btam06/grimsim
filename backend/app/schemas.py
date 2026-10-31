@@ -592,6 +592,37 @@ class WeaponCombatResultOut(BaseModel):
     hazardous_wounds: int
 
 
+class SimulationIn(CombatIn):
+    # The attack, resolved `runs` times (a Monte Carlo simulation).
+    runs: int = Field(default=1000, ge=1, le=5000)
+
+
+class StatOut(BaseModel):
+    # A measure over the runs: its average and (population) standard
+    # deviation.
+    mean: float
+    sd: float
+
+
+class SimulationOut(BaseModel):
+    # Over the runs: the hits, wounds and damage the attack does (damage:
+    # wounds the defending unit actually lost - after saves and Feel No Pain,
+    # no more than it had), and models destroyed. Points: each unit's, and the
+    # defender's points removed per run - its points times the share of its
+    # wounds lost. `efficiency`: those points per attacking point (None if the
+    # attacker's points are 0).
+    runs: int
+    hits: StatOut
+    wounds: StatOut
+    damage: StatOut
+    models_destroyed: StatOut
+    attacker_points: int
+    defender_points: int
+    defender_wounds: int
+    points_removed: StatOut
+    efficiency: float | None = None
+
+
 class CombatOut(BaseModel):
     # (hits: how many were scored - rolled, automatic and extra.)
     hits: int = 0
@@ -719,6 +750,9 @@ class GameIn(BaseModel):
     # Who goes first, if already decided; otherwise (left out) the players
     # roll off once everything is set up.
     first_seat: Literal[1, 2] | None = None
+    # Its dice's seed (see app/services/dice.py): the same seed and the same
+    # actions give the same rolls. Left out, one's picked at random.
+    seed: int | None = Field(default=None, ge=0, lt=2**63)
 
 
 class GameSecondaryOut(BaseModel):
@@ -810,6 +844,8 @@ class GameOut(BaseModel):
     battle_round: int
     turn_seat: int | None
     phase: str | None
+    # Its dice's seed - for playing the game again with the same rolls.
+    seed: int
     players: list[GamePlayerOut]
     # Its terrain (see GET /terrain-layouts/{id}), if one fits the players'
     # dispositions.

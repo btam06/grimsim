@@ -36,7 +36,7 @@ def test_psychic_weapons_ignore_hit_penalties(monkeypatch):
 
     def shoot(psychic_weapon: bool) -> int:
         # A 3+ shot rolling 3s at a target in cover (-1 to hit).
-        monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+        monkeypatch.setattr("app.services.dice.randint", lambda a, b: 3)
         abilities = (
             [_ability([_condition("always")], [_effect("ignore_hit_penalties")])]
             if psychic_weapon
@@ -75,7 +75,7 @@ async def test_psychic_veil(client: AsyncClient, session, tmp_path, monkeypatch)
     game_id, a, p = await _veil_game(client, session, tmp_path)
     [unit] = (await client.get(f"/games/{game_id}/psychic")).json()["units"]
     assert unit["unit_id"] == p["unit_id"]
-    monkeypatch.setattr(psychic.random, "randint", lambda lo, hi: 4)
+    monkeypatch.setattr("app.services.dice.randint", lambda lo, hi: 4)
     response = await client.post(
         f"/games/{game_id}/psychic", json={"unit_id": p["unit_id"], "ability": VEIL}
     )
@@ -106,8 +106,8 @@ async def test_psychic_veil_failing_hurts_its_unit(
     client: AsyncClient, session, tmp_path, monkeypatch
 ):
     game_id, a, p = await _veil_game(client, session, tmp_path)
-    monkeypatch.setattr(psychic.random, "randint", lambda lo, hi: 1)
-    monkeypatch.setattr(combat.random, "randint", lambda lo, hi: 1)
+    monkeypatch.setattr("app.services.dice.randint", lambda lo, hi: 1)
+    monkeypatch.setattr("app.services.dice.randint", lambda lo, hi: 1)
     response = await client.post(
         f"/games/{game_id}/psychic", json={"unit_id": p["unit_id"], "ability": VEIL}
     )

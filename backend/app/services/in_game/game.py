@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import random
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -26,6 +25,7 @@ from app.models import (
 from app.models.game import BATTLE_ROUNDS, PHASES
 from app.models.stratagem import CHOICE_TARGET_ACTIONS, UNIT_TARGET_ACTIONS
 from app.schemas import GameIn
+from app.services import dice
 from app.services.in_game import actions as actions_service
 from app.services.in_game import battle_formations as battle_formations_service
 from app.services.in_game import battle_shock as battle_shock_service
@@ -177,6 +177,8 @@ async def create_game(session: AsyncSession, payload: GameIn) -> Game:
         attacker_seat=payload.attacker_seat,
         first_seat=payload.first_seat,
         battle_round=0,
+        rng_seed=payload.seed if payload.seed is not None else dice.new_seed(),
+        rng_rolls=0,
         players=players,
     )
     # Its terrain: a layout for the attacker's and defender's dispositions.
@@ -220,7 +222,7 @@ async def _draw_tactical(
     drawn = []
     replacing = 0
     while len(drawn) < count + replacing and deck:
-        mission = deck.pop(random.randrange(len(deck)))
+        mission = deck.pop(dice.randrange(len(deck)))
         card = GameSecondary(
             secondary_mission_id=mission.id,
             mission=mission,
@@ -867,7 +869,7 @@ def _stratagem_targeted(player: GamePlayer, unit: Unit | None) -> None:
     # (Its models' abilities, and their wargear's - e.g. an enhanced
     # data-tether.)
     for name in sorted(_ability_names(unit) & set(config)):
-        if random.randint(1, 6) >= config[name]:
+        if dice.randint(1, 6) >= config[name]:
             player.cp += 1
 
 

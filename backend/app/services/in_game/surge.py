@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import random
 
 from fastapi import HTTPException
 
 from app.models import Game, GameSurgeMove, Unit
+from app.services import dice
 from app.services.in_game import battle_shock, deployment, mission_state, movement, pathing
 from app.services.in_game.deployment import TOLERANCE, Placement, gap
 
@@ -89,7 +89,7 @@ def start(game: Game, unit: Unit, distance: str) -> GameSurgeMove:
     if (why := reason(game, unit)) is not None:
         raise _bad_request(f"it can't make a surge move: {why}")
     if distance.upper() == "D6":
-        inches = random.randint(1, 6)
+        inches = dice.randint(1, 6)
     elif distance.isdigit():
         inches = int(distance)
     else:

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import random
 
 from fastapi import HTTPException
 
 from app.models import Game, GamePsychicUse, Unit
 from app.seeds import datasheet_abilities as datasheet_ability_seeds
+from app.services import dice
 from app.services.combat import roll_dice_faces
 from app.services.in_game import battle_shock, casualties, deployment
 
@@ -140,7 +140,7 @@ def use(game: Game, unit: Unit, ability: str, target: Unit | None = None) -> Gam
             raise _bad_request("Soul Sight needs a visible enemy unit")
     elif target is not None:
         raise _bad_request(f"{ability} doesn't pick a unit")
-    roll = random.randint(1, 6)
+    roll = dice.randint(1, 6)
     record = GamePsychicUse(
         unit_id=unit.id,
         ability=ability,

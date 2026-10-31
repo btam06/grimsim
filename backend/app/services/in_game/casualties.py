@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import random
 
 from app.models import Game, GameModelDamage, Unit
+from app.services import dice
 from app.services.in_game import deployment, duty_in_death, turn_record
 
 # Wounds and destroyed models in a game. A model that loses all its wounds is
@@ -140,7 +140,7 @@ def mortal_fnp(unit_model) -> int | None:
 def resists(unit_model) -> bool:
     # Whether the model's Feel No Pain negates one mortal wound (a D6 roll).
     fnp = mortal_fnp(unit_model)
-    return fnp is not None and random.randint(1, 6) >= fnp
+    return fnp is not None and dice.randint(1, 6) >= fnp
 
 
 def mortal_wounds(

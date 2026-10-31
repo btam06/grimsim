@@ -9,7 +9,6 @@ from app.seeds.factions.adeptus_mechanicus.conditions import ON_ACQUISITION, TAR
 from app.services.in_game import (
     battle_formations,
     casualties,
-    charging,
     deployment,
     objectives,
     selected_objectives,
@@ -213,7 +212,7 @@ async def test_magos_gains_cp_at_the_end_of_the_command_phase(
         name="Magos", detachment_id=detachment.id, kind="enhancement", points=10
     )
     await session.commit()
-    monkeypatch.setattr(selected_objectives.random, "randint", lambda lo, hi: 4)
+    monkeypatch.setattr("app.services.dice.randint", lambda lo, hi: 4)
     ruin = await _ruin_id(session, game_id)
 
     await _advance_to(client, game_id, 1, 1, "command")
@@ -312,7 +311,7 @@ async def test_cached_acquisition_secures_where_the_unit_died(
 async def test_priority_reclamation_consolidates_6_onto_the_acquisition_marker(
     client: AsyncClient, session, tmp_path, monkeypatch
 ):
-    monkeypatch.setattr("app.services.combat.random.randint", lambda lo, hi: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda lo, hi: 6)
     units = {1: [("A", 1, {**BLADE, "keywords": ("ADEPTUS MECHANICUS",)})], 2: [("D", 1, BLADE)]}
     game, deployment_ = await _battle(
         client, session, tmp_path, units=units, spots={"A": (20, 38), "D": (20, 4)}
@@ -408,7 +407,7 @@ async def test_reactive_safeguard_embarks_a_charged_unit(
     usable = (await client.get(f"/games/{game_id}/stratagems", params={"seat": 1})).json()
     # No charge declared yet.
     assert stratagem_id not in [s["id"] for s in usable]
-    monkeypatch.setattr(charging.random, "randint", lambda lo, hi: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda lo, hi: 6)
     response = await client.post(f"/games/{game_id}/charge/roll", json={"unit_id": d["unit_id"]})
     assert response.status_code == 200, response.text
     targets = (

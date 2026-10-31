@@ -80,7 +80,7 @@ async def test_emergency_disembark_when_the_transport_is_destroyed(
     assert (await client.post(f"{url}/check", json=payload)).json()["valid"]
     # Hazard roll 6 (no wounds); Deadly Demise 6 - it explodes: 1 mortal
     # wound to each unit within 6" (rolled for each).
-    monkeypatch.setattr("app.services.in_game.emergency.random.randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     response = await client.post(url, json=payload)
     assert response.status_code == 200, response.text
 
@@ -109,7 +109,7 @@ async def test_a_failed_hazard_roll_after_emergency_disembarking(
     [unit] = (await _emergency(client, game_id))["units"]
     positions = {s["unit_model_id"]: (s["x"], s["y"]) for s in unit["suggested"]}
     # Hazard rolls of 1 - but P has no INFANTRY or VEHICLE keyword: no wounds.
-    monkeypatch.setattr("app.services.in_game.emergency.random.randint", lambda a, b: 1)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 1)
     response = await client.post(f"/games/{game_id}/emergency", json=_payload(p, positions))
     assert response.status_code == 200, response.text
     rolls = (await _emergency(client, game_id))["rolls"]

@@ -146,6 +146,10 @@ export const deleteUnit = (id) => request(`/units/${id}`, { method: 'DELETE' })
 
 export const runCombat = (payload) =>
   request('/combat', { method: 'POST', body: JSON.stringify(payload) })
+// The attack resolved `runs` times: each measure's average and standard
+// deviation, and points removed per attacking point.
+export const simulateCombat = (payload) =>
+  request('/combat/simulate', { method: 'POST', body: JSON.stringify(payload) })
 
 export const listWeaponAbilities = () => request('/weapon-abilities')
 export const createWeaponAbility = (payload) =>
@@ -398,3 +402,12 @@ export const rallyUnit = (id, payload) =>
 export const listRepairs = (id) => request(`/games/${id}/repairs`)
 export const repairModel = (id, payload) =>
   request(`/games/${id}/repairs`, { method: 'POST', body: JSON.stringify(payload) })
+// The agent interface (see app/routers/agent.py): the decision a game is
+// waiting on and its legal actions, applying one (or a random one), and the
+// debug log of those applied.
+export const getAgentDecision = (id) => request(`/games/${id}/agent`)
+export const applyAgentAction = (id, action) =>
+  request(`/games/${id}/agent/apply`, { method: 'POST', body: JSON.stringify({ action }) })
+export const randomAgentAction = (id) =>
+  request(`/games/${id}/agent/random`, { method: 'POST' })
+export const getAgentLog = (id) => request(`/games/${id}/agent/log?limit=200`)

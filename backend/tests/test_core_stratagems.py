@@ -84,7 +84,7 @@ async def test_explosives(client: AsyncClient, session, tmp_path, monkeypatch):
     from tests.test_reinforcements import _advance_to
     from tests.test_shooting import _place
 
-    monkeypatch.setattr("app.services.in_game.core_stratagems.random.randint", lambda a, b: 4)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 4)
     stratagem_id = await _core(session, "Explosives", "explosives", "shooting")
     units = {1: [("A", 5, {})], 2: [("D", 1, {"keywords": ("GRENADES",)})]}
     game, deployment_ = await _battle(client, session, tmp_path, units=units)
@@ -114,9 +114,9 @@ async def test_command_reroll_rerolls_a_charge(client: AsyncClient, session, tmp
     await _place(session, a, [(20 + i * 1.5, 14) for i in range(5)])
     await _cp(session, game["id"])
     await _advance_to(client, game["id"], 1, 2, "charge")
-    monkeypatch.setattr("app.services.in_game.charging.random.randint", lambda a_, b: 1)
+    monkeypatch.setattr("app.services.dice.randint", lambda a_, b: 1)
     await client.post(f"/games/{game['id']}/charge/roll", json={"unit_id": d["unit_id"]})
-    monkeypatch.setattr("app.services.in_game.core_stratagems.random.randint", lambda a_, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a_, b: 6)
     from app.services.in_game.core_stratagems import CHARGE_ROLL
 
     response = await _use(client, game["id"], stratagem_id, d, choice=CHARGE_ROLL)
@@ -154,7 +154,7 @@ async def test_heroic_intervention(client: AsyncClient, session, tmp_path, monke
     seat_1 = next(p for p in response.json()["players"] if p["seat"] == 1)
     assert (seat_1["cp"], seat_1["stratagem_uses"][0]["cp"]) == (0, 2)
     # It charges: a roll of 12 is at most 6, Into the Fray.
-    monkeypatch.setattr("app.services.in_game.charging.random.randint", lambda a_, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a_, b: 6)
     response = await client.post(f"/games/{game_id}/charge/roll", json={"unit_id": a["unit_id"]})
     assert response.status_code == 200, response.text
     [unit] = [u for u in response.json()["units"] if u["unit_id"] == a["unit_id"]]

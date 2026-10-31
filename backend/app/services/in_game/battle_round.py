@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import random
 import re
 from dataclasses import dataclass, field
 
@@ -9,6 +8,7 @@ from fastapi import HTTPException
 from app.models import Game, GamePlayer, GameRuleChoice
 from app.seeds import datasheet_abilities as datasheet_ability_seeds
 from app.seeds import factions as faction_seeds
+from app.services import dice
 from app.services.in_game import deployment
 
 # The start of a battle round: before its first turn, rules that happen "at
@@ -270,10 +270,10 @@ def choose(game: Game, seat: int, faction_ability_id: int, option: str | None) -
         ability = _ability(game, faction_ability_id)
         key = (ability.faction.name, ability.name)
         table = [o for o in faction_seeds.ROUND_START_CHOICES[key] if o != ROLL_TWO]
-        dice = sorted(random.randint(1, 6) for _ in range(2))
+        rolls = sorted(dice.randint(1, 6) for _ in range(2))
         earlier = set(chosen_options(game, seat, faction_ability_id, earlier=True))
-        rolled = [table[d - 1] for d in dict.fromkeys(dice)]
-        picked = [f"{ROLL_TWO}: {dice[0]} and {dice[1]}"] + [o for o in rolled if o not in earlier]
+        rolled = [table[d - 1] for d in dict.fromkeys(rolls)]
+        picked = [f"{ROLL_TWO}: {rolls[0]} and {rolls[1]}"] + [o for o in rolled if o not in earlier]
     for name in picked:
         game.rule_choices.append(
             GameRuleChoice(

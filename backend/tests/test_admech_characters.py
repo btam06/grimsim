@@ -4,7 +4,7 @@ from app.models import DatasheetAbility, GameModelDamage, Wargear, WargearAbilit
 from app.routers.games import _load_game
 from app.seeds.factions.adeptus_mechanicus import datasheet_abilities as admech_datasheets
 from app.seeds.factions.adeptus_mechanicus import vengeance
-from app.services.in_game import battle_shock, casualties, deployment, reactive_move, repair
+from app.services.in_game import battle_shock, casualties, deployment, repair
 from app.services.in_game import game as game_service
 from app.services.in_game import shooting
 from tests.test_deployment import _unit_named
@@ -57,7 +57,7 @@ async def test_tactica_obliqua(client: AsyncClient, session, tmp_path, monkeypat
         r["unit_id"], "Tactica Obliqua", None, "D"
     )
 
-    monkeypatch.setattr(reactive_move.random, "randint", lambda a, b: 3)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 3)
     [move] = (
         await client.post(f"/games/{game_id}/reactive-moves/roll", json={"unit_id": r["unit_id"]})
     ).json()
@@ -211,7 +211,7 @@ async def test_enhanced_data_tether(client: AsyncClient, session, tmp_path, monk
     game_ = await _load_game(session, game["id"])
     player = next(p for p in game_.players if p.seat == 2)
     cp = player.cp
-    monkeypatch.setattr(game_service.random, "randint", lambda a, b: 5)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 5)
     game_service._stratagem_targeted(player, deployment.find_unit(game_, r["unit_id"]))
     assert player.cp == cp + 1
 

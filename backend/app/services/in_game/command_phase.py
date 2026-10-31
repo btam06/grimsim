@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import random
 from dataclasses import dataclass
 
 from fastapi import HTTPException
@@ -17,6 +16,7 @@ from app.models import (
 )
 from app.seeds import datasheet_abilities as datasheet_ability_seeds
 from app.seeds import factions as faction_seeds
+from app.services import dice
 from app.services.in_game import casualties, deployment
 from app.services.in_game.battle_round import START_OF_ROUND
 from app.services.in_game.deployment import TOLERANCE, gap
@@ -531,15 +531,15 @@ def heal(game: Game) -> None:
     # regains up to that many lost wounds (once a phase).
     if heals(game):
         return
-    dice = datasheet_ability_seeds.COMMAND_HEALS
+    heal_dice = datasheet_ability_seeds.COMMAND_HEALS
     player = next(p for p in game.players if p.seat == game.turn_seat)
     records = casualties.damage(game)
     for unit in deployment.deployable_units(player):
         for unit_model in deployment.models_on_battlefield(game, unit):
             for ability in unit_model.model.abilities:
-                if ability.name not in dice:
+                if ability.name not in heal_dice:
                     continue
-                roll = random.randint(1, dice[ability.name])
+                roll = dice.randint(1, heal_dice[ability.name])
                 record = records.get(unit_model.id)
                 healed = min(roll, record.wounds_lost) if record else 0
                 if record:

@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from app.db import async_session, engine
 from app.models import Base
 from app.routers import (
+    agent,
     base_sizes,
     combat,
     conditions,
@@ -33,6 +34,7 @@ from app.routers import (
 )
 from app.migrations import run_all as run_migrations
 from app.seeds import run_all as run_seeds
+from app.services import dice
 
 
 @asynccontextmanager
@@ -46,6 +48,16 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="grimsim API", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def unbind_dice(request, call_next):
+    # Each request rolls with the dice of the game it loads, if any (see
+    # app/services/dice.py) - never the last request's.
+    dice.reset()
+    return await call_next(request)
+
+
 app.include_router(factions.router)
 app.include_router(faction_units.router)
 app.include_router(faction_abilities.router)
@@ -66,6 +78,7 @@ app.include_router(users.router)
 app.include_router(missions.secondary_router)
 app.include_router(missions.primary_router)
 app.include_router(games.router)
+app.include_router(agent.router)
 app.include_router(weapon_abilities.router)
 app.include_router(datasheet_abilities.router)
 app.include_router(conditions.router)

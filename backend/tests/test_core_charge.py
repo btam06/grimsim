@@ -11,7 +11,7 @@ from tests.test_shooting import _place
 
 
 async def _game(client, session, tmp_path, monkeypatch, places):
-    monkeypatch.setattr("app.services.in_game.charging.random.randint", lambda a_, b: 4)
+    monkeypatch.setattr("app.services.dice.randint", lambda a_, b: 4)
     units = {1: [("A", 1, {}), ("B", 1, {})], 2: [("D", 2, {})]}
     game, deployment_ = await _battle(
         client, session, tmp_path, units=units,

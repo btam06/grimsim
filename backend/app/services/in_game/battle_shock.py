@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import random
 
 from fastapi import HTTPException
 
@@ -12,6 +11,7 @@ from app.models import (
     Stratagem,
     Unit,
 )
+from app.services import dice
 from app.services.in_game import casualties, deployment
 
 # Battle-shock. A unit takes a Battle-shock test when a rule or stratagem
@@ -312,10 +312,10 @@ def take(
         return test
     from app.seeds.factions.chaos_knights import dread
 
-    test.first_die, test.second_die = (random.randint(1, 6) for _ in range(DICE))
+    test.first_die, test.second_die = (dice.randint(1, 6) for _ in range(DICE))
     test.passed = test.first_die + test.second_die + test.modifier >= needed(game, unit)
     if not test.passed and dread.delirium(game, unit):
-        roll = random.randint(1, DELIRIUM_DICE)
+        roll = dice.randint(1, DELIRIUM_DICE)
         test.wounds = GameBattleShockWounds(source="Delirium", roll=roll)
         casualties.mortal_wounds(game, unit, roll)
     if not test.passed:

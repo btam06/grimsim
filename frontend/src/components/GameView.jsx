@@ -81,6 +81,7 @@ import CardTextAccordion from './CardTextAccordion'
 import ChargePanel from './ChargePanel'
 import DeploymentPanel from './DeploymentPanel'
 import AbilityActionsPanel from './AbilityActionsPanel'
+import AgentDebugPanel from './AgentDebugPanel'
 import PreBattlePanel from './PreBattlePanel'
 import ReactiveMovePanel from './ReactiveMovePanel'
 import SurgePanel from './SurgePanel'
@@ -2232,6 +2233,14 @@ function GameView({ gameId, onBack }) {
       {game.status === 'in_progress' && (
         <TurnRecord game={game} deployment={deployment} onError={setError} />
       )}
+      <AgentDebugPanel
+        game={game}
+        onChanged={() =>
+          getGame(game.id)
+            .then(setGame)
+            .catch((err) => setError(err.message))
+        }
+      />
       {(game.status === 'in_progress' || game.status === 'finished') && (
         <ScoreHistory game={game} />
       )}

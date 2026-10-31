@@ -127,7 +127,7 @@ async def test_embarking_keeps_wounds_and_losses(client: AsyncClient, session, t
 async def test_no_disembarking_after_the_transport_advanced(
     client: AsyncClient, session, tmp_path, monkeypatch
 ):
-    monkeypatch.setattr("app.services.in_game.movement.random.randint", lambda a, b: 3)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 3)
     game_id, t, p = await _transport_game(client, session, tmp_path)
     await _advance_to(client, game_id, 1, 1, "movement")
     response = await client.post(
@@ -165,7 +165,7 @@ async def test_a_combat_disembark(client: AsyncClient, session, tmp_path, monkey
     # Within 6" (not 3"), with hazard rolls - then Battle-shocked.
     from app.services.in_game import battle_shock
 
-    monkeypatch.setattr("random.randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     game_id, t, p = await _transport_game(client, session, tmp_path)
     await _advance_to(client, game_id, 1, 1, "movement")
     spots = [(25, 38), (25, 39.5)]

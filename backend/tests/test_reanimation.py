@@ -3,7 +3,6 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import selectinload
 
 from app.models import FactionAbility, GameModelDamage, GameModelPosition, Model, UnitModel
-from app.seeds.factions.necrons import reanimation
 from tests.test_deployment import _deploy, _deployment, _game, _row, _unit_named
 from tests.test_reinforcements import _advance_to
 
@@ -30,7 +29,7 @@ async def _necrons(session, unit):
 
 
 async def _reanimation_game(client, session, tmp_path, monkeypatch, roll):
-    monkeypatch.setattr(reanimation.random, "randint", lambda a, b: roll)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: roll)
     units = {1: [("N", 3, {})], 2: [("D", 1, {})]}
     game = await _game(client, session, tmp_path, units=units)
     game_id = game["id"]

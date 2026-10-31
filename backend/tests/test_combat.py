@@ -144,12 +144,12 @@ def test_roll_dice_flat():
 
 
 def test_roll_dice_bare_die(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 4)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 4)
     assert combat.roll_dice("D6") == 4
 
 
 def test_roll_dice_multi_die(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 4)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 4)
     assert combat.roll_dice("2D6") == 8
 
 
@@ -222,7 +222,7 @@ def test_hazard_wounds_three_only_if_every_model_is_a_monster_or_vehicle():
 
 
 def test_resolve_combat_not_visible_deals_no_damage(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     weapon = _weapon(attacks="2", skill=2)
     weapon.id = 1
     attacker = _unit([_unit_model(_model(), [weapon])])
@@ -236,7 +236,7 @@ def test_resolve_combat_not_visible_deals_no_damage(monkeypatch):
 
 
 def test_resolve_combat_not_in_range_deals_no_damage(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     weapon = _weapon(attacks="2", skill=2)
     weapon.id = 1
     attacker = _unit([_unit_model(_model(), [weapon])])
@@ -251,7 +251,7 @@ def test_resolve_combat_not_in_range_deals_no_damage(monkeypatch):
 def test_resolve_combat_in_range_is_checked_per_attacking_model(monkeypatch):
     # in_range is evaluated once per attacking model (not once for the whole unit),
     # so every model's weapons should still fire when it's True.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     weapon_a = _weapon(attacks="2", skill=2)
     weapon_a.id = 1
     weapon_b = _weapon(attacks="3", skill=2)
@@ -280,7 +280,7 @@ def test_resolve_combat_rolls_dice_notation_attacks(monkeypatch):
     # must be rolled to get the actual attack count. Every random.randint call
     # (both attack-count dice and the hit rolls that follow) returns a constant 3,
     # which is below the weapon's skill of 5, so every attack simply misses.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 3)
 
     weapon = _weapon(attacks="2D3", skill=5)
     weapon.id = 1
@@ -295,7 +295,7 @@ def test_resolve_combat_rolls_dice_notation_attacks(monkeypatch):
 
 
 def test_resolve_combat_unselected_weapon_does_not_attack(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     weapon = _weapon(attacks="3", skill=2)
     weapon.id = 42
     attacker = _unit([_unit_model(_model(), [weapon])])
@@ -308,7 +308,7 @@ def test_resolve_combat_unselected_weapon_does_not_attack(monkeypatch):
 
 
 def test_resolve_combat_engagement_range_selects_melee_only(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     melee = _weapon(attacks="2", skill=2, weapon_type="melee")
     melee.id = 1
     ranged = _weapon(attacks="5", skill=2, weapon_type="ranged")
@@ -328,7 +328,7 @@ def test_resolve_combat_engagement_range_selects_melee_only(monkeypatch):
 
 
 def test_resolve_combat_not_in_engagement_range_selects_ranged_only(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     melee = _weapon(attacks="2", skill=2, weapon_type="melee")
     melee.id = 1
     ranged = _weapon(attacks="5", skill=2, weapon_type="ranged")
@@ -352,7 +352,7 @@ def test_resolve_combat_targets_normal_models_before_supports(monkeypatch):
     # if targeted), the support has 100 (would survive untouched if targeted) -
     # even though the support has a far better save. If supports were wrongly
     # targeted first, this attack would land on it and fail to kill anything.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     weapon = _weapon(attacks="1", skill=2, strength=10, ap=-10, damage="1")
     weapon.id = 1
     attacker = _unit([_unit_model(_model(toughness=1), [weapon])])
@@ -371,7 +371,7 @@ def test_resolve_combat_targets_worst_save_before_best_save(monkeypatch):
     # Within the same (non-support/leader) tier, the worse-saving model should be
     # targeted first. Only the worst-save model has few enough wounds to die from
     # this single attack.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     weapon = _weapon(attacks="1", skill=2, strength=10, ap=-10, damage="1")
     weapon.id = 1
     attacker = _unit([_unit_model(_model(toughness=1), [weapon])])
@@ -391,7 +391,7 @@ def test_resolve_combat_does_not_spill_remaining_damage_onto_next_model(monkeypa
     # save is engineered to be impossible (save_needed > 6), with no FNP to roll.
     # The weapon deals 2 damage but the first model only has 1 wound - the second
     # point should be wasted, not carried onto the second model.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     weapon = _weapon(attacks="1", skill=2, strength=10, ap=-10, damage="2")
     weapon.id = 1
     attacker = _unit([_unit_model(_model(toughness=1), [weapon])])
@@ -414,7 +414,7 @@ def test_resolve_combat_does_not_spill_remaining_damage_onto_next_model(monkeypa
 
 def test_resolve_combat_feel_no_pain_negates_some_damage(monkeypatch):
     rolls = iter([6, 6, 1, 6, 2, 5])  # hit, wound, save(fail), fnp x3 (succeed, fail, succeed)
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls))
 
     weapon = _weapon(attacks="1", skill=2, strength=10, ap=-10, damage="3")
     weapon.id = 1
@@ -438,7 +438,7 @@ def test_resolve_combat_next_attack_targets_next_model_with_its_own_fnp(monkeypa
     # Phase order: both hits, both wounds, then each wound's save (and damage) in
     # turn - attack 1's save fails (model 1 dies), attack 2's save fails, fnp fails.
     rolls = iter([6, 6, 6, 6, 1, 1, 2])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls))
 
     weapon = _weapon(attacks="2", skill=2, strength=10, ap=-10, damage="1")
     weapon.id = 1
@@ -465,7 +465,7 @@ def test_resolve_combat_next_attack_targets_next_model_with_its_own_fnp(monkeypa
 
 
 def test_resolve_combat_weapon_results_breaks_down_a_single_weapon(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
     weapon = _weapon(name="Boltgun", attacks="1", skill=2, strength=10, ap=-10, damage="1")
     weapon.id = 1
@@ -489,7 +489,7 @@ def test_resolve_combat_weapon_results_groups_same_named_weapons_across_models(m
     # Two different models each carry their own "Boltgun" weapon (different
     # ids, same name) - they should be grouped into a single weapon_results
     # entry rather than appearing as two separate profiles.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
     weapon_a = _weapon(name="Boltgun", attacks="1", skill=2, strength=10, ap=-10, damage="1")
     weapon_a.id = 1
@@ -522,7 +522,7 @@ def test_resolve_combat_weapon_results_groups_same_named_weapons_across_models(m
 
 
 def test_resolve_combat_weapon_results_keeps_differently_named_weapons_separate(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
     weapon_a = _weapon(name="Boltgun", attacks="1", skill=2, strength=10, ap=-10, damage="1")
     weapon_a.id = 1
@@ -555,7 +555,7 @@ def test_resolve_combat_sustained_hits_adds_extra_hit_on_critical(monkeypatch):
     # A constant roll of 6: the hit always crits (triggering the extra-hit effect),
     # the wound threshold is engineered <= 6 so it always wounds, and the save is
     # engineered to be impossible so every wound lands as 1 point of damage.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
     sustained_1 = _ability([_condition("critical_hit")], [_effect("add_extra_hit")])
     weapon = _weapon(attacks="1", skill=2, strength=10, ap=-10, damage="1")
@@ -578,7 +578,7 @@ def test_resolve_combat_sustained_hits_adds_extra_hit_on_critical(monkeypatch):
 def test_resolve_combat_sustained_hits_does_nothing_on_a_non_critical_hit(monkeypatch):
     # A roll of 3 still hits (skill 2) but isn't a critical (not a 6), so the
     # sustained-hits ability should not add anything to the attack chain.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 3)
 
     sustained_1 = _ability([_condition("critical_hit")], [_effect("add_extra_hit")])
     weapon = _weapon(attacks="1", skill=2, strength=10, ap=-10, damage="1")
@@ -599,7 +599,7 @@ def test_resolve_combat_sustained_hits_does_nothing_on_a_non_critical_hit(monkey
 def test_resolve_combat_auto_pass_wound_skips_the_wound_roll(monkeypatch):
     # A critical hit (roll of 6) triggers an auto-pass-wound effect instead of
     # sustained hits - the wound roll should be skipped entirely for this attack.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
     ability = _ability([_condition("critical_hit")], [_effect("auto_pass_wound")])
     weapon = _weapon(attacks="1", skill=2, strength=1, ap=-10, damage="1")
@@ -623,7 +623,7 @@ def test_resolve_combat_lethal_hits_auto_wounds_on_a_critical_hit(monkeypatch):
     # "Lethal Hits": critical_hit -> auto_pass_wound. Strength 1 vs toughness 100
     # would normally never wound, but a critical hit (roll of 6) should still
     # force the wound to pass without a roll being made at all.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
     lethal_hits = _ability([_condition("critical_hit")], [_effect("auto_pass_wound")])
     weapon = _weapon(attacks="1", skill=2, strength=1, ap=-10, damage="1")
@@ -644,7 +644,7 @@ def test_resolve_combat_devastating_wounds_skips_the_save_roll_on_a_critical_wou
     # "Devastating Wounds": critical_wound -> no_save. A save of 2+ with an
     # invulnerable of 2+ would normally always succeed, but a critical wound
     # (roll of 6) should skip the save roll entirely and apply damage.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
     devastating_wounds = _ability([_condition("critical_wound")], [_effect("no_save")])
     weapon = _weapon(attacks="1", skill=2, strength=10, damage="1")
@@ -668,7 +668,7 @@ def test_resolve_combat_devastating_wounds_does_nothing_on_a_non_critical_wound(
     # A wound roll of 3 (vs threshold 2, since strength 10 is double toughness 1)
     # still wounds but isn't a critical, so the save should still be rolled normally.
     rolls = iter([6, 3, 1])  # hit (crit, irrelevant here), wound (non-crit), save
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls))
 
     devastating_wounds = _ability([_condition("critical_wound")], [_effect("no_save")])
     weapon = _weapon(attacks="1", skill=2, strength=10, ap=0, damage="1")
@@ -694,7 +694,7 @@ def test_critical_wound_condition_matches_only_wound_step_sixes():
 def test_resolve_combat_unmatched_condition_keyword_is_ignored(monkeypatch):
     # A condition keyword with no hardcoded implementation should simply never
     # match, rather than raising - the ability is inert.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
     ability = _ability([_condition("unknown_condition")], [_effect("add_extra_hit")])
     weapon = _weapon(attacks="1", skill=2, strength=10, ap=-10, damage="1")
@@ -721,7 +721,7 @@ def test_always_condition_matches_any_context():
 def test_resolve_combat_in_cover_worsens_ranged_hit_rolls(monkeypatch):
     # A roll of 3 would normally hit (skill 3), but a ranged attack against a
     # target in cover needs a 4 instead, so this attack should miss.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 3)
 
     weapon = _weapon(attacks="1", skill=3, weapon_type="ranged")
     weapon.id = 1
@@ -746,7 +746,7 @@ def test_resolve_combat_in_cover_worsens_ranged_hit_rolls(monkeypatch):
 def test_resolve_combat_in_cover_does_not_affect_melee(monkeypatch):
     # In cover only matters for ranged attacks - a melee attack with the same
     # roll (3) against the same skill (3) should still hit.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 3)
 
     weapon = _weapon(attacks="1", skill=3, weapon_type="melee", strength=10, ap=-10)
     weapon.id = 1
@@ -771,7 +771,7 @@ def test_resolve_combat_ignore_cover_weapon_ability_negates_the_penalty(monkeypa
     # Same setup as the "in cover worsens ranged hits" test, but this time the
     # weapon has an "Ignores Cover" ability (always -> ignore_cover), so the
     # roll of 3 should still hit at the unworsened skill of 3.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 3)
 
     ignores_cover = _ability([_condition("always")], [_effect("ignore_cover")])
     weapon = _weapon(attacks="1", skill=3, weapon_type="ranged")
@@ -798,7 +798,7 @@ def test_resolve_combat_ignore_cover_wargear_ability_negates_the_penalty(monkeyp
     # The "Ignores Cover" ability lives on wargear equipped by the model instead
     # of on the weapon itself - it should still negate the cover penalty for
     # every weapon that model fires.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 3)
 
     ignores_cover = _wargear_ability([_condition("always")], [_effect("ignore_cover")])
     gear = _wargear([ignores_cover])
@@ -842,7 +842,7 @@ def test_resolve_combat_anti_infantry_4_plus_scores_a_critical_wound_at_the_thre
     # toughness 100 would normally need a natural 6 to wound, but a wound roll
     # of 4+ against an INFANTRY defender counts as a critical wound regardless.
     rolls = iter([6, 4, 1])  # hit, wound, save (AP -10 always fails regardless)
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls))
 
     anti_infantry = _ability([_condition("anti_infantry_4")], [_effect("force_critical_wound")])
     weapon = _weapon(attacks="1", skill=2, strength=1, ap=-10, damage="1")
@@ -863,7 +863,7 @@ def test_resolve_combat_anti_infantry_4_plus_scores_a_critical_wound_at_the_thre
 def test_resolve_combat_anti_infantry_4_plus_does_nothing_below_the_threshold(monkeypatch):
     # A wound roll below the Anti-Infantry 4+ threshold is just a normal roll.
     rolls = iter([6, 3])  # hit, wound
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls))
 
     anti_infantry = _ability([_condition("anti_infantry_4")], [_effect("force_critical_wound")])
     weapon = _weapon(attacks="1", skill=2, strength=1, ap=-10, damage="1")
@@ -884,7 +884,7 @@ def test_resolve_combat_anti_infantry_does_nothing_without_the_keyword(monkeypat
     # With a non-matching defender (no INFANTRY keyword), Anti-Infantry 4+
     # should not force anything, even on a roll that would meet its threshold.
     rolls = iter([6, 4])  # hit, wound
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls))
 
     anti_infantry = _ability([_condition("anti_infantry_4")], [_effect("force_critical_wound")])
     weapon = _weapon(attacks="1", skill=2, strength=1, ap=-10, damage="1")
@@ -905,7 +905,7 @@ def test_resolve_combat_anti_vehicle_2_plus_scores_a_critical_wound_at_the_thres
     monkeypatch,
 ):
     rolls = iter([6, 2, 1])  # hit, wound, save (AP -10 always fails regardless)
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls))
 
     anti_vehicle = _ability([_condition("anti_vehicle_2")], [_effect("force_critical_wound")])
     weapon = _weapon(attacks="1", skill=2, strength=1, ap=-10, damage="1")
@@ -927,7 +927,7 @@ def test_resolve_combat_anti_infantry_triggers_devastating_wounds(monkeypatch):
     # critical_wound-dependent effects: with Devastating Wounds also attached,
     # the save roll should be skipped entirely too.
     rolls = iter([6, 4])  # hit, wound (meets the Anti-Infantry 4+ threshold)
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls))
 
     anti_infantry = _ability(
         [_condition("anti_infantry_4")], [_effect("force_critical_wound")]
@@ -972,7 +972,7 @@ def test_resolve_combat_heavy_grants_plus_one_to_hit_when_moved_less_than_3(monk
     # Heavy: moved_less_than_3 -> plus_one_to_hit. Skill 4 needs a roll of 4+ to
     # hit normally, but a roll of 3 should now succeed with the +1 bonus.
     rolls = iter([3, 6, 1])  # hit, wound, save
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls))
 
     heavy = _ability([_condition("moved_less_than_3")], [_effect("plus_one_to_hit")])
     weapon = _weapon(attacks="1", skill=4, strength=4, ap=-10, damage="1")
@@ -997,7 +997,7 @@ def test_resolve_combat_heavy_grants_plus_one_to_hit_when_moved_less_than_3(monk
 
 
 def test_resolve_combat_heavy_does_nothing_when_unit_moved_3_or_more(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 3)
 
     heavy = _ability([_condition("moved_less_than_3")], [_effect("plus_one_to_hit")])
     weapon = _weapon(attacks="1", skill=4, strength=4, ap=-10, damage="1")
@@ -1023,7 +1023,7 @@ def test_resolve_combat_heavy_does_nothing_when_unit_moved_3_or_more(monkeypatch
 
 def test_resolve_combat_reroll_failed_hits_rerolls_once_on_a_failure(monkeypatch):
     rolls = iter([2, 6, 6, 1])  # hit (fails), reroll (succeeds), wound, save
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls))
 
     reroll = _ability([_condition("always")], [_effect("reroll_failed_hits")])
     weapon = _weapon(attacks="1", skill=4, strength=4, ap=-10, damage="1")
@@ -1049,7 +1049,7 @@ def test_resolve_combat_reroll_failed_hits_rerolls_once_on_a_failure(monkeypatch
 
 
 def test_resolve_combat_reroll_failed_hits_does_not_reroll_a_success(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
     reroll = _ability([_condition("always")], [_effect("reroll_failed_hits")])
     weapon = _weapon(attacks="1", skill=4, strength=4, ap=-10, damage="1")
@@ -1076,7 +1076,7 @@ def test_resolve_combat_reroll_failed_hits_does_not_reroll_a_success(monkeypatch
 
 def test_resolve_combat_plus_one_skill_ranged_applies_only_to_ranged_weapons(monkeypatch):
     rolls = iter([3, 6, 1])  # hit, wound, save
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls))
 
     bonus = _ability([_condition("always")], [_effect("plus_one_skill_ranged")])
     weapon = _weapon(attacks="1", skill=4, strength=4, ap=-10, damage="1", weapon_type="ranged")
@@ -1101,7 +1101,7 @@ def test_resolve_combat_plus_one_skill_ranged_applies_only_to_ranged_weapons(mon
 
 
 def test_resolve_combat_plus_one_skill_ranged_does_nothing_for_melee_weapons(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 3)
 
     bonus = _ability([_condition("always")], [_effect("plus_one_skill_ranged")])
     weapon = _weapon(attacks="1", skill=4, strength=4, ap=-10, damage="1", weapon_type="melee")
@@ -1127,7 +1127,7 @@ def test_resolve_combat_plus_one_skill_ranged_does_nothing_for_melee_weapons(mon
 
 def test_resolve_combat_plus_one_skill_melee_applies_only_to_melee_weapons(monkeypatch):
     rolls = iter([3, 6, 1])  # hit, wound, save
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls))
 
     bonus = _ability([_condition("always")], [_effect("plus_one_skill_melee")])
     weapon = _weapon(attacks="1", skill=4, strength=4, ap=-10, damage="1", weapon_type="melee")
@@ -1152,7 +1152,7 @@ def test_resolve_combat_plus_one_skill_melee_applies_only_to_melee_weapons(monke
 
 
 def test_resolve_combat_plus_one_skill_melee_does_nothing_for_ranged_weapons(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 3)
 
     bonus = _ability([_condition("always")], [_effect("plus_one_skill_melee")])
     weapon = _weapon(attacks="1", skill=4, strength=4, ap=-10, damage="1", weapon_type="ranged")
@@ -1180,7 +1180,7 @@ def test_resolve_combat_plus_one_skill_melee_does_nothing_for_ranged_weapons(mon
 
 
 def test_resolve_combat_advanced_prevents_a_ranged_weapon_from_firing(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
     weapon = _weapon(attacks="2", skill=2, weapon_type="ranged")
     weapon.id = 1
@@ -1204,7 +1204,7 @@ def test_resolve_combat_advanced_prevents_a_ranged_weapon_from_firing(monkeypatc
 
 
 def test_resolve_combat_assault_weapon_still_fires_when_advanced(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
     assault = _ability([_condition("always")], [_effect("assault")])
     weapon = _weapon(attacks="2", skill=2, weapon_type="ranged")
@@ -1231,7 +1231,7 @@ def test_resolve_combat_assault_weapon_still_fires_when_advanced(monkeypatch):
 def test_resolve_combat_advanced_does_not_affect_melee_weapons(monkeypatch):
     # Advancing only restricts ranged weapons firing during the shooting
     # phase - it has no bearing on a melee weapon swinging in engagement range.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
     weapon = _weapon(attacks="2", skill=2, weapon_type="melee")
     weapon.id = 1
@@ -1256,7 +1256,7 @@ def test_resolve_combat_advanced_does_not_affect_melee_weapons(monkeypatch):
 def test_resolve_combat_ranged_weapon_does_not_fire_in_engagement_range_without_pistol(
     monkeypatch,
 ):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
     weapon = _weapon(attacks="2", skill=2, weapon_type="ranged")
     weapon.id = 1
@@ -1279,7 +1279,7 @@ def test_resolve_combat_ranged_weapon_does_not_fire_in_engagement_range_without_
 
 
 def test_resolve_combat_pistol_weapon_fires_in_engagement_range(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
     pistol = _ability([_condition("always")], [_effect("pistol")])
     weapon = _weapon(attacks="2", skill=2, weapon_type="ranged")
@@ -1306,7 +1306,7 @@ def test_resolve_combat_pistol_weapon_fires_in_engagement_range(monkeypatch):
 def test_resolve_combat_pistol_does_not_help_a_melee_weapon_fire_at_range(monkeypatch):
     # Pistol only ever bypasses the engagement-range restriction for a
     # ranged weapon - it never turns a melee weapon into a ranged one.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
     pistol = _ability([_condition("always")], [_effect("pistol")])
     weapon = _weapon(attacks="2", skill=2, weapon_type="melee")
@@ -1337,7 +1337,7 @@ def test_resolve_combat_datasheet_ability_grants_unit_wide_reroll_failed_hits(mo
     # A datasheet ability on the shooting model, rather than a weapon or
     # wargear ability, should still grant the reroll.
     rolls = iter([2, 6, 6, 1])  # hit (fails), reroll (succeeds), wound, save
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls))
 
     reroll = _datasheet_ability([_condition("always")], [_effect("reroll_failed_hits")])
     weapon = _weapon(attacks="1", skill=4, strength=4, ap=-10, damage="1")
@@ -1363,7 +1363,7 @@ def test_resolve_combat_datasheet_ability_grants_unit_wide_reroll_failed_hits(mo
 
 
 def test_resolve_combat_without_the_datasheet_ability_no_reroll_happens(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 2)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 2)
 
     weapon = _weapon(attacks="1", skill=4, strength=4, ap=-10, damage="1")
     weapon.id = 1
@@ -1393,7 +1393,7 @@ def test_resolve_combat_datasheet_ability_reroll_applies_to_every_model_in_the_u
     # still grant model B's weapon a reroll too - it's unit-wide, not
     # per-model.
     rolls = iter([2, 6, 6, 1])  # model B: hit (fails), reroll (succeeds), wound, save
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls))
 
     reroll = _datasheet_ability([_condition("always")], [_effect("reroll_failed_hits")])
     model_a_weapon = _weapon(attacks="0", skill=4, strength=4, ap=-10, damage="1")
@@ -1460,7 +1460,7 @@ def _precision_defenders():
 def test_precision_attacks_go_to_characters_first(monkeypatch):
     # Every roll is a 6, so a 7+ save on each model guarantees every attack
     # destroys whichever model it's allocated to.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     precision = _ability([_condition("always")], [_effect("precision")])
     leader, support, trooper = _precision_defenders()
     for m in (leader, support, trooper):
@@ -1484,7 +1484,7 @@ def test_precision_attacks_go_to_characters_first(monkeypatch):
 
 
 def test_without_precision_characters_go_last(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     leader, support, trooper = _precision_defenders()
     for m in (leader, support, trooper):
         m.save = 7
@@ -1511,7 +1511,7 @@ def test_within_half_range_condition_checks_pre_weapon_step_and_flag():
 def test_resolve_combat_rapid_fire_1_adds_an_extra_attack_within_half_range(monkeypatch):
     # Rapid Fire 1: within_half_range -> add_extra_attack. The extra attack is
     # a fresh attack, not an auto-hit, so it still needs its own hit roll.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
     rapid_fire = _ability([_condition("within_half_range")], [_effect("add_extra_attack")])
     weapon = _weapon(attacks="1", skill=2, strength=10, ap=-10, damage="1")
@@ -1537,7 +1537,7 @@ def test_resolve_combat_rapid_fire_1_adds_an_extra_attack_within_half_range(monk
 
 
 def test_resolve_combat_rapid_fire_1_does_nothing_outside_half_range(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
     rapid_fire = _ability([_condition("within_half_range")], [_effect("add_extra_attack")])
     weapon = _weapon(attacks="1", skill=2, strength=10, ap=-10, damage="1")
@@ -1565,7 +1565,7 @@ def test_resolve_combat_rapid_fire_1_grants_exactly_one_extra_attack_regardless_
 ):
     # A weapon with 2 base attacks should get exactly 1 extra attack from
     # Rapid Fire 1 (3 total), not 1 extra per base attack.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 1)  # misses everything
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 1)  # misses everything
 
     rapid_fire = _ability([_condition("within_half_range")], [_effect("add_extra_attack")])
     weapon = _weapon(attacks="2", skill=2)
@@ -1592,7 +1592,7 @@ def test_resolve_combat_hazardous_rolls_once_per_weapon_and_deals_no_damage_abov
 ):
     # A weapon with 0 base attacks never makes an attack roll, isolating the
     # hazard check cleanly: this test is purely about the hazard roll itself.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 3)
 
     hazardous = _ability([_condition("always")], [_effect("hazardous")])
     weapon = _weapon(attacks="0", skill=2)
@@ -1611,7 +1611,7 @@ def test_resolve_combat_hazardous_rolls_once_per_weapon_and_deals_no_damage_abov
 
 
 def test_resolve_combat_hazardous_deals_1_wound_to_an_infantry_shooter(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 1)  # hazard roll - triggers
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 1)  # hazard roll - triggers
 
     hazardous = _ability([_condition("always")], [_effect("hazardous")])
     weapon = _weapon(attacks="0", skill=2)
@@ -1629,7 +1629,7 @@ def test_resolve_combat_hazardous_deals_1_wound_to_an_infantry_shooter(monkeypat
 
 
 def test_resolve_combat_hazardous_deals_3_wounds_to_a_vehicle_shooter(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 2)  # hazard roll - triggers
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 2)  # hazard roll - triggers
 
     hazardous = _ability([_condition("always")], [_effect("hazardous")])
     weapon = _weapon(attacks="0", skill=2)
@@ -1651,7 +1651,7 @@ def test_resolve_combat_hazardous_wounds_reduced_by_feel_no_pain(monkeypatch):
     # Hazard roll of 1 (triggers, 3 wounds for a VEHICLE), then 3 FNP rolls:
     # succeed, fail, succeed - only the middle point actually lands.
     rolls = iter([1, 6, 2, 6])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls))
 
     hazardous = _ability([_condition("always")], [_effect("hazardous")])
     weapon = _weapon(attacks="0", skill=2)
@@ -1673,7 +1673,7 @@ def test_resolve_combat_hazardous_destroys_the_shooting_model_when_wounds_exceed
 ):
     # A 1-wound INFANTRY shooter takes exactly 1 hazardous wound - enough to
     # destroy it outright.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 1)  # hazard roll - triggers
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 1)  # hazard roll - triggers
 
     hazardous = _ability([_condition("always")], [_effect("hazardous")])
     weapon = _weapon(attacks="0", skill=2)
@@ -1692,7 +1692,7 @@ def test_resolve_combat_hazardous_destroys_the_shooting_model_when_wounds_exceed
 
 def test_resolve_combat_hazardous_does_not_destroy_a_model_that_survives(monkeypatch):
     # A 5-wound INFANTRY shooter only takes 1 hazardous wound - it survives.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 1)  # hazard roll - triggers
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 1)  # hazard roll - triggers
 
     hazardous = _ability([_condition("always")], [_effect("hazardous")])
     weapon = _weapon(attacks="0", skill=2)
@@ -1712,7 +1712,7 @@ def test_resolve_combat_hazardous_does_not_destroy_a_model_that_survives(monkeyp
 def test_resolve_combat_hazardous_damage_accumulates_across_a_models_weapons(monkeypatch):
     # A 2-wound INFANTRY shooter fires two separate hazardous weapons. Neither
     # hazard roll alone (1 wound each) would kill it, but the two together do.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 1)  # both hazard rolls trigger
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 1)  # both hazard rolls trigger
 
     hazardous = _ability([_condition("always")], [_effect("hazardous")])
     weapon_a = _weapon(attacks="0", skill=2)
@@ -1746,7 +1746,7 @@ def test_resolve_combat_hazardous_models_destroyed_only_counts_models_that_fired
     # Model A fires a hazardous weapon and dies from it. Model B fires a
     # non-hazardous weapon and has only 1 wound itself, but should not be
     # counted since it never risked a self-inflicted wound at all.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 1)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 1)
 
     hazardous = _ability([_condition("always")], [_effect("hazardous")])
     weapon_a = _weapon(attacks="0", skill=2)
@@ -1779,7 +1779,7 @@ def test_resolve_combat_hazardous_models_destroyed_only_counts_models_that_fired
 def test_resolve_combat_ignore_cover_per_model_does_not_leak_to_other_models(monkeypatch):
     # By contrast, the plain (non-unit) "Ignores Cover" wargear ability should
     # only protect the model that actually carries it.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 3)
 
     ignores_cover = _wargear_ability([_condition("always")], [_effect("ignore_cover")])
     gear = _wargear([ignores_cover])
@@ -1879,7 +1879,7 @@ async def test_combat_endpoint_applies_sustained_1_weapon_ability(
     await effects_seed.seed(session)
     await weapon_abilities_seed.seed(session)
 
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
     ability_id = next(
         a["id"]
@@ -1931,7 +1931,7 @@ async def test_combat_endpoint_applies_seeded_devastating_wounds_weapon_ability(
     await effects_seed.seed(session)
     await weapon_abilities_seed.seed(session)
 
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
     abilities = (await client.get("/weapon-abilities")).json()
     ability_id = next(a["id"] for a in abilities if a["name"] == "Devastating Wounds")
@@ -1981,7 +1981,7 @@ async def test_combat_endpoint_applies_seeded_anti_infantry_weapon_ability(
     await weapon_abilities_seed.seed(session)
     await client.post("/keywords", json={"name": "INFANTRY"})
 
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
     abilities = (await client.get("/weapon-abilities")).json()
     ability_id = next(a["id"] for a in abilities if a["name"] == "Anti-Infantry 4+")
@@ -2033,7 +2033,7 @@ async def test_combat_endpoint_applies_seeded_heavy_weapon_ability(
     await effects_seed.seed(session)
     await weapon_abilities_seed.seed(session)
 
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 3)
 
     abilities = (await client.get("/weapon-abilities")).json()
     ability_id = next(a["id"] for a in abilities if a["name"] == "Heavy")
@@ -2082,7 +2082,7 @@ async def test_combat_endpoint_applies_seeded_assault_weapon_ability(
     await effects_seed.seed(session)
     await weapon_abilities_seed.seed(session)
 
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
     abilities = (await client.get("/weapon-abilities")).json()
     ability_id = next(a["id"] for a in abilities if a["name"] == "Assault")
@@ -2131,7 +2131,7 @@ async def test_combat_endpoint_applies_seeded_pistol_weapon_ability(
     await effects_seed.seed(session)
     await weapon_abilities_seed.seed(session)
 
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
     abilities = (await client.get("/weapon-abilities")).json()
     ability_id = next(a["id"] for a in abilities if a["name"] == "Pistol")
@@ -2181,7 +2181,7 @@ async def test_combat_endpoint_applies_seeded_reroll_failed_hits_datasheet_abili
     await datasheet_abilities_seed.seed(session)
 
     rolls = iter([2, 6, 6, 1])  # hit (fails), reroll (succeeds), wound, save
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls))
 
     abilities = (await client.get("/datasheet-abilities")).json()
     ability_id = next(a["id"] for a in abilities if a["name"] == "Reroll Failed Hits")
@@ -2229,7 +2229,7 @@ async def test_combat_endpoint_applies_seeded_hazardous_and_rapid_fire_abilities
     await effects_seed.seed(session)
     await weapon_abilities_seed.seed(session)
 
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 1)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 1)
 
     abilities = (await client.get("/weapon-abilities")).json()
     hazardous_id = next(a["id"] for a in abilities if a["name"] == "Hazardous")
@@ -2273,7 +2273,7 @@ async def test_combat_endpoint_applies_seeded_hazardous_and_rapid_fire_abilities
 async def test_combat_endpoint_in_cover_worsens_ranged_hit_rolls(
     client: AsyncClient, faction_id: int, monkeypatch
 ):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 3)
 
     attacker_model_id = await _create_model(client, faction_id)
     weapon_id = await _create_weapon(client, attacker_model_id, skill=3, weapon_type="ranged")
@@ -2311,7 +2311,7 @@ async def test_combat_endpoint_applies_seeded_ignores_cover_weapon_ability(
     await effects_seed.seed(session)
     await weapon_abilities_seed.seed(session)
 
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 3)
 
     abilities = (await client.get("/weapon-abilities")).json()
     ability_id = next(a["id"] for a in abilities if a["name"] == "Ignores Cover")
@@ -2351,7 +2351,7 @@ async def test_combat_endpoint_applies_seeded_ignores_cover_weapon_ability(
 async def test_combat_endpoint_groups_weapon_results_by_weapon_name(
     client: AsyncClient, faction_id: int, monkeypatch
 ):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
     attacker_model_id = await _create_model(client, faction_id)
     weapon_a_id = await _create_weapon(
@@ -2405,7 +2405,7 @@ async def test_combat_endpoint_groups_weapon_results_by_weapon_name(
 async def test_combat_endpoint_resolves_with_calculator_defaults(
     client: AsyncClient, faction_id: int, monkeypatch
 ):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
     attacker_model_id = await _create_model(client, faction_id)
     weapon_id = await _create_weapon(client, attacker_model_id, strength=10, ap=-10, skill=2)
@@ -2435,7 +2435,7 @@ async def test_combat_endpoint_resolves_with_calculator_defaults(
 async def test_combat_endpoint_calculator_ignores_visible_and_range_overrides(
     client: AsyncClient, faction_id: int, monkeypatch
 ):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
     attacker_model_id = await _create_model(client, faction_id)
     weapon_id = await _create_weapon(client, attacker_model_id)
@@ -2539,7 +2539,7 @@ async def test_combat_endpoint_weapon_not_equipped_by_attacker_returns_400(
 
 def test_resolve_combat_stratagem_grants_unit_wide_reroll_failed_hits(monkeypatch):
     rolls = iter([2, 6, 6, 1])  # hit (fails), reroll (succeeds), wound, save
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls))
 
     stratagem = Stratagem(name="Rerolls", description=None, cp=1, is_core=True)
     stratagem.conditions = [_condition("always")]
@@ -2571,7 +2571,7 @@ def test_resolve_combat_stratagem_effect_applies_per_attack(monkeypatch):
     # +1 to hit is an attack-level effect, so the stratagem must also be in
     # play for each weapon, not only the unit-wide check.
     rolls = iter([3, 6, 1])  # hit (3 vs skill 4, passes with +1), wound, save
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls))
 
     stratagem = Stratagem(name="Plus One", description=None, cp=1, is_core=True)
     stratagem.conditions = [_condition("always")]
@@ -2723,7 +2723,7 @@ def test_resolve_combat_plus_one_to_hit_only_against_monster_or_vehicle(
     monkeypatch, defender_keyword, expected_damage
 ):
     rolls = iter([3, 6, 1])  # hit (3 vs skill 4 - only passes with +1), wound, save
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
 
     ability = _ability([_condition("target_monster_or_vehicle")], [_effect("plus_one_to_hit")])
     weapon = _weapon(attacks="1", skill=4, strength=10, ap=-10, damage="1")
@@ -2808,7 +2808,7 @@ def _hits(result) -> int:
 
 def test_protector_improves_ballistic_skill_of_ranged_weapons(monkeypatch):
     rolls = iter([3, 6, 1])  # hit 3 vs BS4 (passes only with BS+1), wound, save
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=4, strength=10, ap=-10, weapon_type="ranged")
 
     assert _hits(_doctrina_combat(weapon, attacker_rules=PROTECTOR)) == 1
@@ -2816,7 +2816,7 @@ def test_protector_improves_ballistic_skill_of_ranged_weapons(monkeypatch):
 
 def test_protector_does_not_improve_melee_weapon_skill(monkeypatch):
     rolls = iter([3, 6, 1])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=4, strength=10, ap=-10, weapon_type="melee", range=None)
 
     result = _doctrina_combat(weapon, attacker_rules=PROTECTOR, in_engagement_range=True)
@@ -2825,7 +2825,7 @@ def test_protector_does_not_improve_melee_weapon_skill(monkeypatch):
 
 def test_protector_grants_heavy_to_ranged_weapons(monkeypatch):
     rolls = iter([2, 6, 1])  # hit 2 vs BS4: needs BS+1 and Heavy's +1
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=4, strength=10, ap=-10, weapon_type="ranged")
 
     assert _hits(_doctrina_combat(weapon, attacker_rules=PROTECTOR, moved_less_than_3=True)) == 1
@@ -2835,7 +2835,7 @@ def test_protector_heavy_does_not_stack_with_a_weapon_that_already_has_heavy(mon
     # BS5 with BS+1 and a single +1 to hit needs a 3; a doubled Heavy would
     # wrongly let a 2 through.
     rolls = iter([2, 6, 1])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     heavy = _ability([_condition("moved_less_than_3")], [_effect("plus_one_to_hit")])
     weapon = _weapon(attacks="1", skill=5, strength=10, ap=-10, weapon_type="ranged")
     weapon.abilities = [heavy]
@@ -2855,7 +2855,7 @@ def test_protector_on_defender_gives_melee_attacks_against_battleline_minus_one_
     monkeypatch, defender_keyword, weapon_type, expected
 ):
     rolls = iter([3, 6, 1])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(
         attacks="1",
         skill=3,
@@ -2878,7 +2878,7 @@ def test_defender_rules_do_not_apply_to_the_attacker_and_vice_versa(monkeypatch)
     # The attacker having Protector doesn't penalise its own melee attacks, and
     # the defender having Protector doesn't grant the attacker BS+1.
     rolls = iter([3, 6, 1, 3, 6, 1])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     melee = _weapon(attacks="1", skill=3, strength=10, ap=-10, weapon_type="melee", range=None)
     result = _doctrina_combat(
         melee,
@@ -2893,7 +2893,7 @@ def test_defender_rules_do_not_apply_to_the_attacker_and_vice_versa(monkeypatch)
 
 
 def test_conqueror_grants_assault_to_ranged_weapons(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, weapon_type="ranged")
 
     assert _doctrina_combat(weapon, advanced=True).attack_rolls == []
@@ -2902,7 +2902,7 @@ def test_conqueror_grants_assault_to_ranged_weapons(monkeypatch):
 
 def test_conqueror_improves_weapon_skill_of_melee_weapons(monkeypatch):
     rolls = iter([3, 6, 1])  # hit 3 vs WS4 passes only with WS+1
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=4, strength=10, ap=-10, weapon_type="melee", range=None)
 
     result = _doctrina_combat(weapon, attacker_rules=CONQUEROR, in_engagement_range=True)
@@ -2911,7 +2911,7 @@ def test_conqueror_improves_weapon_skill_of_melee_weapons(monkeypatch):
 
 def test_conqueror_does_not_improve_ranged_weapon_skill(monkeypatch):
     rolls = iter([3, 6, 1])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=4, strength=10, ap=-10, weapon_type="ranged")
 
     assert _hits(_doctrina_combat(weapon, attacker_rules=CONQUEROR)) == 0
@@ -2921,7 +2921,7 @@ def test_conqueror_does_not_improve_ranged_weapon_skill(monkeypatch):
 def test_conqueror_improves_ap_for_battleline_attackers(monkeypatch, attacker_keyword, expected):
     # Save 2+ against AP-1 needs a 3; with AP improved to -2 it needs a 4.
     rolls = iter([6, 6, 3])  # hit, wound, save 3
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=-1, weapon_type="ranged")
 
     result = _doctrina_combat(
@@ -2932,7 +2932,7 @@ def test_conqueror_improves_ap_for_battleline_attackers(monkeypatch, attacker_ke
 
 def test_improved_ap_does_not_worsen_invulnerable_save(monkeypatch):
     rolls = iter([6, 6, 4])  # hit, wound, save 4 vs a 4+ invulnerable
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=-3, weapon_type="ranged")
     weapon.id = 1
     attacker = _unit(
@@ -2984,7 +2984,7 @@ async def test_combat_endpoint_applies_rule_option_only_to_units_with_the_factio
     client: AsyncClient, monkeypatch, with_doctrina, expected_damage
 ):
     rolls = iter([3, 6, 1])  # hit 3 vs BS4 - passes only with Protector's BS+1
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     attacker_id, defender_id, weapon_id = await _admech_setup(
         client, with_doctrina=with_doctrina
     )
@@ -3032,7 +3032,7 @@ RILED_UP = orks_abilities.OPTIONS["Waaagh!"]["Riled Up"]
 def _riled_up_defence(monkeypatch, save_roll, defender_rules, invulnerable=None):
     # AP-4 against a 3+ save needs a 7 - only an invulnerable save can stop it.
     rolls = iter([6, 6, save_roll])  # hit, wound, save
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=-4, weapon_type="ranged")
     weapon.id = 1
     attacker = _unit([_unit_model(_model(), [weapon])])
@@ -3068,7 +3068,7 @@ def test_riled_up_keeps_a_better_existing_invulnerable_save(monkeypatch):
 
 
 def test_riled_up_attacker_ranged_weapons_have_assault(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, weapon_type="ranged")
 
     assert _doctrina_combat(weapon, advanced=True).attack_rolls == []
@@ -3078,7 +3078,7 @@ def test_riled_up_attacker_ranged_weapons_have_assault(monkeypatch):
 def test_riled_up_invulnerable_is_defender_only(monkeypatch):
     # An attacking unit that's riled up doesn't hand its target a 5+ invulnerable.
     rolls = iter([6, 6, 5])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=-4, weapon_type="ranged")
     assert _doctrina_combat(weapon, attacker_rules=RILED_UP).total_damage == 1
 
@@ -3099,7 +3099,7 @@ def _hunter_weapon(**overrides):
 def test_hunter_profile_only_attacks_monsters_and_vehicles(
     monkeypatch, defender_keyword, expected_attacks
 ):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     weapon = _hunter_weapon(weapon_type="ranged")
 
     result = _doctrina_combat(weapon, defender_keywords=[defender_keyword])
@@ -3109,7 +3109,7 @@ def test_hunter_profile_only_attacks_monsters_and_vehicles(
 
 
 def test_hunter_melee_profile_is_restricted_too(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     weapon = _hunter_weapon(weapon_type="melee", range=None)
 
     result = _doctrina_combat(weapon, defender_keywords=["INFANTRY"], in_engagement_range=True)
@@ -3117,7 +3117,7 @@ def test_hunter_melee_profile_is_restricted_too(monkeypatch):
 
 
 def test_close_quarters_fires_in_engagement_range(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     close_quarters = _ability([_condition("always")], [_effect("pistol")])
     weapon = _weapon(attacks="1", skill=4, strength=10, ap=-2, damage="3", weapon_type="ranged")
     weapon.abilities = [close_quarters]
@@ -3137,7 +3137,7 @@ def test_lethal_hits_non_monster_vehicle_only_auto_wounds_other_targets(
 ):
     # A critical hit auto-wounds (no wound roll) only against non-MONSTER/VEHICLE.
     rolls = iter([6, 1, 1])  # hit (critical), wound roll if one is made, save
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     lethal = _ability(
         [_condition("critical_hit_not_monster_or_vehicle")], [_effect("auto_pass_wound")]
     )
@@ -3189,14 +3189,14 @@ def test_even_more_dakka_gives_sustained_hits_only_when_riled_up(
     monkeypatch, attacker_options, expected_damage
 ):
     # One critical hit: riled up, it scores an extra (sustained) hit.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     weapon = _weapon(attacks="1", skill=4, strength=10, ap=0, damage="1", weapon_type="ranged")
 
     assert _dakka_combat(weapon, attacker_options).total_damage == expected_damage
 
 
 def test_even_more_dakka_does_not_affect_melee_attacks(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     weapon = _weapon(
         attacks="1", skill=3, strength=10, ap=0, damage="1", weapon_type="melee", range=None
     )
@@ -3211,7 +3211,7 @@ def test_even_more_dakka_does_not_affect_melee_attacks(monkeypatch):
 def test_blitz_dem_gitz_adds_six_attacks_against_non_monster_vehicle(
     monkeypatch, defender_keyword, expected_attacks
 ):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 1)  # every hit misses
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 1)  # every hit misses
     blitz = _ability(
         [_condition("pre_weapon_not_monster_or_vehicle")], [_effect("add_six_attacks")]
     )
@@ -3234,7 +3234,7 @@ async def test_combat_endpoint_passes_riled_up_to_datasheet_abilities(
     await conditions_seed.seed(session)
     await effects_seed.seed(session)
     await datasheet_abilities_seed.seed(session)
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
     faction_id = (await client.post("/factions", json={"name": "Orks"})).json()["id"]
     waaagh_id = (
@@ -3292,7 +3292,7 @@ def test_electro_infusion_gives_minus_one_to_wound_while_led_by_a_character(
     monkeypatch, defender_keywords, wound_roll, expected_damage
 ):
     rolls = iter([6, wound_roll, 1])  # hit, wound, save
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=4, ap=-10, damage="1", weapon_type="ranged")
     weapon.id = 1
     attacker = _unit([_unit_model(_model(), [weapon])])
@@ -3328,7 +3328,7 @@ def test_electro_infusion_gives_minus_one_to_wound_while_led_by_a_character(
 def test_minus_one_to_wound_never_stops_an_unmodified_six(monkeypatch):
     # S2 vs T4 needs 6+; at -1 that would be 7+, but a natural 6 still wounds.
     rolls = iter([6, 6, 1])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=2, ap=-10, damage="1", weapon_type="ranged")
 
     result = _doctrina_combat(
@@ -3340,7 +3340,7 @@ def test_minus_one_to_wound_never_stops_an_unmodified_six(monkeypatch):
 def test_electro_infusion_does_not_affect_its_own_units_attacks(monkeypatch):
     # As the attacker's rule it does nothing, even against a CHARACTER.
     rolls = iter([6, 4, 1])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=4, ap=-10, damage="1", weapon_type="ranged")
     result = _doctrina_combat(
         weapon, attacker_rules=ELECTRO_INFUSION, defender_keywords=["CHARACTER"]
@@ -3354,7 +3354,7 @@ async def test_combat_endpoint_applies_defending_units_datasheet_rules(
     client: AsyncClient, faction_id: int, monkeypatch, with_character, expected_damage
 ):
     rolls = iter([6, 4, 1])  # hit, wound 4 (S4 vs T4: fails only at -1), save
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     infusion_id = (
         await client.post("/datasheet-abilities", json={"name": "Electro-infusion"})
     ).json()["id"]
@@ -3397,7 +3397,7 @@ async def test_combat_endpoint_applies_defending_units_datasheet_rules(
 def test_fnp_rolls_are_recorded_one_per_point_of_damage(monkeypatch):
     # D3 damage rolls 3; the defender's 5+ FNP then rolls 5 (saved), 2, 6 (saved).
     rolls = iter([6, 6, 1, 3, 5, 2, 6])  # hit, wound, save, damage, fnp x3
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, damage="D3", weapon_type="ranged")
     weapon.id = 1
     attacker = _unit([_unit_model(_model(), [weapon])])
@@ -3421,7 +3421,7 @@ def test_fnp_rolls_are_recorded_one_per_point_of_damage(monkeypatch):
 
 
 def test_no_fnp_rolls_without_feel_no_pain(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, damage="2", weapon_type="ranged")
 
     assert _doctrina_combat(weapon).fnp_rolls == []
@@ -3436,7 +3436,7 @@ def _lord_combat(monkeypatch, defender_models, fnp_rolls):
     # One 1-damage attack that always gets through to damage; the FNP rolls
     # (if any are made) come next.
     rolls = iter([6, 6, 1, *fnp_rolls])  # hit, wound, save, fnp...
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, damage="1", weapon_type="ranged")
     weapon.id = 1
     attacker = _unit([_unit_model(_model(), [weapon])])
@@ -3499,7 +3499,7 @@ def test_granted_fnp_keeps_a_models_better_own_fnp(monkeypatch):
 
 
 def test_roll_dice_with_modifier(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 4)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 4)
     assert combat.roll_dice("D6+1") == 5
     assert combat.roll_dice("2D6+2") == 10
 
@@ -3527,7 +3527,7 @@ def _fire(weapon, defender_models, **flags):
 
 @pytest.mark.parametrize("models,expected_attacks", [(4, 2), (5, 3), (10, 4), (11, 4)])
 def test_blast_adds_an_attack_per_five_target_models(monkeypatch, models, expected_attacks):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 1)  # every attack misses
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 1)  # every attack misses
     weapon = _weapon(attacks="2", skill=4, weapon_type="ranged")
     weapon.abilities = [_ability([_condition("always")], [_effect("blast")])]
 
@@ -3538,7 +3538,7 @@ def test_blast_adds_an_attack_per_five_target_models(monkeypatch, models, expect
 def test_rapid_fire_3_adds_three_attacks_within_half_range(
     monkeypatch, half_range, expected_attacks
 ):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 1)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 1)
     weapon = _weapon(attacks="3", skill=4, weapon_type="ranged")
     weapon.abilities = [_ability([_condition("within_half_range")], [_effect("add_three_attacks")])]
 
@@ -3553,7 +3553,7 @@ def _twin_linked():
 def test_twin_linked_rerolls_a_failed_wound(monkeypatch):
     # S4 vs T4 needs 4+: a 2 fails, the re-roll of 5 succeeds.
     rolls = iter([6, 2, 5, 1])  # hit, wound, wound re-roll, save
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=4, ap=0, damage="1", weapon_type="ranged")
     weapon.abilities = [_twin_linked()]
 
@@ -3566,7 +3566,7 @@ def test_twin_linked_rerolls_a_failed_wound(monkeypatch):
 
 def test_twin_linked_does_not_reroll_a_successful_wound(monkeypatch):
     rolls = iter([6, 4, 1])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=4, ap=0, damage="1", weapon_type="ranged")
     weapon.abilities = [_twin_linked()]
 
@@ -3577,7 +3577,7 @@ def test_twin_linked_does_not_reroll_a_successful_wound(monkeypatch):
 def test_twin_linked_reroll_of_a_six_still_triggers_devastating_wounds(monkeypatch):
     # The re-rolled 6 is a critical wound, so Devastating Wounds skips the save.
     rolls = iter([6, 1, 6])  # hit, wound 1 (fails), re-roll 6; no save roll
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=4, ap=0, damage="1", weapon_type="ranged")
     devastating = _ability([_condition("critical_wound")], [_effect("no_save")])
     weapon.abilities = [_twin_linked(), devastating]
@@ -3600,7 +3600,7 @@ def test_blistering_salvoes_plus_one_to_hit_by_target_type(
     monkeypatch, condition, target_keyword, expected_damage
 ):
     rolls = iter([3, 6, 1])  # hit 3 vs BS4 passes only with +1
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=4, strength=10, ap=-10, damage="1", weapon_type="ranged")
     weapon.abilities = [_ability([_condition(condition)], [_effect("plus_one_to_hit")])]
 
@@ -3616,7 +3616,7 @@ def _deadly_demise_model(**overrides):
 @pytest.mark.parametrize("demise_roll,explosions", [(6, 1), (5, 0)])
 def test_deadly_demise_rolls_when_the_model_is_destroyed(monkeypatch, demise_roll, explosions):
     rolls = iter([6, 6, 1, demise_roll])  # hit, wound, save, deadly demise
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=0, damage="1", weapon_type="ranged")
 
     result = _fire(weapon, [_deadly_demise_model()])
@@ -3626,7 +3626,7 @@ def test_deadly_demise_rolls_when_the_model_is_destroyed(monkeypatch, demise_rol
 
 
 def test_deadly_demise_does_not_roll_for_a_surviving_or_ordinary_model(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=0, damage="1", weapon_type="ranged")
 
     survivor = _fire(weapon, [_deadly_demise_model(wounds=5)])
@@ -3640,7 +3640,7 @@ def test_deadly_demise_does_not_roll_for_a_surviving_or_ordinary_model(monkeypat
 
 
 def test_sustained_2_scores_two_extra_hits_on_a_critical(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)  # critical hit, all wound
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)  # critical hit, all wound
     weapon = _weapon(
         attacks="1", skill=4, strength=10, ap=0, damage="1", weapon_type="melee", range=None
     )
@@ -3657,7 +3657,7 @@ STEALTH = datasheet_ability_seeds.RULES["Stealth"]
 def _stealth_shot(monkeypatch, weapon_type="ranged", weapon_abilities=(), **flags):
     # Hit 3 vs skill 3: it hits, unless the target has the benefit of cover.
     rolls = iter([3, 6, 1])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(
         attacks="1",
         skill=3,
@@ -3697,7 +3697,7 @@ def test_stealth_does_not_affect_melee_attacks(monkeypatch):
 )
 def test_stealth_cover_does_not_stack_with_being_in_cover(monkeypatch, flags, hits):
     rolls = iter([3, 6, 1])  # hit, wound, save
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, damage="1", weapon_type="ranged")
     weapon.abilities = [_plus_one()]
 
@@ -3729,7 +3729,7 @@ def test_resolve_combat_rolls_all_hits_before_any_wounds(monkeypatch):
         calls.append(value)
         return value
 
-    monkeypatch.setattr(combat.random, "randint", roll)
+    monkeypatch.setattr("app.services.dice.randint", roll)
     weapon = _weapon(attacks="3", skill=4, strength=10, ap=0, damage="1", weapon_type="ranged")
     result = _fire(weapon, [_model(toughness=1, wounds=10, save=2)])
 
@@ -3743,7 +3743,7 @@ def test_resolve_combat_batches_a_profile_across_models(monkeypatch):
     # Two models each with a one-attack "Gun": both hit rolls are made before
     # either wound roll.
     rolls = iter([6, 2, 6, 1])  # hit (model 1), hit (model 2, misses), wound, save
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     gun_a = _weapon(name="Gun", attacks="1", skill=4, strength=10, ap=0, damage="1")
     gun_a.id = 1
     gun_b = _weapon(name="Gun", attacks="1", skill=4, strength=10, ap=0, damage="1")
@@ -3772,7 +3772,7 @@ def test_resolve_combat_sustained_hits_join_the_hit_phase(monkeypatch):
     # 2 attacks: a critical (sustained adds a hit) and a miss; the extra hit
     # goes to the wound phase with the first, so 2 wound rolls follow both hits.
     rolls = iter([6, 1, 6, 6, 1, 1])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="2", skill=4, strength=10, ap=0, damage="1", weapon_type="ranged")
     weapon.abilities = [_ability([_condition("critical_hit")], [_effect("add_extra_hit")])]
 
@@ -3785,7 +3785,7 @@ def test_resolve_combat_sustained_hits_join_the_hit_phase(monkeypatch):
 def test_resolve_combat_still_rolls_every_hit_after_the_unit_is_wiped(monkeypatch):
     # All the hit, wound and save rolls happen up front, as at the table
     # (05.03); only the damage stops once there's no one left.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6 if b == 6 else 1)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6 if b == 6 else 1)
     weapon = _weapon(attacks="3", skill=2, strength=10, ap=-10, damage="1", weapon_type="ranged")
 
     result = _fire(weapon, [_model(toughness=1, wounds=1, save=7)])
@@ -3810,7 +3810,7 @@ def _hit_with(monkeypatch, hit_roll, skill, abilities=(), **flags):
     # One attack that always wounds and always gets through, so damage tells
     # us whether it hit.
     rolls = iter([hit_roll, 6, 1])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(
         attacks="1", skill=skill, strength=10, ap=-10, damage="1", weapon_type="ranged"
     )
@@ -3867,7 +3867,7 @@ def test_a_shared_datasheet_ability_counts_once_however_many_models_have_it(monk
     # Both models have the same +1 to hit ability; with a -1 against it, the
     # net is 0 (one +1, one -1) - not +1 from counting it per model.
     rolls = iter([3, 6, 1])  # hit 3 vs BS4: only hits at a net +1
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     shared = _datasheet_ability([_condition("always")], [_effect("plus_one_to_hit")])
     weapon = _weapon(attacks="1", skill=4, strength=10, ap=-10, damage="1", weapon_type="ranged")
     weapon.id = 1
@@ -3910,7 +3910,7 @@ def test_heavy_from_two_sources_is_one_plus_one(monkeypatch):
 
     def hit(roll):
         rolls = iter([roll, 6, 1])
-        monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+        monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
         weapon = _weapon(
             attacks="1", skill=4, strength=10, ap=-10, damage="1", weapon_type="ranged"
         )
@@ -3953,7 +3953,7 @@ def test_heavy_stacks_with_a_different_plus_one_before_the_cap(monkeypatch):
 def test_melta_3_adds_three_damage_within_half_range(monkeypatch, half_range, expected_damage):
     # D6 damage rolls a 4 (the last roll); Melta 3 adds 3 within half range.
     rolls = iter([6, 6, 1, 4])  # hit, wound, save, damage
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=2, strength=14, ap=-4, damage="D6", weapon_type="ranged")
     weapon.abilities = [_ability([_condition("within_half_range")], [_effect("melta_3")])]
 
@@ -3963,7 +3963,7 @@ def test_melta_3_adds_three_damage_within_half_range(monkeypatch, half_range, ex
 
 def test_melta_bonus_applies_to_every_attack_of_the_weapon(monkeypatch):
     # 2 attacks, each D1 + 3 = 4 damage.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6 if b == 6 else 1)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6 if b == 6 else 1)
     weapon = _weapon(attacks="2", skill=2, strength=14, ap=-4, damage="1", weapon_type="ranged")
     weapon.abilities = [_ability([_condition("within_half_range")], [_effect("melta_3")])]
 
@@ -3977,7 +3977,7 @@ def test_melta_bonus_applies_to_every_attack_of_the_weapon(monkeypatch):
 def test_extra_keywords_count_for_keyword_conditions(monkeypatch):
     # Mantra of Discipline makes Cawl BATTLELINE, so Conqueror's AP bonus applies.
     rolls = iter([6, 6, 3])  # hit, wound, save 3 vs Sv2+ at AP-1 (fails only at AP-2)
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=-1, damage="1", weapon_type="ranged")
     weapon.id = 1
     result = combat.resolve_combat(
@@ -4099,7 +4099,7 @@ async def _attack(client, attacker, defender, weapon_id, **options):
 async def test_machine_vengeance_rerolls_hits_for_friendly_units_in_cawls_list(
     client: AsyncClient, monkeypatch, attacker, rerolls
 ):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 1)  # every hit misses
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 1)  # every hit misses
     army = await _cawl_army(client)
     unit_id, weapon_id = army[attacker]
 
@@ -4120,7 +4120,7 @@ async def test_shroudpsalm_gives_the_defending_unit_stealth(client: AsyncClient,
 
     async def damage(options):
         rolls = iter([4, 6, 1])
-        monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+        monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
         body = await _attack(
             client, unit_id, army["target_in_list"][0], weapon_id, defender_rule_options=options
         )
@@ -4146,7 +4146,7 @@ async def test_mantra_of_discipline_makes_only_cawls_unit_battleline(
     army = await _cawl_army(client)
     unit_id, weapon_id = army[attacker]
     rolls = iter([6, 6, 3])  # hit, wound, save
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     options = ["Conqueror Imperative"] + (["Mantra of Discipline"] if mantra else [])
 
     body = await _attack(
@@ -4185,7 +4185,7 @@ def _restricted_stratagem(*keywords):
 def _two_model_attack(monkeypatch, stratagem):
     # A CHARACTER and a trooper, each with a one-attack BS4 gun. Every roll is
     # a 3: it hits only with +1 to hit, then always wounds and fails its save.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 3)
     hero_gun = _weapon(name="Hero Gun", attacks="1", skill=4, strength=10, ap=-10, damage="1")
     hero_gun.id = 1
     trooper_gun = _weapon(
@@ -4232,7 +4232,7 @@ def test_restricted_stratagem_stays_out_of_the_unit_wide_check(monkeypatch):
     stratagem.effects = [_effect("reroll_failed_hits")]
     stratagem.keywords = [_keyword("CHARACTER")]
     rolls = iter([1, 6, 6, 1])  # a missed hit - it would hit if re-rolled
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=4, strength=10, ap=-10, damage="1", weapon_type="ranged")
     weapon.id = 1
     result = combat.resolve_combat(
@@ -4296,7 +4296,7 @@ def test_defender_stratagem_modifies_attacks_against_its_unit(monkeypatch):
     stratagem.effects = [_effect("minus_one_to_hit")]
     stratagem.keywords = []
     rolls = iter([4, 6, 1])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=4, strength=10, ap=-10, damage="1", weapon_type="ranged")
     result = _fire(
         weapon, [_model(toughness=1, wounds=10, save=7)], defender_stratagems=[stratagem]
@@ -4423,7 +4423,7 @@ def _bulwark_defence(monkeypatch, save_roll, invulnerable=None):
     stratagem.effects = [_effect("invulnerable_4")]
     stratagem.keywords = []
     rolls = iter([6, 6, save_roll])  # hit, wound, save
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=-4, weapon_type="ranged")
     defender = _model(toughness=1, wounds=10, save=3, invulnerable=invulnerable)
     return _fire(weapon, [defender], defender_stratagems=[stratagem]).total_damage
@@ -4524,7 +4524,7 @@ def _enhanced_attack(monkeypatch, enhancement=None, upgrade=None, with_trooper=T
     # A CHARACTER (carrying `enhancement`) with a gun and a blade, and maybe a
     # trooper with a gun. Every roll is a 3 against BS/WS 4: an attack only
     # hits with +1 to hit, then always wounds and gets through.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 3)
     stats = dict(attacks="1", skill=4, strength=10, ap=-10, damage="1")
     hero_gun = _weapon(name="Hero Gun", weapon_type="ranged", **stats)
     hero_gun.id = 1
@@ -4603,7 +4603,7 @@ async def test_combat_endpoint_applies_enhancement_granted_stealth(
     await effects_seed.seed(session)
     await datasheet_abilities_seed.seed(session)
     await weapon_abilities_seed.seed(session)
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 4)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 4)
 
     stealth_id = next(
         a["id"]
@@ -4702,7 +4702,7 @@ async def test_combat_endpoint_applies_enhancement_granted_stealth(
 )
 def test_plus_one_to_wound(monkeypatch, effects, wound_roll, wounds):
     rolls = iter([6, wound_roll, 1])  # hit, wound, save
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=4, ap=-10, damage="1", weapon_type="ranged")
     weapon.abilities = [_ability([_condition("always")], [_effect(e)]) for e in effects]
     result = _fire(weapon, [_model(toughness=4, wounds=10, save=7)])
@@ -4751,7 +4751,7 @@ async def test_calculator_stratagems_respect_keyword_options(client: AsyncClient
 
 def test_elevated_strider_can_shoot_after_advancing(monkeypatch):
     # Modelled as [ASSAULT] on every weapon, from the datasheet ability.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     strider = next(e for e in datasheet_ability_seeds.ENTRIES if e[0] == "Elevated Strider")
     ability = _datasheet_ability(
         [_condition(c) for c in strider[2]], [_effect(e) for e in strider[3]]
@@ -4790,7 +4790,7 @@ def _breaching_shot(monkeypatch, rolls, **flags):
         [_condition(c) for c in entry[2]], [_effect(e) for e in entry[3]]
     )
     rolls = iter(rolls)
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 6))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 6))
     weapon = _weapon(attacks="1", skill=4, strength=10, ap=-10, weapon_type="ranged")
     weapon.id = 1
     attacker = _unit([_unit_model(_model(abilities=[ability]), [weapon])])
@@ -4848,7 +4848,7 @@ def test_conqueror_imperative_counts_battleline_or_near_it(
 ):
     # AP0 against a 4+ save: a 4 saves unless AP is improved to -1.
     rolls = iter([6, 6, 4])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     conqueror = admech_abilities.OPTIONS["Doctrina Imperatives"]["Conqueror Imperative"]
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=0, weapon_type="melee", range=None)
     weapon.id = 1
@@ -4884,7 +4884,7 @@ def test_protector_imperative_counts_battleline_or_near_it(
 ):
     # A melee 3 against WS3 hits, unless it's at -1 to hit.
     rolls = iter([3, 6, 1])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     protector = admech_abilities.OPTIONS["Doctrina Imperatives"]["Protector Imperative"]
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, weapon_type="melee", range=None)
     weapon.id = 1
@@ -4986,7 +4986,7 @@ async def test_positions_are_asked_about_only_for_units_whose_rules_use_them(
 
 
 def test_rapid_fire_2_adds_two_attacks_within_half_range(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     entry = next(e for e in weapon_ability_seeds.ENTRIES if e[0] == "Rapid Fire 2")
     weapon = _weapon(attacks="2", skill=4, strength=10, ap=-10, weapon_type="ranged")
     weapon.abilities = [
@@ -5004,7 +5004,7 @@ def _one_attack(monkeypatch, rolls, effects, weapon_type="ranged", defender_effe
     # One attack with effects on the weapon (and maybe a defender rule), every
     # roll scripted; returns the result.
     rolls = iter(rolls)
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon_stats = dict(attacks="1", skill=3, strength=4, ap=0, damage="1")
     weapon_stats.update(stats)
     weapon = _weapon(
@@ -5062,7 +5062,7 @@ def test_feel_no_pain_6(monkeypatch):
 
 
 def test_plus_two_attacks_ability_adds_two_attacks_once(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     entry = next(e for e in weapon_ability_seeds.ENTRIES if e[0] == "+2 Attacks")
     weapon = _weapon(attacks="2", skill=3, strength=10, ap=-10, weapon_type="melee", range=None)
     weapon.abilities = [
@@ -5084,7 +5084,7 @@ def test_murderous_imperative(monkeypatch, options, rolls, hit_rerolls, wound_re
     from app.seeds.factions.adeptus_mechanicus import datasheet_abilities as admech_datasheet
 
     rolls = iter(rolls)
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=4, ap=-10, damage="1", weapon_type="ranged")
     weapon.id = 1
     attacker = _unit([_unit_model(_model(), [weapon])])
@@ -5109,7 +5109,7 @@ def test_murderous_imperative(monkeypatch, options, rolls, hit_rerolls, wound_re
 def test_bearers_unit_grant_reaches_the_whole_unit_even_if_not_leading(monkeypatch):
     # The bearer isn't a CHARACTER, so it isn't leading - "bearers_unit" still
     # reaches every model in its unit.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 3)
     stats = dict(attacks="1", skill=4, strength=10, ap=-10, damage="1", weapon_type="ranged")
     guns = []
     for i in (1, 2):
@@ -5173,7 +5173,7 @@ def test_scriptural_prognosis_needs_the_defender_on_an_objective(
 ):
     # AP-2 against a 4+ save: a 5 saves only if the AP is worsened to -1.
     rolls = iter([6, 6, 5])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     prognosis = Stratagem(name="Scriptural Prognosis", description=None, cp=1, is_core=True)
     prognosis.conditions = [_condition("defender_in_range_of_objective")]
     prognosis.effects = [_effect("worsen_ap")]
@@ -5194,7 +5194,7 @@ def test_scriptural_prognosis_needs_the_defender_on_an_objective(
 def test_enhancement_weapon_fires_with_the_bearer(monkeypatch):
     from app.models import EnhancementWeapon
 
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     casket = EnhancementWeapon(
         name="TL-4Ø9",
         weapon_type="ranged",
@@ -5247,7 +5247,7 @@ def test_enhancement_keyword_counts_for_stratagem_targeting(monkeypatch):
     ]
 
     def damage(enhancement):
-        monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+        monkeypatch.setattr("app.services.dice.randint", lambda a, b: 3)
         gun = _weapon(
             attacks="1", skill=4, strength=10, ap=-10, damage="1", weapon_type="ranged"
         )
@@ -5280,7 +5280,7 @@ def test_enhancement_keyword_counts_for_stratagem_targeting(monkeypatch):
 def test_lance_adds_1_to_wound_after_charging(monkeypatch, charged, wounded):
     entry = next(e for e in weapon_ability_seeds.ENTRIES if e[0] == "Lance")
     rolls = iter([6, 3, 1])  # hit, wound (S4 vs T4 needs a 4), save
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=4, ap=-10, weapon_type="melee", range=None)
     weapon.abilities = [
         _ability([_condition(c) for c in entry[2]], [_effect(e) for e in entry[3]])
@@ -5297,7 +5297,7 @@ def test_lance_adds_1_to_wound_after_charging(monkeypatch, charged, wounded):
 @pytest.mark.parametrize("charged,wounded", [(True, True), (False, False)])
 def test_servo_driven_charge_gives_lance_after_charging(monkeypatch, charged, wounded):
     rolls = iter([6, 3, 1])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     charge = Stratagem(name="Servo-Driven Charge", description=None, cp=1, is_core=True)
     charge.conditions = [_condition("charged")]
     charge.effects = [_effect("plus_one_to_wound")]
@@ -5319,7 +5319,7 @@ def test_servo_driven_charge_gives_lance_after_charging(monkeypatch, charged, wo
 def _hazard(monkeypatch, fnp_roll, shooter, stratagems=()):
     # An INFANTRY shooter fails its hazard roll (1 mortal wound); then its FNP roll.
     rolls = iter([1, fnp_roll])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     hazardous = _ability([_condition("always")], [_effect("hazardous")])
     weapon = _weapon(attacks="0", skill=2)
     weapon.id = 1
@@ -5365,7 +5365,7 @@ def test_attacker_stratagem_fnp_protects_its_own_unit_from_hazardous(monkeypatch
 def test_attacker_stratagem_fnp_does_not_protect_its_target(monkeypatch):
     # Benevolence used on the attacking unit: the target doesn't get FNP 6+.
     rolls = iter([6, 6, 1, 6])  # hit, wound, failed save, (no FNP roll expected)
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, weapon_type="ranged")
     result = _fire(weapon, [_model(toughness=1, wounds=10, save=7)], stratagems=[_benevolence()])
     assert (result.total_damage, result.fnp_rolls) == (1, [])
@@ -5373,7 +5373,7 @@ def test_attacker_stratagem_fnp_does_not_protect_its_target(monkeypatch):
 
 def test_defender_stratagem_fnp_protects_the_defender(monkeypatch):
     rolls = iter([6, 6, 1, 6])  # hit, wound, failed save, FNP 6
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, weapon_type="ranged")
     result = _fire(
         weapon, [_model(toughness=1, wounds=10, save=7)], defender_stratagems=[_benevolence()]
@@ -5397,7 +5397,7 @@ def test_attacks_allowing_no_save_use_fnp_vs_mortal_wounds(
     monkeypatch, devastating, fnp_roll, damage
 ):
     rolls = iter([6, 6, fnp_roll] if devastating else [6, 6, 1, fnp_roll])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=0, damage="1", weapon_type="ranged")
     if devastating:
         weapon.abilities = [_ability([_condition("always")], [_effect("no_save")])]
@@ -5409,7 +5409,7 @@ def test_attacks_allowing_no_save_use_fnp_vs_mortal_wounds(
 def test_defender_stratagem_fnp_vs_mortals_counts_against_devastating_wounds(monkeypatch):
     # Benevolence (FNP 6+, 5+ vs mortals) on the defender: a 5 saves a mortal.
     rolls = iter([6, 6, 5])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=0, damage="1", weapon_type="ranged")
     weapon.abilities = [_ability([_condition("always")], [_effect("no_save")])]
     result = _fire(
@@ -5426,7 +5426,7 @@ def test_bearers_unit_wargear_reaches_every_model(monkeypatch, scope, cover_igno
     # An Omnispex-style item on model 1 (which doesn't shoot): model 2's shot
     # ignores cover only if the item reaches the bearer's unit. A 3 hits
     # against BS3, unless the target's cover makes it -1.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 3)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 3)
     omnispex = _wargear([_wargear_ability([_condition("always")], [_effect("ignore_cover")])])
     omnispex.scope = scope
     gun = _weapon(attacks="1", skill=3, strength=10, ap=-10, damage="1", weapon_type="ranged")
@@ -5475,7 +5475,7 @@ async def test_end_of_turn_stratagem_is_in_effect_in_later_phases_of_its_turn(
 
 def test_torrent_hits_automatically(monkeypatch):
     entry = next(e for e in weapon_ability_seeds.ENTRIES if e[0] == "Torrent")
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 1)  # would miss
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 1)  # would miss
     weapon = _weapon(attacks="2", skill=0, strength=10, ap=-10, weapon_type="ranged")
     weapon.abilities = [
         _ability([_condition(c) for c in entry[2]], [_effect(e) for e in entry[3]])
@@ -5501,7 +5501,7 @@ def _kastelan_unit(datasmith_gun=None, kastelan_gun=None):
 def test_protector_protocol_adds_attacks_to_kastelan_ranged_weapons_only(monkeypatch):
     from app.seeds.factions.adeptus_mechanicus import datasheet_abilities as admech
 
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     protocol = admech.OPTIONS["Battle Protocols"]["Protector Protocol"]
     guns = []
     for i, name in ((1, "Pistol"), (2, "Blaster")):
@@ -5531,7 +5531,7 @@ def test_protector_protocol_adds_attacks_to_kastelan_ranged_weapons_only(monkeyp
 
 def _shoot_kastelan_unit(monkeypatch, rolls, defender_rules, apply_precision=False):
     rolls = iter(rolls)
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=9, ap=-10, damage="1", weapon_type="ranged")
     weapon.id = 1
     if apply_precision:
@@ -5597,7 +5597,7 @@ def _seeded_weapon_ability(name):
 def test_ranged_only_invulnerable_save(monkeypatch, weapon_type, saved):
     # AP-4 vs a 3+ save needs a 7; a 5+ invulnerable (ranged only) saves a 5.
     rolls = iter([6, 6, 5])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(
         attacks="1",
         skill=3,
@@ -5614,7 +5614,7 @@ def test_ranged_only_invulnerable_save(monkeypatch, weapon_type, saved):
 
 @pytest.mark.parametrize("ability,bonus", [("Melta 2", 2), ("Melta 6", 6)])
 def test_melta_2_and_6(monkeypatch, ability, bonus):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, damage="1", weapon_type="ranged")
     weapon.abilities = [_seeded_weapon_ability(ability)]
     target = [_model(toughness=1, wounds=20, save=7)]
@@ -5624,7 +5624,7 @@ def test_melta_2_and_6(monkeypatch, ability, bonus):
 
 def test_rapid_fire_d6_plus_3(monkeypatch):
     # Every roll a 2: the D6+3 extra attacks come to 5.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 2)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 2)
     weapon = _weapon(attacks="1", skill=3, weapon_type="ranged")
     weapon.abilities = [_seeded_weapon_ability("Rapid Fire D6+3")]
     target = [_model(toughness=1, wounds=20, save=7)]
@@ -5636,7 +5636,7 @@ def test_rapid_fire_d6_plus_3(monkeypatch):
 def test_anti_fly_2(monkeypatch, keyword, wounded):
     # S1 vs T10 needs a 6 to wound - unless Anti-Fly 2+ makes a 2 critical.
     rolls = iter([6, 2, 1])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=1, ap=-10, weapon_type="ranged")
     weapon.abilities = [_seeded_weapon_ability("Anti-Fly 2+")]
     target = [_model(toughness=10, wounds=10, save=7, keywords=[_keyword(keyword)])]
@@ -5649,7 +5649,7 @@ def test_punishing_salvoes_gives_ranged_weapons_sustained_hits(
 ):
     from app.seeds.factions.imperial_knights import datasheet_abilities as knights
 
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     rules = list(knights.RULES["Punishing Salvoes"])
     weapon = _weapon(
         attacks="1",
@@ -5672,7 +5672,7 @@ def test_punishing_salvoes_gives_ranged_weapons_sustained_hits(
 def test_punishing_salvoes_needs_remained_stationary(monkeypatch):
     from app.seeds.factions.imperial_knights import datasheet_abilities as knights
 
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, weapon_type="ranged")
     result = _fire(
         weapon,
@@ -5685,7 +5685,7 @@ def test_punishing_salvoes_needs_remained_stationary(monkeypatch):
 def test_remained_stationary_counts_as_moving_less_than_3_inches(monkeypatch):
     # [HEAVY]: +1 to hit, so a 2 hits at BS3.
     rolls = iter([2, 6, 1])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, weapon_type="ranged")
     weapon.abilities = [_ability([_condition("moved_less_than_3")], [_effect("heavy")])]
     result = _fire(
@@ -5701,7 +5701,7 @@ def test_crusaders_duty_gives_plus_one_to_hit_on_ranged_attacks(monkeypatch):
 
     option = knights.OPTIONS["Crusader's Duty (Bondsman)"]["Crusader's Duty"]
     rolls = iter([2, 6, 1])  # a 2 misses at BS3, hits at +1
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, weapon_type="ranged")
     target = [_model(toughness=1, wounds=10, save=7)]
     assert _fire(weapon, target, attacker_rules=list(option.rules)).total_damage == 1
@@ -5713,7 +5713,7 @@ def test_crusaders_duty_gives_plus_one_to_hit_on_ranged_attacks(monkeypatch):
 
 def _scripted(monkeypatch, rolls):
     rolls = iter(rolls)
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
 
 
 def test_critical_hit_on_5_triggers_sustained_hits_and_always_hits(monkeypatch):
@@ -5906,7 +5906,7 @@ def test_enaegic_dermal_bond_protects_only_character_models(monkeypatch):
     from app.seeds.factions.necrons import datasheet_abilities as necrons
 
     # Every roll a 4: hits, wounds, fails a 7+ save - and passes a 4+ FNP.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 4)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 4)
     weapon = _weapon(attacks="2", skill=3, strength=10, ap=0, weapon_type="ranged")
     rules = list(necrons.RULES["Enaegic Dermal Bond"])
     trooper = _fire(weapon, [_model(toughness=1, wounds=10, save=7)], defender_rules=rules)
@@ -6102,7 +6102,7 @@ def test_nullstone_field_gives_feel_no_pain_against_mortal_wounds(monkeypatch):
     assert option.army_wide
     # Devastating Wounds: a 6 to wound allows no save - then a 5 passes FNP 5+.
     rolls = iter([6, 6, 5])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=0, weapon_type="ranged")
     weapon.abilities = [_ability([_condition("critical_wound")], [_effect("no_save")])]
     result = _fire(
@@ -6169,7 +6169,7 @@ def test_roll_dice_faces_returns_each_die():
 
 
 def test_roll_dice_faces_adds_the_modifier(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 4)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 4)
     assert combat.roll_dice_faces("D6+2") == (6, [4])
     assert combat.roll_dice_faces("2D6") == (8, [4, 4])
 
@@ -6252,7 +6252,7 @@ async def test_transcendent_cogitation_feeds_murderous_imperative(
 
     # Hit 1 (re-rolled to 6), wound 1 (re-rolled to 6), save 1.
     rolls = iter([1, 6, 1, 6, 1])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     response = await client.post(
         "/combat",
         json={
@@ -6337,7 +6337,7 @@ async def test_malefic_surge_options_come_from_the_detachment_rule(
     assert surge["id"] in granted.json()
 
     rolls = iter(rolls)
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     response = await client.post(
         "/combat",
         json={
@@ -6587,7 +6587,7 @@ async def test_fires_of_mars_makes_both_imperatives_active_for_another_unit(
     )
 
     rolls = iter([1, 6, 1, 6, 1])  # hit 1 re-rolled to 6, wound 1 re-rolled to 6, save 1
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     response = await client.post(
         "/combat",
         json={
@@ -6606,7 +6606,7 @@ async def test_fires_of_mars_makes_both_imperatives_active_for_another_unit(
 
 def test_snap_shots_only_hit_on_an_unmodified_six(monkeypatch):
     rolls = iter([5, 6, 6, 6])  # hit rolls 5 (a miss, even at 2+) and 6; then wound, save
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls))
     weapon = _weapon(attacks="2", skill=2, strength=10, ap=-10, weapon_type="ranged")
     result = _fire(weapon, [_model(toughness=1, wounds=10, save=7)], snap_shots=True)
     assert result.attack_rolls == [5, 6]
@@ -6615,7 +6615,7 @@ def test_snap_shots_only_hit_on_an_unmodified_six(monkeypatch):
 
 def test_snap_shots_are_not_rerolled(monkeypatch):
     rolls = iter([5, 6, 6, 6])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls))
     weapon = _weapon(attacks="1", skill=2, strength=10, ap=-10, weapon_type="ranged")
     weapon.abilities = [_ability([_condition("always")], [_effect("reroll_failed_hits")])]
     result = _fire(weapon, [_model(toughness=1, wounds=10, save=7)], snap_shots=True)
@@ -6624,7 +6624,7 @@ def test_snap_shots_are_not_rerolled(monkeypatch):
 
 def test_snap_shots_trigger_no_hit_abilities(monkeypatch):
     # A 6 hits, but Sustained Hits adds nothing.
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     weapon = _weapon(attacks="1", skill=2, strength=10, ap=-10, weapon_type="ranged")
     weapon.abilities = [_ability([_condition("critical_hit")], [_effect("add_extra_hit")])]
     result = _fire(weapon, [_model(toughness=1, wounds=10, save=7)], snap_shots=True)
@@ -6632,7 +6632,7 @@ def test_snap_shots_trigger_no_hit_abilities(monkeypatch):
 
 
 def test_snap_shots_keep_torrent_and_rapid_fire(monkeypatch):
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: 1)  # would miss
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 1)  # would miss
     torrent = next(e for e in weapon_ability_seeds.ENTRIES if e[0] == "Torrent")
     weapon = _weapon(attacks="1", skill=2, strength=10, ap=-10, weapon_type="ranged")
     weapon.abilities = [
@@ -6660,7 +6660,7 @@ def _indirect_gun():
 
 def _indirect_hit(monkeypatch, roll, spotted=False, weapon=None):
     rolls = iter([roll, 6, 1])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = weapon or _indirect_gun()
     result = combat.resolve_combat(
         _unit([_unit_model(_model(), [weapon])]), _unit([_unit_model(_model(wounds=5, save=7), [])]),
@@ -6687,7 +6687,7 @@ def test_indirect_shooting_only_fires_indirect_weapons(monkeypatch):
 
 def _engaged_shot(monkeypatch, roll, keywords=(), pistol=False):
     rolls = iter([roll, 6, 1])
-    monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
     weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, damage="1", weapon_type="ranged")
     weapon.id = 1
     if pistol:
@@ -6714,7 +6714,7 @@ def test_close_quarters_shooting(monkeypatch):
 def test_plunging_fire_for_a_towering_model_within_12(monkeypatch):
     def shot(roll, keywords, positions):
         rolls = iter([roll, 6, 1])
-        monkeypatch.setattr(combat.random, "randint", lambda a, b: next(rolls, 1))
+        monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
         weapon = _weapon(attacks="1", skill=4, strength=10, ap=-10, damage="1", weapon_type="ranged")
         weapon.id = 1
         shooter = _model(keywords=[_keyword(k) for k in keywords])

@@ -21,7 +21,7 @@ ON_THE_RUIN = [(9, 10), (11, 10)]
 async def _mission_game(client, session, tmp_path, monkeypatch, primaries, d_spot=(9, 10)):
     # `primaries`: {seat: primary mission card} - in place before the battle
     # starts.
-    monkeypatch.setattr("app.services.combat.random.randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     units = {1: [("A", 1, {})], 2: [("D", 2, {"weapon_range": 24})]}
     game = await _game(client, session, tmp_path, units=units)
     game_id = game["id"]

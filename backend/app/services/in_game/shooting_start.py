@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import random
 from dataclasses import dataclass, field
 
 from fastapi import HTTPException
 
 from app.models import Game, Unit, UnitModel
+from app.services import dice
 from app.services.combat import roll_dice_faces
 from app.services.in_game import casualties, deployment, mission_state
 from app.services.in_game.deployment import TOLERANCE, gap
@@ -132,7 +132,7 @@ def use(game: Game, unit: Unit, name: str, target: Unit) -> Result:
             "model with it"
         )
     mission_state.mark(game, game.turn_seat, USED, unit.id)
-    result = Result(roll=random.randint(1, 6))
+    result = Result(roll=dice.randint(1, 6))
     if result.roll >= found.how["roll"]:
         result.wounds, _ = roll_dice_faces(found.how["mortal_wounds"])
         result.destroyed = casualties.mortal_wounds(game, target, result.wounds, unit)

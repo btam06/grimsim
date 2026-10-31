@@ -27,7 +27,7 @@ async def _set_models(session, unit, **fields):
 async def _game(client, session, tmp_path, monkeypatch, units, wounds=1):
     # In the defender's movement phase; the attacker's models have `wounds`
     # and no save.
-    monkeypatch.setattr("app.services.combat.random.randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     spots = {"A": (20, 38), "D": (20, 4), "E": (32, 4)}
     game, deployment = await _battle(client, session, tmp_path, units=units, spots=spots)
     a = _unit_named(deployment, "A")

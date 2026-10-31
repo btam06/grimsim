@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import math
-import random
 
 from fastapi import HTTPException
 
 from app.models import Game, GameChargeTarget, GameUnitCharge, Unit
 from app.seeds import factions as faction_seeds
+from app.services import dice
 from app.services.in_game import (
     actions,
     command_phase,
@@ -192,7 +192,7 @@ def roll_charge(game: Game, unit: Unit) -> GameUnitCharge:
     _check_unit(game, unit, declaring=unit_charge(game, unit) is None)
     if (charge := unit_charge(game, unit)) is not None:
         return charge
-    first, second = (random.randint(1, 6) for _ in range(CHARGE_DICE))
+    first, second = (dice.randint(1, 6) for _ in range(CHARGE_DICE))
     charge = GameUnitCharge(
         unit_id=unit.id,
         battle_round=game.battle_round,
@@ -238,7 +238,7 @@ def reroll_charge(game: Game, unit: Unit) -> GameUnitCharge:
     if not can_reroll(game, unit):
         raise _bad_request("that unit can't re-roll its charge roll")
     charge = unit_charge(game, unit)
-    charge.first_die, charge.second_die = (random.randint(1, 6) for _ in range(CHARGE_DICE))
+    charge.first_die, charge.second_die = (dice.randint(1, 6) for _ in range(CHARGE_DICE))
     mission_state.mark(game, deployment.owner(game, unit).seat, CHARGE_REROLLED, unit.id)
     return charge
 

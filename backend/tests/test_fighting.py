@@ -155,7 +155,7 @@ async def _to_fight(client, session, tmp_path, monkeypatch, units, places):
     # says ({name: [(x, y)]}), in the fight phase, both players done piling in.
     from tests.test_casualties import _set_models
 
-    monkeypatch.setattr("app.services.combat.random.randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     spots = {name: (10 + 8 * i, 4 if seat == 2 else 38)
              for seat, specs in units.items() for i, (name, _, _) in enumerate(specs)}
     game, deployment = await _battle(client, session, tmp_path, units=units, spots=spots)
@@ -319,8 +319,8 @@ async def test_destroyed_units_dont_fight_back(
 async def test_a_charging_unit_fights_first(
     client: AsyncClient, session, tmp_path, monkeypatch
 ):
-    monkeypatch.setattr("app.services.in_game.charging.random.randint", lambda a, b: 4)
-    monkeypatch.setattr("app.services.combat.random.randint", lambda a, b: 6)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 4)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     units = {1: [("A", 1, BLADE)], 2: [("D", 1, BLADE)]}
     game, deployment = await _battle(client, session, tmp_path, units=units)
     game_id = game["id"]

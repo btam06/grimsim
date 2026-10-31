@@ -1,7 +1,6 @@
 from httpx import AsyncClient
 
 from app.models import DatasheetAbility
-from app.services.in_game import first_turn
 from tests.test_deployment import _deploy, _deployment, _game, _row, _unit_named
 from tests.test_space_marine_units import _model_of
 
@@ -29,7 +28,7 @@ async def test_roll_off_then_scouts_moves_before_the_battle(
     client: AsyncClient, session, tmp_path, monkeypatch
 ):
     rolls = iter([3, 3, 2, 5])
-    monkeypatch.setattr(first_turn.random, "randint", lambda a, b: next(rolls))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls))
     game_id, s = await _rolled_off_game(client, session, tmp_path, rolls)
     game = (await client.get(f"/games/{game_id}")).json()
     # Everything's set up: the roll-off is next.
@@ -102,7 +101,7 @@ async def test_scouts_from_wargear_after_the_roll_off(
     from app.models import UnitModel, Wargear, WargearAbility
 
     rolls = iter([2, 5])
-    monkeypatch.setattr(first_turn.random, "randint", lambda a, b: next(rolls))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls))
     units = {1: [("A", 1, {}), ("O", 1, {})], 2: [("D", 1, {})]}
     game = await _game(client, session, tmp_path, units=units, first=None)
     game_id = game["id"]
@@ -137,7 +136,7 @@ async def test_a_scout_move_ends_more_than_8_from_enemy_units(
     from tests.test_shooting import _place
 
     rolls = iter([2, 5])
-    monkeypatch.setattr(first_turn.random, "randint", lambda a, b: next(rolls))
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls))
     game_id, s = await _rolled_off_game(client, session, tmp_path, rolls)
     await client.post(f"/games/{game_id}/first-turn/roll")
     # An enemy model 13" north of S: moving 5" toward it ends 8" away or less.

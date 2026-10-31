@@ -133,7 +133,7 @@ async def test_defend_stronghold_is_replaced_in_the_first_round(
     for name in ("Defend Stronghold", "Spare"):
         session.add(SecondaryMission(name=name, completes_on="either", tactical_points=3))
     await session.commit()
-    monkeypatch.setattr(game_service.random, "randrange", lambda n: 0)
+    monkeypatch.setattr("app.services.dice.randrange", lambda n: 0)
     game = await _load_game(session, game_id)
     player = next(p for p in game.players if p.seat == 2)
     drawn = await game_service._draw_tactical(session, game, player, count=1)

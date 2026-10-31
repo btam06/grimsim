@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 
 from sqlalchemy import delete, inspect, select
@@ -258,17 +260,41 @@ def _subfaction_keywords(unit: Unit, unit_model: UnitModel) -> set[str]:
     return set()
 
 
+# While a simulation resolves the same attack over and over (see
+# app/routers/combat.py simulate), each model's keywords are worked out once:
+# {(id(unit), id(unit model)): keywords}. None: not caching.
+_keyword_cache: ContextVar[dict | None] = ContextVar("keyword_cache", default=None)
+
+
+@contextmanager
+def cached_keywords():
+    # Within this, model_keywords remembers each model's keywords - for when
+    # nothing that changes them (lists, enhancements, rules) can change.
+    token = _keyword_cache.set({})
+    try:
+        yield
+    finally:
+        _keyword_cache.reset(token)
+
+
 def model_keywords(unit: Unit, unit_model: UnitModel) -> set[str]:
     # A model's keywords, including any its unit's enhancements and upgrade
     # give it (e.g. SKITARII from Martial Signatum Amplificator), any the
     # rules of its list's detachments give it (e.g. BATTLELINE for Houndpack
     # Lance's WAR DOGs), and its list's Chapter's (e.g. ULTRAMARINES). Needs
     # the model's keywords loaded.
-    return (
+    cache = _keyword_cache.get()
+    key = (id(unit), id(unit_model))
+    if cache is not None and key in cache:
+        return set(cache[key])
+    keywords = (
         _own_keywords(unit, unit_model)
         | _detachment_keywords(unit, unit_model)
         | _subfaction_keywords(unit, unit_model)
     )
+    if cache is not None:
+        cache[key] = frozenset(keywords)
+    return keywords
 
 
 @dataclass(eq=False)

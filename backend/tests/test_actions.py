@@ -144,7 +144,7 @@ async def test_plunder_completes_at_once_and_stops_charging(
 def _battle_shock_dice(monkeypatch, *rolls):
     values = iter(rolls)
     monkeypatch.setattr(
-        "app.services.in_game.battle_shock.random.randint", lambda a, b: next(values)
+        "app.services.dice.randint", lambda a, b: next(values)
     )
 
 

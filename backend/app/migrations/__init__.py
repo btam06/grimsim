@@ -4,6 +4,7 @@ from app.migrations import (
     core_rule_texts,
     core_stratagems,
     first_seat_nullable,
+    game_dice,
     hellfire_rounds_conditions,
     hull_boxes,
     kit_counts,
@@ -30,6 +31,7 @@ MIGRATIONS = [
     kit_counts,
     core_rule_texts,
     core_stratagems,
+    game_dice,
 ]
 
 

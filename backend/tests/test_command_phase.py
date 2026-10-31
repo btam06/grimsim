@@ -43,7 +43,7 @@ async def _give(session, unit, names):
 
 
 async def _command_game(client, session, tmp_path, monkeypatch, roll=3):
-    monkeypatch.setattr("app.services.in_game.command_phase.random.randint", lambda a, b: roll)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: roll)
     units = {
         1: [
             (name, 1, {"weapon_range": 24, "keywords": keywords})
