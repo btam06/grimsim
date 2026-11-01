@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 
-from sqlalchemy import delete, inspect, select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -25,6 +25,7 @@ from app.models import (
     unit_model_enhancements,
     unit_upgrades,
 )
+from app.models.base import is_loaded
 from app.seeds import factions as faction_seeds
 
 # Which models and units can take an enhancement or upgrade. Shared by the
@@ -227,7 +228,7 @@ def list_rules(army_list) -> list:
 def _detachment_keywords(unit: Unit, unit_model: UnitModel) -> set[str]:
     # The keywords the rules of the unit's list's detachments give this model -
     # none if the unit isn't in a list, or its list wasn't loaded with it.
-    if "army_list" in inspect(unit).unloaded or unit.army_list is None:
+    if not is_loaded(unit, "army_list") or unit.army_list is None:
         return set()
     rules = list_rules(unit.army_list)
     if not rules:
@@ -245,7 +246,7 @@ def _subfaction_keywords(unit: Unit, unit_model: UnitModel) -> set[str]:
     # ADEPTUS ASTARTES models) - none if the unit isn't in a list, or its list
     # wasn't loaded with it, or the model has another option's keyword of its
     # own (e.g. a DEATHWATCH model there under Deathwatch Allies).
-    if "army_list" in inspect(unit).unloaded or unit.army_list is None:
+    if not is_loaded(unit, "army_list") or unit.army_list is None:
         return set()
     selected = unit.army_list.subfaction
     own = {k.name for k in unit_model.model.keywords}

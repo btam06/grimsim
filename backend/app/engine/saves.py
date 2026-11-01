@@ -1,0 +1,81 @@
+from __future__ import annotations
+
+import json
+import os
+import shutil
+from pathlib import Path
+
+from app.config import settings
+from app.engine import state
+from app.engine.catalog import Catalog
+
+# Autosaves: a game's state at the start of each phase, so it can be played
+# again from there (restore). Each game has a folder under settings.saves_dir:
+# catalog.json (what it's played with - see app/engine/catalog.py) and a file
+# per phase it's reached, named for the battle round, whose turn and the
+# phase - e.g. r2-s1-shooting.json. Deleting a game deletes its folder.
+
+VERSION = 1
+CATALOG = "catalog.json"
+
+
+def folder(game_id: int) -> Path:
+    return Path(settings.saves_dir) / str(game_id)
+
+
+def name(game: state.Game) -> str | None:
+    # Its save's name where it is now - None if it isn't in a phase.
+    if game.status != "in_progress" or game.phase is None:
+        return None
+    return f"r{game.battle_round}-s{game.turn_seat}-{game.phase}.json"
+
+
+def saved(game_id: int, save_name: str) -> bool:
+    return (folder(game_id) / save_name).exists()
+
+
+def autosave(game: state.Game, catalog: Catalog) -> Path | None:
+    # Saves the game at the start of the phase it's in (the catalog too,
+    # with anything it's added).
+    save_name = name(game)
+    if save_name is None:
+        return None
+    path = folder(game.id) / save_name
+    _write(folder(game.id) / CATALOG, {"version": VERSION, "catalog": catalog.to_dict()})
+    _write(path, {"version": VERSION, "game": game.to_dict()})
+    return path
+
+
+def restore(path: str | Path) -> tuple[state.Game, Catalog]:
+    # The game as saved at `path`, and its catalog - ready to play on.
+    path = Path(path)
+    data = json.loads(path.read_text())
+    catalog = Catalog.from_dict(json.loads((path.parent / CATALOG).read_text())["catalog"])
+    game = state.Game.from_dict(data["game"])
+    highest = 0
+    for record in game.records():
+        for attr, (id_attr, class_name) in record._refs.items():
+            ref_id = getattr(record, id_attr)
+            if ref_id is not None:
+                object.__setattr__(record, attr, catalog.get(class_name, ref_id))
+        highest = max(highest, getattr(record, "id", None) or 0)
+    state.ids_from(highest + 1)
+    return game, catalog
+
+
+def saves(game_id: int) -> list[Path]:
+    # A game's saves, oldest first.
+    found = [p for p in folder(game_id).glob("r*.json")]
+    return sorted(found, key=lambda p: p.stat().st_mtime)
+
+
+def delete(game_id: int) -> None:
+    shutil.rmtree(folder(game_id), ignore_errors=True)
+
+
+def _write(path: Path, data: dict) -> None:
+    # All at once: never a half-written save.
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, separators=(",", ":")))
+    os.replace(tmp, path)

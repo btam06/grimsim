@@ -23,6 +23,9 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      # Games' autosaves (see backend/app/engine/saves.py), on the host.
+      - ./saves:/app/saves
     networks:
       - internal
 

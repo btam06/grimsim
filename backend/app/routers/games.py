@@ -5,6 +5,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import set_committed_value
 
 from app.db import get_session
+from app.engine import convert, saves
 from app.models import (
     ArmyList,
     FactionAbility,
@@ -388,7 +389,17 @@ def _link_units(game: Game) -> None:
 
 async def _commit_and_reload(session: AsyncSession, game_id: int) -> GameOut:
     await session.commit()
-    return _game_out(await _load_game(session, game_id))
+    game = await _load_game(session, game_id)
+    _autosave(game)
+    return _game_out(game)
+
+
+def _autosave(game: Game) -> None:
+    # The first time the game's at the start of a phase: saved (see
+    # app/engine/saves.py).
+    save_name = saves.name(game)
+    if save_name is not None and not saves.saved(game.id, save_name):
+        saves.autosave(*convert.from_orm(game))
 
 
 async def _load_stratagems(session: AsyncSession, ids: list[int] | None = None) -> list[Stratagem]:
@@ -439,6 +450,7 @@ async def delete_game(game_id: int, session: AsyncSession = Depends(get_session)
     await session.flush()
     await session.delete(game)
     await session.commit()
+    saves.delete(game_id)
 
 
 @router.post("/{game_id}/start", response_model=GameOut)

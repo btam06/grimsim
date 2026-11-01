@@ -8,3 +8,7 @@ __pycache__/
 # backend/app/data/README.md.
 backend/app/data/*
 !backend/app/data/README.md
+
+# Games' autosaves (see backend/app/engine/saves.py).
+saves/
+backend/saves/

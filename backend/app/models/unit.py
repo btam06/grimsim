@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Integer, inspect
+from sqlalchemy import ForeignKey, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.associations import unit_upgrades
-from app.models.base import Base
+from app.models.base import Base, is_loaded
 
 if TYPE_CHECKING:
     from app.models.enhancement import Enhancement
@@ -43,10 +43,9 @@ class Unit(Base):
         # of it, in the list's order (e.g. "Skitarii Rangers 2"), to tell them
         # apart. Just the name if its list isn't loaded with it.
         name = self.faction_unit.name
-        state = inspect(self)
-        if "army_list" in state.unloaded or self.army_list is None:
+        if not is_loaded(self, "army_list") or self.army_list is None:
             return name
-        if "units" in inspect(self.army_list).unloaded:
+        if not is_loaded(self.army_list, "units"):
             return name
         same = sorted(
             u.id for u in self.army_list.units if u.faction_unit_id == self.faction_unit_id

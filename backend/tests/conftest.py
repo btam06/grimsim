@@ -72,6 +72,15 @@ async def no_local_game_data(monkeypatch, tmp_path):
     monkeypatch.setattr(data_files, "DATA_DIR", tmp_path / "no-data")
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def saves_dir(monkeypatch, tmp_path):
+    # Games' autosaves (see app/engine/saves.py) go in the test's own folder.
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "saves_dir", str(tmp_path / "saves"))
+    return tmp_path / "saves"
+
+
 @pytest_asyncio.fixture
 async def fixture_game_data(monkeypatch):
     # A small made-up datasheet ("Test Squad", in tests/fixtures/data) to seed.
