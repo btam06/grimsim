@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import math
 from collections import Counter
 from dataclasses import dataclass, field
@@ -258,21 +259,28 @@ def _radius(base: Base) -> float:
 def outline(base: Base, points: int = OUTLINE_POINTS) -> list[Point]:
     # Points around the edge of a base (a box's: its corners and points
     # along each side).
+    return list(_outline(base, points))
+
+
+@functools.lru_cache(maxsize=4096)
+def _outline(base: Base, points: int) -> tuple[Point, ...]:
+    # (Worked out once per base and position: bases are measured against
+    # each other many times over while a game's played.)
     if base.box:
         corners = base_corners(base)
         per_side = max(1, points // 4)
-        return [
+        return tuple(
             (p[0] + (q[0] - p[0]) * i / per_side, p[1] + (q[1] - p[1]) * i / per_side)
             for p, q in _edges(corners)
             for i in range(per_side)
-        ]
+        )
     a, b = base.semi_axes
     result = []
     for i in range(points):
         angle = 2 * math.pi * i / points
         dx, dy = _rotate(a * math.cos(angle), b * math.sin(angle), base.rotation)
         result.append((base.x + dx, base.y + dy))
-    return result
+    return tuple(result)
 
 
 def wholly_inside(base: Base, polygon: list[Point]) -> bool:
@@ -302,8 +310,16 @@ def _on_edge(point: Point, polygon: list[Point]) -> bool:
     return any(_segment_distance(point, p, q) <= TOLERANCE for p, q in _edges(polygon))
 
 
+def _reach(base: Base) -> float:
+    # How far its edge gets from its centre, at most.
+    a, b = base.semi_axes
+    return math.hypot(a, b) if base.box else max(a, b)
+
+
 def overlaps(first: Base, second: Base) -> bool:
     # Whether two bases overlap (touching doesn't count).
+    if math.hypot(first.x - second.x, first.y - second.y) >= _reach(first) + _reach(second):
+        return False
     if first.box and second.box:
         return convex_overlap(base_corners(first), base_corners(second), touching=False)
     if _is_round(first) and _is_round(second):
@@ -357,20 +373,34 @@ def gap(first: Base, second: Base) -> float:
         return max(0.0, apart - _radius(first) - _radius(second))
     if overlaps(first, second):
         return 0.0
-    second_outline = outline(second)
-    nearest = min(
-        _segment_distance(p, q, r) for p in outline(first) for q, r in _edges(second_outline)
-    )
+    first_outline, second_outline = _outline(first, OUTLINE_POINTS), _outline(second, OUTLINE_POINTS)
+    nearest = _nearest(first_outline, second_outline)
     if first.box or second.box:
         # (Two boxes' nearest points can be a corner of either: both ways.)
-        first_outline = outline(first)
-        nearest = min(
-            nearest,
-            min(
-                _segment_distance(p, q, r) for p in second_outline for q, r in _edges(first_outline)
-            ),
-        )
+        nearest = min(nearest, _nearest(second_outline, first_outline))
     return nearest
+
+
+def _nearest(points, polygon) -> float:
+    # The least distance from any of `points` to an edge of `polygon`. Exact,
+    # but skipping what can't be nearer than the nearest yet: every point of
+    # the polygon is within its bounding circle, and every point of an edge
+    # within half its length of its middle.
+    cx = sum(x for x, _ in polygon) / len(polygon)
+    cy = sum(y for _, y in polygon) / len(polygon)
+    reach = max(math.hypot(x - cx, y - cy) for x, y in polygon)
+    edges = [
+        (q, r, (q[0] + r[0]) / 2, (q[1] + r[1]) / 2, math.hypot(r[0] - q[0], r[1] - q[1]) / 2)
+        for q, r in _edges(list(polygon))
+    ]
+    best = math.inf
+    for away, p in sorted((math.hypot(p[0] - cx, p[1] - cy), p) for p in points):
+        if away - reach >= best:
+            break
+        for q, r, mx, my, half in edges:
+            if math.hypot(p[0] - mx, p[1] - my) - half < best:
+                best = min(best, _segment_distance(p, q, r))
+    return best
 
 
 def distance_to_polygon(base: Base, polygon: list[Point]) -> float:

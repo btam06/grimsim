@@ -42,6 +42,7 @@ from app.schemas import (
 )
 from app.services import dice, weapon_profiles
 from app.services.in_game import (
+    battle_round,
     charging,
     deployment,
     embarked,
@@ -247,10 +248,11 @@ async def _waiting_for(session: AsyncSession, game: Game) -> dict:
             return {"seat": g.deployment_service.deploying_seat(game), "reason": "deploying"}
         if step == "first_turn":
             return {"seat": game.attacker_seat, "reason": "rolling off for the first turn"}
-        homers = g._teleport_homers_out(game)
-        if homers.waiting_seats:
-            return {"seat": homers.waiting_seats[0], "reason": "setting up Teleport Homers"}
         return {"seat": g.scouts_service.scouting_seat(game), "reason": "Scouts moves"}
+    # Teleport Homer tokens are set up once the battle's begun (first round).
+    homers = g._teleport_homers_out(game)
+    if homers.waiting_seats:
+        return {"seat": homers.waiting_seats[0], "reason": "setting up Teleport Homers"}
     emergency = g._emergency_out(game)
     if emergency.units:
         return {"seat": emergency.units[0].seat, "reason": "emergency disembarking"}
@@ -267,6 +269,8 @@ async def _waiting_for(session: AsyncSession, game: Game) -> dict:
     if reanimation.placing:
         return {"seat": reanimation.seat, "reason": "placing reanimated models"}
     turn, other = game.turn_seat, g.game_service.other_seat(game.turn_seat)
+    if (seat := _round_choice_seat(game)) is not None:
+        return {"seat": seat, "reason": "choosing an option for the battle round"}
     if game.phase == "movement" and reinforcements.movement_ended(game):
         return {"seat": other, "reason": "the end of the Movement phase (Rapid Ingress, Overwatch)"}
     if game.phase == "charge" and g.core_stratagems_service.charge_ended(game):
@@ -279,6 +283,19 @@ async def _waiting_for(session: AsyncSession, game: Game) -> dict:
             what = "consolidating" if fight_state.step == "consolidate" else "picking a unit to fight"
             return {"seat": fight_state.seat, "reason": what}
     return {"seat": turn, "reason": f"their {game.phase.replace('_', ' ')} phase"}
+
+
+def _round_choice_seat(game: Game) -> int | None:
+    # At the start of a battle round, the first player still to choose a
+    # required option for an army rule (e.g. Doctrina Imperatives).
+    if game.phase != battle_round.START_OF_ROUND:
+        return None
+    for player in game.players:
+        chosen = battle_round.choices(game, player.seat)
+        for rule in battle_round.player_rules(game, player, game.battle_round):
+            if rule.required and rule.faction_ability_id not in chosen:
+                return player.seat
+    return None
 
 
 # --- the legal actions ---
@@ -320,9 +337,6 @@ async def _legal_actions(session: AsyncSession, game: Game, waiting: dict) -> li
         elif step == "first_turn":
             add(Action("roll_first_turn", waiting["seat"], "Roll off for the first turn"))
         else:
-            homers = g._teleport_homers_out(game)
-            for seat in homers.waiting_seats:
-                add(Action("finish_teleport_homers", seat, "Done with Teleport Homers"))
             seat = g.scouts_service.scouting_seat(game)
             if seat is not None:
                 scouting = g._scouts_out(game)
@@ -346,7 +360,10 @@ async def _legal_actions(session: AsyncSession, game: Game, waiting: dict) -> li
     # --- in the battle ---
     turn = game.turn_seat
 
-    # Always-blocking decisions first.
+    # Always-blocking decisions first: Teleport Homer tokens (set up at the
+    # start of the battle - finishing without any is allowed), ...
+    for seat in g._teleport_homers_out(game).waiting_seats:
+        add(Action("finish_teleport_homers", seat, "Done with Teleport Homers"))
     emergency = g._emergency_out(game)
     for eu in emergency.units:
         add(Action(
@@ -387,8 +404,10 @@ async def _legal_actions(session: AsyncSession, game: Game, waiting: dict) -> li
     if found:
         return found
 
-    # Advancing: the seat the game waits on (at a pause, that's declining).
-    add(Action("advance", waiting["seat"], "Next phase / end of phase"))
+    # Advancing: the seat the game waits on (at a pause, that's declining) -
+    # not before the battle round's required options are chosen.
+    if _round_choice_seat(game) is None:
+        add(Action("advance", waiting["seat"], "Next phase / end of phase"))
 
     if game.phase == "start_of_round":
         for player in (await g.round_start(gid, session)).players:

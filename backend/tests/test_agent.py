@@ -92,8 +92,10 @@ async def test_random_play_through_deployment(client: AsyncClient, session, tmp_
 
 async def test_random_play_through_a_fight(client: AsyncClient, session, tmp_path, monkeypatch):
     # Engaged units in the fight phase (piling in done): fights, consolidating
-    # and the next turn, at random.
+    # and the next turn, at random. (Seeded: the same game each time.)
     from tests.test_fighting import BLADE, _to_fight
+
+    monkeypatch.setattr("app.services.dice.new_seed", lambda: 40)
 
     units = {1: [("A", 2, BLADE)], 2: [("D", 2, BLADE)]}
     places = {"D": [(20, 4), (21.5, 4)], "A": [(20, 6), (21.5, 6)]}
@@ -102,3 +104,45 @@ async def test_random_play_through_a_fight(client: AsyncClient, session, tmp_pat
     types = {e["type"] for e in log if e["ok"]}
     assert "fight" in types, log
     assert _problems(log) == [], _summary(_problems(log))
+
+
+async def test_the_battle_rounds_required_options_come_first(
+    client: AsyncClient, session, tmp_path
+):
+    # At the start of the round, seat 1 must choose a Doctrina Imperative
+    # before anything else - though seat 2 has the first turn.
+    from tests.test_battle_round import PROTECTOR, _doctrina_game
+
+    game_id, ability_id, _ = await _doctrina_game(client, session, tmp_path)
+    decision = await _decision(client, game_id)
+    assert decision["waiting_for"]["seat"] == 1
+    assert "advance" not in decision["counts"]
+    choice = next(
+        a for a in decision["actions"]
+        if a["type"] == "round_start_choice" and a["params"]["option"] == PROTECTOR
+    )
+    response = await client.post(
+        f"/games/{game_id}/agent/apply",
+        json={"action": {"type": choice["type"], "seat": choice["seat"], "params": choice["params"]}},
+    )
+    assert response.json()["log"]["ok"]
+    decision = response.json()["decision"]
+    assert "advance" in decision["counts"]
+
+
+async def test_teleport_homers_wait_for_their_player(client: AsyncClient, session, tmp_path):
+    # Seat 1 has a Teleport Homer: once the battle's begun, the game waits for
+    # them to set up its token (or be done without one) - not for "advance".
+    from tests.test_teleport_homer import _homer_game
+
+    game_id, _, _ = await _homer_game(client, session, tmp_path)
+    decision = await _decision(client, game_id)
+    assert decision["waiting_for"] == {"seat": 1, "reason": "setting up Teleport Homers"}
+    finish = next(a for a in decision["actions"] if a["type"] == "finish_teleport_homers")
+    assert finish["seat"] == 1
+    response = await client.post(
+        f"/games/{game_id}/agent/apply",
+        json={"action": {"type": finish["type"], "seat": finish["seat"], "params": {}}},
+    )
+    assert response.json()["log"]["ok"]
+    assert response.json()["decision"]["waiting_for"]["reason"] != "setting up Teleport Homers"
