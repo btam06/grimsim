@@ -14,9 +14,17 @@ from app.engine.catalog import Catalog
 # catalog.json (what it's played with - see app/engine/catalog.py) and a file
 # per phase it's reached, named for the battle round, whose turn and the
 # phase - e.g. r2-s1-shooting.json. Deleting a game deletes its folder.
+#
+# A game put away while it's being played (see app/engine/store.py
+# evict_idle) is saved just as it is, to current.json - and comes back from
+# whichever is newer, that or its latest phase. summary.json is what the
+# games list shows of it (see app/routers/games.py list_games), as of its
+# newest save.
 
 VERSION = 1
 CATALOG = "catalog.json"
+CURRENT = "current.json"
+SUMMARY = "summary.json"
 
 
 def folder(game_id: int) -> Path:
@@ -34,16 +42,39 @@ def saved(game_id: int, save_name: str) -> bool:
     return (folder(game_id) / save_name).exists()
 
 
-def autosave(game: state.Game, catalog: Catalog) -> Path | None:
+def autosave(game: state.Game, catalog: Catalog, summary: dict | None = None) -> Path | None:
     # Saves the game at the start of the phase it's in (the catalog too,
     # with anything it's added).
     save_name = name(game)
     if save_name is None:
         return None
+    return _save(game, catalog, save_name, summary)
+
+
+def save_current(game: state.Game, catalog: Catalog, summary: dict | None = None) -> Path:
+    # Saves the game as it is now (see CURRENT).
+    return _save(game, catalog, CURRENT, summary)
+
+
+def _save(game: state.Game, catalog: Catalog, save_name: str, summary: dict | None) -> Path:
     path = folder(game.id) / save_name
     _write(folder(game.id) / CATALOG, {"version": VERSION, "catalog": catalog.to_dict()})
     _write(path, {"version": VERSION, "game": game.to_dict()})
+    if summary is not None:
+        _write(folder(game.id) / SUMMARY, summary)
     return path
+
+
+def latest(game_id: int) -> Path | None:
+    # Where the game comes back from: its newest save - as it was put away,
+    # or the start of its latest phase.
+    found = saves(game_id) + [p for p in [folder(game_id) / CURRENT] if p.exists()]
+    return max(found, key=lambda p: p.stat().st_mtime, default=None)
+
+
+def summary(game_id: int) -> dict | None:
+    path = folder(game_id) / SUMMARY
+    return json.loads(path.read_text()) if path.exists() else None
 
 
 def restore(path: str | Path) -> tuple[state.Game, Catalog]:

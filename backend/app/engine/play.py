@@ -28,6 +28,8 @@ from app.schemas import GameIn
 class Engine:
     def __init__(self, live: Live) -> None:
         self.live = live
+        # Kept in memory while it's played from here (see close).
+        live.pinned = True
         store.put(live)
 
     @classmethod
@@ -108,4 +110,5 @@ class Engine:
 
     def close(self) -> None:
         # Forgotten from memory (its saves stay).
+        self.live.pinned = False
         store.forget(self.id)

@@ -1,7 +1,9 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.config import settings
 from app.db import async_session, engine
 from app.engine import context, store
 from app.models import Base
@@ -45,7 +47,16 @@ async def lifespan(app: FastAPI):
         await run_migrations(session)
         await run_seeds(session)
     store.start()
+    task = asyncio.create_task(_put_away_idle_games())
     yield
+    task.cancel()
+
+
+async def _put_away_idle_games() -> None:
+    # Every minute: games left alone out of memory (see app/engine/store.py).
+    while True:
+        await asyncio.sleep(60)
+        games.evict_idle(settings.idle_minutes * 60)
 
 
 app = FastAPI(title="grimsim API", lifespan=lifespan)

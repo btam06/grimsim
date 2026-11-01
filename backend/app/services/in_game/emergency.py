@@ -165,8 +165,9 @@ def _free_check(game: Game, unit: Unit, taken: list[Base], wrecks: list[Base]):
 
 def suggested(game: Game, unit: Unit) -> dict[int, tuple[float, float, float]]:
     # Where to start the unit's models, for the player to arrange: touching
-    # the wreck where there's room, then as near it as they fit within 3" -
-    # any that don't fit are left out (they'd be destroyed).
+    # the wreck where there's room - each as close to those already placed
+    # as it can be, so the unit stays together - then as near it as they fit
+    # within 3" - any that don't fit are left out (they'd be destroyed).
     record = _record(game, unit)
     wrecks = wreck_bases(game, record.transport_unit_id)
     taken: list[Base] = []
@@ -174,7 +175,11 @@ def suggested(game: Game, unit: Unit) -> dict[int, tuple[float, float, float]]:
     for model in surviving_models(game, unit):
         free = _free_check(game, unit, taken, wrecks)
         spots = _touching_spots(model, wrecks, free)
-        spot = spots[0] if spots else None
+        spot = (
+            min(spots, key=lambda s: min(gap(deployment.base_at(model, *s), t) for t in taken))
+            if spots and taken
+            else spots[0] if spots else None
+        )
         if spot is None:
             cx = sum(w.x for w in wrecks) / len(wrecks)
             cy = sum(w.y for w in wrecks) / len(wrecks)

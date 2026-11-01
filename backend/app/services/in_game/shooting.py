@@ -414,25 +414,23 @@ class _Terrain:
     seen: dict = field(default_factory=dict)
 
 
-# Each layout's terrain, by the layout object's id (with the layout, so a
-# reused id isn't mistaken for it): a game's layout never changes.
-_TERRAIN: dict[int, tuple[object, _Terrain]] = {}
-# The most line-of-sight results kept per layout.
+# The most line-of-sight results kept per game.
 SEEN_LIMIT = 200_000
 
 
 def terrain(game: Game) -> _Terrain:
+    # Worked out once per game being played (its layout never changes - see
+    # app/engine/context.py cache).
     layout = game.layout
     if layout is None:
         return _Terrain([], [], [], [], [])
-    cached = _TERRAIN.get(id(layout))
-    if cached is not None and cached[0] is layout:
-        return cached[1]
-    if len(_TERRAIN) > 32:
-        _TERRAIN.clear()
-    found = _layout_terrain(layout)
-    _TERRAIN[id(layout)] = (layout, found)
-    return found
+    cache = context.cache("terrain")
+    if cache is None:
+        return _layout_terrain(layout)
+    cached = cache.get("layout")
+    if cached is None or cached[0] is not layout:
+        cached = cache["layout"] = (layout, _layout_terrain(layout))
+    return cached[1]
 
 
 def _layout_terrain(layout) -> _Terrain:

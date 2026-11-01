@@ -144,3 +144,106 @@ async def test_envs_one_at_a_time(client: AsyncClient, session, tmp_path):
             envs.poll(timeout=60)
     finally:
         envs.close()
+
+
+def _weapon(abilities=(), **stats):
+    from types import SimpleNamespace
+
+    base = dict(attacks="2", skill=3, strength=4, ap=-1, damage="1")
+    return SimpleNamespace(
+        abilities=[SimpleNamespace(name=a) for a in abilities], **(base | stats)
+    )
+
+
+def _defender(**stats):
+    from types import SimpleNamespace
+
+    base = dict(toughness=4, save=3, invulnerable=None, feel_no_pain=None)
+    return SimpleNamespace(**(base | stats))
+
+
+def test_expected_weapon_damage():
+    from app.engine.features import _weapon_damage
+
+    def through(weapon, defender=None, keywords=(), models=1, half=False, cover=False, heavy=False):
+        return _weapon_damage(
+            weapon, defender or _defender(), set(keywords), models, half, cover, heavy
+        )[0]
+
+    # 2 attacks, hitting on 3+ (2/3), wounding on 4+ (1/2), saved on 4+ (1/2).
+    assert abs(through(_weapon()) - 2 * 2 / 3 * 1 / 2 * 1 / 2) < 1e-9
+    # Cover: 4+ to hit; Heavy (unmoved) cancels it out; Ignores Cover too.
+    assert abs(through(_weapon(), cover=True) - 2 * 1 / 2 * 1 / 2 * 1 / 2) < 1e-9
+    assert through(_weapon(["Heavy"]), cover=True, heavy=True) == through(_weapon())
+    assert through(_weapon(["Ignores Cover"]), cover=True) == through(_weapon())
+    # Torrent always hits; Rapid Fire 2 at half range: 4 attacks.
+    assert abs(through(_weapon(["Torrent"])) - 2 * 1 / 2 * 1 / 2) < 1e-9
+    assert abs(through(_weapon(["Rapid Fire 2"]), half=True) - 2 * through(_weapon())) < 1e-9
+    assert through(_weapon(["Rapid Fire 2"])) == through(_weapon())
+    # Melta 2 at half range: 2 more damage each.
+    assert _weapon_damage(_weapon(["Melta 2"]), _defender(), set(), 1, True, False, False)[1] == 3
+    # An invulnerable save that's better than the armour save; Feel No Pain.
+    assert through(_weapon(ap=-3), _defender(invulnerable=4)) == through(_weapon())
+    assert abs(through(_weapon(), _defender(feel_no_pain=5)) - through(_weapon()) * 2 / 3) < 1e-9
+    # Anti-Infantry 4+ against INFANTRY with Devastating Wounds: mortal
+    # wounds on 4+ - no saves.
+    anti = _weapon(["Anti-Infantry 4+", "Devastating Wounds"])
+    assert abs(through(anti, keywords={"INFANTRY"}) - 2 * 2 / 3 * 1 / 2) < 1e-9
+    assert through(anti) < through(anti, keywords={"INFANTRY"})
+    # Blast: 1 more attack per 5 models.
+    assert abs(through(_weapon(["Blast"]), models=10) - 2 * through(_weapon())) < 1e-9
+
+
+async def test_attacks_say_what_they_would_do(client: AsyncClient, session, tmp_path):
+    from app.engine import features
+
+    path = await _save(client, session, tmp_path)
+    env = GameEnv(path, seat=2, max_steps=400)
+    obs, info = env.reset(seed=3)
+    rng = random.Random(3)
+    damage = features.ACTION_SIZE - 3
+    seen = 0
+    for _ in range(400):
+        for action, row in zip(info["actions"], obs["actions"]):
+            if action["type"] in ("shoot", "fight"):
+                seen += 1
+                assert row[damage] > 0
+                assert 0 < row[damage + 1] <= 1 and 0 < row[damage + 2] <= 1
+            else:
+                assert row[damage:] == [0.0, 0.0, 0.0]
+        if seen:
+            break
+        index = random_policy(Decision(None, obs["seat"], info["actions"]), rng)
+        obs, _, terminated, truncated, info = env.step(index)
+        if terminated or truncated:
+            obs, info = env.reset()
+    assert seen
+    env.close()
+
+
+async def test_a_policy_is_evaluated(client: AsyncClient, session, tmp_path):
+    from app.engine.evaluate import evaluate, first_action
+
+    path = await _save(client, session, tmp_path)
+    result = evaluate(first_action, path, games=2, max_steps=60)
+    assert [g.seat for g in result.games] == [1, 2]
+    assert sum(result.count(o) for o in ("win", "draw", "loss", "unfinished")) == 2
+    assert 0 <= result.interval[0] <= result.interval[1] <= 1
+    assert "2 games" in result.summary()
+    # The same seed: the same games - played in parallel or not.
+    again = evaluate(first_action, path, games=2, max_steps=60, processes=2)
+    assert [(g.vp, g.opponent_vp, g.steps) for g in again.games] == [
+        (g.vp, g.opponent_vp, g.steps) for g in result.games
+    ]
+
+
+async def test_either_seat(client: AsyncClient, session, tmp_path):
+    path = await _save(client, session, tmp_path)
+    env = GameEnv(path, seat="random", seed=0)
+    seats = set()
+    for seed in range(8):
+        _, info = env.reset(seed=seed)
+        seats.add(env.seat)
+        assert info["seat"] == env.seat
+    assert seats == {1, 2}
+    env.close()

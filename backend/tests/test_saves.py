@@ -62,3 +62,84 @@ async def test_deleting_a_game_deletes_its_saves(client: AsyncClient, session, t
     assert saves.folder(game["id"]).exists()
     assert (await client.delete(f"/games/{game['id']}")).status_code == 204
     assert not saves.folder(game["id"]).exists()
+
+
+async def test_a_game_left_alone_is_put_away(client: AsyncClient, session, tmp_path):
+    from app.routers.games import evict_idle
+
+    game, _ = await _battle(client, session, tmp_path)
+    game_id = game["id"]
+    # Seat 2 rolls to Advance mid-phase: not at the start of one.
+    unit_id = next(u.id for u in _units(game_id, 2))
+    response = await client.post(f"/games/{game_id}/movement/advance", json={"unit_id": unit_id})
+    assert response.status_code == 200, response.text
+    before = store.get(game_id).game.to_dict()
+    # Used just now: kept.
+    assert evict_idle(60) == []
+    assert evict_idle(0) == [game_id]
+    assert store.peek(game_id) is None
+    assert (saves.folder(game_id) / saves.CURRENT).exists()
+    # Listing the games doesn't bring it back...
+    listed = (await client.get("/games")).json()
+    assert [g["id"] for g in listed] == [game_id]
+    assert listed[0]["phase"] == "movement"
+    assert store.peek(game_id) is None
+    # ...using it does - as it was, mid-phase.
+    assert (await client.get(f"/games/{game_id}")).status_code == 200
+    assert store.peek(game_id).game.to_dict() == before
+
+
+async def test_nothing_of_a_put_away_game_stays_in_memory(
+    client: AsyncClient, session, tmp_path
+):
+    import gc
+    import weakref
+
+    from app.routers.games import evict_idle
+
+    game, _ = await _battle(client, session, tmp_path)
+    game_id = game["id"]
+    # Its caches filled (line of sight, who's engaged).
+    await client.get(f"/games/{game_id}/movement")
+    await client.get(f"/games/{game_id}/agent")
+    live = store.peek(game_id)
+    assert live.caches
+    gone = weakref.ref(live)
+    gone_game = weakref.ref(live.game)
+    del live
+    assert evict_idle(0) == [game_id]
+    gc.collect()
+    assert gone() is None and gone_game() is None
+
+
+async def test_games_in_use_stay(client: AsyncClient, session, tmp_path):
+    from app.engine import context
+    from app.engine.play import Engine
+    from app.routers.games import evict_idle
+
+    game, _ = await _battle(client, session, tmp_path)
+    game_id = game["id"]
+    live = store.peek(game_id)
+    # In the middle of a request.
+    request = context.begin_request(changes=False)
+    context.use(live)
+    assert evict_idle(0) == []
+    context.end_request(request, failed=False)
+    # Played from Python - until it's closed.
+    engine = Engine.of(game_id)
+    assert evict_idle(0) == []
+    engine.close()
+    store.get(game_id)
+    assert evict_idle(0) == [game_id]
+    # Not saved: there'd be nothing to bring it back from.
+    live = store.get(game_id)
+    live.autosave = False
+    assert evict_idle(0) == []
+
+
+def _units(game_id: int, seat: int):
+    from app.services.in_game import deployment
+
+    live = store.peek(game_id) or store.get(game_id)
+    player = next(p for p in live.game.players if p.seat == seat)
+    return deployment.deployable_units(player)

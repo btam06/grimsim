@@ -12,3 +12,9 @@ backend/app/data/*
 # Games' autosaves (see backend/app/engine/saves.py).
 saves/
 backend/saves/
+
+# Machine learning (see ml/README.md): its virtualenv, training runs and
+# recorded games.
+ml/.venv/
+ml/runs/
+ml/data/

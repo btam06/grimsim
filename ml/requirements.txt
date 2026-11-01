@@ -1,0 +1,9 @@
+# Machine learning on top of the game engine (see ml/README.md) - kept out
+# of the backend's image. PyTorch's CPU build:
+#     uv pip install -r ml/requirements.txt --index-url https://download.pytorch.org/whl/cpu \
+#         --extra-index-url https://pypi.org/simple
+-r ../backend/requirements.txt
+aiosqlite>=0.20
+torch>=2.9
+tensorboard>=2.18
+pytest>=8.0

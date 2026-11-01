@@ -44,6 +44,7 @@ from app.services import dice, weapon_profiles
 from app.services.in_game import (
     battle_round,
     charging,
+    command_phase,
     deployment,
     embarked,
     fighting,
@@ -52,6 +53,7 @@ from app.services.in_game import (
     reinforcements,
     scouts,
 )
+from app.services.in_game import emergency as emergency_service
 
 # The agent interface: everything a player can do in a game, as one list of
 # legal actions and one way to apply them - for a program to play the game
@@ -285,6 +287,22 @@ async def _waiting_for(session: AsyncSession, game: Game) -> dict:
     return {"seat": turn, "reason": f"their {game.phase.replace('_', ' ')} phase"}
 
 
+def _emergency_default(game: Game, unit, suggested) -> dict:
+    # The suggested set-up if it's allowed - otherwise as many of its models
+    # as can be set up together, the rest left out (destroyed): one at a
+    # time, each kept if the set-up still is. (None at all is always
+    # allowed, so there's always one to take.)
+    placement = {p.unit_model_id: (p.x, p.y, p.rotation) for p in suggested}
+    if _valid(lambda: emergency_service.check(game, unit, placement)):
+        return placement
+    kept: dict = {}
+    for model_id, spot in placement.items():
+        trying = {**kept, model_id: spot}
+        if _valid(lambda: emergency_service.check(game, unit, trying)):
+            kept = trying
+    return kept
+
+
 def _round_choice_seat(game: Game) -> int | None:
     # At the start of a battle round, the first player still to choose a
     # required option for an army rule (e.g. Doctrina Imperatives).
@@ -366,11 +384,12 @@ async def _legal_actions(session: AsyncSession, game: Game, waiting: dict) -> li
         add(Action("finish_teleport_homers", seat, "Done with Teleport Homers"))
     emergency = g._emergency_out(game)
     for eu in emergency.units:
+        unit = units[eu.unit_id]
+        placement = _placement(game, unit, "emergency", 6.0, None)
+        placement["default"] = _as_positions(_emergency_default(game, unit, eu.suggested))
         add(Action(
             "emergency_disembark", eu.seat, f"Emergency disembark {eu.name}",
-            {"unit_id": eu.unit_id},
-            _placement(game, units[eu.unit_id], "emergency", 6.0,
-                       {p.unit_model_id: (p.x, p.y, p.rotation) for p in eu.suggested}),
+            {"unit_id": eu.unit_id}, placement,
         ))
     battle_shock = await g._battle_shock_out(session, game)
     for test in battle_shock.pending:
@@ -405,8 +424,11 @@ async def _legal_actions(session: AsyncSession, game: Game, waiting: dict) -> li
         return found
 
     # Advancing: the seat the game waits on (at a pause, that's declining) -
-    # not before the battle round's required options are chosen.
-    if _round_choice_seat(game) is None:
+    # not before the battle round's required options are chosen, nor the
+    # Command phase's (e.g. Canticles of the Omnissiah).
+    if _round_choice_seat(game) is None and not (
+        game.phase == "command" and command_phase.missing_choices(game)
+    ):
         add(Action("advance", waiting["seat"], "Next phase / end of phase"))
 
     if game.phase == "start_of_round":
@@ -423,9 +445,19 @@ async def _legal_actions(session: AsyncSession, game: Game, waiting: dict) -> li
         command = g._command_out(game)
         if command.seat is not None:
             for ability in command.abilities:
+                # One selection an ability a phase here: a person can change
+                # their mind until the phase ends, but an agent needn't (and
+                # could go back and forth for ever).
+                if ability.chosen:
+                    continue
                 for option in ability.options:
-                    targets = ability.option_targets.get(option) or ability.targets
-                    for target in (targets if ability.needs_target else [None]):
+                    # An option with targets of its own (an enemy unit - e.g.
+                    # Invocation of Machine Vengeance) needs one of them.
+                    if option in ability.option_targets:
+                        targets = ability.option_targets[option]
+                    else:
+                        targets = ability.targets if ability.needs_target else [None]
+                    for target in targets:
                         add(Action(
                             "command_choice", command.seat,
                             f"{ability.unit_name}: {ability.ability} - {option}"

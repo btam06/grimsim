@@ -172,3 +172,81 @@ async def test_teleport_homers_wait_for_their_player(client: AsyncClient, sessio
     )
     assert response.json()["log"]["ok"]
     assert response.json()["decision"]["waiting_for"]["reason"] != "setting up Teleport Homers"
+
+
+async def test_the_command_phases_required_choices_come_first(
+    client: AsyncClient, session, tmp_path, monkeypatch
+):
+    from tests.test_command_phase import _command_game
+    from tests.test_reinforcements import _advance_to
+
+    game_id, units = await _command_game(client, session, tmp_path, monkeypatch)
+    await _advance_to(client, game_id, 1, 1, "command")
+    decision = await _decision(client, game_id)
+    # Canticles and the Rod must be selected before the phase can end.
+    assert "advance" not in decision["counts"]
+    choices = [a for a in decision["actions"] if a["type"] == "command_choice"]
+    protocol = next(a for a in choices if a["params"]["ability"] == "Battle Protocols")
+    response = await client.post(
+        f"/games/{game_id}/agent/apply",
+        json={"action": {"type": "command_choice", "seat": 1, "params": protocol["params"]}},
+    )
+    assert response.json()["log"]["ok"], response.text
+    # One selection an ability: the protocol's made - not offered again.
+    decision = response.json()["decision"]
+    assert not [
+        a for a in decision["actions"]
+        if a["type"] == "command_choice" and a["params"]["ability"] == "Battle Protocols"
+    ]
+    for ability in ("Canticles of the Omnissiah", "Rod of the War Forge"):
+        choice = next(
+            a for a in decision["actions"]
+            if a["type"] == "command_choice" and a["params"]["ability"] == ability
+        )
+        response = await client.post(
+            f"/games/{game_id}/agent/apply",
+            json={"action": {"type": "command_choice", "seat": 1, "params": choice["params"]}},
+        )
+        assert response.json()["log"]["ok"], response.text
+        decision = response.json()["decision"]
+    assert "advance" in decision["counts"]
+
+
+async def test_an_emergency_disembark_is_always_ready(
+    client: AsyncClient, session, tmp_path, monkeypatch
+):
+    # Six models out of a destroyed transport: set up together (in
+    # coherency) where they can be.
+    from tests.test_emergency import _destroy_transport, _give
+    from tests.test_reinforcements import _advance_to
+    from tests.test_scoring_rules import _transport_game
+
+    from app.services.in_game import emergency
+
+    game_id, t, p = await _transport_game(client, session, tmp_path, passengers=6)
+    await _give(session, t, "Deadly Demise 1")
+    await _advance_to(client, game_id, 1, 1, "movement")
+    await _destroy_transport(session, game_id, t)
+    # Even if what's suggested scatters them round the wreck (every other
+    # model on its far side, out of coherency).
+    suggested = emergency.suggested
+
+    def scattered(game, unit):
+        found = suggested(game, unit)
+        return {
+            i: (40 - x, 76 - y, r) if n % 2 else (x, y, r)
+            for n, (i, (x, y, r)) in enumerate(found.items())
+        }
+
+    monkeypatch.setattr(emergency, "suggested", scattered)
+    decision = await _decision(client, game_id)
+    [action] = [a for a in decision["actions"] if a["type"] == "emergency_disembark"]
+    assert action["concrete"] and action["placement"]["default"]
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
+    response = await client.post(
+        f"/games/{game_id}/agent/apply",
+        json={"action": {"type": "emergency_disembark", "seat": 1,
+                         "params": {**action["params"],
+                                    "positions": action["placement"]["default"]}}},
+    )
+    assert response.json()["log"]["ok"], response.json()["log"]["error"]

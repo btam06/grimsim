@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_session
 from app.engine import context, loader, saves
 from app.engine import store as game_store
+from app.engine.context import Live
 from app.models import Model, Stratagem, Unit, Weapon
 from app.engine.state import Game, GamePlayer, GameSecondary, GameStratagemUse, GameUnitShot
 from app.schemas import (
@@ -306,6 +307,7 @@ async def _load_game(session: AsyncSession | None, game_id: int) -> Game:
     live = game_store.get(game_id)
     if live is None:
         raise HTTPException(status_code=404, detail="game not found")
+    context.use(live)
     if live.stale and session is not None:
         await loader.reload(session, live)
     context.track(live)
@@ -326,7 +328,25 @@ def _autosave(live) -> None:
         return
     save_name = saves.name(live.game)
     if save_name is not None and not saves.saved(live.game.id, save_name):
-        saves.autosave(live.game, live.catalog)
+        saves.autosave(live.game, live.catalog, _summary(live))
+
+
+def _summary(live) -> dict:
+    # What the games list shows of it (see list_games).
+    return _game_out(live.game).model_dump(mode="json")
+
+
+def evict_idle(max_idle: float) -> list[int]:
+    # Puts away the games no request has used for `max_idle` seconds (see
+    # app/engine/store.py idle): each saved just as it is, and out of
+    # memory - it comes back as it was when it's next used. Their ids.
+    gone = []
+    for live in game_store.idle(max_idle):
+        with context.bound(live):
+            saves.save_current(live.game, live.catalog, _summary(live))
+        game_store.forget(live.game.id)
+        gone.append(live.game.id)
+    return gone
 
 
 async def _load_stratagems(session: AsyncSession, ids: list[int] | None = None) -> list[Stratagem]:
@@ -336,7 +356,21 @@ async def _load_stratagems(session: AsyncSession, ids: list[int] | None = None) 
 
 @router.get("", response_model=list[GameOut])
 async def list_games(session: AsyncSession = Depends(get_session)):
-    return [_game_out(game_store.get(game_id).game) for game_id in game_store.ids()]
+    # Each game - those not in memory as their newest save has them, without
+    # bringing them back.
+    found = []
+    for game_id in game_store.ids():
+        live = game_store.peek(game_id)
+        if live is not None:
+            found.append(_game_out(live.game))
+        elif (summary := saves.summary(game_id)) is not None:
+            found.append(GameOut(**summary))
+        elif (path := saves.latest(game_id)) is not None:
+            # (Saved before summaries were.)
+            game, catalog = saves.restore(path)
+            with context.bound(Live(game, catalog)):
+                found.append(_game_out(game))
+    return found
 
 
 @router.post("", response_model=GameOut, status_code=201)

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import functools
 import math
 
 from fastapi import HTTPException
 
 from app.models import Unit, UnitModel
+from app.engine import context
 from app.engine.state import Game, GameUnitMove, GameUnitMoveStart
 from app.services import dice
 from app.services.in_game import (
@@ -120,16 +120,29 @@ def in_engagement_range(game: Game, unit: Unit) -> bool:
     )
 
 
-@functools.lru_cache(maxsize=4096)
+# The most engagement results kept per game.
+ENGAGED_LIMIT = 20_000
+
+
 def _engaged(bases: tuple, enemies: tuple) -> bool:
     # Whether any of the bases is within Engagement Range of any of the
-    # enemies. (Remembered: the same units are asked about again and again
-    # while nobody moves.)
-    return any(
+    # enemies. (Remembered for the game being played - see
+    # app/engine/context.py cache: the same units are asked about again and
+    # again while nobody moves.)
+    cache = context.cache("engaged")
+    key = (bases, enemies)
+    if cache is not None and key in cache:
+        return cache[key]
+    found = any(
         deployment.gap(base, enemy) <= ENGAGEMENT_RANGE + TOLERANCE
         for base in bases
         for enemy in enemies
     )
+    if cache is not None:
+        if len(cache) >= ENGAGED_LIMIT:
+            cache.clear()
+        cache[key] = found
+    return found
 
 
 AIRCRAFT = "AIRCRAFT"

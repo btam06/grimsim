@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextvars
 import copy
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -30,6 +31,15 @@ class Live:
     # Saved at the start of each phase (see app/engine/saves.py) - off for
     # games played where only speed matters (see app/engine/play.py).
     autosave: bool = True
+    # When a request last used it, and how many are using it now - a game
+    # left alone is put away (see app/engine/store.py evict_idle) - and
+    # whether it's kept in memory regardless (played from Python - see
+    # app/engine/play.py).
+    touched: float = field(default_factory=time.monotonic)
+    busy: int = 0
+    pinned: bool = False
+    # Its own caches (line of sight, who's engaged...): gone with it.
+    caches: dict[str, Any] = field(default_factory=dict)
 
     def snapshot(self) -> state.Game:
         # A copy of its state (sharing the catalog) - to go back to.
@@ -55,6 +65,12 @@ def catalog() -> Catalog:
     if live is None:
         raise RuntimeError("no game bound")
     return live.catalog
+
+
+def cache(name: str) -> dict | None:
+    # The bound game's cache called `name` (None if no game's bound).
+    live = _current.get()
+    return live.caches.setdefault(name, {}) if live is not None else None
 
 
 def bind(live: Live | None) -> None:
@@ -85,6 +101,8 @@ def bound(live: Live) -> Iterator[Live]:
 class Request:
     changes: bool
     loaded: list[tuple[Live, state.Game]] = field(default_factory=list)
+    # Every game it's using (see use).
+    using: list[Live] = field(default_factory=list)
 
 
 _request: contextvars.ContextVar[Request | None] = contextvars.ContextVar("request", default=None)
@@ -108,8 +126,23 @@ def track(live: Live) -> None:
     request.loaded.append((live, live.snapshot()))
 
 
+def use(live: Live) -> None:
+    # A game the request is using: not to be put away until it's done (see
+    # app/engine/store.py evict_idle).
+    live.touched = time.monotonic()
+    request = _request.get()
+    if request is None or any(seen is live for seen in request.using):
+        return
+    request.using.append(live)
+    live.busy += 1
+
+
 def end_request(request: Request, failed: bool) -> None:
     for live, snapshot in request.loaded:
         if failed:
             live.restore(snapshot)
     request.loaded.clear()
+    for live in request.using:
+        live.busy -= 1
+        live.touched = time.monotonic()
+    request.using.clear()

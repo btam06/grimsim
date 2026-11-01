@@ -35,7 +35,8 @@ from app.engine.play import Engine  # noqa: E402
 # as listed are offered (see app/routers/agent.py - "concrete").
 #
 # With `seat`, the env plays that seat: the other's decisions are taken by
-# `opponent` (by default, at random) and rewards are that seat's. Without
+# `opponent` (by default, at random) and rewards are that seat's ("random":
+# either seat, picked each episode). Without
 # it, both seats are played through the env (self-play): each step's reward
 # is for the player who took it, and info["rewards"] has both players'.
 #
@@ -82,7 +83,7 @@ class GameEnv:
     def __init__(
         self,
         saves: str | Path | list[str | Path],
-        seat: int | None = None,
+        seat: int | str | None = None,
         opponent: Policy = random_policy,
         vp_scale: float = 100.0,
         win_reward: float = 1.0,
@@ -90,7 +91,8 @@ class GameEnv:
         seed: int | None = None,
     ) -> None:
         self.saves = [str(p) for p in ([saves] if isinstance(saves, (str, Path)) else saves)]
-        self.seat = seat
+        self.seats = seat
+        self.seat = seat if seat != "random" else None
         self.opponent = opponent
         self.vp_scale = vp_scale
         self.win_reward = win_reward
@@ -110,6 +112,8 @@ class GameEnv:
         self.close_game()
         game, catalog = _restored(str(save) if save is not None else self.rng.choice(self.saves))
         game = copy.deepcopy(game)
+        if self.seats == "random":
+            self.seat = self.rng.choice([p.seat for p in game.players])
         game.rng_seed = self.rng.getrandbits(63)
         game.rng_rolls = 0
         self.engine = Engine(Live(game, catalog, autosave=False))

@@ -145,11 +145,11 @@ async def test_defend_stronghold_is_replaced_in_the_first_round(
 # --- embarked units ---
 
 
-async def _transport_game(client, session, tmp_path):
-    # Seat 1's P starts embarked in its transport T (at (20, 38)); seat 2's
-    # D at (20, 4).
+async def _transport_game(client, session, tmp_path, passengers=2):
+    # Seat 1's P (2 models, or `passengers`) starts embarked in its transport
+    # T (at (20, 38)); seat 2's D at (20, 4).
     units = {
-        1: [("T", 1, {"keywords": ("TRANSPORT",)}), ("P", 2, {})],
+        1: [("T", 1, {"keywords": ("TRANSPORT",)}), ("P", passengers, {})],
         2: [("D", 1, {})],
     }
     game = await _formation_game(client, session, tmp_path, units=units, declare=False)
