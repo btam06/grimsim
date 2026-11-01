@@ -537,7 +537,10 @@ async def _movement_actions(session, game: Game, add, units, turn) -> None:
         move_state = g._movement_out(game)
         for mu in move_state.units:
             unit = units[mu.unit_id]
-            if mu.arrived or mu.disembarked:
+            # Each unit moves once a phase here: a person can redo a move
+            # until the phase ends, but an agent needn't (and would spend
+            # most of its steps on it).
+            if mu.arrived or mu.disembarked or mu.moved:
                 continue
             speeds = {m.unit_model_id: m.movement for m in mu.models}
             if "advance" in mu.allowed_kinds and mu.advance_roll is None:
@@ -547,10 +550,8 @@ async def _movement_actions(session, game: Game, add, units, turn) -> None:
                 if kind == "advance" and mu.advance_roll is None:
                     continue
                 extra = (mu.advance_roll or 0) if kind == "advance" else 0
-                stay = _positions(game, unit)
-                default = stay if _valid(
-                    lambda: movement.check_move(game, unit, kind, stay)
-                ) else None
+                # (No default: staying where it is would only be a 0" move,
+                # losing it Remained Stationary.)
                 for options in [{}] + ([{"take_to_skies": True}] if mu.can_fly else []) + (
                     [{"mobile": True}] if mu.super_heavy_walker else []
                 ):
@@ -560,7 +561,7 @@ async def _movement_actions(session, game: Game, add, units, turn) -> None:
                         + "".join(f" ({k.replace('_', ' ')})" for k in options),
                         {"unit_id": mu.unit_id, "kind": kind, **options},
                         _placement(game, unit, "move",
-                                   lambda m, e=extra: speeds.get(m.id, 0) + e, default),
+                                   lambda m, e=extra: speeds.get(m.id, 0) + e, None),
                     ))
                 # The same move, its default towards the closest enemy unit
                 # (as far as it can go, short of Engagement Range).
@@ -580,8 +581,6 @@ async def _movement_actions(session, game: Game, add, units, turn) -> None:
                                            lambda m, e=extra: speeds.get(m.id, 0) + e, guess),
                             ))
                             break
-            if mu.moved:
-                add(Action("reset_move", turn, f"Reset {mu.name}'s move", {"unit_id": mu.unit_id}))
         embarked_state = g._embarked_out(game)
         for eu in embarked_state.units:
             unit = units[eu.unit_id]

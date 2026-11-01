@@ -42,9 +42,35 @@ async def test_the_decision_and_its_actions(client: AsyncClient, session, tmp_pa
     assert decision["waiting_for"] == {"seat": 2, "reason": "their movement phase"}
     types = set(decision["counts"])
     assert {"advance", "move", "roll_advance"} <= types
-    move = next(a for a in decision["actions"] if a["type"] == "move")
-    assert move["placement"]["default"] is not None
-    assert move["concrete"]
+    moves = [a for a in decision["actions"] if a["type"] == "move"]
+    # A move to positions of the agent's own (no default: staying put would
+    # be a 0" move)...
+    assert moves[0]["placement"]["default"] is None
+    assert not moves[0]["concrete"]
+    # ...and towards the closest enemy unit, ready to make.
+    towards = [a for a in moves if " towards " in a["label"]]
+    assert towards and all(a["concrete"] for a in towards)
+
+
+async def test_each_unit_moves_once_a_phase(client: AsyncClient, session, tmp_path):
+    # For an agent: a unit that's moved isn't offered another move (a person
+    # can still redo it).
+    game, _ = await _battle(client, session, tmp_path)
+    decision = await _decision(client, game["id"])
+    move = next(a for a in decision["actions"] if a["concrete"] and a["type"] == "move")
+    unit_id = move["params"]["unit_id"]
+    response = await client.post(
+        f"/games/{game['id']}/agent/apply",
+        json={"action": {"type": "move", "seat": move["seat"],
+                         "params": {**move["params"], "positions": move["placement"]["default"]}}},
+    )
+    assert response.json()["log"]["ok"], response.text
+    decision = response.json()["decision"]
+    assert not [
+        a for a in decision["actions"]
+        if a["params"].get("unit_id") == unit_id
+        and a["type"] in ("move", "roll_advance", "reset_move")
+    ]
 
 
 async def test_applying_an_action_is_logged(client: AsyncClient, session, tmp_path):

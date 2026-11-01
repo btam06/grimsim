@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import math
 
 from fastapi import HTTPException
@@ -114,10 +115,19 @@ def _enemy_bases(game: Game, unit: Unit) -> list[deployment.Base]:
 def in_engagement_range(game: Game, unit: Unit) -> bool:
     # Whether any of the unit's models is within Engagement Range of an enemy
     # model.
-    enemies = _enemy_bases(game, unit)
+    return _engaged(
+        tuple(_start_bases(game, unit).values()), tuple(_enemy_bases(game, unit))
+    )
+
+
+@functools.lru_cache(maxsize=4096)
+def _engaged(bases: tuple, enemies: tuple) -> bool:
+    # Whether any of the bases is within Engagement Range of any of the
+    # enemies. (Remembered: the same units are asked about again and again
+    # while nobody moves.)
     return any(
         deployment.gap(base, enemy) <= ENGAGEMENT_RANGE + TOLERANCE
-        for base in _start_bases(game, unit).values()
+        for base in bases
         for enemy in enemies
     )
 
@@ -138,11 +148,7 @@ def _engaged_with_non_aircraft(game: Game, unit: Unit) -> bool:
         for p, m, b in deployment.placed_bases(game, unit)
         if p.seat != seat and not any(k.name == AIRCRAFT for k in m.model.keywords)
     ]
-    return any(
-        deployment.gap(base, enemy) <= ENGAGEMENT_RANGE + TOLERANCE
-        for base in _start_bases(game, unit).values()
-        for enemy in enemies
-    )
+    return _engaged(tuple(_start_bases(game, unit).values()), tuple(enemies))
 
 
 def allowed_kinds(game: Game, unit: Unit) -> list[str]:
