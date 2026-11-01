@@ -173,6 +173,34 @@ async def test_rapid_ingress_at_the_end_of_the_opponents_movement(
     assert (await client.post(f"/games/{game_id}/advance")).json()["phase"] == "shooting"
 
 
+async def test_rapid_ingress_once_per_phase(client: AsyncClient, session, tmp_path):
+    # Seat 1 has R and S in Reserves: once Rapid Ingress has brought one in,
+    # the other isn't offered (nor to the agent) - it's once per phase.
+    await _rapid_ingress(session)
+    units = {1: [("A", 1, {}), ("R", 1, {}), ("S", 1, {}), ("B", 1, {})], 2: [("D", 1, {})]}
+    game = await _game(client, session, tmp_path, units=units, declare=False)
+    game_id = game["id"]
+    deployment = await _deployment(client, game_id)
+    a, r, s, b, d = (_unit_named(deployment, n) for n in "ARSBD")
+    for unit in (r, s):
+        assert (await _set(client, game_id, 1, unit, "reserves")).status_code == 200
+    for seat in (1, 2):
+        await _declare(client, game_id, seat)
+    for unit, (x, y) in ((a, (20, 40)), (d, (20, 4)), (b, (30, 40))):
+        assert (await _deploy(client, game_id, unit, _row(unit, x, y))).status_code == 200
+    await _advance_to(client, game_id, 2, 2, "movement", ended=True)
+    reserves = (await client.get(f"/games/{game_id}/reserves")).json()
+    assert {u["name"] for u in reserves["units"]} == {"R", "S"}
+    response = await _bring_in(client, game_id, r, _at(r, *EDGE))
+    assert response.status_code == 200, response.text
+    reserves = (await client.get(f"/games/{game_id}/reserves")).json()
+    assert reserves["units"] == []
+    decision = (await client.get(f"/games/{game_id}/agent")).json()
+    assert not [a for a in decision["actions"] if a["type"] == "bring_in"]
+    response = await _bring_in(client, game_id, s, _at(s, EDGE[0] + 10, EDGE[1]))
+    assert "already been used this phase" in response.json()["detail"]
+
+
 async def test_no_pause_without_rapid_ingress(client: AsyncClient, session, tmp_path):
     # Without the stratagem (or reserves), the movement phase just ends.
     game_id, r = await _reserves_game(client, session, tmp_path, rapid_ingress=False)

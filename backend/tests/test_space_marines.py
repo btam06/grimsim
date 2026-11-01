@@ -1,3 +1,5 @@
+import pytest
+from fastapi import HTTPException
 from httpx import AsyncClient
 
 from app.models import DatasheetAbility, Faction, Keyword, Model, Unit, UnitModel
@@ -303,3 +305,16 @@ async def test_two_supreme_commanders_either_can_be_warlord(
     assert await warlord_reason(session, list_id, None) == "A or X must be the list's Warlord"
     assert await warlord_reason(session, list_id, named["X"]["unit_id"]) is None
     assert await warlord_reason(session, list_id, named["A"]["unit_id"]) is None
+
+
+def test_more_than_one_doctrine_can_be_active():
+    # Codex Adept (and Author of the Codex) make doctrines active in addition
+    # to any others: a unit with more than one can still attack...
+    combat_router._validate_rule_options(
+        ["Assault Doctrine", "Devastator Doctrine", "Tactical Doctrine"], "attacker_rule_options"
+    )
+    # ...but other abilities still have one option at a time.
+    with pytest.raises(HTTPException):
+        combat_router._validate_rule_options(
+            ["Protector Imperative", "Conqueror Imperative"], "attacker_rule_options"
+        )

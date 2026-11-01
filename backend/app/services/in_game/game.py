@@ -522,6 +522,10 @@ async def advance(session: AsyncSession, game: Game) -> None:
 
 
 async def core_stratagem(session: AsyncSession, name: str) -> Stratagem | None:
+    return _core_stratagem(name)
+
+
+def _core_stratagem(name: str) -> Stratagem | None:
     return next(
         (s for s in context.catalog().all("Stratagem") if s.name == name and s.is_core), None
     )
@@ -565,30 +569,28 @@ async def heroic_intervention_open(session: AsyncSession, game: Game) -> bool:
 async def rapid_ingress_open(session: AsyncSession, game: Game) -> bool:
     # Whether, at the end of this movement phase, the opponent of the player
     # whose turn it is could use Rapid Ingress: units can arrive this round,
-    # they have a unit in Strategic Reserves, and they can use the stratagem
-    # (CP, and not already this phase).
+    # and they can use the stratagem on one of their units in Strategic
+    # Reserves.
     if not reinforcements_service.arrival_round(game):
         return False
-    opponent = player_at(game, other_seat(game.turn_seat))
-    units = reinforcements_service.reserve_units(game, opponent.seat)
-    if not units:
-        return False
-    stratagem = await rapid_ingress_stratagem(session)
-    # The cheapest it could be for one of those units (e.g. with a Teleport
-    # Homer token, or Beacon Angelis).
-    discount = max(
-        reinforcements_service.rapid_ingress_discount(u)
-        + (
-            teleport_homer_service.CP_DISCOUNT
-            if teleport_homer_service.token(game, u) is not None
-            else 0
-        )
-        for u in units
+    units = reinforcements_service.reserve_units(game, other_seat(game.turn_seat))
+    return any(rapid_ingress_reason(game, u) is None for u in units)
+
+
+def rapid_ingress_reason(game: Game, unit: Unit) -> str | None:
+    # Why the unit's player can't use Rapid Ingress on it now (CP, or already
+    # this phase), or None if they can - at the cheapest it could be for it
+    # (e.g. with a Teleport Homer token, or Beacon Angelis).
+    stratagem = _core_stratagem(reinforcements_service.RAPID_INGRESS)
+    if stratagem is None:
+        return "there's no Rapid Ingress stratagem"
+    discount = reinforcements_service.rapid_ingress_discount(unit) + (
+        teleport_homer_service.CP_DISCOUNT
+        if teleport_homer_service.token(game, unit) is not None
+        else 0
     )
-    return (
-        stratagem is not None
-        and stratagem_unavailable_reason(game, opponent, stratagem, discount) is None
-    )
+    player = deployment_service.owner(game, unit)
+    return stratagem_unavailable_reason(game, player, stratagem, discount, unit)
 
 
 async def overwatch_open(session: AsyncSession, game: Game) -> bool:

@@ -146,6 +146,24 @@ def _option_owner(option_name: str):
     ) or datasheet_ability_seeds.OPTION_OWNERS.get(option_name)
 
 
+@functools.cache
+def _stacking_owners() -> frozenset:
+    # The abilities more than one of whose options can be active at once:
+    # those whose options an ability makes active in addition to any others
+    # (Codex Adept's always, Author of the Codex's selected one).
+    owners = {
+        _option_owner(option)
+        for options in datasheet_ability_seeds.ALWAYS_ACTIVE_OPTIONS.values()
+        for option in options
+    }
+    owners |= {
+        tuple(choice.faction_options)
+        for choice in datasheet_ability_seeds.COMMAND_CHOICES.values()
+        if choice.faction_options
+    }
+    return frozenset(owners - {None})
+
+
 def _validate_rule_options(option_names: list[str], field: str) -> None:
     unknown = [name for name in option_names if _option_owner(name) is None]
     if unknown:
@@ -153,8 +171,13 @@ def _validate_rule_options(option_names: list[str], field: str) -> None:
             status_code=400, detail=f"unknown {field}: {', '.join(unknown)}"
         )
     # Only one option per ability can be active at a time (e.g. not both the
-    # Protector and Conqueror Imperatives).
-    owners = [_option_owner(name) for name in set(option_names)]
+    # Protector and Conqueror Imperatives) - unless another ability makes its
+    # options active as well (e.g. Codex Adept: every Combat Doctrine).
+    owners = [
+        owner
+        for owner in map(_option_owner, set(option_names))
+        if owner not in _stacking_owners()
+    ]
     if len(owners) != len(set(owners)):
         raise HTTPException(
             status_code=400,

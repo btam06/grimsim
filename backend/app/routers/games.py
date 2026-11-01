@@ -1849,8 +1849,9 @@ def _reserves_out(game: Game) -> ReservesOut:
             u
             for u in reinforcements_service.reserve_units(game, seat)
             # (In the first battle round, only those that can make an
-            # ingress move.)
+            # ingress move; by Rapid Ingress, only those it can be used on.)
             if reinforcements_service.arrival_round(game, u, step == "rapid_ingress")
+            and (step != "rapid_ingress" or game_service.rapid_ingress_reason(game, u) is None)
         ]
         if seat is not None
         else []
