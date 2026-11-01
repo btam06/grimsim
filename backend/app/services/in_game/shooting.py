@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import math
 import re
 from dataclasses import dataclass, field
@@ -230,12 +231,20 @@ def move_status(game: Game, unit: Unit) -> MoveStatus:
 # --- line of sight ---
 
 
-def _clip(a: Point, b: Point, polygon: list[Point]) -> tuple[float, float] | None:
+def _winding(polygon: list[Point]) -> int:
+    # 1 if the polygon's corners go anticlockwise, -1 if clockwise.
+    area2 = sum(p[0] * q[1] - p[1] * q[0] for p, q in zip(polygon, polygon[1:] + polygon[:1]))
+    return 1 if area2 > 0 else -1
+
+
+def _clip(
+    a: Point, b: Point, polygon: list[Point], sign: int | None = None
+) -> tuple[float, float] | None:
     # Where the segment ab is inside a convex polygon, as (enter, leave)
     # fractions along it - None if it doesn't pass through the inside (just
     # touching an edge or corner doesn't count). Clipped to each edge's inside.
-    area2 = sum(p[0] * q[1] - p[1] * q[0] for p, q in zip(polygon, polygon[1:] + polygon[:1]))
-    sign = 1 if area2 > 0 else -1
+    # `sign`: its _winding, if known.
+    sign = sign or _winding(polygon)
     dx, dy = b[0] - a[0], b[1] - a[1]
     enter, leave = 0.0, 1.0
     for p, q in zip(polygon, polygon[1:] + polygon[:1]):
@@ -258,9 +267,9 @@ def _clip(a: Point, b: Point, polygon: list[Point]) -> tuple[float, float] | Non
     return (enter, leave) if leave - enter > TOLERANCE else None
 
 
-def _blocks(a: Point, b: Point, polygon: list[Point]) -> bool:
+def _blocks(a: Point, b: Point, polygon: list[Point], sign: int | None = None) -> bool:
     # Whether the segment ab passes through the inside of a convex polygon.
-    return _clip(a, b, polygon) is not None
+    return _clip(a, b, polygon, sign) is not None
 
 
 def _sight_points(base: Base) -> list[Point]:
@@ -401,12 +410,32 @@ class _Terrain:
     obscuring: list[bool]
     has_dense: list[bool]
     bridges: list[tuple[int, int, list[Point]]]
+    # Whether one base sees another, as worked out (see Sight.sees).
+    seen: dict = field(default_factory=dict)
+
+
+# Each layout's terrain, by the layout object's id (with the layout, so a
+# reused id isn't mistaken for it): a game's layout never changes.
+_TERRAIN: dict[int, tuple[object, _Terrain]] = {}
+# The most line-of-sight results kept per layout.
+SEEN_LIMIT = 200_000
 
 
 def terrain(game: Game) -> _Terrain:
     layout = game.layout
     if layout is None:
         return _Terrain([], [], [], [], [])
+    cached = _TERRAIN.get(id(layout))
+    if cached is not None and cached[0] is layout:
+        return cached[1]
+    if len(_TERRAIN) > 32:
+        _TERRAIN.clear()
+    found = _layout_terrain(layout)
+    _TERRAIN[id(layout)] = (layout, found)
+    return found
+
+
+def _layout_terrain(layout) -> _Terrain:
     areas = [area_polygon(a) for a in layout.areas]
     features = [
         (feature.shape.kind, polygon)
@@ -450,7 +479,14 @@ class Sight:
         return t.dense + [area for area, s in zip(t.areas, solid) if s] + bridges
 
     def sees(self, a: Base, b: Base) -> bool:
-        return can_see(a, b, self.walls(a, b))
+        # (Remembered: models stand still for most of a phase.)
+        seen = self.terrain.seen
+        found = seen.get((a, b))
+        if found is None:
+            if len(seen) >= SEEN_LIMIT:
+                seen.clear()
+            found = seen[(a, b)] = can_see(a, b, self.walls(a, b))
+        return found
 
     def fully_sees(self, a: Base, b: Base) -> bool:
         # Whether every point round the target model's base can be seen from
@@ -521,8 +557,11 @@ def can_see(viewer: Base, target: Base, walls: list[list[Point]]) -> bool:
     ]
     if not near:
         return True
+    near = [(wall, _winding(wall)) for wall in near]
     return any(
-        not any(_blocks(a, b, wall) for wall in near) for a in sources for b in targets
+        not any(_blocks(a, b, wall, sign) for wall, sign in near)
+        for a in sources
+        for b in targets
     )
 
 
@@ -726,20 +765,36 @@ def engaged_with(game: Game, unit: Unit, other: Unit) -> bool:
     return distance(game, unit, other) <= movement.ENGAGEMENT_RANGE + TOLERANCE
 
 
-def _weapon_allowed(
-    game: Game, unit: Unit, unit_model: UnitModel, weapon, target: Unit
-) -> bool:
+class _Engaged:
+    # Who's within Engagement Range, for one unit shooting at one target -
+    # each worked out once, when first needed.
+    def __init__(self, game: Game, unit: Unit, target: Unit) -> None:
+        self.game, self.unit, self.target = game, unit, target
+
+    @functools.cached_property
+    def unit_engaged(self) -> bool:
+        return movement.in_engagement_range(self.game, self.unit)
+
+    @functools.cached_property
+    def target_engaged(self) -> bool:
+        return movement.in_engagement_range(self.game, self.target)
+
+    @functools.cached_property
+    def with_each_other(self) -> bool:
+        return engaged_with(self.game, self.unit, self.target)
+
+
+def _weapon_allowed(engaged: _Engaged, unit_model: UnitModel, weapon) -> bool:
     # Whether the model can fire the weapon at the target at all, by who's
     # engaged (see above).
-    big = _big(unit, unit_model)
-    if movement.in_engagement_range(game, unit):
-        if _blast(weapon) and movement.in_engagement_range(game, target):
+    if engaged.unit_engaged:
+        if _blast(weapon) and engaged.target_engaged:
             return False
-        if big:
+        if _big(engaged.unit, unit_model):
             return True
-        return close_quarters(weapon) and engaged_with(game, unit, target)
-    if movement.in_engagement_range(game, target):
-        return _big(target) and not _blast(weapon)
+        return close_quarters(weapon) and engaged.with_each_other
+    if engaged.target_engaged:
+        return _big(engaged.target) and not _blast(weapon)
     return True
 
 
@@ -762,6 +817,7 @@ def reach(game: Game, unit: Unit, target: Unit, assault: set | None = None) -> T
     targets = list(target_bases.values())
     sight = Sight(game)
     hidden = hidden_models(game, target, sight)
+    engaged = _Engaged(game, unit, target)
 
     def sees(base: Base) -> list[Base]:
         # The target models the base can see: hidden ones only within 15".
@@ -801,10 +857,11 @@ def reach(game: Game, unit: Unit, target: Unit, assault: set | None = None) -> T
                 ),
             )
             entry.carried_by += 1
-            if entry.unusable or not _weapon_allowed(game, unit, unit_model, weapon, target):
-                continue
+            # (Range first: a target model it can't see needs no more checks.)
             limit = min(weapon.range, target_limit) if target_limit else weapon.range
-            if nearest is not None and nearest <= limit + TOLERANCE:
+            if entry.unusable or nearest is None or nearest > limit + TOLERANCE:
+                continue
+            if _weapon_allowed(engaged, unit_model, weapon):
                 half = nearest <= weapon.range / 2 + TOLERANCE
                 entry.in_range += 1
                 entry.half_range = entry.half_range or half
@@ -849,14 +906,10 @@ def reach(game: Game, unit: Unit, target: Unit, assault: set | None = None) -> T
                 continue
             for weapon in ranged_weapons(unit_model):
                 entry = reaches[weapon.id]
-                if (
-                    entry.unusable
-                    or not _indirect(weapon)
-                    or not _weapon_allowed(game, unit, unit_model, weapon, target)
-                ):
-                    continue
                 limit = min(weapon.range, target_limit) if target_limit else weapon.range
-                if nearest <= limit + TOLERANCE:
+                if entry.unusable or not _indirect(weapon) or nearest > limit + TOLERANCE:
+                    continue
+                if _weapon_allowed(engaged, unit_model, weapon):
                     half = nearest <= weapon.range / 2 + TOLERANCE
                     entry.in_range += 1
                     entry.half_range = entry.half_range or half
@@ -868,7 +921,9 @@ def reach(game: Game, unit: Unit, target: Unit, assault: set | None = None) -> T
     return TargetReach(
         unit=target,
         visible=visible,
-        in_cover=in_cover(game, target, list(shooters.values()), sight)
+        # (Only if it can be shot at.)
+        in_cover=(visible or indirect)
+        and in_cover(game, target, list(shooters.values()), sight)
         and not psychic.soul_sighted(game, target),
         weapons=list(reaches.values()),
         firing=firing,
