@@ -209,6 +209,8 @@ async def create_game(session: AsyncSession, payload: GameIn) -> Live:
         ],
         layout=layout,
     )
+    # Its records' ids from here on are its own (see app/engine/state.py).
+    game.record_ids = max(getattr(r, "id", 0) or 0 for r in game.records() if r is not game)
     # What it refers to, from the catalog.
     for record in game.records():
         for attr, (id_attr, class_name) in record._refs.items():

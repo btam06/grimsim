@@ -322,6 +322,8 @@ async def _commit_and_reload(session: AsyncSession | None, game_id: int) -> Game
 def _autosave(live) -> None:
     # The first time the game's at the start of a phase: saved (see
     # app/engine/saves.py).
+    if not live.autosave:
+        return
     save_name = saves.name(live.game)
     if save_name is not None and not saves.saved(live.game.id, save_name):
         saves.autosave(live.game, live.catalog)

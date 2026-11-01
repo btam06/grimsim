@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextvars
 import itertools
 import typing
 from dataclasses import dataclass, field, fields
@@ -17,7 +18,7 @@ if TYPE_CHECKING:
     from app.models.user import User
 
 # A game's state, as plain Python objects: played in memory (see
-# app/engine/__init__.py), not through the database. Each class is one kind
+# app/engine/store.py), not through the database. Each class is one kind
 # of record - a player, a unit's move, a model's position - held in lists on
 # the Game (or on its players, and so on), in the order they were made.
 #
@@ -57,13 +58,29 @@ _CATALOG_TYPES = {
     )
 }
 
-# Records' ids: unique in the process, and in the order records are made (so
-# sorting by id is sorting by when). Restoring a save moves this past its ids.
+# Records' ids, in the order records are made (so sorting by id is sorting
+# by when): counted by the game being played (Game.record_ids - so replaying
+# it from a save makes the same ids), or - with none bound, e.g. while a new
+# game's being put together - by the process.
 _ids = itertools.count(1)
+_playing: contextvars.ContextVar[Game | None] = contextvars.ContextVar("playing", default=None)
 
 
 def next_id() -> int:
-    return next(_ids)
+    game = _playing.get()
+    if game is None:
+        return next(_ids)
+    game.record_ids += 1
+    return game.record_ids
+
+
+def playing(game: Game | None) -> contextvars.Token:
+    # The game whose records are being made (see app/engine/context.py).
+    return _playing.set(game)
+
+
+def stop_playing(token: contextvars.Token) -> None:
+    _playing.reset(token)
 
 
 def ids_from(start: int) -> None:
@@ -238,6 +255,8 @@ class Game(State):
     # rolls it's made so far (see app/services/dice.py).
     rng_seed: int = field(default_factory=dice.new_seed)
     rng_rolls: int = 0
+    # The last id given to one of its records (see next_id).
+    record_ids: int = 0
 
     players: list['GamePlayer'] = field(default_factory=list)
     layout_link: GameTerrainLayout | None = None

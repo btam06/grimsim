@@ -3,8 +3,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.migrations import (
     core_rule_texts,
     core_stratagems,
-    first_seat_nullable,
-    game_dice,
     hellfire_rounds_conditions,
     hull_boxes,
     kit_counts,
@@ -25,13 +23,11 @@ from app.migrations import (
 MIGRATIONS = [
     reconnaissance_spelling,
     hellfire_rounds_conditions,
-    first_seat_nullable,
     skitarii_marshal_spelling,
     hull_boxes,
     kit_counts,
     core_rule_texts,
     core_stratagems,
-    game_dice,
 ]
 
 

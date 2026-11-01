@@ -10,7 +10,7 @@ from app.models import Base
 
 # What a game is played with, read from the database once: its armies (units,
 # models, weapons, abilities, ...), stratagems, mission cards and terrain. The
-# engine (see app/engine/__init__.py) plays on plain copies of those rows - a
+# engine (see app/engine/store.py) plays on plain copies of those rows - a
 # "mirror" of each - so nothing during a game goes back to the database.
 #
 # A mirror has the same name, columns and relationships as the ORM class it
@@ -33,7 +33,7 @@ class Mirror:
         return f"<{type(self).__name__} {_key(self)}>"
 
     # Shared, never copied: a copy of a game's state (see
-    # app/engine/__init__.py) refers to the same catalog.
+    # app/engine/play.py) refers to the same catalog.
     def __copy__(self):
         return self
 

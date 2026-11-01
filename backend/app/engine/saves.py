@@ -58,8 +58,10 @@ def restore(path: str | Path) -> tuple[state.Game, Catalog]:
             ref_id = getattr(record, id_attr)
             if ref_id is not None:
                 object.__setattr__(record, attr, catalog.get(class_name, ref_id))
-        highest = max(highest, getattr(record, "id", None) or 0)
-    state.ids_from(highest + 1)
+        if record is not game:
+            highest = max(highest, getattr(record, "id", None) or 0)
+    # Its records' ids carry on from its own count (see app/engine/state.py).
+    game.record_ids = max(game.record_ids, highest)
     return game, catalog
 
 

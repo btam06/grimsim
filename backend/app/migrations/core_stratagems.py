@@ -1,8 +1,8 @@
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models import GameStratagemUse, Stratagem
+from app.models import Stratagem
 from app.seeds import stratagems as stratagem_seeds
 
 # The core stratagems as the 11th edition Core Rules PDF has them (15.02-15.12):
@@ -46,12 +46,7 @@ async def run(session: AsyncSession) -> None:
             core[new].name = new
     removed = core.pop(REMOVED, None)
     if removed is not None and REMOVED not in entries:
-        used = (
-            await session.execute(
-                select(GameStratagemUse.id).where(GameStratagemUse.stratagem_id == removed.id)
-            )
-        ).first()
-        if used is None:
+        if not await _used_in_old_games(session, removed.id):
             await session.delete(removed)
     for name, stratagem in core.items():
         entry = entries.get(name)
@@ -76,3 +71,19 @@ async def run(session: AsyncSession) -> None:
         stratagem.keyword_option_links = []
         stratagem.timings = []
     await session.flush()
+
+
+async def _used_in_old_games(session: AsyncSession, stratagem_id: int) -> bool:
+    # Whether a game from when games were kept in the database (they're now
+    # played in memory - see app/engine/) used it: its old table may still
+    # be there, pointing at it.
+    if session.bind.dialect.name != "postgresql":
+        return False
+    table = (await session.execute(text("SELECT to_regclass('game_stratagem_uses')"))).scalar()
+    if table is None:
+        return False
+    used = await session.execute(
+        text("SELECT 1 FROM game_stratagem_uses WHERE stratagem_id = :id LIMIT 1"),
+        {"id": stratagem_id},
+    )
+    return used.first() is not None

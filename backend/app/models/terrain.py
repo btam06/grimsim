@@ -235,14 +235,3 @@ class TerrainObjectiveArea(Base):
     area_id: Mapped[int] = mapped_column(ForeignKey("terrain_areas.id"), primary_key=True)
 
     area: Mapped["TerrainArea"] = relationship(lazy="selectin")
-
-
-class GameTerrainLayout(Base):
-    # The terrain layout a game is played on. Its own table rather than a
-    # column, so existing databases pick it up without a migration.
-    __tablename__ = "game_terrain_layouts"
-
-    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"), primary_key=True)
-    layout_id: Mapped[int] = mapped_column(ForeignKey("terrain_layouts.id"))
-
-    layout: Mapped["TerrainLayout"] = relationship(lazy="selectin")

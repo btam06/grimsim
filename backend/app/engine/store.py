@@ -40,6 +40,11 @@ def remove(game_id: int) -> None:
     saves.delete(game_id)
 
 
+def forget(game_id: int) -> None:
+    # Out of memory (its saves stay: it comes back from the latest).
+    _games.pop(game_id, None)
+
+
 def mark_stale() -> None:
     # Every game's catalog is out of date (see Live.stale).
     for live in _games.values():

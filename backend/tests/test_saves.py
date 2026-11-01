@@ -40,8 +40,13 @@ async def test_a_save_restores_the_game(client: AsyncClient, session, tmp_path):
 async def test_restored_records_get_new_ids(client: AsyncClient, session, tmp_path):
     game, _ = await _battle(client, session, tmp_path)
     restored, _ = saves.restore(saves.folder(game["id"]) / "r1-s2-movement.json")
-    highest = max(r.id for r in restored.records() if getattr(r, "id", None))
-    assert state.GameUnitMove(unit_id=1, battle_round=1, turn_seat=2, kind="normal").id > highest
+    highest = max(getattr(r, "id", 0) or 0 for r in restored.records() if r is not restored)
+    token = state.playing(restored)
+    try:
+        move = state.GameUnitMove(unit_id=1, battle_round=1, turn_seat=2, kind="normal")
+    finally:
+        state.stop_playing(token)
+    assert move.id == highest + 1
 
 
 async def test_the_catalog_round_trips(client: AsyncClient, session, tmp_path):

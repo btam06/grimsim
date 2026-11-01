@@ -27,6 +27,9 @@ class Live:
     # Its catalog is out of date: read again from the database when the
     # game's next loaded with one (see app/routers/games.py _load_game).
     stale: bool = False
+    # Saved at the start of each phase (see app/engine/saves.py) - off for
+    # games played where only speed matters (see app/engine/play.py).
+    autosave: bool = True
 
     def snapshot(self) -> state.Game:
         # A copy of its state (sharing the catalog) - to go back to.
@@ -36,6 +39,7 @@ class Live:
         self.game = snapshot
         if _current.get() is self:
             dice.bind(snapshot)
+            state.playing(snapshot)
 
 
 _current: contextvars.ContextVar[Live | None] = contextvars.ContextVar("live", default=None)
@@ -57,15 +61,18 @@ def bind(live: Live | None) -> None:
     # For the rest of the request (or engine call).
     _current.set(live)
     dice.bind(live.game if live is not None else None)
+    state.playing(live.game if live is not None else None)
 
 
 @contextmanager
 def bound(live: Live) -> Iterator[Live]:
     token = _current.set(live)
+    playing = state.playing(live.game)
     try:
         with dice.bound(live.game):
             yield live
     finally:
+        state.stop_playing(playing)
         _current.reset(token)
 
 

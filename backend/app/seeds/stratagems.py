@@ -14,7 +14,7 @@ from app.models import (
     Stratagem,
     StratagemTiming,
 )
-from app.models.game import PHASES
+from app.engine.state import PHASES
 from app.models.stratagem import (
     STRATAGEM_COMBAT_SIDES,
     STRATAGEM_DURATIONS,
