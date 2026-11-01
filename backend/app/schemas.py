@@ -1190,6 +1190,9 @@ class MovementUnitOut(BaseModel):
     moved: bool = False
     # It arrived from Reserves this phase (it can't move again).
     arrived: bool = False
+    # It disembarked from a transport that had moved this phase (it can't
+    # move again).
+    disembarked: bool = False
     # It can take to the skies (FLY), or be MOBILE (a Super-heavy Walker).
     can_fly: bool = False
     super_heavy_walker: bool = False

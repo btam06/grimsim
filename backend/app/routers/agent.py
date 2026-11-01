@@ -537,7 +537,7 @@ async def _movement_actions(session, game: Game, add, units, turn) -> None:
         move_state = g._movement_out(game)
         for mu in move_state.units:
             unit = units[mu.unit_id]
-            if mu.arrived:
+            if mu.arrived or mu.disembarked:
                 continue
             speeds = {m.unit_model_id: m.movement for m in mu.models}
             if "advance" in mu.allowed_kinds and mu.advance_roll is None:

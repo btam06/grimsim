@@ -12,6 +12,7 @@
 // How a unit stands this phase.
 function unitStatus(unit) {
   if (unit.arrived) return 'Arrived from Reserves'
+  if (unit.disembarked) return 'Disembarked from a transport that had moved'
   if (unit.moved) {
     if (unit.kind === 'advance') return `Advanced (rolled ${unit.advance_roll})`
     if (unit.kind === 'fall_back') return 'Fell back'
@@ -53,7 +54,7 @@ function MovementPanel({
             <input
               type="radio"
               name="move-unit"
-              disabled={unit.arrived}
+              disabled={unit.arrived || unit.disembarked}
               checked={draft.unitId === unit.unit_id}
               onChange={() => onSelectUnit(unit)}
             />

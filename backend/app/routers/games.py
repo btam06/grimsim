@@ -658,6 +658,7 @@ def _movement_out(game: Game) -> MovementOut:
                 advance_roll=move.advance_roll if move else None,
                 moved=bool(move and move.completed),
                 arrived=bool(move and move.kind == reinforcements_service.ARRIVED),
+                disembarked=bool(move and move.kind == embarked_service.DISEMBARKED),
                 can_fly=movement_service.can_fly(unit),
                 super_heavy_walker=pathing_service.is_super_heavy_walker(unit),
                 models=[

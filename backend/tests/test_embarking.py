@@ -147,6 +147,12 @@ async def test_a_rapid_disembark_after_the_transport_moved(
     assert response.status_code == 200, response.text
     response = await _move(client, game_id, p, [(21.5, 33), (21.5, 34.5)])
     assert response.status_code == 400
+    # Shown as such, and the agent offers it no moves.
+    movement = (await client.get(f"/games/{game_id}/movement")).json()
+    [unit] = [u for u in movement["units"] if u["unit_id"] == p["unit_id"]]
+    assert unit["disembarked"]
+    decision = (await client.get(f"/games/{game_id}/agent")).json()
+    assert not [a for a in decision["actions"] if a["params"].get("unit_id") == p["unit_id"]]
     session.expire_all()
     game = await _load_game(session, game_id)
     from app.services.in_game import embarked
