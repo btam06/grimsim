@@ -32,7 +32,7 @@ class Engine:
 
     @classmethod
     async def create(
-        cls, session: AsyncSession, game_in: GameIn | dict, autosave: bool = True
+        cls, session: AsyncSession, game_in: GameIn | dict, autosave: bool = False
     ) -> Engine:
         # A new game, set up as POST /games would.
         from app.services.in_game import game as game_service
@@ -56,11 +56,14 @@ class Engine:
         return cls(live)
 
     @classmethod
-    def of(cls, game_id: int) -> Engine:
-        # A game already in memory (or saved), e.g. one made through the API.
+    def of(cls, game_id: int, autosave: bool | None = None) -> Engine:
+        # A game already in memory (or saved), e.g. one made through the API
+        # (autosaved as it was, unless `autosave` says otherwise).
         live = store.get(game_id)
         if live is None:
             raise KeyError(game_id)
+        if autosave is not None:
+            live.autosave = autosave
         return cls(live)
 
     @property

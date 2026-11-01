@@ -1,4 +1,4 @@
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -10,8 +10,7 @@ from app.seeds import stratagems as stratagem_seeds
 # and the rest have new costs, timings, targets and text. Seeding only fills
 # in what's missing, so each core stratagem's cost and text are brought in
 # line with stratagems.json, and its keyword requirements and timings
-# cleared for the seed to fill in again. Go to Ground goes, unless a game has
-# used it.
+# cleared for the seed to fill in again. Go to Ground goes.
 RENAMED = {
     "Grenade": "Explosives",
     "Tank Shock": "Crushing Impact",
@@ -46,8 +45,7 @@ async def run(session: AsyncSession) -> None:
             core[new].name = new
     removed = core.pop(REMOVED, None)
     if removed is not None and REMOVED not in entries:
-        if not await _used_in_old_games(session, removed.id):
-            await session.delete(removed)
+        await session.delete(removed)
     for name, stratagem in core.items():
         entry = entries.get(name)
         if entry is None:
@@ -72,18 +70,3 @@ async def run(session: AsyncSession) -> None:
         stratagem.timings = []
     await session.flush()
 
-
-async def _used_in_old_games(session: AsyncSession, stratagem_id: int) -> bool:
-    # Whether a game from when games were kept in the database (they're now
-    # played in memory - see app/engine/) used it: its old table may still
-    # be there, pointing at it.
-    if session.bind.dialect.name != "postgresql":
-        return False
-    table = (await session.execute(text("SELECT to_regclass('game_stratagem_uses')"))).scalar()
-    if table is None:
-        return False
-    used = await session.execute(
-        text("SELECT 1 FROM game_stratagem_uses WHERE stratagem_id = :id LIMIT 1"),
-        {"id": stratagem_id},
-    )
-    return used.first() is not None
