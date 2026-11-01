@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.models import Game, GamePlayer, Stratagem, Unit
+from app.models import Stratagem, Unit
+from app.engine.state import Game, GamePlayer
 from app.seeds import stratagems as stratagem_seeds
 from app.services.in_game import (
     battle_formations,

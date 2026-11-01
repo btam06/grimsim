@@ -260,10 +260,6 @@ class Game(Base):
         return self.layout_link.layout if self.layout_link else None
 
 
-# A game's rolls come from its own dice once it's loaded (or made).
-dice.listen(Game)
-
-
 class GamePlayer(Base):
     __tablename__ = "game_players"
 

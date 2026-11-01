@@ -1,19 +1,12 @@
 from httpx import AsyncClient
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.models import (
-    DatasheetAbility,
-    Faction,
-    FactionAbility,
-    GameModelDamage,
-    GameModelPosition,
-    GameRuleChoice,
-    Model,
-    UnitModel,
-)
+from app.models import DatasheetAbility, Faction, FactionAbility, Model, UnitModel
+from app.engine.state import GameRuleChoice
 from app.routers.games import _defender_positions, _load_game
 from app.services.in_game import deployment
+from tests import live_games
 from tests.test_deployment import _deployment, _unit_named
 from tests.test_movement import _battle, _move
 from tests.test_reinforcements import _advance_to
@@ -59,31 +52,19 @@ async def _ability(session, unit, name):
 
 async def _destroy(session, game_id, unit, count, wounds=2):
     for m in unit["models"][:count]:
-        session.add(
-            GameModelDamage(
-                game_id=game_id, unit_model_id=m["unit_model_id"], wounds_lost=wounds,
-                destroyed=True,
-            )
-        )
-        await session.execute(
-            delete(GameModelPosition).where(
-                GameModelPosition.game_id == game_id,
-                GameModelPosition.unit_model_id == m["unit_model_id"],
-            )
-        )
-    await session.commit()
+        live_games.damage(game_id, m["unit_model_id"], wounds_lost=wounds, destroyed=True)
+        live_games.remove_position(m["unit_model_id"], game_id)
 
 
 async def _dread(session, game_id, ability_id, *options):
     # Seat 2's Dread abilities chosen (in the first battle round).
     for option in options:
-        session.add(
+        live_games.game(game_id).rule_choices.append(
             GameRuleChoice(
                 game_id=game_id, battle_round=1, seat=2, faction_ability_id=ability_id,
                 option=option,
             )
         )
-    await session.commit()
 
 
 async def _rule_test(client, game_id, unit):

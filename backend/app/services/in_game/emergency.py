@@ -4,14 +4,13 @@ import math
 
 from fastapi import HTTPException
 
-from app.models import (
+from app.models import Unit, UnitModel
+from app.engine.state import (
     Game,
     GameEmergencyDisembark,
     GameEmergencyRoll,
     GameModelPosition,
     GameTransportWreck,
-    Unit,
-    UnitModel,
 )
 from app.services import dice
 from app.services.in_game import casualties, deployment, regions

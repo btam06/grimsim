@@ -4,7 +4,8 @@ from dataclasses import dataclass
 
 from fastapi import HTTPException
 
-from app.models import Game, GameAction, GameActionUnitTarget, Unit
+from app.models import Unit
+from app.engine.state import Game, GameAction, GameActionUnitTarget
 from app.services.in_game import battle_shock, deployment, mission_state, objectives, regions
 from app.services.in_game.terrain import area_polygon
 

@@ -4,14 +4,13 @@ import re
 
 from fastapi import HTTPException
 
-from app.models import (
+from app.models import Unit, UnitModel
+from app.engine.state import (
     Game,
     GameModelPosition,
     GameScoutsDone,
     GameUnitMove,
     GameUnitMoveStart,
-    Unit,
-    UnitModel,
 )
 from app.services.in_game import deployment, movement
 from app.services.in_game.deployment import Placement

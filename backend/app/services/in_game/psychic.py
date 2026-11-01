@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 
-from app.models import Game, GamePsychicUse, Unit
+from app.models import Unit
+from app.engine.state import Game, GamePsychicUse
 from app.seeds import datasheet_abilities as datasheet_ability_seeds
 from app.services import dice
 from app.services.combat import roll_dice_faces

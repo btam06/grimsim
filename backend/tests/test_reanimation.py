@@ -1,8 +1,9 @@
 from httpx import AsyncClient
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.models import FactionAbility, GameModelDamage, GameModelPosition, Model, UnitModel
+from app.models import FactionAbility, Model, UnitModel
+from tests import live_games
 from tests.test_deployment import _deploy, _deployment, _game, _row, _unit_named
 from tests.test_reinforcements import _advance_to
 
@@ -43,22 +44,9 @@ async def _reanimation_game(client, session, tmp_path, monkeypatch, roll):
 
 
 async def _hurt(session, game_id, unit_model_id, wounds_lost, destroyed=False):
-    session.add(
-        GameModelDamage(
-            game_id=game_id,
-            unit_model_id=unit_model_id,
-            wounds_lost=wounds_lost,
-            destroyed=destroyed,
-        )
-    )
+    live_games.damage(game_id, unit_model_id, wounds_lost, destroyed)
     if destroyed:
-        await session.execute(
-            delete(GameModelPosition).where(
-                GameModelPosition.game_id == game_id,
-                GameModelPosition.unit_model_id == unit_model_id,
-            )
-        )
-    await session.commit()
+        live_games.remove_position(unit_model_id, game_id)
 
 
 def _model(deployment, unit_model_id):

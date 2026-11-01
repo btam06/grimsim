@@ -1,9 +1,8 @@
 from httpx import AsyncClient
-from sqlalchemy import delete
 
-from app.models import GameModelDamage, GameModelPosition
 from app.routers.games import _load_game
 from app.services.in_game import casualties, deployment
+from tests import live_games
 from tests.test_reinforcements import _advance_to
 from tests.test_scoring_rules import _at, _transport_game
 
@@ -90,14 +89,9 @@ async def test_embarking_keeps_wounds_and_losses(client: AsyncClient, session, t
     await _advance_to(client, game_id, 2, 1, "movement")
     # One of P's models is destroyed, the other has lost a wound.
     first, second = (m["unit_model_id"] for m in p["models"])
-    session.add(GameModelDamage(game_id=game_id, unit_model_id=first, wounds_lost=2, destroyed=True))
-    session.add(GameModelDamage(game_id=game_id, unit_model_id=second, wounds_lost=1))
-    await session.execute(
-        delete(GameModelPosition).where(
-            GameModelPosition.game_id == game_id, GameModelPosition.unit_model_id == first
-        )
-    )
-    await session.commit()
+    live_games.damage(game_id, first, wounds_lost=2, destroyed=True)
+    live_games.damage(game_id, second, wounds_lost=1)
+    live_games.remove_position(first, game_id)
     response = await client.post(
         f"/games/{game_id}/movement",
         json={

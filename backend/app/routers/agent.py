@@ -4,14 +4,15 @@ import json
 import math
 import time
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
-from app.models import Game, GameAgentLog
+from app.engine import store as game_store
+from app.engine.state import Game
 from app.models.stratagem import UNIT_TARGET_ACTIONS
 from app.routers import games as g
 from app.schemas import (
@@ -939,12 +940,13 @@ def _summary(result) -> str | None:
 async def _decision(session: AsyncSession, game_id: int) -> dict:
     started = time.perf_counter()
     game = await g._load_game(session, game_id)
-    g._link_units(game)
+    rolls = game.rng_rolls
     waiting = await _waiting_for(session, game)
     actions = await _legal_actions(session, game, waiting)
     state = _state(game)
-    # Nothing here changes the game (default placements are only checked).
-    await session.rollback()
+    # Nothing here changes the game (default placements are only checked) -
+    # nor uses up its dice (shuffling where to try placing units).
+    game.rng_rolls = rolls
     counts: dict[str, int] = {}
     for a in actions:
         counts[a.type] = counts.get(a.type, 0) + 1
@@ -965,52 +967,43 @@ async def get_decision(game_id: int, session: AsyncSession = Depends(get_session
 
 async def _do(session: AsyncSession, game_id: int, action: AgentActionIn, listed_keys: set[str]):
     game = await g._load_game(session, game_id)
+    live = game_store.get(game_id)
     state = _state(game)
     listed = _key(action.type, action.seat, action.params) in listed_keys
     started = time.perf_counter()
     ok, error, result = True, None, None
+    # A rejected action leaves the game as it was.
+    before = live.snapshot()
     try:
         result = await _apply(session, game_id, action)
     except HTTPException as exc:
         ok, error = False, str(exc.detail)
-        await session.rollback()
+        live.restore(before)
     except Exception as exc:  # A crash: the log says so, with what it was.
         ok, error = False, f"{type(exc).__name__}: {exc}"
-        await session.rollback()
+        live.restore(before)
     ms = round((time.perf_counter() - started) * 1000, 1)
-    entry = GameAgentLog(
-        game_id=game_id,
-        state=state,
-        seat=action.seat,
-        action_type=action.type,
-        params=json.dumps(action.params, default=str),
-        listed=listed,
-        ok=ok,
-        error=error,
-        result=_summary(result) if ok else None,
-        ms=ms,
-    )
-    session.add(entry)
-    await session.commit()
+    entry = {
+        "id": len(live.agent_log) + 1,
+        "at": datetime.now().isoformat(),
+        "state": state,
+        "seat": action.seat,
+        "type": action.type,
+        "params": action.params,
+        "listed": listed,
+        "ok": ok,
+        "error": error,
+        "result": _summary(result) if ok else None,
+        "ms": ms,
+        # Listed as legal, then rejected: the interface and the game disagree.
+        "mismatch": listed and not ok,
+    }
+    live.agent_log.append(entry)
     return entry
 
 
-def _log_out(entry: GameAgentLog) -> dict:
-    return {
-        "id": entry.id,
-        "at": entry.created_at.isoformat() if entry.created_at else None,
-        "state": entry.state,
-        "seat": entry.seat,
-        "type": entry.action_type,
-        "params": json.loads(entry.params),
-        "listed": entry.listed,
-        "ok": entry.ok,
-        "error": entry.error,
-        "result": entry.result,
-        "ms": entry.ms,
-        # Listed as legal, then rejected: the interface and the game disagree.
-        "mismatch": entry.listed and not entry.ok,
-    }
+def _log_out(entry: dict) -> dict:
+    return entry
 
 
 @router.post("/{game_id}/agent/apply")
@@ -1051,12 +1044,5 @@ async def random_action(
 async def get_log(game_id: int, limit: int = 100, session: AsyncSession = Depends(get_session)):
     # The most recent actions applied through the agent interface, newest
     # first.
-    rows = (
-        await session.execute(
-            select(GameAgentLog)
-            .where(GameAgentLog.game_id == game_id)
-            .order_by(GameAgentLog.id.desc())
-            .limit(limit)
-        )
-    ).scalars()
-    return [_log_out(r) for r in rows]
+    await g._load_game(session, game_id)
+    return list(reversed(game_store.get(game_id).agent_log))[:limit]

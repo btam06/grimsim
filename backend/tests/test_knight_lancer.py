@@ -1,6 +1,7 @@
 from httpx import AsyncClient
 
-from app.models import DatasheetAbility, GameModelDamage, GameStratagemUse, Stratagem
+from app.models import DatasheetAbility, Stratagem
+from app.engine.state import GameModelDamage, GameStratagemUse
 from app.routers.games import _load_game
 from app.services.in_game import casualties, deployment, objectives
 from app.services.in_game import game as game_service
@@ -39,8 +40,8 @@ async def test_shock_charge(client: AsyncClient, session, tmp_path):
     crushing = Stratagem(name="Crushing Impact", cp=1, is_core=True)
     session.add(crushing)
     await session.commit()
-    crushing = await game_service.core_stratagem(session, "Crushing Impact")
     game, unit = await _knight(client, session, tmp_path, "Shock Charge")
+    crushing = await game_service.core_stratagem(session, "Crushing Impact")
     with session.no_autoflush:
         player = game_service.player_at(game, 2)
         player.cp = 0

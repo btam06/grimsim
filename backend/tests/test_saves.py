@@ -1,13 +1,12 @@
 from httpx import AsyncClient
 
-from app.engine import convert, saves, state
+from app.engine import saves, state, store
 from app.engine.catalog import Catalog
-from app.routers.games import _load_game
 from tests.test_deployment import _unit_named
 from tests.test_movement import _battle
 
 # Autosaves (see app/engine/saves.py): a game's state at the start of each
-# phase, as plain state (see app/engine/state.py) - restorable.
+# phase - restorable.
 
 
 async def test_each_phase_is_saved_at_its_start(client: AsyncClient, session, tmp_path, saves_dir):
@@ -21,7 +20,7 @@ async def test_each_phase_is_saved_at_its_start(client: AsyncClient, session, tm
 async def test_a_save_restores_the_game(client: AsyncClient, session, tmp_path):
     game, deployment = await _battle(client, session, tmp_path)
     restored, catalog = saves.restore(saves.folder(game["id"]) / "r1-s2-movement.json")
-    live, _ = convert.from_orm(await _load_game(session, game["id"]))
+    live = store.get(game["id"]).game
     assert restored.to_dict() == live.to_dict()
     assert (restored.battle_round, restored.turn_seat, restored.phase) == (1, 2, "movement")
     # What it refers to in the catalog comes back as objects: the armies,
@@ -47,7 +46,7 @@ async def test_restored_records_get_new_ids(client: AsyncClient, session, tmp_pa
 
 async def test_the_catalog_round_trips(client: AsyncClient, session, tmp_path):
     game, _ = await _battle(client, session, tmp_path)
-    _, catalog = convert.from_orm(await _load_game(session, game["id"]))
+    catalog = store.get(game["id"]).catalog
     again = Catalog.from_dict(catalog.to_dict())
     assert again.to_dict() == catalog.to_dict()
     assert {name for name in catalog.rows} >= {"ArmyList", "Unit", "UnitModel", "Model"}

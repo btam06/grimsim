@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 
-from app.models import Game, Unit
+from app.models import Unit
+from app.engine.state import Game
 from app.services import weapon_profiles
 from app.services.in_game import deployment, movement, reinforcements
 from app.services.in_game import shooting

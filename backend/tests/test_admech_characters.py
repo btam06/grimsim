@@ -1,6 +1,7 @@
 from httpx import AsyncClient
 
-from app.models import DatasheetAbility, GameModelDamage, Wargear, WargearAbility
+from app.models import DatasheetAbility, Wargear, WargearAbility
+from app.engine.state import GameModelDamage
 from app.routers.games import _load_game
 from app.seeds.factions.adeptus_mechanicus import datasheet_abilities as admech_datasheets
 from app.seeds.factions.adeptus_mechanicus import vengeance

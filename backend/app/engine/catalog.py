@@ -32,6 +32,14 @@ class Mirror:
     def __repr__(self) -> str:
         return f"<{type(self).__name__} {_key(self)}>"
 
+    # Shared, never copied: a copy of a game's state (see
+    # app/engine/__init__.py) refers to the same catalog.
+    def __copy__(self):
+        return self
+
+    def __deepcopy__(self, memo):
+        return self
+
 
 def mirror_class(orm_class: type) -> type:
     found = _mirrors.get(orm_class)

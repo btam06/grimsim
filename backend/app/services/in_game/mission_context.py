@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from functools import cached_property
 
-from app.models import Game, Unit
+from app.models import Unit
+from app.engine.state import Game
 from app.models.terrain import TerrainObjective
 from app.services.in_game import battle_shock, deployment, objectives, regions, turn_record
 

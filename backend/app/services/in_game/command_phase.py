@@ -5,15 +5,8 @@ from dataclasses import dataclass
 from fastapi import HTTPException
 
 from app.combat_rules import CommandChoice, RuleOption
-from app.models import (
-    FactionAbility,
-    Game,
-    GameCommandChoice,
-    GameCommandHeal,
-    GameRuleChoice,
-    Unit,
-    UnitModel,
-)
+from app.models import FactionAbility, Unit, UnitModel
+from app.engine.state import Game, GameCommandChoice, GameCommandHeal, GameRuleChoice
 from app.seeds import datasheet_abilities as datasheet_ability_seeds
 from app.seeds import factions as faction_seeds
 from app.services import dice

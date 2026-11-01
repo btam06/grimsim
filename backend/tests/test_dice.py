@@ -1,10 +1,9 @@
 from types import SimpleNamespace
 
 from httpx import AsyncClient
-from sqlalchemy import select
 
-from app.models import Game
 from app.services import dice
+from tests import live_games
 from tests.test_deployment import _unit_named
 from tests.test_movement import _battle
 from tests.test_simulation import _units
@@ -15,11 +14,8 @@ from tests.test_simulation import _units
 
 def _rolls(seed, count):
     game = SimpleNamespace(rng_seed=seed, rng_rolls=0)
-    token = dice._current.set(dice._Stream(game))
-    try:
+    with dice.bound(game):
         return [dice.d6() for _ in range(count)], game.rng_rolls
-    finally:
-        dice._current.reset(token)
 
 
 def test_a_seed_gives_the_same_rolls():
@@ -36,9 +32,7 @@ async def test_a_game_rolls_from_its_seed(client: AsyncClient, session, tmp_path
     assert game["seed"] == 1234
 
     async def rolls():
-        return (
-            await session.execute(select(Game.rng_rolls).where(Game.id == game["id"]))
-        ).scalar_one()
+        return live_games.game(game["id"]).rng_rolls
 
     before = await rolls()
     d = _unit_named(deployment, "D")
@@ -53,25 +47,14 @@ async def test_a_game_rolls_from_its_seed(client: AsyncClient, session, tmp_path
 
 
 def _rolls_from(seed, n):
-    stream = dice._Stream(SimpleNamespace(rng_seed=seed, rng_rolls=n))
-    stream.read()
-    token = dice._current.set(stream)
-    try:
+    with dice.bound(SimpleNamespace(rng_seed=seed, rng_rolls=n)):
         return dice.d6()
-    finally:
-        dice._current.reset(token)
 
 
 async def test_the_calculator_uses_its_own_dice(client: AsyncClient, session, tmp_path):
     a, d, gun = await _units(client, session, tmp_path)
-    game_id = (
-        await session.execute(select(Game.id).order_by(Game.id.desc()).limit(1))
-    ).scalar_one()
-
     async def rolls():
-        return (
-            await session.execute(select(Game.rng_rolls).where(Game.id == game_id))
-        ).scalar_one()
+        return live_games.game().rng_rolls
 
     before = await rolls()
     payload = {"attacking_unit_id": d["unit_id"], "defending_unit_id": a["unit_id"],

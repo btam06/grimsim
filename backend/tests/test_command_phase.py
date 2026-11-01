@@ -2,10 +2,11 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.models import DatasheetAbility, GameModelDamage, Model, UnitModel
+from app.models import DatasheetAbility, Model, UnitModel
 from app.routers.games import _load_game, _rule_options
 from app.seeds.factions.adeptus_mechanicus import datasheet_abilities as admech
 from app.services.in_game import deployment
+from tests import live_games
 from tests.test_deployment import _deploy, _deployment, _game, _row, _unit_named
 from tests.test_movement import _move, _shifted
 from tests.test_reinforcements import _advance_to
@@ -242,8 +243,7 @@ async def test_self_repair_at_the_start_of_the_command_phase(
 ):
     game_id, units = await _command_game(client, session, tmp_path, monkeypatch, roll=2)
     cawl = units["Cawl"]["models"][0]["unit_model_id"]
-    session.add(GameModelDamage(game_id=game_id, unit_model_id=cawl, wounds_lost=1))
-    await session.commit()
+    live_games.damage(game_id, cawl, wounds_lost=1)
     await _advance_to(client, game_id, 1, 1, "command")
     [heal] = (await _command(client, game_id))["heals"]
     # Rolled 2, but had only 1 wound to regain.

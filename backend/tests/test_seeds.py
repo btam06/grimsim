@@ -1260,7 +1260,7 @@ LOCAL_STRATAGEMS = stratagems.load(LOCAL_DATA_DIR / "stratagems.json")
 )
 async def test_local_stratagems_are_well_formed():
     # Checks your local data file, if you have one.
-    from app.models.game import PHASES
+    from app.engine.state import PHASES
     from app.models.stratagem import (
         STRATAGEM_DURATIONS,
         STRATAGEM_GAME_ACTIONS,

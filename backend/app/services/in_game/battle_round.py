@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 
 from fastapi import HTTPException
 
-from app.models import Game, GamePlayer, GameRuleChoice
+from app.engine.state import Game, GamePlayer, GameRuleChoice
 from app.seeds import datasheet_abilities as datasheet_ability_seeds
 from app.seeds import factions as faction_seeds
 from app.services import dice

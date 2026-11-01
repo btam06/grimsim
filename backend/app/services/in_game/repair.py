@@ -5,7 +5,8 @@ from fastapi import HTTPException
 from app.combat_rules import Rule
 from app.combat_rules.conditions import ALWAYS
 from app.combat_rules.effects import FEEL_NO_PAIN_5
-from app.models import Game, GameRepair, Unit, UnitModel
+from app.models import Unit, UnitModel
+from app.engine.state import Game, GameRepair
 from app.services.combat import roll_dice_faces
 from app.services.in_game import casualties, deployment
 from app.services.in_game.deployment import TOLERANCE, gap

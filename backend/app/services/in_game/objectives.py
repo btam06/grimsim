@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from app.models import Game, GameObjectiveControl, GameSecuredObjective, Unit, UnitModel
+from app.models import Unit, UnitModel
+from app.engine.state import Game, GameObjectiveControl, GameSecuredObjective
 from app.models.terrain import TerrainObjective
 from app.services.in_game import battle_shock, deployment
 from app.services.in_game.terrain import area_polygon, within

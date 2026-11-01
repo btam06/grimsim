@@ -4,13 +4,13 @@ from dataclasses import dataclass, field
 
 from fastapi import HTTPException
 
-from app.models import (
+from app.models import Unit
+from app.engine.state import (
     Game,
     GameCardChoice,
     GameMarkedUnit,
     GameMissionPrompt,
     GameOperationMarker,
-    Unit,
 )
 from app.services.in_game import deployment, regions
 from app.services.in_game.terrain import area_polygon

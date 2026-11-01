@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from app.models import Game, GameModelDamage, Unit
+from app.models import Unit
+from app.engine.state import Game, GameModelDamage
 from app.services.in_game import deployment
 from app.services.in_game.deployment import COHERENCY_RANGE, TOLERANCE, UNIT_SPAN, gap
 

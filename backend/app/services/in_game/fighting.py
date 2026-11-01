@@ -4,15 +4,14 @@ import math
 
 from fastapi import HTTPException
 
-from app.models import (
+from app.models import Unit, UnitModel
+from app.engine.state import (
     Game,
     GameFightPass,
     GamePileInDone,
     GameUnitConsolidation,
     GameUnitFight,
     GameUnitPileIn,
-    Unit,
-    UnitModel,
 )
 from app.services import weapon_profiles
 from app.services.in_game import deployment, duty_in_death, mission_state, pathing

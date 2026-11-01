@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 
-from app.models import Game, GameReanimation, Unit
+from app.models import Unit
+from app.engine.state import Game, GameReanimation
 from app.services import dice
 from app.services.in_game import deployment, heal
 

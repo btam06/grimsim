@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db import get_session
+from app.engine import context
 from app.combat_rules import Rule, RuleOption
 from app.combat_rules.conditions import WITHIN_12_OF_TARGET
 from app.combat_rules.positions import ALWAYS_ASKED, POSITION_CONDITIONS, POSITIONS
@@ -56,6 +57,10 @@ router = APIRouter(prefix="/combat", tags=["combat"])
 
 
 async def _load_unit(session: AsyncSession, unit_id: int) -> Unit | None:
+    # From the game's catalog, while a game's played (see
+    # app/engine/context.py); otherwise (the calculator) from the database.
+    if context.current() is not None:
+        return context.catalog().get("Unit", unit_id)
     weapons_loader = selectinload(Unit.unit_models).selectinload(UnitModel.weapons)
     wargear_loader = selectinload(Unit.unit_models).selectinload(UnitModel.wargear)
     model_loader = selectinload(Unit.unit_models).selectinload(UnitModel.model)
@@ -304,6 +309,15 @@ async def _detachment_rules(session: AsyncSession, unit: Unit) -> list[Detachmen
     if unit.army_list is None:
         return []
     detachment_ids = [d.id for d in unit.army_list.detachments]
+    if context.current() is not None:
+        return sorted(
+            (
+                r
+                for r in context.catalog().all("DetachmentRule")
+                if r.detachment_id in detachment_ids
+            ),
+            key=lambda r: r.id,
+        )
     weapon = selectinload(DetachmentRule.weapon_ability_grants).selectinload(
         DetachmentRuleWeaponAbility.weapon_ability
     )
@@ -325,6 +339,11 @@ async def _detachment_rules(session: AsyncSession, unit: Unit) -> list[Detachmen
 
 
 async def _load_stratagems(session: AsyncSession, ids: list[int] | None = None) -> list[Stratagem]:
+    if context.current() is not None:
+        return sorted(
+            (s for s in context.catalog().all("Stratagem") if ids is None or s.id in ids),
+            key=lambda s: s.id,
+        )
     query = select(Stratagem).options(
         selectinload(Stratagem.detachments),
         selectinload(Stratagem.conditions),
@@ -466,15 +485,10 @@ async def relevant_positions(
     ]
 
 
-async def _deck_weapons(
+async def _deck_weapon_rows(
     session: AsyncSession, firing_deck: list[tuple[int, int, int]]
-) -> tuple[dict[int, list], set]:
-    # The Firing Deck weapons, shaped like weapons for the combat engine, on
-    # the transport's model that fires them ({unit model id: [weapon]}), and
-    # their ids.
-    if not firing_deck:
-        return {}, set()
-    weapons = {
+) -> dict[int, Weapon]:
+    return {
         w.id: w
         for w in (
             await session.execute(
@@ -487,6 +501,21 @@ async def _deck_weapons(
             )
         ).scalars()
     }
+
+
+async def _deck_weapons(
+    session: AsyncSession, firing_deck: list[tuple[int, int, int]]
+) -> tuple[dict[int, list], set]:
+    # The Firing Deck weapons, shaped like weapons for the combat engine, on
+    # the transport's model that fires them ({unit model id: [weapon]}), and
+    # their ids.
+    if not firing_deck:
+        return {}, set()
+    if context.current() is not None:
+        catalog = context.catalog()
+        weapons = {w: catalog.get("Weapon", w) for _, _, w in firing_deck}
+    else:
+        weapons = await _deck_weapon_rows(session, firing_deck)
     extra: dict[int, list] = {}
     ids = set()
     for carrier_id, embarked_id, weapon_id in firing_deck:

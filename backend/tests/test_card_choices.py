@@ -1,7 +1,8 @@
 from httpx import AsyncClient
 from sqlalchemy import select
 
-from app.models import GameTerrainLayout, TerrainObjective
+from app.models import TerrainObjective
+from tests import live_games
 from tests.test_reinforcements import _advance_to
 from tests.test_scoring import _end_turn, _game, _secondary
 from tests.test_shooting import _place
@@ -69,9 +70,7 @@ async def test_tempting_target_is_chosen_by_the_opponent(
 ):
     game_id, a, d = await _game(client, session, tmp_path, monkeypatch)
     # The objective's marker in No Man's Land.
-    link = (
-        await session.execute(select(GameTerrainLayout).where(GameTerrainLayout.game_id == game_id))
-    ).scalar_one()
+    link = live_games.game(game_id).layout_link
     objective = (
         await session.execute(
             select(TerrainObjective).where(TerrainObjective.layout_id == link.layout_id)

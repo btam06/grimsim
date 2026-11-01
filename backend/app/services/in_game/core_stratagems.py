@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 
-from app.models import Game, GamePlayer, GameStratagemOutcome, GameStratagemUse, Stratagem, Unit
+from app.models import Stratagem, Unit
+from app.engine.state import Game, GamePlayer, GameStratagemOutcome, GameStratagemUse
 from app.services import dice
 from app.services.in_game import casualties, charging, deployment, fighting, movement, shooting
 from app.services.in_game.deployment import TOLERANCE, gap
@@ -129,7 +130,7 @@ def charge_ended(game: Game) -> bool:
 
 
 def end_charges(game: Game) -> None:
-    from app.models import GameChargeEnded
+    from app.engine.state import GameChargeEnded
 
     game.charges_ended.append(
         GameChargeEnded(battle_round=game.battle_round, turn_seat=game.turn_seat)

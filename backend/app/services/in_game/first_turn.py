@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 
-from app.models import Game, GameFirstTurnRoll
+from app.engine.state import Game, GameFirstTurnRoll
 from app.services import dice
 
 # Who goes first: once both armies are set up (see

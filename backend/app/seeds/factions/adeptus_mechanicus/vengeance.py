@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from app.models import Game, Unit
+from app.models import Unit
+from app.engine.state import Game
 from app.seeds.factions.adeptus_mechanicus.conditions import VENGEANCE
 from app.services.in_game import deployment, mission_state
 from app.services.in_game.deployment import TOLERANCE, gap

@@ -4,7 +4,8 @@ from dataclasses import dataclass, field
 
 from fastapi import HTTPException
 
-from app.models import Game, Unit, UnitModel
+from app.models import Unit, UnitModel
+from app.engine.state import Game
 from app.services import dice
 from app.services.combat import roll_dice_faces
 from app.services.in_game import casualties, deployment, mission_state

@@ -1,7 +1,8 @@
 from httpx import AsyncClient
-from sqlalchemy import select
 
-from app.models import GameOperationMarker, GamePlayer, PrimaryMission
+from app.models import PrimaryMission
+from app.engine.state import GameOperationMarker
+from tests import live_games
 from tests.test_casualties import _set_models
 from tests.test_deployment import _deploy, _deployment, _game, _row, _unit_named
 from tests.test_reinforcements import _advance_to
@@ -26,11 +27,7 @@ async def _mission_game(client, session, tmp_path, monkeypatch, primaries, d_spo
     game = await _game(client, session, tmp_path, units=units)
     game_id = game["id"]
     for seat, name in primaries.items():
-        player = (
-            await session.execute(
-                select(GamePlayer).where(GamePlayer.game_id == game_id, GamePlayer.seat == seat)
-            )
-        ).scalar_one()
+        player = live_games.player(game_id, seat)
         mission = await session.get(PrimaryMission, player.primary_mission_id)
         mission.name = name
     await session.commit()
@@ -88,13 +85,12 @@ async def _triangle(client, game_id) -> int:
 
 async def _markers(session, game_id, seat, count, objective_id=None, area_id=None):
     for _ in range(count):
-        session.add(
+        live_games.game(game_id).operation_markers.append(
             GameOperationMarker(
                 game_id=game_id, seat=seat, source="test", objective_id=objective_id,
                 area_id=area_id, placed_round=1,
             )
         )
-    await session.commit()
 
 
 async def test_locate_and_deny_places_markers_at_the_start(

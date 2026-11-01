@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 
-from app.models import Game, GameClaimOffer, GameScore, GameScoreReason, GameScoringStep
+from app.engine.state import Game, GameClaimOffer, GameScore, GameScoreReason, GameScoringStep
 from app.services.in_game import mission_cards
 from app.services.in_game.mission_context import Context
 

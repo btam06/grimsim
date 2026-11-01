@@ -2,16 +2,16 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 
-from app.models import (
+from app.models import Unit
+from app.engine.state import (
     Game,
     GameModelDamage,
     GameModelPosition,
     GameMovementEnded,
     GameUnitMove,
-    Unit,
 )
-from app.models import GameBattleFormation
-from app.models.game import RESERVES_DESTROYED
+from app.engine.state import GameBattleFormation
+from app.engine.state import RESERVES_DESTROYED
 from app.seeds import factions as faction_seeds
 from app.services.in_game import deployment
 from app.services.in_game.deployment import TOLERANCE, Base, Placement, gap

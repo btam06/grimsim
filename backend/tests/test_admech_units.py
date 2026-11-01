@@ -1,6 +1,7 @@
 from httpx import AsyncClient
 
-from app.models import DatasheetAbility, GameDisembarkation
+from app.models import DatasheetAbility
+from app.engine.state import GameDisembarkation
 from app.routers.games import _load_game
 from app.seeds import weapon_abilities as weapon_ability_seeds
 from app.seeds.factions.adeptus_mechanicus import datasheet_abilities as admech_datasheets

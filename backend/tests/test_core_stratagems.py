@@ -1,9 +1,11 @@
 from httpx import AsyncClient
 
-from app.models import GameStratagemTarget, GameStratagemUse, Stratagem
+from app.models import Stratagem
+from app.engine.state import GameStratagemTarget, GameStratagemUse
 from app.routers.games import _load_game
 from app.services.in_game import battle_shock, deployment
 from app.services.in_game import game as game_service
+from tests import live_games
 from tests.test_deployment import _unit_named
 from tests.test_movement import _battle
 
@@ -59,12 +61,8 @@ async def _core(session, name, action, phase=None, turn="your_turn"):
 
 
 async def _cp(session, game_id, cp=5):
-    from sqlalchemy import update
-
-    from app.models import GamePlayer
-
-    await session.execute(update(GamePlayer).where(GamePlayer.game_id == game_id).values(cp=cp))
-    await session.commit()
+    for player in live_games.game(game_id).players:
+        player.cp = cp
 
 
 async def _use(client, game_id, stratagem_id, unit, seat=2, choice=None):

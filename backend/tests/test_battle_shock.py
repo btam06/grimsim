@@ -1,7 +1,7 @@
 from httpx import AsyncClient
-from sqlalchemy import delete
 
-from app.models import GameModelDamage, GameModelPosition, Stratagem, StratagemTiming
+from app.models import Stratagem, StratagemTiming
+from tests import live_games
 from tests.test_casualties import _set_models
 from tests.test_deployment import _deployment, _unit_named
 from tests.test_movement import _battle
@@ -35,21 +35,8 @@ async def _destroy(session, game_id, unit, count):
     # Destroys the unit's last `count` models (those left stay in coherency,
     # so none are removed at the end of a turn).
     for model in unit["models"][len(unit["models"]) - count:]:
-        session.add(
-            GameModelDamage(
-                game_id=game_id,
-                unit_model_id=model["unit_model_id"],
-                wounds_lost=2,
-                destroyed=True,
-            )
-        )
-        await session.execute(
-            delete(GameModelPosition).where(
-                GameModelPosition.game_id == game_id,
-                GameModelPosition.unit_model_id == model["unit_model_id"],
-            )
-        )
-    await session.commit()
+        live_games.damage(game_id, model["unit_model_id"], wounds_lost=2, destroyed=True)
+        live_games.remove_position(model["unit_model_id"], game_id)
 
 
 async def _battle_shock(client, game_id):
@@ -123,12 +110,7 @@ async def test_a_single_model_counts_its_wounds(client: AsyncClient, session, tm
     game_id = game["id"]
     a = _unit_named(deployment_, "A")
     await _set_models(session, a, wounds=4)
-    session.add(
-        GameModelDamage(
-            game_id=game_id, unit_model_id=a["models"][0]["unit_model_id"], wounds_lost=2
-        )
-    )
-    await session.commit()
+    live_games.damage(game_id, a["models"][0]["unit_model_id"], wounds_lost=2)
     await _advance_to(client, game_id, 1, 1, "command")
     [test] = (await _battle_shock(client, game_id))["pending"]
     assert (test["starting_strength"], test["current_strength"]) == (4, 2)

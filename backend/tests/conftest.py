@@ -41,6 +41,12 @@ async def session() -> AsyncGenerator[AsyncSession, None]:
     app.dependency_overrides[get_session] = override_get_session
 
     async with test_session_factory() as test_session:
+        # Games are played on a copy of their catalog rows (see
+        # app/engine/catalog.py): tests set games up by changing those rows
+        # through this session, so its commits have games read them again.
+        from app.engine import store
+
+        event.listen(test_session.sync_session, "after_commit", lambda _: store.mark_stale())
         yield test_session
 
     app.dependency_overrides.clear()
@@ -79,6 +85,20 @@ async def saves_dir(monkeypatch, tmp_path):
 
     monkeypatch.setattr(settings, "saves_dir", str(tmp_path / "saves"))
     return tmp_path / "saves"
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def fresh_games(monkeypatch):
+    # Games are played in memory (see app/engine/store.py): none carry over
+    # from another test, and ids start again.
+    import itertools
+
+    from app.engine import state, store
+
+    store.clear()
+    monkeypatch.setattr(state, "_game_ids", itertools.count(1))
+    yield
+    store.clear()
 
 
 @pytest_asyncio.fixture

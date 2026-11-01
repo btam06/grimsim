@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 
-from app.models import Game, GameTeleportHomer, GameTeleportHomersDone, Unit
+from app.models import Unit
+from app.engine.state import Game, GameTeleportHomer, GameTeleportHomersDone
 from app.services.in_game import deployment, place_token
 
 # Teleport Homers: at the start of the battle, each of a player's units with

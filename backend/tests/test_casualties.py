@@ -1,7 +1,8 @@
 from httpx import AsyncClient
 from sqlalchemy import select
 
-from app.models import GameModelDamage, GameModelPosition, Model, Unit, UnitModel
+from app.models import Model, Unit, UnitModel
+from tests import live_games
 from tests.test_deployment import _deployment, _unit_named
 from tests.test_movement import _battle, _move, _shifted
 from tests.test_shooting import _place, _shoot, _shooting, _to_shooting
@@ -92,8 +93,7 @@ async def test_wounded_model_is_attacked_first(
     game_id = game["id"]
     d, a = _unit_named(deployment, "D"), _unit_named(deployment, "A")
     second = a["models"][1]["unit_model_id"]
-    session.add(GameModelDamage(game_id=game_id, unit_model_id=second, wounds_lost=1))
-    await session.commit()
+    live_games.damage(game_id, second, wounds_lost=1)
     await _to_shooting(client, game_id)
 
     body = (await _shoot(client, game_id, d, a)).json()
@@ -104,18 +104,8 @@ async def test_wounded_model_is_attacked_first(
 
 
 async def _destroy(session, game_id, unit_model_id, wounds=1):
-    session.add(
-        GameModelDamage(
-            game_id=game_id, unit_model_id=unit_model_id, wounds_lost=wounds, destroyed=True
-        )
-    )
-    position = (
-        await session.execute(
-            select(GameModelPosition).where(GameModelPosition.unit_model_id == unit_model_id)
-        )
-    ).scalar_one()
-    await session.delete(position)
-    await session.commit()
+    live_games.damage(game_id, unit_model_id, wounds_lost=wounds, destroyed=True)
+    live_games.remove_position(unit_model_id)
 
 
 async def test_destroyed_models_are_left_out_of_moves(

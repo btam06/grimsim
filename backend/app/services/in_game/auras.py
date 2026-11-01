@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.models import Game, Unit, UnitModel
+from app.models import Unit, UnitModel
+from app.engine.state import Game
 from app.seeds import datasheet_abilities as datasheet_ability_seeds
 from app.seeds.factions.chaos_knights import dread
 from app.services.in_game import command_phase, deployment

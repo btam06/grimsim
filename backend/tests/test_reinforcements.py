@@ -1,7 +1,7 @@
 from httpx import AsyncClient
-from sqlalchemy import select
 
 from app.models import Stratagem, StratagemTiming
+from tests import live_games
 from tests.test_deployment import (
     R32,
     _declare,
@@ -200,17 +200,16 @@ async def test_repositioned_units_arent_destroyed_after_round_three(
 ):
     # R is placed in Strategic Reserves during the battle (20.02): it
     # survives the end of the third battle round.
-    from app.models import GameMarkedUnit
+    from app.engine.state import GameMarkedUnit
     from app.services.in_game.reinforcements import REPOSITIONED
 
     game_id, r = await _reserves_game(client, session, tmp_path, rapid_ingress=False)
     await _advance_to(client, game_id, 3, 1, "fight")
-    session.add(
+    live_games.game(game_id).marked_units.append(
         GameMarkedUnit(
             game_id=game_id, battle_round=2, turn_seat=1, seat=1, kind=REPOSITIONED,
             unit_id=r["unit_id"],
         )
     )
-    await session.commit()
     await _advance_to(client, game_id, 4, 2, "command")
     assert _unit_named(await _deployment(client, game_id), "R")["formation"] == "reserves"

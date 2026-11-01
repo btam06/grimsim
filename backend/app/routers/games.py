@@ -1,26 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-from sqlalchemy.orm.attributes import set_committed_value
 
 from app.db import get_session
-from app.engine import convert, saves
-from app.models import (
-    ArmyList,
-    FactionAbility,
-    Game,
-    GamePlayer,
-    GameSecondary,
-    GameStratagemUse,
-    GameUnitShot,
-    Model,
-    Stratagem,
-    Unit,
-    UnitModel,
-    Wargear,
-    Weapon,
-)
+from app.engine import context, loader, saves
+from app.engine import store as game_store
+from app.models import Model, Stratagem, Unit, Weapon
+from app.engine.state import Game, GamePlayer, GameSecondary, GameStratagemUse, GameUnitShot
 from app.schemas import (
     AllocationGroupOut,
     IdNameOut,
@@ -314,120 +300,48 @@ def _game_out(game: Game) -> GameOut:
     )
 
 
-def _game_options():
-    players = selectinload(Game.players)
-    return [
-        players.selectinload(GamePlayer.user),
-        players.selectinload(GamePlayer.army_list).selectinload(ArmyList.detachments),
-        # The armies, for deployment.
-        players.selectinload(GamePlayer.army_list)
-        .selectinload(ArmyList.units)
-        .selectinload(Unit.faction_unit),
-        players.selectinload(GamePlayer.army_list)
-        .selectinload(ArmyList.units)
-        .selectinload(Unit.unit_models)
-        .selectinload(UnitModel.model)
-        .selectinload(Model.abilities),
-        # For shooting: their weapons (and their abilities - e.g. [PISTOL] for
-        # close-quarters shooting) and keywords.
-        players.selectinload(GamePlayer.army_list)
-        .selectinload(ArmyList.units)
-        .selectinload(Unit.unit_models)
-        .selectinload(UnitModel.weapons)
-        .selectinload(Weapon.abilities),
-        # Their wargear's abilities (e.g. an Orbital Comms Array's Scouts 6").
-        players.selectinload(GamePlayer.army_list)
-        .selectinload(ArmyList.units)
-        .selectinload(Unit.unit_models)
-        .selectinload(UnitModel.wargear)
-        .selectinload(Wargear.abilities),
-        players.selectinload(GamePlayer.army_list)
-        .selectinload(ArmyList.units)
-        .selectinload(Unit.unit_models)
-        .selectinload(UnitModel.model)
-        .selectinload(Model.keywords),
-        # For the start of the battle round: their army rules.
-        players.selectinload(GamePlayer.army_list)
-        .selectinload(ArmyList.units)
-        .selectinload(Unit.unit_models)
-        .selectinload(UnitModel.model)
-        .selectinload(Model.faction_abilities)
-        .selectinload(FactionAbility.faction),
-        players.selectinload(GamePlayer.disposition),
-        players.selectinload(GamePlayer.primary_mission),
-        players.selectinload(GamePlayer.secondaries).selectinload(GameSecondary.mission),
-        players.selectinload(GamePlayer.scores),
-        players.selectinload(GamePlayer.stratagem_uses)
-        .selectinload(GameStratagemUse.stratagem)
-        .selectinload(Stratagem.game_action_link),
-    ]
-
-
-async def _load_game(session: AsyncSession, game_id: int) -> Game:
-    game = (
-        await session.execute(
-            select(Game)
-            .options(*_game_options())
-            .where(Game.id == game_id)
-            .execution_options(populate_existing=True)
-        )
-    ).scalar_one_or_none()
-    if game is None:
+async def _load_game(session: AsyncSession | None, game_id: int) -> Game:
+    # The game, in memory (see app/engine/store.py) - bound for the rest of
+    # the request (see app/engine/context.py).
+    live = game_store.get(game_id)
+    if live is None:
         raise HTTPException(status_code=404, detail="game not found")
-    _link_units(game)
-    return game
+    if live.stale and session is not None:
+        await loader.reload(session, live)
+    context.track(live)
+    context.bind(live)
+    return live.game
 
 
-def _link_units(game: Game) -> None:
-    # Each unit's list, as loaded with its player (without a query - nor
-    # marking anything changed): so units of the same datasheet in it can be
-    # numbered (see Unit.label).
-    for player in game.players:
-        for unit in player.army_list.units:
-            set_committed_value(unit, "army_list", player.army_list)
-
-
-async def _commit_and_reload(session: AsyncSession, game_id: int) -> GameOut:
-    await session.commit()
+async def _commit_and_reload(session: AsyncSession | None, game_id: int) -> GameOut:
     game = await _load_game(session, game_id)
-    _autosave(game)
+    _autosave(game_store.get(game_id))
     return _game_out(game)
 
 
-def _autosave(game: Game) -> None:
+def _autosave(live) -> None:
     # The first time the game's at the start of a phase: saved (see
     # app/engine/saves.py).
-    save_name = saves.name(game)
-    if save_name is not None and not saves.saved(game.id, save_name):
-        saves.autosave(*convert.from_orm(game))
+    save_name = saves.name(live.game)
+    if save_name is not None and not saves.saved(live.game.id, save_name):
+        saves.autosave(live.game, live.catalog)
 
 
 async def _load_stratagems(session: AsyncSession, ids: list[int] | None = None) -> list[Stratagem]:
-    query = select(Stratagem).options(
-        selectinload(Stratagem.detachments),
-        selectinload(Stratagem.conditions),
-        selectinload(Stratagem.effects),
-        selectinload(Stratagem.keywords),
-        selectinload(Stratagem.timings),
-        selectinload(Stratagem.game_action_link),
-    )
-    if ids is not None:
-        query = query.where(Stratagem.id.in_(ids))
-    return list((await session.execute(query.order_by(Stratagem.id))).scalars().all())
+    # From the game's catalog (see app/routers/combat.py).
+    return await combat_router._load_stratagems(session, ids)
 
 
 @router.get("", response_model=list[GameOut])
 async def list_games(session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(Game).options(*_game_options()).order_by(Game.id))
-    return [_game_out(game) for game in result.scalars().all()]
+    return [_game_out(game_store.get(game_id).game) for game_id in game_store.ids()]
 
 
 @router.post("", response_model=GameOut, status_code=201)
 async def create_game(payload: GameIn, session: AsyncSession = Depends(get_session)):
-    game = await game_service.create_game(session, payload)
-    await session.flush()
-    await session.commit()
-    game = await _load_game(session, game.id)
+    live = await game_service.create_game(session, payload)
+    game_store.put(live)
+    game = await _load_game(session, live.game.id)
     game_service.enter_deployment(game)
     return await _commit_and_reload(session, game.id)
 
@@ -439,18 +353,8 @@ async def get_game(game_id: int, session: AsyncSession = Depends(get_session)):
 
 @router.delete("/{game_id}", status_code=204)
 async def delete_game(game_id: int, session: AsyncSession = Depends(get_session)):
-    game = await _load_game(session, game_id)
-    # Scores and claim offers first: they point at the secondaries (and
-    # mission prompts, which point at actions).
-    game.claim_offers.clear()
-    game.mission_prompts.clear()
-    game.card_choices.clear()
-    for player in game.players:
-        player.scores.clear()
-    await session.flush()
-    await session.delete(game)
-    await session.commit()
-    saves.delete(game_id)
+    await _load_game(session, game_id)
+    game_store.remove(game_id)
 
 
 @router.post("/{game_id}/start", response_model=GameOut)
@@ -792,7 +696,6 @@ async def roll_advance(
     game = await _load_game(session, game_id)
     unit = deployment_service.find_unit(game, payload.unit_id)
     movement_service.roll_advance(game, unit)
-    await session.commit()
     return _movement_out(await _load_game(session, game_id))
 
 
@@ -1083,7 +986,6 @@ async def shoot(game_id: int, payload: ShootIn, session: AsyncSession = Depends(
     )
     if firing_deck:
         shooting_service.record_deck(game, unit)
-    await session.commit()
     return out
 
 
@@ -1320,7 +1222,6 @@ async def fire_overwatch(
     out = await _fire(
         session, game, unit, target, payload, reach, shooting_service.MoveStatus(), snap_shots=True
     )
-    await session.commit()
     return out
 
 
@@ -1385,7 +1286,6 @@ async def roll_charge(
     # Rolls the unit's charge (once a phase: asking again gives the same roll).
     game = await _load_game(session, game_id)
     charging_service.roll_charge(game, deployment_service.find_unit(game, payload.unit_id))
-    await session.commit()
     return _charge_out(await _load_game(session, game_id))
 
 
@@ -1396,7 +1296,6 @@ async def reroll_charge(
     # Re-rolls the unit's charge roll, if an ability lets it (once).
     game = await _load_game(session, game_id)
     charging_service.reroll_charge(game, deployment_service.find_unit(game, payload.unit_id))
-    await session.commit()
     return _charge_out(await _load_game(session, game_id))
 
 
@@ -1716,7 +1615,6 @@ async def fight(game_id: int, payload: FightIn, session: AsyncSession = Depends(
         sum(c.total_damage for _, c in results),
         sum(c.models_destroyed for _, c in results),
     )
-    await session.commit()
     return FightResultOut(
         charged=charged,
         fights_first=fights_first,
@@ -1821,7 +1719,6 @@ async def choose_rule_option(
     # (e.g. which Doctrina Imperative is active), at its start.
     game = await _load_game(session, game_id)
     battle_round_service.choose(game, payload.seat, payload.faction_ability_id, payload.option)
-    await session.commit()
     return await round_start(game_id, session)
 
 
@@ -1921,7 +1818,6 @@ async def set_formation(
         payload.place,
         transport,
     )
-    await session.commit()
     return _formations_out(await _load_game(session, game_id))
 
 
@@ -2268,7 +2164,6 @@ async def choose_command_option(
             game, payload.seat, payload.unit_id, payload.ability, payload.option,
             payload.target_unit_id,
         )
-    await session.commit()
     return _command_out(await _load_game(session, game_id))
 
 
@@ -2280,7 +2175,6 @@ async def select_objective(
     # Acquisition objective marker) in their Command phase.
     game = await _load_game(session, game_id)
     selected_objectives_service.select(game, payload.seat, payload.name, payload.objective_id)
-    await session.commit()
     return _command_out(await _load_game(session, game_id))
 
 
@@ -2350,7 +2244,6 @@ async def require_battle_shock_test(
     game = await _load_game(session, game_id)
     unit = deployment_service.find_unit(game, payload.unit_id)
     battle_shock_service.require(game, unit, payload.reason, payload.modifier)
-    await session.commit()
     return await _battle_shock_out(session, await _load_game(session, game_id))
 
 
@@ -2374,7 +2267,6 @@ async def take_battle_shock_test(
         if stratagem is None:
             raise HTTPException(status_code=400, detail="there's no Insane Bravery stratagem")
     battle_shock_service.take(game, test, stratagem)
-    await session.commit()
     return await _battle_shock_out(session, await _load_game(session, game_id))
 
 
@@ -2543,7 +2435,6 @@ async def start_action(
     game = await _load_game(session, game_id)
     unit = deployment_service.find_unit(game, payload.unit_id)
     actions_service.start(game, unit, payload.action, payload.target_id)
-    await session.commit()
     return _actions_out(await _load_game(session, game_id))
 
 
@@ -2745,7 +2636,6 @@ async def answer_mission_prompt(
         raise HTTPException(status_code=400, detail="no such choice waiting to be made")
     if prompt.kind == "redraw":
         await game_service.redraw(session, game, prompt, payload.ids)
-        await session.commit()
         return _mission_state_out(await _load_game(session, game_id))
     given = mission_state_service.Answer(
         consecrations=payload.consecrations, guards=payload.guards
@@ -2759,7 +2649,6 @@ async def answer_mission_prompt(
     elif prompt.kind == "remove_marker":
         given.marker_id = payload.ids[0] if payload.ids else None
     mission_state_service.answer(game, prompt_id, given)
-    await session.commit()
     return _mission_state_out(await _load_game(session, game_id))
 
 
@@ -2908,7 +2797,6 @@ async def use_psychic(
         else None
     )
     psychic_service.use(game, unit, payload.ability, target)
-    await session.commit()
     return _psychic_out(await _load_game(session, game_id))
 
 
@@ -2965,7 +2853,6 @@ async def place_teleport_homer(
         teleport_homer_service.remove(game, payload.seat, unit)
     else:
         teleport_homer_service.place(game, payload.seat, unit, payload.x, payload.y)
-    await session.commit()
     return _teleport_homers_out(await _load_game(session, game_id))
 
 
@@ -3076,7 +2963,6 @@ async def roll_reactive_move(
     # Rolls for how far the unit's reactive move can go.
     game = await _load_game(session, game_id)
     reactive_move_service.roll(game, deployment_service.find_unit(game, payload.unit_id))
-    await session.commit()
     return _reactive_out(await _load_game(session, game_id))
 
 
@@ -3087,7 +2973,6 @@ async def check_reactive_move(
     game = await _load_game(session, game_id)
     unit = deployment_service.find_unit(game, payload.unit_id)
     result = reactive_move_service.check(game, unit, _placement(payload.positions))
-    await session.commit()
     return _check_out(result)
 
 
@@ -3131,7 +3016,6 @@ async def start_surge_move(
     # (rolled for D6"), and its surge target.
     game = await _load_game(session, game_id)
     surge_service.start(game, deployment_service.find_unit(game, payload.unit_id), payload.distance)
-    await session.commit()
     return _surge_out(await _load_game(session, game_id))
 
 
@@ -3187,7 +3071,6 @@ async def use_shooting_start(
         payload.ability,
         deployment_service.find_unit(game, payload.target_unit_id),
     )
-    await session.commit()
     return StartOfShootingResultOut(
         roll=result.roll, wounds=result.wounds, destroyed_unit_model_ids=result.destroyed
     )
@@ -3290,7 +3173,6 @@ async def scout_move(
     unit = deployment_service.find_unit(game, payload.unit_id)
     seat = deployment_service.owner(game, unit).seat
     scouts_service.move(game, seat, unit, _placement(payload.positions))
-    await session.commit()
     return _scouts_out(await _load_game(session, game_id))
 
 

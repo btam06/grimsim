@@ -7,10 +7,8 @@ from collections.abc import Iterator, MutableSequence, Sequence
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, TypeVar
 
-from sqlalchemy import event
-
 if TYPE_CHECKING:
-    from app.models import Game
+    from app.engine.state import Game
 
 T = TypeVar("T")
 
@@ -21,46 +19,19 @@ T = TypeVar("T")
 # stores is its seed (Game.rng_seed) and how many rolls it's made
 # (Game.rng_rolls).
 #
-# Which game's stream is used is whichever game was last loaded (or made) in
-# the request: the services rolling dice don't all have the game to hand (e.g.
-# app/services/combat.py), so it's bound when the Game row is loaded (see
-# _bind below). With no game bound, rolls come from Python's own `random`.
-# The calculator binds a throwaway generator instead (see using), so its
-# previews don't use up a game's rolls.
+# The game whose dice are rolled is the one bound while it's played (see
+# app/engine/context.py): the services rolling dice don't all have the game
+# to hand (e.g. app/services/combat.py). With no game bound, rolls come from
+# Python's own `random`. The calculator binds a throwaway generator instead
+# (see using), so its previews don't use up a game's rolls.
 
-_current: contextvars.ContextVar[_Stream | random.Random | None] = contextvars.ContextVar(
+_current: contextvars.ContextVar[Game | random.Random | None] = contextvars.ContextVar(
     "dice", default=None
 )
 
 
 def new_seed() -> int:
-    # Fits a PostgreSQL BIGINT.
     return secrets.randbits(63)
-
-
-class _Stream:
-    # A game's dice: its seed and how many rolls it's made, kept here and
-    # written to the Game as each roll's made - not read from it then, since
-    # the Game may have been expired (by a rollback) and sync code can't
-    # reload it.
-    def __init__(self, game: Game) -> None:
-        self.game = game
-        self.seed: int | None = None
-        self.rolls = 0
-
-    def read(self) -> None:
-        # From the Game's row, once it's been loaded (or reloaded).
-        self.seed, self.rolls = self.game.rng_seed, self.game.rng_rolls or 0
-
-    def next(self) -> random.Random:
-        if self.seed is None:
-            # A new game: its seed's set when it's made (if not, one now).
-            self.seed = self.game.rng_seed
-            if self.seed is None:
-                self.seed = self.game.rng_seed = new_seed()
-        n = self.rolls
-        self.rolls = self.game.rng_rolls = n + 1
-        return random.Random((self.seed << 32) + n)
 
 
 def _rng() -> random.Random:
@@ -69,7 +40,9 @@ def _rng() -> random.Random:
         return random._inst
     if isinstance(bound, random.Random):
         return bound
-    return bound.next()
+    n = bound.rng_rolls
+    bound.rng_rolls = n + 1
+    return random.Random((bound.rng_seed << 32) + n)
 
 
 def randint(a: int, b: int) -> int:
@@ -97,42 +70,25 @@ def chance() -> float:
     return _rng().random()
 
 
-def reset() -> None:
-    # Unbinds whatever's bound (at the start of each request).
-    _current.set(None)
+def bind(game: Game | None) -> None:
+    # For the rest of the request (or engine call).
+    _current.set(game)
 
 
 @contextmanager
-def using(rng: random.Random) -> Iterator[None]:
-    # Rolls in the block come from `rng`, even if a game's loaded in it.
-    token = _current.set(rng)
+def bound(game: Game) -> Iterator[None]:
+    token = _current.set(game)
     try:
         yield
     finally:
         _current.reset(token)
 
 
-def listen(game_class: type) -> None:
-    # Binds each Game as it's loaded, refreshed or made (see above).
-    def _stream(target) -> _Stream:
-        stream = target.__dict__.get("_dice")
-        if stream is None:
-            stream = target._dice = _Stream(target)
-        return stream
-
-    def _bind(stream: _Stream) -> None:
-        if not isinstance(_current.get(), random.Random):
-            _current.set(stream)
-
-    def _loaded(target, *_args) -> None:
-        stream = _stream(target)
-        if {"rng_seed", "rng_rolls"} <= target.__dict__.keys():
-            stream.read()
-        _bind(stream)
-
-    def _made(target, *_args) -> None:
-        _bind(_stream(target))
-
-    event.listen(game_class, "load", _loaded)
-    event.listen(game_class, "refresh", _loaded)
-    event.listen(game_class, "init", _made)
+@contextmanager
+def using(rng: random.Random) -> Iterator[None]:
+    # Rolls in the block come from `rng`.
+    token = _current.set(rng)
+    try:
+        yield
+    finally:
+        _current.reset(token)

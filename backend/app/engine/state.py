@@ -73,12 +73,73 @@ def ids_from(start: int) -> None:
     _ids = itertools.count(max(current, start))
 
 
+# Games' own ids, one after another (and past every saved game's - see
+# app/engine/store.py).
+_game_ids = itertools.count(1)
+
+
+def next_game_id() -> int:
+    return next(_game_ids)
+
+
+def game_ids_from(start: int) -> None:
+    global _game_ids
+    current = next(_game_ids)
+    _game_ids = itertools.count(max(current, start))
+
+
+class Children(list):
+    # A record's list of records that point back to it (e.g. a player's
+    # secondaries: each card's .player): set as they're added.
+    __slots__ = ("owner", "back")
+
+    def __init__(self, owner, back: str, items=()) -> None:
+        super().__init__()
+        self.owner, self.back = owner, back
+        self.extend(items)
+
+    def _adopt(self, item) -> None:
+        object.__setattr__(item, self.back, self.owner)
+
+    def append(self, item) -> None:
+        self._adopt(item)
+        super().append(item)
+
+    def insert(self, index, item) -> None:
+        self._adopt(item)
+        super().insert(index, item)
+
+    def extend(self, items) -> None:
+        items = list(items)
+        for item in items:
+            self._adopt(item)
+        super().extend(items)
+
+    def __iadd__(self, items):
+        self.extend(items)
+        return self
+
+    def __setitem__(self, index, value) -> None:
+        for item in value if isinstance(index, slice) else [value]:
+            self._adopt(item)
+        super().__setitem__(index, value)
+
+    def __reduce_ex__(self, protocol):
+        return (Children, (self.owner, self.back, list(self)))
+
+
 class State:
     # Catalog objects a record refers to: {attribute: (the attribute holding
     # its id, its catalog class)}. Setting the object sets the id too.
     _refs: ClassVar[dict[str, tuple[str, str]]] = {}
+    # Lists of records that point back to this one: {attribute: the
+    # attribute on each pointing back}.
+    _children: ClassVar[dict[str, str]] = {}
 
     def __setattr__(self, name: str, value: Any) -> None:
+        back = self._children.get(name)
+        if back is not None:
+            value = Children(self, back, value or ())
         object.__setattr__(self, name, value)
         ref = self._refs.get(name)
         if ref is not None and value is not None:
@@ -161,7 +222,7 @@ def _is_datetime(kind) -> bool:
 
 @dataclass(eq=False, kw_only=True)
 class Game(State):
-    id: int = field(default_factory=next_id)
+    id: int = field(default_factory=next_game_id)
     created_at: datetime | None = None
     status: str = 'setup'
     # Seats are 1 and 2 (see GamePlayer.seat).
@@ -1023,3 +1084,5 @@ GamePlayer._refs = {
 GameSecondary._refs = {"mission": ("secondary_mission_id", "SecondaryMission")}
 GameStratagemUse._refs = {"stratagem": ("stratagem_id", "Stratagem")}
 GameTerrainLayout._refs = {"layout": ("layout_id", "TerrainLayout")}
+Game._children = {"players": "game"}
+GamePlayer._children = {"secondaries": "player", "scores": "player", "stratagem_uses": "player"}

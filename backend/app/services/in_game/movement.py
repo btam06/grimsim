@@ -4,7 +4,8 @@ import math
 
 from fastapi import HTTPException
 
-from app.models import Game, GameUnitMove, GameUnitMoveStart, Unit, UnitModel
+from app.models import Unit, UnitModel
+from app.engine.state import Game, GameUnitMove, GameUnitMoveStart
 from app.services import dice
 from app.services.in_game import (
     deployment,

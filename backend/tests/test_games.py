@@ -526,10 +526,11 @@ async def test_games_list_and_delete(client: AsyncClient):
     ids = await _setup(client)
     game = await _new_game(client, ids)
     assert [g["id"] for g in (await client.get("/games")).json()] == [game["id"]]
-    # A list used in a game can't be deleted.
-    assert (await client.delete(f"/lists/{ids['list1']}")).status_code == 400
-    # Nor can a user who has played a game.
-    assert (await client.delete(f"/users/{ids['user1']}")).status_code == 400
+    # A game has its own copy of its armies and players (see
+    # app/engine/catalog.py): deleting a list or user it used leaves it be.
+    assert (await client.delete(f"/lists/{ids['list1']}")).status_code == 204
+    assert (await client.delete(f"/users/{ids['user1']}")).status_code == 204
+    assert (await client.get(f"/games/{game['id']}")).status_code == 200
     assert (await client.delete(f"/games/{game['id']}")).status_code == 204
     assert (await client.get("/games")).json() == []
     assert (await client.get(f"/games/{game['id']}")).status_code == 404

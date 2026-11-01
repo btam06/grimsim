@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 
-from app.models import Game, GameBattleFormation, GameFormationsDone, GamePlayer, Unit
-from app.models.game import FORMATION_PLACES
+from app.models import Unit
+from app.engine.state import Game, GameBattleFormation, GameFormationsDone, GamePlayer
+from app.engine.state import FORMATION_PLACES
 from app.services.in_game import deployment, embarked
 
 # Declaring battle formations, at the start of deployment: each player says

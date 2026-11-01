@@ -1,7 +1,9 @@
 from httpx import AsyncClient
 from sqlalchemy import select
 
-from app.models import GamePlayer, GameSecondary, PrimaryMission, SecondaryMission
+from app.models import PrimaryMission, SecondaryMission
+from app.engine.state import GamePlayer, GameSecondary
+from tests import live_games
 from tests.test_casualties import _game as _casualty_game
 from tests.test_casualties import _gun
 from tests.test_deployment import _unit_named
@@ -15,11 +17,7 @@ from tests.test_shooting import _place, _shoot, _to_shooting
 
 
 async def _player(session, game_id, seat) -> GamePlayer:
-    return (
-        await session.execute(
-            select(GamePlayer).where(GamePlayer.game_id == game_id, GamePlayer.seat == seat)
-        )
-    ).scalar_one()
+    return live_games.player(game_id, seat)
 
 
 async def _primary(session, game_id, seat, name):
@@ -52,7 +50,7 @@ async def _secondary(session, game_id, seat, name, fixed=False, points=2) -> int
         fixed=fixed,
         drawn_round=1,
     )
-    session.add(card)
+    player.secondaries.append(card)
     await session.commit()
     return card.id
 

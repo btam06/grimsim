@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 
-from app.models import Game, GameSelectedObjective, Unit
+from app.models import Unit
+from app.engine.state import Game, GameSelectedObjective
 from app.models.terrain import TerrainObjective
 from app.seeds import factions as faction_seeds
 from app.services import dice

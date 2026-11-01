@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 
-from app.models import Game, GameSurgeMove, Unit
+from app.models import Unit
+from app.engine.state import Game, GameSurgeMove
 from app.services import dice
 from app.services.in_game import battle_shock, deployment, mission_state, movement, pathing
 from app.services.in_game.deployment import TOLERANCE, Placement, gap

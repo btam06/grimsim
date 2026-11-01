@@ -3,7 +3,8 @@ from __future__ import annotations
 from app.combat_rules import Rule
 from app.combat_rules.conditions import ALWAYS
 from app.combat_rules.effects import REROLL_FAILED_WOUNDS
-from app.models import Game, GameFireSupport, Unit
+from app.models import Unit
+from app.engine.state import Game, GameFireSupport
 from app.services.in_game import deployment
 
 # Fire Support (e.g. a Skorpius Dunerider): in its player's Shooting phase,

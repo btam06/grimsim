@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from app.models import (
+from app.models import Unit, UnitModel
+from app.engine.state import (
     Game,
     GameDestroyedOnObjective,
     GameKillOnObjective,
@@ -8,8 +9,6 @@ from app.models import (
     GameTurnStartControl,
     GameTurnStartInArea,
     GameTurnStartOnObjective,
-    Unit,
-    UnitModel,
 )
 from app.services.in_game import deployment
 

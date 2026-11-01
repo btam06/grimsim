@@ -4,7 +4,8 @@ import math
 
 from fastapi import HTTPException
 
-from app.models import Game, GameChargeTarget, GameUnitCharge, Unit
+from app.models import Unit
+from app.engine.state import Game, GameChargeTarget, GameUnitCharge
 from app.seeds import factions as faction_seeds
 from app.services import dice
 from app.services.in_game import (

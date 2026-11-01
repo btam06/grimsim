@@ -1,6 +1,7 @@
 from httpx import AsyncClient
 
-from app.models import DetachmentRule, Enhancement, GameSelectedObjective, UnitModel
+from app.models import DetachmentRule, Enhancement, UnitModel
+from app.engine.state import GameSelectedObjective
 from app.models.model import TransportCapacity
 from app.routers.games import _attacker_positions, _defender_positions, _load_game
 from app.seeds import stratagems as stratagem_seeds

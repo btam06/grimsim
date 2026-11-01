@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 
-from app.models import (
+from app.models import Unit
+from app.engine.state import (
     Game,
     GameBattleFormation,
     GameDisembarkation,
     GameModelPosition,
     GameUnitMove,
     GameUnitTransit,
-    Unit,
 )
 from app.services.in_game import deployment, regions
 from app.services.in_game.deployment import TOLERANCE, Base, Placement, gap

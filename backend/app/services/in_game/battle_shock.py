@@ -3,14 +3,8 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 
-from app.models import (
-    Game,
-    GameBattleShockTest,
-    GameBattleShockWounds,
-    GameStratagemUse,
-    Stratagem,
-    Unit,
-)
+from app.models import Stratagem, Unit
+from app.engine.state import Game, GameBattleShockTest, GameBattleShockWounds, GameStratagemUse
 from app.services import dice
 from app.services.in_game import casualties, deployment
 

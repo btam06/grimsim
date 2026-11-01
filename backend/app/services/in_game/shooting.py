@@ -5,20 +5,12 @@ import re
 from dataclasses import dataclass, field
 
 from fastapi import HTTPException
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.combat_rules.effects import ASSAULT
-from app.models import (
-    DetachmentRule,
-    Effect,
-    Game,
-    GameFiringDeckUse,
-    GameUnitMove,
-    Unit,
-    UnitModel,
-    WeaponAbility,
-)
+from app.engine import context
+from app.engine.state import Game, GameFiringDeckUse, GameUnitMove
+from app.models import DetachmentRule, Unit, UnitModel
 from app.services import weapon_profiles
 from app.services.in_game import actions, command_phase, deployment, embarked
 from app.services.in_game import movement
@@ -549,10 +541,11 @@ def ranged_weapons(unit_model: UnitModel) -> list:
 
 async def assault_ability_ids(session: AsyncSession) -> set[int]:
     # The weapon abilities that give a weapon Assault.
-    query = (
-        select(WeaponAbility.id).join(WeaponAbility.effects).where(Effect.keyword == ASSAULT)
-    )
-    return set((await session.execute(query)).scalars())
+    return {
+        ability.id
+        for ability in context.catalog().all("WeaponAbility")
+        if any(effect.keyword == ASSAULT for effect in ability.effects)
+    }
 
 
 def assault_weapons(

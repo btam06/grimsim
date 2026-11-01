@@ -6,9 +6,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models import (
-    ArmyList,
-    Detachment,
+from app.engine import context, loader
+from app.engine.context import Live
+from app.engine.state import (
+    BATTLE_ROUNDS,
+    PHASES,
     Game,
     GamePlayer,
     GameScore,
@@ -16,13 +18,16 @@ from app.models import (
     GameStratagemTarget,
     GameStratagemUse,
     GameTerrainLayout,
+)
+from app.models import (
+    ArmyList,
+    Detachment,
     PrimaryMission,
     SecondaryMission,
     Stratagem,
     Unit,
     User,
 )
-from app.models.game import BATTLE_ROUNDS, PHASES
 from app.models.stratagem import CHOICE_TARGET_ACTIONS, UNIT_TARGET_ACTIONS
 from app.schemas import GameIn
 from app.services import dice
@@ -79,7 +84,9 @@ def mission_points(card: GameSecondary) -> int:
     return mission.tactical_points or 0
 
 
-async def create_game(session: AsyncSession, payload: GameIn) -> Game:
+async def create_game(session: AsyncSession, payload: GameIn) -> Live:
+    # A new game (checked against the database), with its catalog - what
+    # it'll be played with (see app/engine/loader.py).
     users = {
         u.id: u
         for u in (
@@ -141,7 +148,9 @@ async def create_game(session: AsyncSession, payload: GameIn) -> Game:
             if len(missions) != len(ids) or any(m.fixed_points is None for m in missions):
                 raise _bad_request(f"player {seat}: those secondaries can't be used as fixed")
             secondaries = [
-                GameSecondary(mission=m, fixed=True, status="active", drawn_round=0)
+                GameSecondary(
+                    secondary_mission_id=m.id, fixed=True, status="active", drawn_round=0
+                )
                 for m in missions
             ]
         elif spec.fixed_secondary_ids:
@@ -184,13 +193,29 @@ async def create_game(session: AsyncSession, payload: GameIn) -> Game:
     # Its terrain: a layout for the attacker's and defender's dispositions.
     attacker = next(p for p in players if p.seat == payload.attacker_seat)
     defender = next(p for p in players if p.seat != payload.attacker_seat)
-    layout = await terrain_service.pick_layout(
-        session, attacker.disposition_id, defender.disposition_id
-    )
+    with dice.bound(game):
+        layout = await terrain_service.pick_layout(
+            session, attacker.disposition_id, defender.disposition_id
+        )
     if layout is not None:
-        game.layout_link = GameTerrainLayout(layout=layout)
-    session.add(game)
-    return game
+        game.layout_link = GameTerrainLayout(layout_id=layout.id)
+    catalog = await loader.load(
+        session,
+        list_ids=[p.list_id for p in players],
+        user_ids=[p.user_id for p in players],
+        disposition_ids=[p.disposition_id for p in players if p.disposition_id is not None],
+        primary_mission_ids=[
+            p.primary_mission_id for p in players if p.primary_mission_id is not None
+        ],
+        layout=layout,
+    )
+    # What it refers to, from the catalog.
+    for record in game.records():
+        for attr, (id_attr, class_name) in record._refs.items():
+            ref_id = getattr(record, id_attr)
+            if ref_id is not None:
+                setattr(record, attr, catalog.get(class_name, ref_id))
+    return Live(game, catalog)
 
 
 def _require_in_progress(game: Game) -> None:
@@ -212,12 +237,8 @@ async def _draw_tactical(
     seen = {c.secondary_mission_id for c in player.secondaries if c.status != SHUFFLED}
     deck = [
         m
-        for m in (
-            await session.execute(
-                select(SecondaryMission).where(SecondaryMission.tactical_points.is_not(None))
-            )
-        ).scalars()
-        if m.id not in seen
+        for m in context.catalog().all("SecondaryMission")
+        if m.tactical_points is not None and m.id not in seen
     ]
     drawn = []
     replacing = 0
@@ -237,9 +258,6 @@ async def _draw_tactical(
             # draw's deck already).
             card.status = SHUFFLED
             replacing += 1
-    # Saved now, so the new cards have ids for the choices made about them
-    # (e.g. whether to redraw one - see mission_state.cards_drawn).
-    await session.flush()
     return [c for c in drawn if c.status == "active"]
 
 
@@ -502,17 +520,9 @@ async def advance(session: AsyncSession, game: Game) -> None:
 
 
 async def core_stratagem(session: AsyncSession, name: str) -> Stratagem | None:
-    return (
-        await session.execute(
-            select(Stratagem)
-            .options(
-                selectinload(Stratagem.detachments),
-                selectinload(Stratagem.timings),
-                selectinload(Stratagem.game_action_link),
-            )
-            .where(Stratagem.name == name, Stratagem.is_core)
-        )
-    ).scalar_one_or_none()
+    return next(
+        (s for s in context.catalog().all("Stratagem") if s.name == name and s.is_core), None
+    )
 
 
 async def rapid_ingress_stratagem(session: AsyncSession) -> Stratagem | None:
@@ -534,21 +544,8 @@ async def heroic_intervention_open(session: AsyncSession, game: Game) -> bool:
     stratagem = next(
         (
             s
-            for s in (
-                await session.execute(
-                    select(Stratagem)
-                    .options(
-                        selectinload(Stratagem.detachments),
-                        selectinload(Stratagem.timings),
-                        selectinload(Stratagem.game_action_link),
-                        selectinload(Stratagem.keywords),
-                        selectinload(Stratagem.excluded_keywords),
-                        selectinload(Stratagem.keyword_option_links),
-                    )
-                    .where(Stratagem.is_core)
-                )
-            ).scalars()
-            if s.game_action == core_stratagems.HEROIC_INTERVENTION
+            for s in context.catalog().all("Stratagem")
+            if s.is_core and s.game_action == core_stratagems.HEROIC_INTERVENTION
         ),
         None,
     )

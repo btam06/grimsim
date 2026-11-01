@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.db import async_session, engine
+from app.engine import context, store
 from app.models import Base
 from app.routers import (
     agent,
@@ -34,7 +35,6 @@ from app.routers import (
 )
 from app.migrations import run_all as run_migrations
 from app.seeds import run_all as run_seeds
-from app.services import dice
 
 
 @asynccontextmanager
@@ -44,6 +44,7 @@ async def lifespan(app: FastAPI):
     async with async_session() as session:
         await run_migrations(session)
         await run_seeds(session)
+    store.start()
     yield
 
 
@@ -51,11 +52,18 @@ app = FastAPI(title="grimsim API", lifespan=lifespan)
 
 
 @app.middleware("http")
-async def unbind_dice(request, call_next):
-    # Each request rolls with the dice of the game it loads, if any (see
-    # app/services/dice.py) - never the last request's.
-    dice.reset()
-    return await call_next(request)
+async def game_requests(request, call_next):
+    # Each request plays the game it loads (see app/engine/context.py) -
+    # never the last request's - and one that changes it and fails leaves it
+    # as it was.
+    tracked = context.begin_request(changes=request.method not in ("GET", "HEAD", "OPTIONS"))
+    try:
+        response = await call_next(request)
+    except Exception:
+        context.end_request(tracked, failed=True)
+        raise
+    context.end_request(tracked, failed=response.status_code >= 400)
+    return response
 
 
 app.include_router(factions.router)

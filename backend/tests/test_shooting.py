@@ -1,10 +1,9 @@
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import select
 
-from app.models import GameModelPosition
 from app.services.in_game.shooting import _blocks, _obstacles, _visible_region, can_see
 from app.services.in_game.terrain import Base
+from tests import live_games
 from tests.test_deployment import R32, _deployment, _unit_named
 from tests.test_movement import _battle, _move, _shifted
 
@@ -78,15 +77,8 @@ def test_sight_region_ignores_far_terrain():
 async def _place(session, unit, spots):
     # Puts the unit's models at `spots` directly.
     for model, (x, y) in zip(unit["models"], spots):
-        position = (
-            await session.execute(
-                select(GameModelPosition).where(
-                    GameModelPosition.unit_model_id == model["unit_model_id"]
-                )
-            )
-        ).scalar_one()
+        position = live_games.position(model["unit_model_id"])
         position.x, position.y = x, y
-    await session.commit()
 
 
 async def _to_shooting(client, game_id):

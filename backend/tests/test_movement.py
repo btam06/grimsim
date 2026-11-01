@@ -1,7 +1,6 @@
 from httpx import AsyncClient
-from sqlalchemy import select
 
-from app.models import GameModelPosition
+from tests import live_games
 from tests.test_deployment import R32, _deploy, _deployment, _game, _row, _unit_named
 
 # Games on the test layout (see tests/test_deployment.py): the attacker (seat
@@ -268,15 +267,8 @@ async def test_once_rolled_it_always_advances(client: AsyncClient, session, tmp_
 
 async def _engage(session, unit, x, y):
     # Puts the unit's first model at (x, y) directly (as if it had charged).
-    position = (
-        await session.execute(
-            select(GameModelPosition).where(
-                GameModelPosition.unit_model_id == unit["models"][0]["unit_model_id"]
-            )
-        )
-    ).scalar_one()
+    position = live_games.position(unit["models"][0]["unit_model_id"])
     position.x, position.y = x, y
-    await session.commit()
 
 
 async def test_engaged_unit_can_only_fall_back(client: AsyncClient, session, tmp_path):
