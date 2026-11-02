@@ -217,9 +217,13 @@ async def test_create_game_validation(client: AsyncClient):
     payload = _game_payload(ids)
     payload["players"][0]["list_id"] = ids["list2"]
     assert await status(payload) == 400
-    # The same user twice.
+    # The same list twice.
     payload = _game_payload(ids)
-    payload["players"][1]["user_id"] = ids["user1"]
+    payload["players"][1] = {**payload["players"][0]}
+    assert await status(payload) == 400
+    # A user who doesn't exist.
+    payload = _game_payload(ids)
+    payload["players"][1]["user_id"] = 9999
     assert await status(payload) == 400
     # Fixed mode needs exactly 2 fixed-usable secondaries.
     assert await status(_game_payload(ids, modes=("fixed", "tactical"))) == 400
@@ -228,6 +232,28 @@ async def test_create_game_validation(client: AsyncClient):
     # Tactical mode doesn't pick secondaries up front.
     two = (ids["tactical"][:2], ())
     assert await status(_game_payload(ids, fixed=two)) == 400
+
+
+async def test_one_user_can_play_both_sides(client: AsyncClient):
+    # (With two of their lists - say, sorted under one user.)
+    ids = await _setup(client)
+    other = await client.post(
+        "/lists",
+        json={
+            "name": "Alice's other list",
+            "points_limit": 2000,
+            "faction_id": ids["faction2"],
+            "detachment_ids": [ids["detachment2"]],
+            "user_id": ids["user1"],
+        },
+    )
+    payload = _game_payload(ids)
+    payload["players"][1].update(user_id=ids["user1"], list_id=other.json()["id"])
+
+    response = await client.post("/games", json=payload)
+
+    assert response.status_code == 201, response.text
+    assert [p["user_id"] for p in response.json()["players"]] == [ids["user1"]] * 2
 
 
 async def test_create_game_with_fixed_secondaries(client: AsyncClient):

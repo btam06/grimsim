@@ -96,8 +96,13 @@ async def create_game(session: AsyncSession, payload: GameIn) -> Live:
             )
         ).scalars()
     }
-    if len(users) != 2:
-        raise _bad_request("a game needs two different, existing users")
+    # (One user can play both sides - their lists are their own way of
+    # organising them - but not one list against itself: its units would be
+    # on both sides.)
+    if any(p.user_id not in users for p in payload.players):
+        raise _bad_request("a game's players need to be existing users")
+    if payload.players[0].list_id == payload.players[1].list_id:
+        raise _bad_request("a game needs two different lists")
 
     players: list[GamePlayer] = []
     for seat, spec in enumerate(payload.players, start=1):

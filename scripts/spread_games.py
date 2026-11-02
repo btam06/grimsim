@@ -13,8 +13,8 @@ ml.imitate or evaluate:
 
 Games are made through the app's API (it has to be running: docker compose
 up -d), each player being the list's owner. Pairings of dispositions with no
-terrain layout, or of two lists with the same owner, are skipped, and said
-so. Only the standard library's used, so any Python 3 will do.
+terrain layout are skipped, and said so. Only the standard library's used,
+so any Python 3 will do.
 """
 
 from __future__ import annotations
@@ -86,17 +86,12 @@ def main() -> None:
         frozenset((l["attacker_disposition_id"], l["defender_disposition_id"])) for l in layouts
     }
     names = {d["id"]: d["name"] for d in call(args.api, "GET", "/dispositions")}
-    users = {u["id"]: u["name"] for u in call(args.api, "GET", "/users")}
 
     seeds = itertools.count(args.seed if args.seed is not None else random.randrange(2**32))
     made, skipped = [], []
     for attacker, defender in itertools.permutations(lists, 2):
         pairing = f"{attacker['name']} (attacking) vs {defender['name']}"
         dispositions = (attacker["disposition_id"], defender["disposition_id"])
-        if attacker["user_id"] == defender["user_id"]:
-            # (Each player's the list's owner, and a game needs two users.)
-            skipped.append(f"{pairing}: both are {users.get(attacker['user_id'])}'s lists")
-            continue
         # (A layout fits its dispositions either way round.)
         if layouts and frozenset(dispositions) not in covered:
             skipped.append(
