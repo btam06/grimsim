@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { createList, createUnit, deleteUnit, updateList } from '../api'
+import { useEffect, useState } from 'react'
+import { createList, createUnit, deleteUnit, listDispositions, updateList } from '../api'
 import Field from './Field'
 import Select from './Select'
 import { CopyButton, DeleteButton, EditButton } from './IconButtons'
@@ -18,6 +18,7 @@ function buildEmptyForm() {
     user_id: '',
     warlord_unit_id: '',
     subfaction: '',
+    disposition_id: '',
   }
 }
 
@@ -30,6 +31,7 @@ function formFromList(list) {
     user_id: list.user_id === null ? '' : String(list.user_id),
     warlord_unit_id: list.warlord_unit_id === null ? '' : String(list.warlord_unit_id),
     subfaction: list.subfaction ?? '',
+    disposition_id: list.disposition_id == null ? '' : String(list.disposition_id),
   }
 }
 
@@ -42,6 +44,7 @@ function toPayload(form) {
     user_id: form.user_id === '' ? null : Number(form.user_id),
     warlord_unit_id: form.warlord_unit_id === '' ? null : Number(form.warlord_unit_id),
     subfaction: form.subfaction || null,
+    disposition_id: form.disposition_id === '' ? null : Number(form.disposition_id),
   }
 }
 
@@ -79,6 +82,20 @@ function ListFormPage({
 }) {
   const [form, setForm] = useState(editingList ? formFromList(editingList) : buildEmptyForm())
   const [error, setError] = useState(null)
+  const [dispositions, setDispositions] = useState([])
+  useEffect(() => {
+    listDispositions()
+      .then(setDispositions)
+      .catch((err) => setError(err.message))
+  }, [])
+  // The dispositions the list's detachments offer - its games use the one
+  // chosen (or the only one).
+  const offeredDispositionIds = new Set(
+    detachments
+      .filter((d) => form.detachment_ids.includes(d.id))
+      .flatMap((d) => d.disposition_ids ?? [])
+  )
+  const dispositionOptions = dispositions.filter((d) => offeredDispositionIds.has(d.id))
 
   const detachmentOptionsForFaction = detachments.filter(
     (d) => String(d.faction_id) === form.faction_id
@@ -98,6 +115,14 @@ function ListFormPage({
     if (perModel.length === 0) return new Set()
     return new Set([...perModel[0]].filter((name) => perModel.every((set) => set.has(name))))
   }
+  // Whether one of the unit's models is a CHARACTER (only those can be the
+  // Warlord).
+  const isCharacter = (unit) =>
+    unit.unit_models.some((um) =>
+      (models.find((m) => m.id === um.model_id)?.keyword_ids ?? []).some(
+        (id) => keywords.find((k) => k.id === id)?.name === 'CHARACTER'
+      )
+    )
   const categoryOf = (unit) => {
     const shared = sharedKeywords(unit)
     return UNIT_CATEGORIES.find((c) => shared.has(c.keyword))?.label ?? 'Other'
@@ -135,16 +160,22 @@ function ListFormPage({
   const selectedFaction = factions.find((f) => String(f.id) === form.faction_id)
 
   const handleFactionChange = (faction_id) => {
-    setForm({ ...form, faction_id, detachment_ids: [], subfaction: '' })
+    setForm({ ...form, faction_id, detachment_ids: [], subfaction: '', disposition_id: '' })
   }
 
   const toggleDetachment = (id) => {
-    setForm({
-      ...form,
-      detachment_ids: form.detachment_ids.includes(id)
-        ? form.detachment_ids.filter((d) => d !== id)
-        : [...form.detachment_ids, id],
-    })
+    const detachment_ids = form.detachment_ids.includes(id)
+      ? form.detachment_ids.filter((d) => d !== id)
+      : [...form.detachment_ids, id]
+    // (Its disposition, if the detachments no longer offer it, goes.)
+    const offered = new Set(
+      detachments.filter((d) => detachment_ids.includes(d.id)).flatMap((d) => d.disposition_ids ?? [])
+    )
+    const disposition_id =
+      form.disposition_id !== '' && !offered.has(Number(form.disposition_id))
+        ? ''
+        : form.disposition_id
+    setForm({ ...form, detachment_ids, disposition_id })
   }
 
   const handleSubmit = async (e) => {
@@ -250,7 +281,7 @@ function ListFormPage({
             <Select
               options={[
                 { id: '', name: 'No Warlord' },
-                ...unitsInThisList.map((u) => ({
+                ...unitsInThisList.filter(isCharacter).map((u) => ({
                   id: String(u.id),
                   name: `${factionUnitName(u.faction_unit_id)} — ${u.points}pts`,
                 })),
@@ -278,6 +309,23 @@ function ListFormPage({
             ))}
           </div>
         </div>
+        {dispositionOptions.length > 0 && (
+          // Its disposition: one its detachments offer (games use it).
+          <Field label="Disposition">
+            <Select
+              options={[
+                {
+                  id: '',
+                  name: dispositionOptions.length === 1 ? dispositionOptions[0].name : 'Choose one',
+                },
+                ...(dispositionOptions.length > 1 ? dispositionOptions : []),
+              ]}
+              value={dispositionOptions.length === 1 ? '' : form.disposition_id}
+              onChange={(disposition_id) => setForm({ ...form, disposition_id })}
+              isDisabled={dispositionOptions.length === 1}
+            />
+          </Field>
+        )}
         <button type="submit">{editingList ? 'Save Changes' : 'Add List'}</button>
         <button type="button" onClick={onCancel}>
           Cancel

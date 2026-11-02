@@ -188,6 +188,8 @@ function FightPanel({
   const [orders, setOrders] = useState({})
   const [outcome, setOutcome] = useState(null)
   const [busy, setBusy] = useState(false)
+  // Abilities it uses as it fights (e.g. Banner of Macragge).
+  const [abilities, setAbilities] = useState([])
   const selected = fightState?.units.find((u) => u.unit_id === focus.unitId) ?? null
   const target = targets.find((t) => t.unit_id === focus.targetId) ?? null
   const weapons = weaponsByKey(targets)
@@ -197,6 +199,7 @@ function FightPanel({
     setTargets([])
     setSplits({})
     setOrders({})
+    setAbilities([])
     if (!selected?.can_fight) return
     let cancelled = false
     getFightTargets(game.id, selected.unit_id)
@@ -254,6 +257,7 @@ function FightPanel({
         allocation_orders: Object.fromEntries(
           Object.entries(orders).filter(([t]) => Number(t) !== target.unit_id)
         ),
+        abilities,
       })
       setOutcome({ unit: selected.name, target: target.name, ...result })
       onFocus({ unitId: null, targetId: null })
@@ -504,6 +508,20 @@ function FightPanel({
               order={orders[t.unit_id] ?? []}
               onChange={(order) => setOrders((o) => ({ ...o, [t.unit_id]: order }))}
             />
+          ))}
+          {(selected.abilities ?? []).map((name) => (
+            <label key={name} className="radio-option">
+              <input
+                type="checkbox"
+                checked={abilities.includes(name)}
+                onChange={(e) =>
+                  setAbilities((current) =>
+                    e.target.checked ? [...current, name] : current.filter((a) => a !== name)
+                  )
+                }
+              />
+              Use {name} <span className="hint">(once a battle)</span>
+            </label>
           ))}
           <div className="inline-controls">
             <button

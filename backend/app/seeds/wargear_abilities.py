@@ -2,7 +2,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.combat_rules.conditions import ALWAYS
-from app.combat_rules.effects import IGNORE_COVER, INVULNERABLE_5
+from app.combat_rules.effects import IGNORE_COVER, INVULNERABLE_4, INVULNERABLE_5
 from app.models import Condition, Effect, WargearAbility
 
 # (name, description, [condition keywords], [effect keywords])
@@ -22,11 +22,37 @@ ENTRIES = [
         [INVULNERABLE_5],
     ),
     (
+        # Its bearer's unit can resurrect (see
+        # app/seeds/factions/necrons/reanimation.py) - as the datasheet
+        # ability of the same name.
+        "Resurrection Orb",
+        "(Once per battle, per unit) At the end of any phase, you can use this ability. If you "
+        "do, this unit resurrects: its Reanimation Protocols activate, but it heals D6 wounds "
+        "(instead of D3 wounds). You cannot resurrect more than one unit per turn.",
+        [],
+        [],
+    ),
+    (
+        "Dispersion Shield",
+        "The bearer has a 4+ invulnerable save.",
+        [ALWAYS],
+        [INVULNERABLE_4],
+    ),
+    (
         # In a game, a Stratagem used on the bearer's unit rolls for the CP
         # (see datasheet_abilities STRATAGEM_TARGET_CP).
         "Enhanced data-tether",
         "Each time you select the bearer's unit as the target of a Stratagem, roll one D6: on "
         "a 5+, you gain 1CP.",
+        [],
+        [],
+    ),
+    (
+        # As Enhanced data-tether, for a model that can take one (e.g. an
+        # Onager Dunecrawler); it loses SMOKE (not modelled).
+        "Broad Spectrum Data-tether",
+        "The bearer loses the SMOKE keyword, but each time you target the bearer with a "
+        "Stratagem, roll one D6: on a 5+, you gain 1CP.",
         [],
         [],
     ),

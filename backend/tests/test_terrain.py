@@ -488,25 +488,35 @@ async def test_unknown_layout_is_404(client: AsyncClient):
     assert (await client.get("/terrain-layouts/9999")).status_code == 404
 
 
-@pytest.mark.parametrize("attacker,expected", [(1, True), (2, False)])
+@pytest.mark.parametrize("attacker", [1, 2])
 async def test_game_gets_a_layout_for_the_attacker_and_defender_dispositions(
-    client: AsyncClient, session, tmp_path, attacker, expected
+    client: AsyncClient, session, tmp_path, attacker
 ):
-    # The layout is for Disposition 1 attacking Disposition 2: only a game with
-    # seat 1 (Disposition 1) as the attacker fits it.
+    # The layout is for Disposition 1 vs Disposition 2 - either way round:
+    # whichever is attacking gets its attacker zone.
     ids, [layout] = await _seeded(client, session, tmp_path)
     response = await client.post("/games", json=_game_payload(ids, attacker=attacker))
     assert response.status_code == 201, response.text
     game = response.json()
-    if expected:
-        assert game["terrain_layout_id"] == layout["id"]
-        assert game["terrain_layout_name"] == "Test Layout"
-    else:
-        assert game["terrain_layout_id"] is None
+    assert game["terrain_layout_id"] == layout["id"]
+    assert game["terrain_layout_name"] == "Test Layout"
     # It's kept: reading the game again gives the same layout.
     again = (await client.get(f"/games/{game['id']}")).json()
     assert again["terrain_layout_id"] == game["terrain_layout_id"]
     assert (await client.delete(f"/games/{game['id']}")).status_code == 204
+
+
+async def test_game_without_a_layout_for_its_dispositions_isnt_made(
+    client: AsyncClient, session, tmp_path
+):
+    # Only a Disposition 1 mirror layout: Disposition 1 vs 2 has no battlefield
+    # to deploy on, so it isn't made.
+    ids, _ = await _seeded(client, session, tmp_path, defender="Disposition 1")
+    response = await client.post("/games", json=_game_payload(ids, attacker=1))
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "no terrain layout for Disposition 1 vs Disposition 2 (either way round)" in detail
+    assert "Disposition 1 vs Disposition 1" in detail
 
 
 # --- the local layouts data file (app/data/terrain_layouts.json), if present ---

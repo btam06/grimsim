@@ -167,3 +167,23 @@ def available(game: Game) -> list[tuple[Unit, GameSurgeMove]]:
         for r in game.surge_moves
         if _this_phase(game, r) and not r.made
     ]
+
+
+def after_losses(game: Game, unit: Unit, destroyed: list[int]) -> GameSurgeMove | None:
+    # An enemy unit has shot the unit in its Shooting phase, destroying the
+    # unit's models `destroyed` (by unit model id): if an ability lets it
+    # surge then (e.g. Glory of Ultramar: D6"), its surge move starts - if it
+    # can make one (it needn't).
+    from app.seeds import datasheet_abilities
+
+    mine = {m.id for m in unit.unit_models}
+    if game.phase != "shooting" or not mine & set(destroyed):
+        return None
+    if deployment.owner(game, unit).seat == game.turn_seat:
+        return None
+    config = datasheet_abilities.SURGE_WHEN_SHOT
+    names = {a.name for m in deployment.models_on_battlefield(game, unit) for a in m.model.abilities}
+    for name in sorted(names & set(config)):
+        if reason(game, unit) is None:
+            return start(game, unit, config[name])
+    return None

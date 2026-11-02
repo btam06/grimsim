@@ -45,7 +45,7 @@ function ShootingStartPanel({ game, refreshKey, onUsed, onError }) {
   if (abilities.length === 0 && results.length === 0) return null
   return (
     <div className="deployment-panel">
-      <h3>Start of the Shooting phase</h3>
+      <h3>Start of the {game.phase === 'fight' ? 'Fight' : 'Shooting'} phase</h3>
       {abilities.map((a) => (
         <div key={key(a)}>
           <p>

@@ -8,7 +8,7 @@ from pathlib import Path
 # Training a policy (see ml/model.py) with PPO, on games played in parallel
 # (see backend/app/engine/vec.py) - against itself, or an opponent:
 #
-#     ml/.venv/bin/python -m ml.ppo saves/1/r1-s2-start_of_round.json --run first
+#     ml/.venv/bin/python -m ml.ppo saves/1/setup.json --run first
 #
 # Each env's decisions are kept apart by player: a decision's reward is
 # everything that happens to that player until their next decision (or the

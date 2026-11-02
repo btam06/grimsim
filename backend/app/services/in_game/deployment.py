@@ -347,22 +347,40 @@ def overlaps_polygon(base: Base, polygon: list[Point]) -> bool:
 FEATURE_KIND_NAMES = {"ruin_wall": "a ruin wall", "obstacle": "an obstacle"}
 
 
-def _features(game: Game) -> list[tuple[str, list[Point]]]:
-    # Each part of the battlefield's terrain features: what it is, and its
-    # corners on the board.
+def _features(game: Game) -> list[tuple[str, list[Point], tuple[float, float, float, float]]]:
+    # Each part of the battlefield's terrain features: what it is, its
+    # corners on the board, and the box around them.
     layout = game.layout
     if layout is None:
         return []
     return [
-        (FEATURE_KIND_NAMES.get(feature.shape.kind, "terrain"), polygon)
+        (
+            FEATURE_KIND_NAMES.get(feature.shape.kind, "terrain"),
+            polygon,
+            (
+                min(p[0] for p in polygon), min(p[1] for p in polygon),
+                max(p[0] for p in polygon), max(p[1] for p in polygon),
+            ),
+        )
         for feature in layout.features
         for polygon in feature_polygons(feature)
     ]
 
 
-def _feature_overlapped(base: Base, features: list[tuple[str, list[Point]]]) -> str | None:
-    # What terrain feature the base overlaps, if any.
-    return next((kind for kind, polygon in features if overlaps_polygon(base, polygon)), None)
+def _feature_overlapped(base: Base, features: list) -> str | None:
+    # What terrain feature the base overlaps, if any. (Those whose box it's
+    # clear of are passed over before the exact check.)
+    reach = _reach(base)
+    return next(
+        (
+            kind
+            for kind, polygon, (left, top, right, bottom) in features
+            if base.x + reach > left and base.x - reach < right
+            and base.y + reach > top and base.y - reach < bottom
+            and overlaps_polygon(base, polygon)
+        ),
+        None,
+    )
 
 
 def gap(first: Base, second: Base) -> float:
@@ -601,28 +619,45 @@ def _grid(count: int) -> tuple[int, int]:
 
 
 def formation(
-    game: Game, unit: Unit, x: float, y: float, models: list[UnitModel] | None = None
+    game: Game,
+    unit: Unit,
+    x: float,
+    y: float,
+    models: list[UnitModel] | None = None,
+    ranks: int | None = None,
+    upright: bool = False,
+    nudge: float | None = None,
 ) -> dict[int, tuple[float, float, float]]:
     # Where to start a unit's models when it's set down at (x, y): in even rows
     # centred there (a short last row centred under the others), kept on the
     # battlefield - and, if (x, y) is in its owner's deployment zone, within
     # that zone's extent - then any model overlapping another or a terrain
     # feature moved to the nearest free spot. A starting point: the player then arranges them.
-    # (Just `models`, if given - e.g. those not destroyed.)
+    # (Just `models`, if given - e.g. those not destroyed. `ranks`: in that
+    # many rows instead - e.g. 2, to line up along a battlefield edge - and
+    # `upright`, those rows running up and down rather than across. `nudge`:
+    # how far a model's moved to a free spot at most - e.g. a little, when
+    # it's one of many spots tried, and quicker to try the next: refused if
+    # one can't be.)
     models = unit_models(unit) if models is None else models
     sizes = {m.id: base_mm(m)[:2] for m in models}
     # Spaced by the widest and tallest bases (ovals start facing across).
     cell_x = max(w for w, _ in sizes.values()) / MM_PER_INCH + FORMATION_GAP
     cell_y = max(h for _, h in sizes.values()) / MM_PER_INCH + FORMATION_GAP
-    rows, columns = _grid(len(models))
+    if ranks is None:
+        rows, columns = _grid(len(models))
+    else:
+        rows = min(ranks, len(models))
+        columns = math.ceil(len(models) / rows)
     offsets = {}
     for i, model in enumerate(models):
         row, column = divmod(i, columns)
         in_row = min(columns, len(models) - row * columns)
         shift = (columns - in_row) / 2
+        along = column + shift - (columns - 1) / 2
+        across = row - (rows - 1) / 2
         offsets[model.id] = (
-            (column + shift - (columns - 1) / 2) * cell_x,
-            (row - (rows - 1) / 2) * cell_y,
+            (across * cell_x, along * cell_y) if upright else (along * cell_x, across * cell_y)
         )
 
     # Keep it on the battlefield (and in the zone's extent, if set down in it).
@@ -647,18 +682,32 @@ def formation(
     right = max(offsets[i][0] + half[i][0] for i in offsets)
     top = min(offsets[i][1] - half[i][1] for i in offsets)
     bottom = max(offsets[i][1] + half[i][1] for i in offsets)
-    x = min(max(x, bounds[0] - left), bounds[2] - right)
-    y = min(max(y, bounds[1] - top), bounds[3] - bottom)
+    # (A hair inside: positions are rounded, and an edge isn't inside.)
+    margin = 0.01
+    x = min(max(x, bounds[0] - left + margin), bounds[2] - right - margin)
+    y = min(max(y, bounds[1] - top + margin), bounds[3] - bottom - margin)
 
-    taken = [base for _, _, base in placed_bases(game, unit)]
+    # (Each base taken with how far it reaches: those clearly too far away
+    # to overlap are passed over before the exact check.)
+    taken = [(base, _reach(base)) for _, _, base in placed_bases(game, unit)]
     features = _features(game)
     result = {}
+
+    def clear_of_others(base: Base) -> bool:
+        reach = _reach(base)
+        for other, other_reach in taken:
+            near = reach + other_reach
+            if abs(other.x - base.x) < near and abs(other.y - base.y) < near and overlaps(
+                base, other
+            ):
+                return False
+        return True
 
     def free(base: Base, in_zone: bool) -> bool:
         return (
             wholly_within(base, BOARD)
             and (not in_zone or zone is None or wholly_inside(base, zone))
-            and not any(overlaps(base, other) for other in taken)
+            and clear_of_others(base)
             and _feature_overlapped(base, features) is None
         )
 
@@ -666,18 +715,25 @@ def formation(
         start = (x + offsets[model.id][0], y + offsets[model.id][1])
         spot = start
         if not free(base_at(model, *start), in_zone=False):
-            spot = _nearest_free(model, start, free) or start
-        taken.append(base_at(model, *spot))
+            spot = _nearest_free(model, start, free, nudge or NUDGE_LIMIT)
+            if spot is None and nudge is not None:
+                # (One of many spots tried: there's no room here.)
+                raise _bad_request("there's no room for the unit there")
+            spot = spot or start
+        placed = base_at(model, *spot)
+        taken.append((placed, _reach(placed)))
         result[model.id] = (round(spot[0], 3), round(spot[1], 3), 0.0)
     return result
 
 
-def _nearest_free(model: UnitModel, start: Point, free) -> Point | None:
-    # The nearest spot to `start` where the model fits: in rings outward,
-    # preferring its owner's deployment zone.
+def _nearest_free(
+    model: UnitModel, start: Point, free, limit: float = NUDGE_LIMIT
+) -> Point | None:
+    # The nearest spot to `start` where the model fits, up to `limit` away:
+    # in rings outward, preferring its owner's deployment zone.
     for in_zone in (True, False):
         radius = NUDGE_STEP
-        while radius <= NUDGE_LIMIT:
+        while radius <= limit:
             steps = max(8, int(2 * math.pi * radius / NUDGE_STEP))
             for i in range(steps):
                 angle = 2 * math.pi * i / steps

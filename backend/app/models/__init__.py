@@ -1,4 +1,4 @@
-from app.models.army_list import ArmyList, ListSubfaction, ListWarlord
+from app.models.army_list import ArmyList, ListDisposition, ListSubfaction, ListWarlord
 from app.models.associations import (
     datasheet_ability_links,
     detachment_dispositions,
@@ -134,6 +134,7 @@ __all__ = [
     "EnhancementWeapon",
     "Disposition",
     "ArmyList",
+    "ListDisposition",
     "ListSubfaction",
     "ListWarlord",
     "Stratagem",

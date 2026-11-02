@@ -79,12 +79,45 @@ def in_range(game: Game, aura: Aura, unit: Unit) -> bool:
     )
 
 
+def _option(aura: Aura):
+    return datasheet_ability_seeds.OPTIONS.get(aura.ability, {}).get(aura.option)
+
+
+def _wholly_within(aura: Aura) -> bool:
+    # An aura that reaches only models wholly within its range (see RuleOption).
+    option = _option(aura)
+    return option is not None and option.wholly_within
+
+
 def aura_options(game: Game, unit: Unit) -> list[str]:
-    # The options of its owner's auras the unit is within range of.
+    # The options of its owner's auras the unit is within range of (those
+    # that reach models one by one aside - see model_rules).
     seat = deployment.owner(game, unit).seat
     return list(
-        dict.fromkeys(a.option for a in auras(game, seat) if in_range(game, a, unit))
+        dict.fromkeys(
+            a.option
+            for a in auras(game, seat)
+            if not _wholly_within(a) and in_range(game, a, unit)
+        )
     )
+
+
+def model_rules(game: Game, unit: Unit) -> dict[int, list]:
+    # The rules of its owner's auras that reach models one by one (e.g.
+    # Emanatus Force Field), for each of the unit's models wholly within
+    # range: {unit model id: [Rule]}.
+    from app.services.in_game import regions
+
+    seat = deployment.owner(game, unit).seat
+    found: dict[int, list] = {}
+    for aura in auras(game, seat):
+        if not _wholly_within(aura):
+            continue
+        source = _base(game, aura.model)
+        for unit_model in deployment.models_on_battlefield(game, unit):
+            if regions.base_wholly_within_of(_base(game, unit_model), [source], aura.range):
+                found.setdefault(unit_model.id, []).extend(_option(aura).rules)
+    return found
 
 
 def ranges(game: Game, unit: Unit) -> list[tuple[UnitModel, str, float]]:

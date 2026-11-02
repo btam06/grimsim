@@ -22,6 +22,7 @@ from app.models import (
 from app.seeds import datasheet_abilities as datasheet_ability_seeds
 from app.seeds import weapon_abilities as weapon_ability_seeds
 from app.seeds.factions.adeptus_mechanicus import abilities as admech_abilities
+from app.seeds.factions.adeptus_mechanicus import datasheet_abilities as admech_datasheet_abilities
 from app.seeds.factions.orks import abilities as orks_abilities
 from app.services import combat
 
@@ -156,15 +157,16 @@ def test_roll_dice_multi_die(monkeypatch):
 # --- allocation groups (05.03) ---
 
 
-def _t(save=3, invulnerable=None, wounds=1, left=None, character=False, uid=None):
+def _t(save=3, invulnerable=None, wounds=1, left=None, character=False, uid=None, ranged=None):
     return combat._Target(
         4, save, invulnerable, None, wounds if left is None else left,
         wounds_characteristic=wounds, is_character=character, unit_model_id=uid,
+        ranged_invulnerable=ranged,
     )
 
 
-def _order(targets, order=None):
-    allocation = combat._Allocation(combat.deque(targets), order)
+def _order(targets, order=None, ranged=True):
+    allocation = combat._Allocation(combat.deque(targets), order, ranged=ranged)
     return [[t.unit_model_id for t in g] for g in allocation.groups]
 
 
@@ -172,14 +174,28 @@ def test_allocation_groups_by_w_sv_and_insv_with_characters_alone():
     a, b = _t(save=3, uid=1), _t(save=3, uid=2)
     c = _t(save=6, uid=3)
     hero, other_hero = _t(save=2, character=True, uid=4), _t(save=2, character=True, uid=5)
-    # The least protected first by default; CHARACTERs last, one group each.
-    assert _order([hero, a, c, b, other_hero]) == [[3], [1, 2], [4], [5]]
+    # The best protected first by default; CHARACTERs last, one group each.
+    assert _order([hero, a, c, b, other_hero]) == [[1, 2], [3], [4], [5]]
 
 
 def test_allocation_better_of_armour_and_invulnerable_counts_as_protection():
     bad_armour_great_invuln = _t(save=6, invulnerable=2, uid=1)
     ok_armour = _t(save=4, uid=2)
-    assert _order([bad_armour_great_invuln, ok_armour]) == [[2], [1]]
+    assert _order([bad_armour_great_invuln, ok_armour]) == [[1], [2]]
+
+
+def test_a_ranged_invulnerable_save_makes_its_own_group_against_ranged_attacks():
+    # Skitarii with a 4+ save, two of them wholly within Emanatus Force
+    # Field's 6" (4+ invulnerable against ranged attacks): against ranged
+    # attacks they're a group of their own, and first (better protected)...
+    covered, also_covered = _t(save=4, invulnerable=5, ranged=4, uid=1), _t(
+        save=4, invulnerable=5, ranged=4, uid=2
+    )
+    outside = _t(save=4, invulnerable=5, uid=3)
+    assert _order([outside, covered, also_covered]) == [[1, 2], [3]]
+    # ...but not against melee attacks.
+    [group] = _order([outside, covered, also_covered], ranged=False)
+    assert sorted(group) == [1, 2, 3]
 
 
 def test_allocation_wounded_groups_come_first_and_the_defender_orders_the_rest():
@@ -347,11 +363,10 @@ def test_resolve_combat_not_in_engagement_range_selects_ranged_only(monkeypatch)
     assert len(result.attack_rolls) == 5  # only the ranged weapon's attacks counted
 
 
-def test_resolve_combat_targets_normal_models_before_supports(monkeypatch):
-    # A single attack that deals 1 damage. The normal model has only 1 wound (dies
-    # if targeted), the support has 100 (would survive untouched if targeted) -
-    # even though the support has a far better save. If supports were wrongly
-    # targeted first, this attack would land on it and fail to kill anything.
+def test_resolve_combat_treats_supports_like_any_model(monkeypatch):
+    # A single attack that deals 1 damage. SUPPORT models have no allocation
+    # rule of their own (05.03): by default the best protected group goes
+    # first - here the support (2+), which has 100 wounds and survives.
     monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     weapon = _weapon(attacks="1", skill=2, strength=10, ap=-10, damage="1")
     weapon.id = 1
@@ -363,14 +378,14 @@ def test_resolve_combat_targets_normal_models_before_supports(monkeypatch):
     result = combat.resolve_combat(
         attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
-    assert result.models_destroyed == 1  # the 1-wound normal model, not the support
-    assert result.defending_models_remaining == 1
+    assert result.models_destroyed == 0
+    assert result.defending_models_remaining == 2
 
 
-def test_resolve_combat_targets_worst_save_before_best_save(monkeypatch):
-    # Within the same (non-support/leader) tier, the worse-saving model should be
-    # targeted first. Only the worst-save model has few enough wounds to die from
-    # this single attack.
+def test_resolve_combat_targets_best_save_before_worst_save(monkeypatch):
+    # By default (the defender can choose another order - 05.03), the
+    # better-saving model takes attacks first: it has 100 wounds, so this
+    # single attack destroys nothing.
     monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
     weapon = _weapon(attacks="1", skill=2, strength=10, ap=-10, damage="1")
     weapon.id = 1
@@ -382,8 +397,8 @@ def test_resolve_combat_targets_worst_save_before_best_save(monkeypatch):
     result = combat.resolve_combat(
         attacker, defender, {weapon.id}, in_engagement_range=False, visible=True, in_range=True, in_cover=False, half_range=False, moved_less_than_3=False, advanced=False
     )
-    assert result.models_destroyed == 1  # the worst-save model, not the best-save one
-    assert result.defending_models_remaining == 1
+    assert result.models_destroyed == 0  # the best-save model took it
+    assert result.defending_models_remaining == 2
 
 
 def test_resolve_combat_does_not_spill_remaining_damage_onto_next_model(monkeypatch):
@@ -6730,3 +6745,372 @@ def test_plunging_fire_for_a_towering_model_within_12(monkeypatch):
     assert shot(3, ["TOWERING"], near)
     assert not shot(3, ["TOWERING"], set())
     assert not shot(3, [], near)
+
+
+# --- Galvanic Field (leader-granted Lethal Hits) ---
+
+GALVANIC_FIELD = datasheet_ability_seeds.RULES["Galvanic Field"]
+
+
+@pytest.mark.parametrize("led,expected_damage", [(True, 1), (False, 0)])
+def test_galvanic_field_gives_lethal_hits_while_leading(monkeypatch, led, expected_damage):
+    # A critical hit, then a wound roll of 1 if one's made: with Lethal Hits
+    # it wounds anyway (and the save of 1 fails).
+    rolls = iter([6, 1, 1])
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=4, ap=0, damage="1", weapon_type="ranged")
+    weapon.id = 1
+    bodyguard = _unit_model(_model(name="Skitarii"), [weapon])
+    manipulus = _unit_model(_model(name="Manipulus", keywords=[_keyword("CHARACTER")]), [])
+    attacker = _unit([bodyguard, manipulus] if led else [bodyguard])
+    defender = _unit([_unit_model(_model(toughness=4, wounds=10, save=7), [])])
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {weapon.id},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+        attacker_rules=GALVANIC_FIELD,
+    )
+    assert result.total_damage == expected_damage
+
+
+# --- Emanatus Force Field (4+ invulnerable against ranged, for BATTLELINE) ---
+
+EMANATUS = list(
+    admech_datasheet_abilities.OPTIONS["Emanatus Force Field (Aura)"]["Emanatus Force Field"].rules
+)
+
+
+@pytest.mark.parametrize(
+    "keywords,weapon_type,expected_damage",
+    [
+        (["BATTLELINE"], "ranged", 0),  # the 4+ invulnerable save is made
+        ([], "ranged", 1),  # not BATTLELINE
+        (["BATTLELINE"], "melee", 1),  # ranged attacks only
+    ],
+)
+def test_emanatus_force_field(monkeypatch, keywords, weapon_type, expected_damage):
+    rolls = iter([6, 6, 4])  # hit, wound, save
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=4, ap=-10, damage="1", weapon_type=weapon_type)
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    defender = _unit(
+        [_unit_model(_model(wounds=10, save=7, keywords=[_keyword(k) for k in keywords]), [])]
+    )
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {weapon.id},
+        in_engagement_range=weapon_type == "melee",
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+        defender_rules=EMANATUS,
+    )
+    assert result.total_damage == expected_damage
+
+
+def test_anti_fly_4():
+    from app.combat_rules.conditions import ANTI_FLY_4, CORE_CONDITIONS
+
+    anti_fly = CORE_CONDITIONS[ANTI_FLY_4]
+    assert anti_fly({"step": "wound", "roll": 4, "defender_keywords": {"FLY"}})
+    assert not anti_fly({"step": "wound", "roll": 3, "defender_keywords": {"FLY"}})
+    assert not anti_fly({"step": "wound", "roll": 6, "defender_keywords": {"INFANTRY"}})
+    assert "Anti-Fly 4+" in {entry[0] for entry in weapon_ability_seeds.ENTRIES}
+
+
+def test_a_weapon_with_no_skill_never_rolls_to_hit(monkeypatch):
+    # Skill 0 ([TORRENT]'s "N/A") hits automatically, even without the
+    # ability - and dice attacks (3D3) are rolled for how many.
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 1)  # would miss
+    weapon = _weapon(attacks="3D3", skill=0, strength=10, ap=-10, weapon_type="ranged")
+    result = _fire(weapon, [_model(toughness=1, wounds=10, save=7)])
+    assert result.attack_rolls == []
+    assert len(result.wound_rolls) == 3  # 3D3 of 1s: 3 attacks
+
+
+def test_emanatus_saves_only_the_models_it_covers(monkeypatch):
+    # Two BATTLELINE models (one covered by the aura in a game - a per-model
+    # rule) and their attacker's 2 hits get through to saves of 4: the
+    # covered model is the best protected, so takes them both - and saves
+    # them (the uncovered one would have failed).
+    from app.combat_rules import Rule
+
+    rolls = iter([6, 6, 6, 6, 4, 4])  # hits, wounds, saves
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="2", skill=3, strength=4, ap=-10, damage="1", weapon_type="ranged")
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    covered = _unit_model(_model(wounds=1, save=7, keywords=[_keyword("BATTLELINE")]), [])
+    covered.id = 11
+    uncovered = _unit_model(_model(wounds=1, save=7, keywords=[_keyword("BATTLELINE")]), [])
+    uncovered.id = 12
+    defender = _unit([uncovered, covered])
+    result = combat.resolve_combat(
+        attacker,
+        defender,
+        {weapon.id},
+        in_engagement_range=False,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+        defender_model_rules={11: EMANATUS},
+    )
+    assert result.total_damage == 0
+    assert result.defender_wounds_remaining == {11: 1, 12: 1}
+
+
+@pytest.mark.parametrize("defended,expected_damage", [(True, 0), (False, 1)])
+def test_defend_the_divine_work_gives_a_4_up_invulnerable_save(
+    monkeypatch, defended, expected_damage
+):
+    # A game passes its rules for each of the unit's models (see
+    # app/services/in_game/phase_start.py model_rules).
+    rules = list(admech_datasheet_abilities.PHASE_START_ABILITIES["Defend the Divine Work"].rules)
+    rolls = iter([6, 6, 4])  # hit, wound, save
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=4, ap=-10, damage="1", weapon_type="melee")
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    defender_model = _unit_model(_model(wounds=10, save=7), [])
+    defender_model.id = 21
+    result = combat.resolve_combat(
+        attacker,
+        _unit([defender_model]),
+        {weapon.id},
+        in_engagement_range=True,
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+        defender_model_rules={21: rules} if defended else None,
+    )
+    assert result.total_damage == expected_damage
+
+
+# --- Marneus Calgar's retinue and the Storm Speeder Thunderstrike ---
+
+from app.seeds.factions.space_marines import datasheet_abilities as sm_datasheet_abilities  # noqa: E402
+
+
+def _resolve(attacker, defender, weapon, **options):
+    flags = dict(
+        in_engagement_range=weapon.weapon_type == "melee",
+        visible=True,
+        in_range=True,
+        in_cover=False,
+        half_range=False,
+        moved_less_than_3=False,
+        advanced=False,
+    )
+    flags.update(options)
+    return combat.resolve_combat(attacker, defender, {weapon.id}, **flags)
+
+
+def test_veteran_bodyguard_gives_other_characters_fnp_4(monkeypatch):
+    # Kaius (Veteran Bodyguard) and another CHARACTER in his unit: an attack
+    # on the other one gets its Feel No Pain 4+ (an attack on Kaius wouldn't).
+    rolls = iter([6, 6, 1, 4])  # hit, wound, save, fnp
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, damage="1", weapon_type="ranged")
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    kaius = _unit_model(
+        _model(name="Kaius", wounds=5, save=7, keywords=[_keyword("CHARACTER")],
+               abilities=[DatasheetAbility(name="Veteran Bodyguard")]), []
+    )
+    kaius.id = 31
+    calgar = _unit_model(
+        _model(name="Calgar", wounds=6, save=7, keywords=[_keyword("CHARACTER")]), []
+    )
+    calgar.id = 32
+    result = _resolve(
+        attacker, _unit([calgar, kaius]), weapon,
+        defender_rules=sm_datasheet_abilities.RULES["Veteran Bodyguard"],
+        allocation_order=[32, 31],
+    )
+    # (CHARACTER groups go by the defender's order: Calgar first.)
+    assert result.fnp_rolls == [4]
+    assert result.total_damage == 0
+
+
+def test_calgars_champion_rerolls_only_its_own_ones_against_characters(monkeypatch):
+    # Kaius and a bodyguard each make one attack at a CHARACTER unit: every
+    # roll is a 1 - only Kaius's hit roll is re-rolled.
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 1)
+    sword = _weapon(name="Sword", attacks="1", skill=2, strength=10, ap=-3, damage="1", weapon_type="melee")
+    sword.id = 1
+    kaius = _unit_model(_model(name="Kaius", abilities=[DatasheetAbility(name="Calgar's Champion")]), [sword])
+    guard = _unit_model(_model(name="Guard"), [sword])
+    defender = _unit([_unit_model(_model(wounds=10, save=7, keywords=[_keyword("CHARACTER")]), [])])
+    result = _resolve(
+        _unit([kaius, guard]), defender, sword,
+        attacker_rules=sm_datasheet_abilities.RULES["Calgar's Champion"],
+    )
+    assert (result.attack_rolls, result.attack_rerolls) == ([1, 1], [1])
+
+
+@pytest.mark.parametrize("keywords,wound_roll,expected", [(["VEHICLE"], 3, 1), ([], 3, 0)])
+def test_thunderstrike_is_plus_one_to_wound_against_vehicles(monkeypatch, keywords, wound_roll, expected):
+    # S6 vs T6 wounds on 4+: a 3 wounds with +1 - against a VEHICLE.
+    rolls = iter([6, wound_roll, 1])
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=6, ap=-10, damage="1", weapon_type="ranged")
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    defender = _unit([_unit_model(
+        _model(toughness=6, wounds=10, save=7, keywords=[_keyword(k) for k in keywords]), []
+    )])
+    result = _resolve(attacker, defender, weapon, attacker_rules=sm_datasheet_abilities.RULES["Thunderstrike"])
+    assert result.total_damage == expected
+
+
+@pytest.mark.parametrize("ability", ["Honour Guard of Macragge", "Command Squad"])
+def test_minus_one_to_wound_against_the_unit(monkeypatch, ability):
+    # S4 vs T4 needs a 4+, or 5+ at -1.
+    rolls = iter([6, 4, 1])
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=4, ap=-10, damage="1", weapon_type="ranged")
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    defender = _unit([_unit_model(_model(wounds=10, save=7), [])])
+    result = _resolve(attacker, defender, weapon, defender_rules=sm_datasheet_abilities.RULES[ability])
+    assert result.total_damage == 0
+
+
+# --- Necrons: Technomancer, Overlord, Lychguard, Skorpeks, Heavy Destroyers ---
+
+from app.seeds.factions.necrons import datasheet_abilities as necron_datasheet_abilities  # noqa: E402
+
+NECRON_RULES = necron_datasheet_abilities.RULES
+
+
+def _character(name="Leader", **stats):
+    return _model(name=name, keywords=[_keyword("CHARACTER")], **stats)
+
+
+@pytest.mark.parametrize("led,fnp_rolls", [(True, [5]), (False, [])])
+def test_rites_of_reanimation(monkeypatch, led, fnp_rolls):
+    rolls = iter([6, 6, 1, 5])  # hit, wound, save, fnp
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=10, ap=-10, damage="1", weapon_type="ranged")
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    warrior = _unit_model(_model(name="Warrior", wounds=10, save=7), [])
+    defender = _unit([warrior, _unit_model(_character(wounds=4, save=7), [])] if led else [warrior])
+    result = _resolve(attacker, defender, weapon, defender_rules=NECRON_RULES["Rites of Reanimation"])
+    assert result.fnp_rolls == fnp_rolls
+
+
+@pytest.mark.parametrize(
+    "weapon_name,keywords,rerolled",
+    [
+        ("Enmitic exterminator", [], True),
+        ("Enmitic exterminator", ["VEHICLE"], False),
+        ("Gauss destructor", ["VEHICLE"], True),
+        ("Gauss destructor", [], False),
+    ],
+)
+def test_optimised_for_slaughter(monkeypatch, weapon_name, keywords, rerolled):
+    rolls = iter([6, 1, 6, 1])  # hit, wound 1, (re-roll), save
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(name=weapon_name, attacks="1", skill=3, strength=6, ap=0, damage="1", weapon_type="ranged")
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    defender = _unit([_unit_model(_model(wounds=10, save=7, keywords=[_keyword(k) for k in keywords]), [])])
+    result = _resolve(attacker, defender, weapon, attacker_rules=NECRON_RULES["Optimised for Slaughter"])
+    assert bool(result.wound_rerolls) == rerolled
+
+
+def test_implacable_resilience_for_its_model_only(monkeypatch):
+    # A 2-damage attack gets through: allocated to the Overlord, it does 1
+    # (to a model without the ability, 2).
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6 if b == 6 else 1)
+    weapon = _weapon(attacks="1", skill=2, strength=10, ap=-10, damage="2", weapon_type="ranged")
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    overlord = _unit_model(
+        _character("Overlord", wounds=6, save=7, abilities=[DatasheetAbility(name="Implacable Resilience")]), []
+    )
+    overlord.id = 41
+    result = _resolve(
+        attacker, _unit([overlord]), weapon,
+        defender_rules=NECRON_RULES["Implacable Resilience"],
+    )
+    assert result.total_damage == 1
+    lone = _unit_model(_model(name="Warrior", wounds=6, save=7), [])
+    lone.id = 42
+    result = _resolve(attacker, _unit([lone]), weapon, defender_rules=NECRON_RULES["Implacable Resilience"])
+    assert result.total_damage == 2
+
+
+@pytest.mark.parametrize("noble,strength,expected", [(True, 6, 0), (False, 6, 1), (True, 5, 1)])
+def test_guardian_protocols(monkeypatch, noble, strength, expected):
+    # T5 Lychguard: S6 wounds on 3+ - a 3 fails at -1 while a NOBLE leads.
+    rolls = iter([6, 3 if strength == 6 else 4, 1])
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=strength, ap=-10, damage="1", weapon_type="ranged")
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    guard = _unit_model(_model(name="Lychguard", toughness=5, wounds=10, save=7), [])
+    leader = _unit_model(_model(name="Overlord", toughness=5, wounds=6, save=7,
+                                keywords=[_keyword("CHARACTER"), _keyword("NOBLE")]), [])
+    defender = _unit([guard, leader] if noble else [guard])
+    result = _resolve(attacker, defender, weapon, defender_rules=NECRON_RULES["Guardian Protocols"],
+                      allocation_order=[])
+    assert result.total_damage == expected
+
+
+@pytest.mark.parametrize("led,expected", [(True, 1), (False, 0)])
+def test_united_in_destruction(monkeypatch, led, expected):
+    rolls = iter([6, 1, 1])  # critical hit, wound 1 (if rolled), save
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
+    claws = _weapon(attacks="1", skill=3, strength=4, ap=0, damage="1", weapon_type="melee")
+    claws.id = 1
+    attacker = _unit([_unit_model(_model(), [claws])] + ([_unit_model(_character(), [])] if led else []))
+    defender = _unit([_unit_model(_model(wounds=10, save=7), [])])
+    result = _resolve(attacker, defender, claws, attacker_rules=NECRON_RULES["United In Destruction"])
+    assert result.total_damage == expected
+
+
+@pytest.mark.parametrize("charged,first_roll,rerolled", [(False, 1, True), (False, 2, False), (True, 2, True)])
+def test_whirling_onslaught(monkeypatch, charged, first_roll, rerolled):
+    rolls = iter([first_roll, 6, 6, 1])
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
+    blades = _weapon(attacks="1", skill=3, strength=7, ap=-2, damage="2", weapon_type="melee")
+    blades.id = 1
+    attacker = _unit([_unit_model(_model(), [blades])])
+    defender = _unit([_unit_model(_model(wounds=10, save=7), [])])
+    result = _resolve(attacker, defender, blades, attacker_rules=NECRON_RULES["Whirling Onslaught"], charged=charged)
+    assert bool(result.attack_rerolls) == rerolled
+
+
+def test_dispersion_shield_is_a_4_up_invulnerable_save(monkeypatch):
+    from app.seeds import wargear_abilities
+
+    entry = next(e for e in wargear_abilities.ENTRIES if e[0] == "Dispersion Shield")
+    rolls = iter([6, 6, 4])
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls, 1))
+    weapon = _weapon(attacks="1", skill=3, strength=4, ap=-10, damage="1", weapon_type="melee")
+    weapon.id = 1
+    attacker = _unit([_unit_model(_model(), [weapon])])
+    shield = Wargear(name="Dispersion shield")
+    shield.abilities = [_wargear_ability([_condition(c) for c in entry[2]], [_effect(e) for e in entry[3]])]
+    defender = _unit([_unit_model(_model(wounds=10, save=7), [], [shield])])
+    assert _resolve(attacker, defender, weapon).total_damage == 0

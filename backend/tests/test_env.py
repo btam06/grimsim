@@ -247,3 +247,33 @@ async def test_either_seat(client: AsyncClient, session, tmp_path):
         assert info["seat"] == env.seat
     assert seats == {1, 2}
     env.close()
+
+
+async def test_the_scripted_player_plays_a_battle(client: AsyncClient, session, tmp_path):
+    # Against random play, from either seat: it plays to the end.
+    from app.engine.evaluate import evaluate
+    from app.engine.scripted import scripted
+
+    path = await _save(client, session, tmp_path)
+    result = evaluate(scripted, path, games=2)
+    assert [g.seat for g in result.games] == [1, 2]
+    assert result.count("unfinished") == 0
+
+
+async def test_an_episode_from_the_games_start(client: AsyncClient, session, tmp_path):
+    # From the save made with the game: deployment is played too.
+    game_id = await _armed_battle(client, session, tmp_path)
+    path = str(saves.folder(game_id) / saves.SETUP)
+    store.clear()
+    env = GameEnv(path, seat=1)
+    obs, info = env.reset(seed=3)
+    statuses = [env.engine.live.game.status]
+    for _ in range(300):
+        index = random_policy(Decision(None, obs["seat"], info["actions"]), random.Random(0))
+        obs, reward, terminated, truncated, info = env.step(index)
+        statuses.append(env.engine.live.game.status)
+        if terminated or truncated or statuses[-1] == "in_progress":
+            break
+    assert statuses[0] == "deployment"
+    assert statuses[-1] == "in_progress"
+    env.close()

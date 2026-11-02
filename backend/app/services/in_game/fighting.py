@@ -167,9 +167,19 @@ def locked_models(game: Game, unit: Unit) -> set[int]:
     }
 
 
+def _phase_start_block(game: Game) -> str | None:
+    # (The opponent's abilities for the start of the phase come first - e.g.
+    # Defend the Divine Work.)
+    from app.services.in_game import phase_start
+
+    return phase_start.blocks(game)
+
+
 def cant_pile_in_reason(game: Game, unit: Unit) -> str | None:
     # Why the unit can't pile in now, or None if it can: in the Pile In step,
     # or as an overrun fight's pile-in (see "Fighting" below).
+    if (reason := _phase_start_block(game)) is not None:
+        return reason
     if overrun_due(game, unit):
         return None
     seat = piling_seat(game)
@@ -294,6 +304,8 @@ def pile_in(game: Game, unit: Unit, placement: dict[int, tuple[float, float, flo
 def finish_piling_in(game: Game, seat: int) -> None:
     # The player has finished piling in: their opponent's turn to (or the
     # fight goes on).
+    if (reason := _phase_start_block(game)) is not None:
+        raise _bad_request(reason)
     if piling_seat(game) != seat:
         raise _bad_request("it isn't that player's turn to pile in")
     game.pile_ins_done.append(
@@ -469,6 +481,8 @@ def can_pass(game: Game, seat: int) -> bool:
 
 
 def pass_fight(game: Game, seat: int) -> None:
+    if (reason := _phase_start_block(game)) is not None:
+        raise _bad_request(reason)
     if not can_pass(game, seat):
         raise _bad_request(
             "a player can only pass when each of their units eligible to fight is more than "
@@ -557,6 +571,8 @@ def fighting_seat(game: Game) -> int | None:
 
 def cant_fight_reason(game: Game, unit: Unit) -> str | None:
     # Why the unit can't fight now, or None if it can.
+    if (reason := _phase_start_block(game)) is not None:
+        return reason
     step = fight_step(game)
     if step is None:
         return "units can only fight in the fight phase"

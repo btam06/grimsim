@@ -148,3 +148,48 @@ async def test_left_over_wounds_spill_into_another_model(
     assert response.status_code == 200, response.text
     deployment = await _deployment(client, game_id)
     assert [_model(deployment, i)["wounds_remaining"] for i in (first, second)] == [2, 1]
+
+
+async def test_resurrection_orb_at_the_end_of_a_phase(
+    client: AsyncClient, session, tmp_path, monkeypatch
+):
+    # Seat 1's N has a Resurrection Orb: in seat 2's Shooting phase, with a
+    # model destroyed and one wounded, seat 1 declares it - and as the phase
+    # ends, N heals D6 (a 2): the wound, then the destroyed model returns, for
+    # seat 1 to set up before the Charge phase.
+    from tests.test_admech_characters import _give
+
+    game_id, n = await _reanimation_game(client, session, tmp_path, monkeypatch, roll=2)
+    await _give(session, n, "Resurrection Orb")
+    first, second, _ = (m["unit_model_id"] for m in n["models"])
+    await _advance_to(client, game_id, 1, 2, "shooting")
+    await _hurt(session, game_id, first, 2, destroyed=True)
+    await _hurt(session, game_id, second, 1)
+    state = (await client.get(f"/games/{game_id}/resurrection")).json()
+    assert [(u["name"], u["seat"], u["declared"]) for u in state["units"]] == [("N", 1, False)]
+    response = await client.post(
+        f"/games/{game_id}/resurrection", json={"seat": 1, "unit_id": n["unit_id"]}
+    )
+    assert response.status_code == 200, response.text
+    # Declared, not yet resolved.
+    deployment = await _deployment(client, game_id)
+    assert _model(deployment, second)["wounds_remaining"] == 1
+
+    response = await client.post(f"/games/{game_id}/advance")
+    assert response.json()["phase"] == "shooting"
+    state = (await client.get(f"/games/{game_id}/reanimation")).json()
+    assert state["placing"] and state["seat"] == 1
+    [unit] = state["units"]
+    assert (unit["roll"], unit["healed"], unit["returned"]) == (2, 1, 1)
+    response = await client.post(f"/games/{game_id}/advance")
+    assert "set up the returned models first" in response.json()["detail"]
+    payload = {"unit_id": n["unit_id"], "positions": unit["to_place"]}
+    response = await client.post(f"/games/{game_id}/reanimation", json=payload)
+    assert response.status_code == 200, response.text
+    assert (await client.post(f"/games/{game_id}/advance")).json()["phase"] == "charge"
+    # Once a battle.
+    response = await client.post(
+        f"/games/{game_id}/resurrection", json={"seat": 1, "unit_id": n["unit_id"]}
+    )
+    assert "once a battle" in response.json()["detail"]
+    assert (await client.get(f"/games/{game_id}/resurrection")).json()["units"] == []

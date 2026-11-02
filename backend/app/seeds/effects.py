@@ -36,6 +36,8 @@ from app.combat_rules.effects import (
     REROLL_DAMAGE,
     INVULNERABLE_4,
     INVULNERABLE_5,
+    RANGED_INVULNERABLE_4,
+    WORSE_MELEE_SKILL,
     MELTA_2,
     MELTA_3,
     MELTA_4,
@@ -226,6 +228,16 @@ ENTRIES = [
         IMPROVE_AP,
         "Improve AP by 1",
         "This attack's Armour Penetration is improved by 1.",
+    ),
+    (
+        WORSE_MELEE_SKILL,
+        "Worse Melee Weapon Skill",
+        "The attacking model's melee weapons' Weapon Skill is worsened by 1.",
+    ),
+    (
+        RANGED_INVULNERABLE_4,
+        "4+ Invulnerable Save Against Ranged Attacks",
+        "The model has a 4+ invulnerable save against ranged attacks (a better one is kept).",
     ),
     (
         INVULNERABLE_4,

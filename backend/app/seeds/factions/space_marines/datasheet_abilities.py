@@ -1,10 +1,18 @@
-from app.combat_rules import CommandChoice, Rule, RuleOption
+from app.combat_rules import (
+    CommandChoice,
+    FightAbility,
+    FormationGrant,
+    Rule,
+    RuleOption,
+    UnitEffect,
+)
 from app.combat_rules.conditions import (
     ALWAYS,
     CHARGED,
     CRITICAL_HIT,
     DEFENDER_CONTROLLING_OBJECTIVE,
     DEFENDER_IN_RANGE_OF_OBJECTIVE,
+    MELEE_ATTACK,
     RANGED_ATTACK,
     STRENGTH_EXCEEDS_TOUGHNESS,
     TARGET_MONSTER_OR_VEHICLE,
@@ -12,11 +20,15 @@ from app.combat_rules.conditions import (
     TARGET_WITHIN_9,
 )
 from app.combat_rules.effects import (
+    ADD_EXTRA_ATTACK,
     ADD_EXTRA_HIT,
     AUTO_PASS_WOUND,
+    FEEL_NO_PAIN_4,
     MINUS_ONE_TO_HIT,
     MINUS_ONE_TO_WOUND,
+    PLUS_ONE_STRENGTH,
     PLUS_ONE_TO_SAVE,
+    PLUS_ONE_TO_WOUND,
     PRECISION,
     REROLL_DAMAGE,
     REROLL_HIT_ONES,
@@ -24,6 +36,10 @@ from app.combat_rules.effects import (
 )
 from app.seeds.factions.space_marines.conditions import (
     ASSAULT_DOCTRINE_ACTIVE,
+    CALGARS_CHAMPION_ATTACK,
+    MELEE_PRE_WEAPON,
+    PSYCHIC_ATTACK,
+    TARGET_MODEL_OTHER_CHARACTER,
     DEVASTATOR_DOCTRINE_ACTIVE,
     LIGHTNING_CLAWS_WEAPON,
     TACTICAL_DOCTRINE_ACTIVE,
@@ -205,10 +221,132 @@ ENTRIES = [
         [],
         [],
     ),
+    (
+        "Master Tactician",
+        "In your Movement phase, you can select one visible friendly ADEPTUS ASTARTES unit "
+        "within 9\" of this model, and select one combat doctrine. That combat doctrine is "
+        "active for that unit until the start of your next Command phase.",
+        [],
+        [],
+    ),
+    (
+        "Thunderhawk Insertion",
+        "In the Declare Battle Formations step, you can select one friendly GRAVIS/PHOBOS/"
+        "TACTICUS unit. That unit has Deep Strike.",
+        [],
+        [],
+    ),
+    (
+        "Veteran Bodyguard",
+        "While this model is attached to a unit, other CHARACTER models in this unit have Feel "
+        "No Pain 4+.",
+        [],
+        [],
+    ),
+    (
+        "Calgar's Champion",
+        "This model's attacks that target a CHARACTER unit can:\n"
+        "- Re-roll hit rolls of 1.\n"
+        "- Re-roll wound rolls of 1.",
+        [],
+        [],
+    ),
+    (
+        "Glory of Ultramar",
+        "In your opponent's Shooting phase, when an enemy unit has shot, if a model in this unit "
+        "was destroyed by those attacks, this unit can make a surge move of up to D6\".",
+        [],
+        [],
+    ),
+    (
+        "Honour Guard of Macragge",
+        "Attacks that target this unit have -1 to wound rolls.",
+        [],
+        [],
+    ),
+    (
+        "Banner of Macragge",
+        "- At the end of your Movement phase, if this unit is controlling an objective, that "
+        "objective is secured.\n"
+        "- (Once per battle, per army) When this unit is selected to fight, you can use this "
+        "ability. If you do, this unit's melee attacks have +1 A and S.",
+        [],
+        [],
+    ),
+    (
+        "Command Squad",
+        "Attacks that target this unit have -1 to wound rolls.",
+        [],
+        [],
+    ),
+    (
+        "Thunderstrike",
+        "This unit's ranged attacks that target a MONSTER/VEHICLE unit have +1 to wound rolls.",
+        [],
+        [],
+    ),
+    (
+        "Shattered Defences",
+        "In your Shooting phase, when this unit has shot, select one enemy MONSTER/VEHICLE unit "
+        "hit by those attacks. Friendly ADEPTUS ASTARTES units' ranged attacks that target that "
+        "enemy unit have +1 AP.",
+        [],
+        [],
+    ),
 ]
 
 # Code-defined rules for abilities above: {ability name: [Rule, ...]}.
 RULES = {
+    "Psychic Hood": [
+        Rule(
+            conditions=(PSYCHIC_ATTACK,),
+            effects=(FEEL_NO_PAIN_4,),
+            side="defender",
+            description="Feel No Pain 4+ against attacks with [PSYCHIC] weapons.",
+        ),
+    ],
+    "Veteran Bodyguard": [
+        Rule(
+            conditions=(TARGET_MODEL_OTHER_CHARACTER,),
+            effects=(FEEL_NO_PAIN_4,),
+            side="defender",
+            description="Other CHARACTER models in its unit have Feel No Pain 4+.",
+        ),
+    ],
+    "Calgar's Champion": [
+        Rule(conditions=(CALGARS_CHAMPION_ATTACK,), effects=(REROLL_HIT_ONES,)),
+        Rule(
+            conditions=(CALGARS_CHAMPION_ATTACK,),
+            effects=(REROLL_WOUND_ONES,),
+            description=(
+                "This model's attacks (not its unit's) against a unit with a CHARACTER re-roll "
+                "hit rolls of 1 and wound rolls of 1."
+            ),
+        ),
+    ],
+    "Honour Guard of Macragge": [
+        Rule(
+            conditions=(ALWAYS,),
+            effects=(MINUS_ONE_TO_WOUND,),
+            side="defender",
+            description="Attacks that target this unit are -1 to wound.",
+        ),
+    ],
+    "Command Squad": [
+        Rule(
+            conditions=(ALWAYS,),
+            effects=(MINUS_ONE_TO_WOUND,),
+            side="defender",
+            description="Attacks that target this unit are -1 to wound.",
+        ),
+    ],
+    "Thunderstrike": [
+        Rule(
+            conditions=(RANGED_ATTACK, TARGET_MONSTER_OR_VEHICLE),
+            effects=(PLUS_ONE_TO_WOUND,),
+            description="Ranged attacks against a MONSTER or VEHICLE unit are +1 to wound.",
+        ),
+    ],
     "Never Shall the Standard Fall": [
         Rule(
             conditions=(DEFENDER_IN_RANGE_OF_OBJECTIVE, STRENGTH_EXCEEDS_TOUGHNESS),
@@ -286,7 +424,22 @@ RULES = {
 
 # Selectable options for abilities above: {ability name: {option name:
 # RuleOption}} - here, an aura that's always on.
+# Banner of Macragge's once-a-battle boost: +1 A and S to melee attacks.
+_BANNER_RULES = (
+    Rule(conditions=(MELEE_PRE_WEAPON,), effects=(ADD_EXTRA_ATTACK,)),
+    Rule(conditions=(MELEE_ATTACK,), effects=(PLUS_ONE_STRENGTH,)),
+)
+
 OPTIONS = {
+    "Banner of Macragge": {
+        "Banner of Macragge (fight)": RuleOption(
+            rules=_BANNER_RULES,
+            description=(
+                "Its once-a-battle use when selected to fight: this unit's melee attacks have "
+                "+1 A and S."
+            ),
+        ),
+    },
     # In a game, active for the phase once it's used (see
     # app/services/in_game/psychic.py).
     "Shrouding": {
@@ -313,6 +466,28 @@ OPTIONS = {
 
 # How the calculator handles abilities above, where that needs saying.
 CALCULATOR_NOTES = {
+    "Master Tactician": (
+        "Pick the doctrine under Faction Rules for the unit selected; in a game, it's selected "
+        "in your Movement phase for a visible friendly ADEPTUS ASTARTES unit within 9\"."
+    ),
+    "Thunderhawk Insertion": (
+        "Descriptive only in the calculator; in a game, its player selects the GRAVIS, PHOBOS "
+        "or TACTICUS unit given Deep Strike as they declare their battle formations."
+    ),
+    "Glory of Ultramar": (
+        "Descriptive only in the calculator; in a game, its surge move (D6\") starts when an "
+        "enemy unit's shooting destroys one of its models."
+    ),
+    "Banner of Macragge": (
+        "Pick its fight option for its once-a-battle +1 A and S; in a game, objectives it's "
+        "controlling at the end of your Movement phase are secured, and its player can use the "
+        "+1 A and S when it's selected to fight (once a battle, for the army)."
+    ),
+    "Shattered Defences": (
+        "Descriptive only in the calculator (tick +1 AP for the attacker); in a game, the "
+        "MONSTER or VEHICLE unit it shoots and hits in its Shooting phase gives friendly "
+        "ADEPTUS ASTARTES units' ranged attacks against it +1 AP, for the rest of the turn."
+    ),
     "Transhuman Strategist": (
         "Descriptive only in the calculator; in a game, its player gains 1CP at the start of "
         "each battle round while it's their Warlord."
@@ -334,7 +509,6 @@ CALCULATOR_NOTES = {
         "attacks against the unit it picks ignore cover that phase."
     ),
     "Librarian": "Descriptive only; in a game, it's this unit's psyker level (1).",
-    "Psychic Hood": "Descriptive only: psychic attacks aren't modelled yet.",
     "Codex Adept": (
         "Pick the doctrines under Faction Rules in the calculator; in a game, all three are "
         "active for this unit."
@@ -371,6 +545,15 @@ CALCULATOR_NOTES = {
 # Doctrines' (the doctrine is active for that unit as if its own Combat
 # Doctrines had it, so its rules come from there).
 COMMAND_CHOICES = {
+    # Master Tactician: the same, within 9".
+    "Master Tactician": CommandChoice(
+        required=False,
+        target_keywords=("ADEPTUS ASTARTES",),
+        target_range=9.0,
+        target_visible=True,
+        phase="movement",
+        faction_options=("Space Marines", "Combat Doctrines"),
+    ),
     "Author of the Codex": CommandChoice(
         required=False,
         target_keywords=("ADEPTUS ASTARTES",),
@@ -400,7 +583,7 @@ WARGEAR_WOUNDS = {"Storm Shield": 1}
 # In a game: abilities that secure the objectives their unit is controlling at
 # the end of one of their player's phases (see
 # app/services/in_game/objectives.py).
-SECURES_OBJECTIVES = {"Raise the Banner": "movement"}
+SECURES_OBJECTIVES = {"Raise the Banner": "movement", "Banner of Macragge": "movement"}
 
 # In a game: psyker levels, by the ability that gives one, and psychic
 # abilities' levels (see app/services/in_game/psychic.py).
@@ -422,3 +605,37 @@ AFTER_CHARGE_BATTLE_SHOCK = {"Terminatus Assault (Deathwatch)": (-1, ("IMPERIUM"
 # In a game: abilities whose unit can still start an action after these moves
 # (see app/services/in_game/actions.py).
 ACTION_AFTER = {"Flexible Asset": ("advanced", "fell_back")}
+
+
+# In a game: abilities whose unit, after shooting in its Shooting phase, does
+# something to an enemy unit it hit (see app/services/in_game/unit_effects.py)
+# - Shattered Defences: for the rest of the turn (the text gives no end; its
+# effect is on ranged attacks, so in practice that Shooting phase).
+AFTER_SHOOTING_EFFECTS = {
+    "Shattered Defences": UnitEffect(
+        required_keywords=("MONSTER", "VEHICLE"),
+        ranged_ap=1,
+        by_keyword="ADEPTUS ASTARTES",
+        lasts="this turn",
+    ),
+}
+
+# In a game: abilities that let their unit surge after an enemy unit's
+# shooting destroys one of its models, in its opponent's Shooting phase - how
+# far (see app/services/in_game/surge.py).
+SURGE_WHEN_SHOT = {"Glory of Ultramar": "D6"}
+
+
+# In a game: abilities that, at Declare Battle Formations, give one of their
+# player's units an ability (see app/services/in_game/battle_formations.py).
+FORMATION_GRANTS = {
+    "Thunderhawk Insertion": FormationGrant(
+        keywords=("GRAVIS", "PHOBOS", "TACTICUS"), grants="Deep Strike"
+    ),
+}
+
+# In a game: abilities their unit can use when it's selected to fight (see
+# app/services/in_game/fight_abilities.py).
+FIGHT_ABILITIES = {
+    "Banner of Macragge": FightAbility(rules=_BANNER_RULES, per_army=True),
+}

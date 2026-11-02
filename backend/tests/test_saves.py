@@ -17,6 +17,15 @@ async def test_each_phase_is_saved_at_its_start(client: AsyncClient, session, tm
     assert (saves_dir / str(game["id"]) / saves.CATALOG).exists()
 
 
+async def test_the_game_is_saved_as_its_made(client: AsyncClient, session, tmp_path):
+    # Into deployment, nothing deployed yet (e.g. to learn deployment from).
+    game, _ = await _battle(client, session, tmp_path)
+    path = saves.folder(game["id"]) / saves.SETUP
+    assert path in saves.saves(game["id"])
+    restored, _ = saves.restore(path)
+    assert restored.status == "deployment" and restored.model_positions == []
+
+
 async def test_a_save_restores_the_game(client: AsyncClient, session, tmp_path):
     game, deployment = await _battle(client, session, tmp_path)
     restored, catalog = saves.restore(saves.folder(game["id"]) / "r1-s2-movement.json")

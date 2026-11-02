@@ -30,6 +30,11 @@ RANGED_VS_CLOSEST = "ranged_vs_closest"
 RANGED_VS_CLOSEST_ON_OBJECTIVE = "ranged_vs_closest_on_objective"
 MURDER_MADNESS_CRITICAL_HIT = "murder_madness_critical_hit"
 PROPHET_OF_DESTRUCTION_TARGET = "prophet_of_destruction_target"
+ENMITIC_EXTERMINATOR_VS_NON_MONSTER = "enmitic_exterminator_vs_non_monster"
+GAUSS_DESTRUCTOR_VS_MONSTER = "gauss_destructor_vs_monster"
+TARGET_LED_BY_NOBLE = "target_led_by_noble"
+IMPLACABLE_TARGET_MODEL = "implacable_target_model"
+MELEE_CRITICAL_HIT = "melee_critical_hit"
 
 # The calculator's Positioning (see app/combat_rules/positions.py).
 WITHIN_POWER_MATRIX = "within_power_matrix"
@@ -194,7 +199,49 @@ def prophet_of_destruction_target(context: dict) -> bool:
 
 
 # {keyword: check}
+def _big(context: dict) -> bool:
+    keywords = context.get("defender_keywords", set())
+    return "MONSTER" in keywords or "VEHICLE" in keywords
+
+
+def enmitic_exterminator_vs_non_monster(context: dict) -> bool:
+    # True at every step for an enmitic exterminator's attack against a unit
+    # with no MONSTER or VEHICLE model - Optimised for Slaughter.
+    return "enmitic exterminator" in context.get("weapon_name", "").lower() and not _big(context)
+
+
+def gauss_destructor_vs_monster(context: dict) -> bool:
+    # True at every step for a gauss destructor's attack against a unit with
+    # a MONSTER or VEHICLE model - Optimised for Slaughter.
+    return "gauss destructor" in context.get("weapon_name", "").lower() and _big(context)
+
+
+def target_led_by_noble(context: dict) -> bool:
+    # True at every step when a NOBLE model is leading the defending unit (it
+    # has one, and a model that isn't) - Guardian Protocols.
+    per_model = context.get("defender_model_keywords", [])
+    return any("NOBLE" in k for k in per_model) and any("NOBLE" not in k for k in per_model)
+
+
+def implacable_target_model(context: dict) -> bool:
+    # A defending model with Implacable Resilience (checked per model, as its
+    # profile's worked out) - -1 Damage for attacks allocated to it.
+    return context.get("step") == "target_model" and "Implacable Resilience" in context.get(
+        "target_model_abilities", set()
+    )
+
+
+def melee_critical_hit(context: dict) -> bool:
+    # A melee attack's critical hit - e.g. United In Destruction's [LETHAL HITS].
+    return critical_hit(context) and not context.get("is_ranged", True)
+
+
 CONDITIONS = {
+    ENMITIC_EXTERMINATOR_VS_NON_MONSTER: enmitic_exterminator_vs_non_monster,
+    GAUSS_DESTRUCTOR_VS_MONSTER: gauss_destructor_vs_monster,
+    TARGET_LED_BY_NOBLE: target_led_by_noble,
+    IMPLACABLE_TARGET_MODEL: implacable_target_model,
+    MELEE_CRITICAL_HIT: melee_critical_hit,
     ATTACKER_IN_POWER_MATRIX: attacker_in_power_matrix,
     DESTROYER_CULT_RANGED_VS_CLOSEST: destroyer_cult_ranged_vs_closest,
     TARGET_IS_WORTHY_FOE: target_is_worthy_foe,
@@ -218,6 +265,31 @@ CONDITIONS = {
 
 # Seeded Condition rows: (keyword, name, description).
 ENTRIES = [
+    (
+        ENMITIC_EXTERMINATOR_VS_NON_MONSTER,
+        "Enmitic Exterminator vs non-Monster/Vehicle",
+        "An enmitic exterminator's attack against a unit with no MONSTER or VEHICLE model.",
+    ),
+    (
+        GAUSS_DESTRUCTOR_VS_MONSTER,
+        "Gauss Destructor vs Monster/Vehicle",
+        "A gauss destructor's attack against a unit with a MONSTER or VEHICLE model.",
+    ),
+    (
+        TARGET_LED_BY_NOBLE,
+        "Target Led by Noble",
+        "A NOBLE model is leading the defending unit. Applies at every step.",
+    ),
+    (
+        IMPLACABLE_TARGET_MODEL,
+        "Target Model Has Implacable Resilience",
+        "The defending model has Implacable Resilience (checked per model).",
+    ),
+    (
+        MELEE_CRITICAL_HIT,
+        "Melee Critical Hit",
+        "A melee attack scored a critical hit.",
+    ),
     (
         ATTACKER_IN_POWER_MATRIX,
         "Attacker in Power Matrix",

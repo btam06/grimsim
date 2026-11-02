@@ -372,3 +372,50 @@ async def test_the_fires_of_mars_for_the_unit_chosen_within_6(
         units["Cawl"],
     )
     assert response.status_code == 400
+
+
+async def test_an_aura_that_reaches_models_wholly_within_range(
+    client: AsyncClient, session, tmp_path
+):
+    # Seat 2's Onager has Emanatus Force Field (Aura) at (20, 4); its
+    # BATTLELINE unit B has a model wholly within 6" of it (at 24.6) and one
+    # that isn't (at 26.6, partly beyond): only the first has the 4+ against
+    # ranged attacks - and the unit as a whole doesn't.
+    from app.services.in_game import auras
+
+    units = {
+        1: [("A", 1, {})],
+        2: [("Onager", 1, {}), ("B", 2, {"keywords": ("BATTLELINE",)})],
+    }
+    game = await _game(client, session, tmp_path, units=units)
+    game_id = game["id"]
+    deployment_ = await _deployment(client, game_id)
+    named = {n: _unit_named(deployment_, n) for n in ("A", "Onager", "B")}
+    name = "Emanatus Force Field (Aura)"
+    unit_model = await session.get(UnitModel, named["Onager"]["models"][0]["unit_model_id"])
+    model = (
+        await session.execute(
+            select(Model)
+            .options(selectinload(Model.abilities))
+            .where(Model.id == unit_model.model_id)
+        )
+    ).scalar_one()
+    model.abilities.append(DatasheetAbility(name=name, description=TEXT[name]))
+    await session.commit()
+    for unit_name, spot in (("A", (20, 40)), ("Onager", (20, 4))):
+        unit = named[unit_name]
+        response = await _deploy(client, game_id, unit, _row(unit, *spot))
+        assert response.status_code == 200, response.text
+    near, far = (m["unit_model_id"] for m in named["B"]["models"])
+    positions = [
+        {"unit_model_id": near, "x": 24.6, "y": 4},
+        {"unit_model_id": far, "x": 26.6, "y": 4},
+    ]
+    response = await _deploy(client, game_id, named["B"], positions)
+    assert response.status_code == 200, response.text
+
+    game = await _load_game(session, game_id)
+    b = deployment.find_unit(game, named["B"]["unit_id"])
+    reached = auras.model_rules(game, b)
+    assert set(reached) == {near}
+    assert "Emanatus Force Field" not in await _options(session, game_id, named["B"])

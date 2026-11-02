@@ -3,7 +3,13 @@ from __future__ import annotations
 from fastapi import HTTPException
 
 from app.models import Unit
-from app.engine.state import Game, GameBattleFormation, GameFormationsDone, GamePlayer
+from app.engine.state import (
+    Game,
+    GameBattleFormation,
+    GameFormationGrant,
+    GameFormationsDone,
+    GamePlayer,
+)
 from app.engine.state import FORMATION_PLACES
 from app.services.in_game import deployment, embarked
 
@@ -120,3 +126,77 @@ def declare(game: Game, seat: int) -> None:
         if is_aircraft(unit) and (formation is None or formation.place != "reserves"):
             raise _bad_request(f"{unit.label} is an AIRCRAFT: it must start in Strategic Reserves")
     game.formations_done.append(GameFormationsDone(seat=seat))
+
+
+# --- abilities given to a unit at Declare Battle Formations (e.g. Thunderhawk
+# Insertion: one GRAVIS/PHOBOS/TACTICUS unit has Deep Strike) - see
+# datasheet_abilities FORMATION_GRANTS ---
+
+
+def _grant_config() -> dict:
+    from app.seeds import datasheet_abilities
+
+    return datasheet_abilities.FORMATION_GRANTS
+
+
+def grant_sources(game: Game, seat: int) -> list[tuple[Unit, str]]:
+    # The player's units with an ability that gives another one an ability
+    # now: (unit, ability).
+    config = _grant_config()
+    return [
+        (unit, name)
+        for unit in deployment.deployable_units(_player(game, seat))
+        for name in sorted({a.name for m in unit.unit_models for a in m.model.abilities} & set(config))
+    ]
+
+
+def grant_targets(game: Game, seat: int, ability: str) -> list[Unit]:
+    # The player's units the ability can be given to.
+    wanted = set(_grant_config()[ability].keywords)
+    return [
+        unit
+        for unit in deployment.deployable_units(_player(game, seat))
+        if wanted & {k.name for m in unit.unit_models for k in m.model.keywords}
+    ]
+
+
+def grant(game: Game, seat: int, source: Unit, ability: str, unit: Unit | None) -> None:
+    # The player selects the unit the source's ability gives its ability to
+    # (None: none).
+    if deployment.deployment_step(game) != "formations":
+        raise _bad_request("that's selected as battle formations are declared")
+    if done(game, seat):
+        raise _bad_request("that player has already declared their battle formations")
+    if (source, ability) not in [(u, a) for u, a in grant_sources(game, seat)]:
+        raise _bad_request(f"that unit doesn't have {ability}")
+    if unit is not None and unit.id not in {u.id for u in grant_targets(game, seat, ability)}:
+        keywords = "/".join(_grant_config()[ability].keywords)
+        raise _bad_request(f"{ability} selects one of that player's {keywords} units")
+    for old in [
+        g for g in game.formation_grants if g.source_unit_id == source.id and g.ability == ability
+    ]:
+        game.formation_grants.remove(old)
+    if unit is not None:
+        game.formation_grants.append(
+            GameFormationGrant(
+                seat=seat, source_unit_id=source.id, ability=ability, unit_id=unit.id,
+                grants=_grant_config()[ability].grants,
+            )
+        )
+
+
+def granted(game: Game, unit: Unit, ability: str) -> bool:
+    # Whether something has given the unit the ability (e.g. Deep Strike).
+    return any(g.unit_id == unit.id and g.grants == ability for g in game.formation_grants)
+
+
+def grant_of(game: Game, source: Unit, ability: str) -> int | None:
+    # The unit the source's ability was given to, if any.
+    return next(
+        (
+            g.unit_id
+            for g in game.formation_grants
+            if g.source_unit_id == source.id and g.ability == ability
+        ),
+        None,
+    )

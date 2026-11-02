@@ -11,6 +11,9 @@ import {
   emergencyDisembark,
   getEmergency,
   getTeleportHomers,
+  getPhaseStart,
+  applyPhaseStart,
+  finishPhaseStart,
   getPsychic,
   castPsychic,
   placeTeleportHomer,
@@ -39,6 +42,7 @@ import {
   startSurgeMove,
   consolidate,
   rollAdvance,
+  rerollAdvance,
   declareFormations,
   deployUnit,
   discardSecondary,
@@ -54,6 +58,10 @@ import {
   getMissionState,
   getOverwatch,
   getReanimation,
+  getResurrection,
+  getTurnEndReserves,
+  declareTurnEndReserves,
+  declareResurrection,
   checkReanimation,
   placeReanimated,
   getReserves,
@@ -97,10 +105,12 @@ import BattleShockPanel from './BattleShockPanel'
 import CommandPanel from './CommandPanel'
 import MissionPanel from './MissionPanel'
 import ReanimationPanel from './ReanimationPanel'
+import ResurrectionPanel from './ResurrectionPanel'
 import ReservesPanel from './ReservesPanel'
 import EmbarkedPanel from './EmbarkedPanel'
 import EmergencyPanel from './EmergencyPanel'
 import TeleportHomerPanel from './TeleportHomerPanel'
+import PhaseStartPanel from './PhaseStartPanel'
 import PsychicPanel from './PsychicPanel'
 import RoundStartPanel from './RoundStartPanel'
 import ScoringPanel from './ScoringPanel'
@@ -814,7 +824,9 @@ function GameView({ gameId, onBack }) {
   const commandPhase = game?.status === 'in_progress' && game?.phase === 'command'
   const [reanimation, setReanimation] = useState(null)
   useEffect(() => {
-    if (!game || !commandPhase) {
+    // (Returned models can also be set up at the end of any phase - a
+    // Resurrection Orb's.)
+    if (!game || game.status !== 'in_progress') {
       setReanimation(null)
       return
     }
@@ -825,7 +837,39 @@ function GameView({ gameId, onBack }) {
     return () => {
       cancelled = true
     }
-  }, [game, commandPhase])
+  }, [game])
+  // Resurrection Orbs, declared for the end of the phase (see GET /games/{id}/resurrection).
+  const [resurrection, setResurrection] = useState(null)
+  useEffect(() => {
+    if (!game || game.status !== 'in_progress') {
+      setResurrection(null)
+      return
+    }
+    let cancelled = false
+    getResurrection(game.id)
+      .then((r) => !cancelled && setResurrection(r))
+      .catch((err) => setError(err.message))
+    return () => {
+      cancelled = true
+    }
+  }, [game])
+
+  // Units going into Strategic Reserves at the end of the turn (e.g.
+  // Tunnelling Horrors - see GET /games/{id}/turn-end-reserves).
+  const [turnEndReserves, setTurnEndReserves] = useState(null)
+  useEffect(() => {
+    if (!game || game.status !== 'in_progress') {
+      setTurnEndReserves(null)
+      return
+    }
+    let cancelled = false
+    getTurnEndReserves(game.id)
+      .then((r) => !cancelled && setTurnEndReserves(r))
+      .catch((err) => setError(err.message))
+    return () => {
+      cancelled = true
+    }
+  }, [game])
 
   // Teleport Homer tokens: set up at the start of the battle, and those on
   // the battlefield (see GET /games/{id}/teleport-homers). `homerPlacing` is
@@ -883,6 +927,21 @@ function GameView({ gameId, onBack }) {
     }
   }, [game, inMovement])
 
+  // Abilities for the start of an opponent's phase (see GET /games/{id}/phase-start).
+  const [phaseStart, setPhaseStart] = useState(null)
+  useEffect(() => {
+    if (!game || game.status !== 'in_progress') {
+      setPhaseStart(null)
+      return
+    }
+    let cancelled = false
+    getPhaseStart(game.id)
+      .then((p) => !cancelled && setPhaseStart(p))
+      .catch((err) => setError(err.message))
+    return () => {
+      cancelled = true
+    }
+  }, [game])
   const [homers, setHomers] = useState(null)
   const [homerPlacing, setHomerPlacing] = useState(null)
   useEffect(() => {
@@ -1862,6 +1921,14 @@ function GameView({ gameId, onBack }) {
           }
         }}
       />
+      <PhaseStartPanel
+        game={game}
+        phaseStart={phaseStart}
+        onUse={(seat, a) =>
+          act(() => applyPhaseStart(game.id, { seat, unit_id: a.unit_id, ability: a.ability }))
+        }
+        onDone={(seat) => act(() => finishPhaseStart(game.id, { seat }))}
+      />
       <TeleportHomerPanel
         game={game}
         homers={homers}
@@ -1915,7 +1982,26 @@ function GameView({ gameId, onBack }) {
       {(commandPhase || game?.phase === 'movement') && !reanimation?.placing && (
         <CommandPanel game={game} onError={setError} />
       )}
-      {commandPhase && (
+      <ResurrectionPanel
+        game={game}
+        resurrection={resurrection}
+        onDeclare={(unit, cancel) =>
+          act(() => declareResurrection(game.id, { seat: unit.seat, unit_id: unit.unit_id, cancel }))
+        }
+      />
+      <ResurrectionPanel
+        game={game}
+        resurrection={turnEndReserves}
+        title="Into Strategic Reserves at the end of the turn"
+        declaredText="goes into Strategic Reserves at the end of this turn"
+        declareLabel="Into Strategic Reserves at the end of this turn"
+        onDeclare={(unit, cancel) =>
+          act(() =>
+            declareTurnEndReserves(game.id, { seat: unit.seat, unit_id: unit.unit_id, cancel })
+          )
+        }
+      />
+      {reanimation?.placing && (
         <ReanimationPanel
           game={game}
           reanimation={reanimation}
@@ -1964,6 +2050,13 @@ function GameView({ gameId, onBack }) {
           checking={checking}
           onSelectUnit={selectMoveUnit}
           onToggleAdvance={toggleAdvance}
+          onRerollAdvance={async (unit) => {
+            try {
+              setMovement(await rerollAdvance(game.id, { unit_id: unit.unit_id }))
+            } catch (err) {
+              setError(err.message)
+            }
+          }}
           onOptions={setDraftOptions}
           onReset={resetMove}
         />
@@ -2083,7 +2176,7 @@ function GameView({ gameId, onBack }) {
           onError={setError}
         />
       )}
-      {shootingPhase && (
+      {(shootingPhase || game?.phase === 'fight') && (
         <ShootingStartPanel
           game={game}
           refreshKey={shots}

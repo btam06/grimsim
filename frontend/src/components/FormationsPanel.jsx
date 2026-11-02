@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { declareFormations, getFormations, setFormation } from '../api'
+import { declareFormations, getFormations, grantFormationAbility, setFormation } from '../api'
 import Select from './Select'
 
 // Declaring battle formations, at the start of deployment (see
@@ -94,6 +94,34 @@ function FormationsPanel({ game, onDeclared, onError }) {
                 )
               })}
             </ul>
+            {(player.grants ?? []).map((grant) => (
+              // Abilities that give another unit an ability now (e.g.
+              // Thunderhawk Insertion: Deep Strike).
+              <div key={`${grant.source_unit_id}-${grant.ability}`} className="formation-grant">
+                <span>
+                  {grant.ability} <span className="hint">({grant.source_name})</span>:{' '}
+                  {grant.grants} for
+                </span>
+                <Select
+                  options={[
+                    { id: 'none', name: 'No unit' },
+                    ...grant.targets.map((t) => ({ id: t.unit_id, name: t.name })),
+                  ]}
+                  value={grant.unit_id == null ? 'none' : String(grant.unit_id)}
+                  onChange={(value) =>
+                    grantFormationAbility(game.id, {
+                      seat: player.seat,
+                      source_unit_id: grant.source_unit_id,
+                      ability: grant.ability,
+                      unit_id: value && value !== 'none' ? Number(value) : null,
+                    })
+                      .then(setFormations)
+                      .catch((err) => onError(err.message))
+                  }
+                  isDisabled={player.done}
+                />
+              </div>
+            ))}
             <div className="inline-controls">
               <button
                 type="button"

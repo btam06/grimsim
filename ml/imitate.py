@@ -12,8 +12,8 @@ from pathlib import Path
 # (see ml/model.py) to choose as it did - and to guess each player's return
 # from there (the value). The checkpoint can start PPO (ml.ppo --init).
 #
-#     ml/.venv/bin/python -m ml.imitate record saves/1/r1-s2-start_of_round.json \
-#         --teacher mypackage.policies:scripted --games 200 --processes 4 --data ml/data/scripted
+#     ml/.venv/bin/python -m ml.imitate record saves/1/setup.json \
+#         --teacher app.engine.scripted:scripted --games 200 --processes 4 --data ml/data/scripted
 #     ml/.venv/bin/python -m ml.imitate train ml/data/scripted --run imitated
 #
 # A game is a file of its decisions (gzipped JSON lines: what the player

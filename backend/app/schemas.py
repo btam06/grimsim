@@ -666,6 +666,9 @@ class ArmyListIn(BaseModel):
     # Its selection for its faction's list selection, if any (e.g. a Space
     # Marines list's Chapter - see FactionOut).
     subfaction: str | None = None
+    # The disposition it plays with: one its detachments offer (needed for a
+    # game if they offer more than one).
+    disposition_id: int | None = None
 
 
 class ListEligibleOut(BaseModel):
@@ -684,6 +687,7 @@ class ArmyListOut(BaseModel):
     user_id: int | None
     warlord_unit_id: int | None = None
     subfaction: str | None = None
+    disposition_id: int | None = None
 
 
 
@@ -734,11 +738,10 @@ class PrimaryMissionOut(PrimaryMissionIn):
 
 
 class GamePlayerIn(BaseModel):
+    # (Their disposition is their list's - see ArmyListIn.disposition_id.)
     user_id: int
     list_id: int
     secondary_mode: Literal["fixed", "tactical"]
-    # Needed only if the list's detachments have more than one disposition.
-    disposition_id: int | None = None
     # Fixed mode: the 2 secondary missions kept all game.
     fixed_secondary_ids: list[int] = []
 
@@ -1187,9 +1190,14 @@ class MovementUnitOut(BaseModel):
     # rolled one (kept for the phase, whether or not it Advances).
     kind: str | None = None
     advance_roll: int | None = None
+    # It can re-roll that Advance roll now (e.g. Karnivore).
+    can_reroll_advance: bool = False
     moved: bool = False
     # It arrived from Reserves this phase (it can't move again).
     arrived: bool = False
+    # What's being done to it now (e.g. 'Electro-shock: -2" Move, -2 to
+    # Advance and Charge rolls' - its models' movement already allows for it).
+    effects: list[str] = []
     # It disembarked from a transport that had moved this phase (it can't
     # move again).
     disembarked: bool = False
@@ -1480,6 +1488,9 @@ class FightUnitOut(BaseModel):
     fought: bool
     can_fight: bool
     reason: str | None = None
+    # Abilities it can use when it fights (e.g. Banner of Macragge - see
+    # FightIn.abilities).
+    abilities: list[str] = []
     # Eligible to fight but not engaged: it makes an overrun fight's pile-in
     # move first (12.06).
     overrun: bool = False
@@ -1553,6 +1564,9 @@ class FightIn(ShootIn):
     # unit id - see ShootIn.allocation_order).
     splits: list[FightSplitIn] = []
     allocation_orders: dict[int, list[int]] = {}
+    # Abilities the unit uses as it fights (e.g. Banner of Macragge's +1 A
+    # and S - see FightUnitOut.abilities).
+    abilities: list[str] = []
 
 
 class SplitCombatOut(BaseModel):
@@ -1610,6 +1624,18 @@ class FormationUnitOut(BaseModel):
     transport_unit_id: int | None = None
 
 
+class FormationGrantOut(BaseModel):
+    # A unit's ability that gives another of its player's units an ability
+    # as they declare their battle formations (e.g. Thunderhawk Insertion:
+    # Deep Strike): the units it can, and the one it does (if any).
+    source_unit_id: int
+    source_name: str
+    ability: str
+    grants: str
+    unit_id: int | None = None
+    targets: list["UnitIdNameOut"] = []
+
+
 class FormationPlayerOut(BaseModel):
     seat: int
     user_name: str
@@ -1618,6 +1644,15 @@ class FormationPlayerOut(BaseModel):
     reserves_points: int
     reserves_limit: int
     units: list[FormationUnitOut]
+    grants: list[FormationGrantOut] = []
+
+
+class FormationGrantIn(BaseModel):
+    seat: Literal[1, 2]
+    source_unit_id: int
+    ability: str
+    # The unit given the ability - None: none.
+    unit_id: int | None = None
 
 
 class FormationsOut(BaseModel):
@@ -1651,6 +1686,51 @@ class TeleportHomerUnitOut(BaseModel):
     name: str
     seat: int
     token: dict | None = None
+
+
+class ResurrectionUnitOut(BaseModel):
+    # A unit with a Resurrection Orb that could resurrect at the end of this
+    # phase - or is declared to.
+    unit_id: int
+    name: str
+    seat: int
+    declared: bool = False
+
+
+class ResurrectionOut(BaseModel):
+    units: list[ResurrectionUnitOut]
+
+
+class ResurrectionIn(BaseModel):
+    seat: Literal[1, 2]
+    unit_id: int
+    # Taking the declaration back.
+    cancel: bool = False
+
+
+class PhaseStartAbilityOut(BaseModel):
+    # An ability its player can use now, at the start of their opponent's
+    # phase: the unit, the ability and what it does.
+    unit_id: int
+    unit_name: str
+    ability: str
+    description: str | None = None
+
+
+class PhaseStartOut(BaseModel):
+    # The start of the phase: the player the game's waiting on to use their
+    # abilities for it (e.g. Defend the Divine Work) - or say they're done -
+    # and those abilities; and the abilities used this phase.
+    seat: int | None
+    phase: str | None
+    abilities: list[PhaseStartAbilityOut]
+    used: list[PhaseStartAbilityOut] = []
+
+
+class PhaseStartIn(BaseModel):
+    seat: Literal[1, 2]
+    unit_id: int
+    ability: str
 
 
 class TeleportHomersOut(BaseModel):
@@ -2190,3 +2270,6 @@ class EmergencyOut(BaseModel):
 class EmbarkIn(BaseModel):
     unit_id: int
     transport_unit_id: int
+
+
+FormationGrantOut.model_rebuild()

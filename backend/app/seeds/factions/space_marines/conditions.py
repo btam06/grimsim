@@ -8,6 +8,10 @@ THUNDER_HAMMER_WEAPON = "thunder_hammer_weapon"
 ASSAULT_DOCTRINE_ACTIVE = "assault_doctrine_active"
 DEVASTATOR_DOCTRINE_ACTIVE = "devastator_doctrine_active"
 TACTICAL_DOCTRINE_ACTIVE = "tactical_doctrine_active"
+CALGARS_CHAMPION_ATTACK = "calgars_champion_attack"
+TARGET_MODEL_OTHER_CHARACTER = "target_model_other_character"
+MELEE_PRE_WEAPON = "melee_pre_weapon"
+PSYCHIC_ATTACK = "psychic_attack"
 
 
 def _weapon(context: dict, name: str) -> bool:
@@ -47,7 +51,39 @@ def tactical_doctrine_active(context: dict) -> bool:
     return _doctrine(context, "Tactical")
 
 
+def calgars_champion_attack(context: dict) -> bool:
+    # An attack by the model with Calgar's Champion (not its unit's other
+    # models), against a unit with a CHARACTER model.
+    return "Calgar's Champion" in context.get(
+        "attacker_model_abilities", set()
+    ) and "CHARACTER" in context.get("defender_keywords", set())
+
+
+def target_model_other_character(context: dict) -> bool:
+    # A defending CHARACTER model other than the one with Veteran Bodyguard
+    # (checked per model, as its profile's worked out).
+    return (
+        context.get("step") == "target_model"
+        and "CHARACTER" in context.get("target_model_keywords", set())
+        and "Veteran Bodyguard" not in context.get("target_model_abilities", set())
+    )
+
+
+def melee_pre_weapon(context: dict) -> bool:
+    # Checked once per melee weapon - e.g. for "+1 A" to melee attacks.
+    return context.get("step") == "pre_weapon" and not context.get("is_ranged", True)
+
+
+def psychic_attack(context: dict) -> bool:
+    # An attack made with a [PSYCHIC] weapon - e.g. Psychic Hood's Feel No Pain.
+    return "Psychic" in context.get("weapon_ability_names", set())
+
+
 CONDITIONS = {
+    PSYCHIC_ATTACK: psychic_attack,
+    CALGARS_CHAMPION_ATTACK: calgars_champion_attack,
+    TARGET_MODEL_OTHER_CHARACTER: target_model_other_character,
+    MELEE_PRE_WEAPON: melee_pre_weapon,
     LIGHTNING_CLAWS_WEAPON: lightning_claws_weapon,
     THUNDER_HAMMER_WEAPON: thunder_hammer_weapon,
     ASSAULT_DOCTRINE_ACTIVE: assault_doctrine_active,

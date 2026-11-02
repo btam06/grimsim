@@ -39,6 +39,27 @@ async def test_primary_vp_is_capped_at_15_a_battle_round(
     assert "15VP" in response.json()["detail"]
 
 
+async def test_primary_vp_is_capped_at_45_a_battle(
+    client: AsyncClient, session, tmp_path, monkeypatch
+):
+    # 15VP in each of three battle rounds, then 10 more in the fourth: none
+    # of it counts.
+    from app.engine.state import GameScore
+
+    game_id, a, d = await _game(client, session, tmp_path, monkeypatch)
+    game = await _load_game(session, game_id)
+    player = next(p for p in game.players if p.seat == 2)
+    for battle_round in (1, 2, 3):
+        player.scores.append(
+            GameScore(battle_round=battle_round, turn_seat=2, kind="primary", points=15)
+        )
+    await _advance_to(client, game_id, 4, 2, "command")
+    url = f"/games/{game_id}/primary-score"
+    response = await client.post(url, json={"seat": 2, "points": 10})
+    assert "45VP" in response.json()["detail"]
+    assert sum(s["points"] for s in await _scores(client, game_id, 2) if s["kind"] == "primary") <= 45
+
+
 # --- what counts as a kill ---
 
 

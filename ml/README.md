@@ -13,15 +13,17 @@ uv pip install --python ml/.venv/bin/python -r ml/requirements.txt \
 
 That's PyTorch's CPU build: the models are small, and the bottleneck is playing the games.
 
-Run everything from the project's root. Games start from saves in `saves/<game>/` (see `backend/app/engine/saves.py`). Make a game in the app, and once it's under way its phase saves can be used, for example `saves/1/r1-s2-start_of_round.json`.
+Run everything from the project's root. Games start from saves in `saves/<game>/` (see `backend/app/engine/saves.py`). Make a game in the app: `saves/<game>/setup.json` is saved as it's made, before anything's deployed, so episodes from it learn deployment too (for example `saves/1/setup.json`). Its phase saves, such as `r1-s1-start_of_round.json`, start later, once the battle's under way.
+
+To make a spread of games from your army lists - every pairing, each way round - run `python3 scripts/spread_games.py --games 3 > ml/data/spread.txt` with the app up, then pass `$(cat ml/data/spread.txt)` as the saves. Each episode starts from one of them at random.
 
 ## Training with PPO
 
 ```bash
-ml/.venv/bin/python -m ml.ppo saves/1/r1-s2-start_of_round.json --run first --envs 4
+ml/.venv/bin/python -m ml.ppo saves/1/setup.json --run first --envs 4
 ```
 
-- `--opponent self` (the default) is self-play: one policy plays both players. `--opponent app.engine.env:random_policy`, or any `module:function`, plays a fixed opponent, taking a random seat each game.
+- `--opponent self` (the default) is self-play: one policy plays both players. `--opponent app.engine.env:random_policy`, `--opponent app.engine.scripted:scripted` (the scripted player: rules of thumb - see backend/app/engine/scripted.py), or any `module:function`, plays a fixed opponent, taking a random seat each game.
 - `--eval-every 10 --eval-games 4` plays the policy against random play every 10 updates.
 - `--init ml/runs/imitated/model.pt` starts from a checkpoint, for example one from imitation.
 - Checkpoints go to `ml/runs/<run>/model.pt`. To watch the logs, run `ml/.venv/bin/tensorboard --logdir ml/runs`.
@@ -31,8 +33,8 @@ ml/.venv/bin/python -m ml.ppo saves/1/r1-s2-start_of_round.json --run first --en
 Record a policy's games, then train the model to choose as it did:
 
 ```bash
-ml/.venv/bin/python -m ml.imitate record saves/1/r1-s2-start_of_round.json \
-    --teacher mypackage.policies:scripted --games 200 --processes 4 --data ml/data/scripted
+ml/.venv/bin/python -m ml.imitate record saves/1/setup.json \
+    --teacher app.engine.scripted:scripted --games 200 --processes 4 --data ml/data/scripted
 ml/.venv/bin/python -m ml.imitate train ml/data/scripted --run imitated
 ```
 
@@ -45,7 +47,7 @@ import ml
 from app.engine.evaluate import evaluate
 from ml.policy import ModelPolicy
 
-print(evaluate(ModelPolicy("ml/runs/first/model.pt"), "saves/1/r1-s2-start_of_round.json",
+print(evaluate(ModelPolicy("ml/runs/first/model.pt"), "saves/1/setup.json",
                games=20, processes=4).summary())
 ```
 

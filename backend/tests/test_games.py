@@ -255,19 +255,20 @@ async def test_create_game_chooses_between_several_dispositions(client: AsyncCli
             },
         )
     ).json()["id"]
-    await client.put(
-        f"/lists/{ids['list1']}",
-        json={
-            "name": "List 1",
-            "points_limit": 2000,
-            "faction_id": ids["faction1"],
-            "detachment_ids": [ids["detachment1"], detachment],
-            "user_id": ids["user1"],
-        },
-    )
+    list_body = {
+        "name": "List 1",
+        "points_limit": 2000,
+        "faction_id": ids["faction1"],
+        "detachment_ids": [ids["detachment1"], detachment],
+        "user_id": ids["user1"],
+    }
+    await client.put(f"/lists/{ids['list1']}", json=list_body)
     payload = _game_payload(ids)
-    assert (await client.post("/games", json=payload)).status_code == 400
-    payload["players"][0]["disposition_id"] = extra
+    # Two to choose from: it's chosen on the list.
+    response = await client.post("/games", json=payload)
+    assert "choose their list's disposition" in response.json()["detail"]
+    response = await client.put(f"/lists/{ids['list1']}", json={**list_body, "disposition_id": extra})
+    assert response.json()["disposition_id"] == extra
     game = (await client.post("/games", json=payload)).json()
     assert _player(game, 1)["disposition_id"] == extra
     # No primary mission defined for that pairing.
@@ -719,3 +720,22 @@ async def test_a_stratagem_can_be_used_once_per_phase(client: AsyncClient):
     await _advance(client, game_id)
     assert "Anytime" in await _usable(client, game_id, 1)
     assert (await use(1)).status_code == 200
+
+
+
+async def test_a_lists_disposition_is_one_its_detachments_offer(client: AsyncClient):
+    ids = await _setup(client)
+    other = (await client.post("/dispositions", json={"name": "Other"})).json()["id"]
+    body = {
+        "name": "List 1",
+        "points_limit": 2000,
+        "faction_id": ids["faction1"],
+        "detachment_ids": [ids["detachment1"]],
+        "user_id": ids["user1"],
+    }
+    response = await client.put(f"/lists/{ids['list1']}", json={**body, "disposition_id": other})
+    assert "detachments offer" in response.json()["detail"]
+    response = await client.put(
+        f"/lists/{ids['list1']}", json={**body, "disposition_id": ids["disposition1"]}
+    )
+    assert response.json()["disposition_id"] == ids["disposition1"]

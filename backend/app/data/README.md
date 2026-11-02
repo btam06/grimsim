@@ -251,7 +251,10 @@ The terrain kit, and the battlefield layouts that place it. Every layout uses
 the same kit - the same baseplates (terrain areas) and ruin walls and
 obstacles (terrain features) - each piece placed, turned and sometimes flipped
 differently, and not always all of them. A game is given a layout for its
-attacker's and defender's dispositions (picked at random if there are several).
+attacker's and defender's dispositions (picked at random if there are several),
+either way round: a Take and Hold vs Purge the Foe layout is also for a Purge
+the Foe attacker against a Take and Hold defender - its zones are the
+attacker's and the defender's, whatever their dispositions.
 
 `area_shapes` and `feature_shapes` are the kit, each with how many of it the
 kit has (`count`). An area shape is a `width` x `height` rectangle centred on

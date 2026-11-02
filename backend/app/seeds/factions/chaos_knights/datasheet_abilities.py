@@ -225,7 +225,10 @@ OPTIONS = {
 # How the calculator handles abilities above, where that needs saying.
 CALCULATOR_NOTES = {
     "Executioner": "Its Battle-shock tests are outside the calculator.",
-    "Karnivore": "Descriptive only: Advance and Charge rolls are outside the calculator.",
+    "Karnivore": (
+        "Descriptive only in the calculator; in a game, it can re-roll its Advance and Charge "
+        "rolls."
+    ),
     "Protection Protocols": "Descriptive only: a stratagem rule.",
     "Malefic Surge": (
         "Pick the Malefic Surge ability the unit is using under Faction Rules; Unholy Hunger "
@@ -233,3 +236,9 @@ CALCULATOR_NOTES = {
     ),
     "Fleshmetal Fusion": "The +1 to armour saves against Damage 1 attacks isn't modelled.",
 }
+
+
+# In a game: abilities that let their unit re-roll its charge roll, and its
+# Advance roll (see app/services/in_game/charging.py, movement.py).
+CHARGE_REROLLS = {"Karnivore"}
+ADVANCE_REROLLS = {"Karnivore"}

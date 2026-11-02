@@ -32,6 +32,15 @@ async def warlord_reason(
             .where(Unit.list_id == list_id)
         )
     ).scalars().all()
+    from app.seeds import datasheet_abilities
+
+    chosen = next((u for u in units if u.id == warlord_unit_id), None)
+    if chosen is not None and (
+        {a.name for m in chosen.unit_models for a in m.model.abilities}
+        & datasheet_abilities.CANNOT_BE_WARLORD
+    ):
+        # (e.g. Enslaved Star God: "This model cannot be your WARLORD".)
+        return f"{chosen.faction_unit.name} can't be the list's Warlord"
     required = [
         unit
         for unit in units

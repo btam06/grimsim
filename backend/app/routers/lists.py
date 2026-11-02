@@ -10,6 +10,7 @@ from app.models import (
     Detachment,
     Faction,
     FactionUnit,
+    ListDisposition,
     ListSubfaction,
     ListWarlord,
     Model,
@@ -35,6 +36,7 @@ def _to_out(army_list: ArmyList) -> ArmyListOut:
         user_id=army_list.owner.id if army_list.owner else None,
         warlord_unit_id=army_list.warlord_unit_id,
         subfaction=army_list.subfaction,
+        disposition_id=army_list.disposition_id,
     )
 
 
@@ -52,7 +54,11 @@ async def _build_detachments(
 ) -> list[Detachment]:
     if not detachment_ids:
         return []
-    result = await session.execute(select(Detachment).where(Detachment.id.in_(detachment_ids)))
+    result = await session.execute(
+        select(Detachment)
+        .options(selectinload(Detachment.dispositions))
+        .where(Detachment.id.in_(detachment_ids))
+    )
     detachments = list(result.scalars().all())
     if len(detachments) != len(set(detachment_ids)):
         raise HTTPException(status_code=400, detail="one or more detachment_ids not found")
@@ -70,6 +76,20 @@ async def _build_detachments(
             detail=f"only one {', '.join(clashing)} detachment can be taken",
         )
     return detachments
+
+
+def _build_disposition(
+    detachments: list[Detachment], disposition_id: int | None
+) -> ListDisposition | None:
+    # The list's disposition: one its detachments offer.
+    if disposition_id is None:
+        return None
+    offered = {d.id for detachment in detachments for d in detachment.dispositions}
+    if disposition_id not in offered:
+        raise HTTPException(
+            status_code=400, detail="the disposition must be one the list's detachments offer"
+        )
+    return ListDisposition(disposition_id=disposition_id)
 
 
 async def _build_warlord(
@@ -189,6 +209,7 @@ async def create_list(payload: ArmyListIn, session: AsyncSession = Depends(get_s
     # A new list has no units yet to be its Warlord.
     await _build_warlord(session, None, payload.warlord_unit_id)
     subfaction = await _build_subfaction(session, payload.faction_id, payload.subfaction)
+    disposition = _build_disposition(detachments, payload.disposition_id)
 
     army_list = ArmyList(
         name=payload.name,
@@ -198,6 +219,7 @@ async def create_list(payload: ArmyListIn, session: AsyncSession = Depends(get_s
         owner=owner,
         warlord_link=None,
         subfaction_link=subfaction,
+        disposition_link=disposition,
     )
     session.add(army_list)
     try:
@@ -252,6 +274,11 @@ async def update_list(
         army_list.subfaction_link = None
         await session.flush()
         army_list.subfaction_link = subfaction
+    disposition = _build_disposition(detachments, payload.disposition_id)
+    if army_list.disposition_id != payload.disposition_id:
+        army_list.disposition_link = None
+        await session.flush()
+        army_list.disposition_link = disposition
 
     try:
         await session.commit()

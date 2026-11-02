@@ -19,7 +19,7 @@ from app.engine.play import Engine  # noqa: E402
 # A game as a machine learning environment, in the style of Gymnasium's
 # (reset, then step until it's over) - plain Python, nothing to install:
 #
-#     env = GameEnv("saves/1/r1-s2-start_of_round.json", seat=1)
+#     env = GameEnv("saves/1/setup.json", seat=1)
 #     obs, info = env.reset(seed=0)
 #     while True:
 #         index = policy(obs)            # one of obs["actions"]
@@ -28,7 +28,8 @@ from app.engine.play import Engine  # noqa: E402
 #             obs, info = env.reset()
 #
 # Each episode starts from a save (see app/engine/saves.py) - one of
-# several, picked at random - with dice of its own (a new seed for the
+# several, picked at random; setup.json, made with the game, plays its
+# deployment too - with dice of its own (a new seed for the
 # game's rolls - see app/services/dice.py). An observation is what the
 # player whose decision it is sees (see app/engine/features.py): an action
 # is the index of one of its legal actions. Only actions that can be taken
@@ -70,10 +71,10 @@ Policy = Callable[[Decision, random.Random], int]
 
 
 def random_policy(decision: Decision, rng: random.Random) -> int:
-    # A legal action at random - but less often moving the game on (advance)
-    # while there's something else to do.
+    # A legal action at random - but less often moving the game on (advance,
+    # end_phase) while there's something else to do.
     actions = decision.actions
-    others = [i for i, a in enumerate(actions) if a["type"] != "advance"]
+    others = [i for i, a in enumerate(actions) if a["type"] not in ("advance", "end_phase")]
     if others and rng.random() > 0.2:
         return rng.choice(others)
     return rng.randrange(len(actions))

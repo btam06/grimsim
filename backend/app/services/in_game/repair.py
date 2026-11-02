@@ -11,14 +11,15 @@ from app.services.combat import roll_dice_faces
 from app.services.in_game import casualties, deployment
 from app.services.in_game.deployment import TOLERANCE, gap
 
-# Repairing in the Command phase: some abilities let their player, in their
-# Command phase, select one friendly model with some keywords within a
-# distance of the model with the ability: it regains lost wounds - and if
-# it's a VEHICLE, has a Feel No Pain until the start of their next Command
-# phase. Each model can be repaired once a Command phase, and each ability
-# used once (datasheet_abilities REPAIRS: {ability name: {"keywords": (...),
-# "range": inches, "heal": dice, "vehicle_feel_no_pain": n}} - e.g.
-# Omnissiah's Blessing).
+# Repairing: some abilities let their player, in one of their phases (their
+# Command phase, unless it says otherwise), select one friendly model with
+# some keywords within a distance of the model with the ability: it regains
+# lost wounds - and if it's a VEHICLE, may have a Feel No Pain until the
+# start of their next Command phase. Each model can be repaired once a turn,
+# and each ability used once (datasheet_abilities REPAIRS: {ability name:
+# {"keywords": (...), "range": inches, "heal": dice, "vehicle_feel_no_pain":
+# n, "phase": phase}} - e.g. Omnissiah's Blessing; Technomancer, at the end
+# of the Movement phase).
 
 FEEL_NO_PAIN_EFFECTS = {5: FEEL_NO_PAIN_5}
 
@@ -43,9 +44,9 @@ def _this_phase(game: Game, record: GameRepair) -> bool:
 
 
 def available(game: Game) -> list[tuple[Unit, str, list[UnitModel]]]:
-    # The repair abilities the player whose turn it is can use now (in their
-    # Command phase), and the models each could repair.
-    if game.status != "in_progress" or game.phase != "command":
+    # The repair abilities the player whose turn it is can use now (in the
+    # phase each is for), and the models each could repair.
+    if game.status != "in_progress" or game.phase is None:
         return []
     config = _config()
     player = next(p for p in game.players if p.seat == game.turn_seat)
@@ -61,7 +62,7 @@ def available(game: Game) -> list[tuple[Unit, str, list[UnitModel]]]:
                 continue
             for ability in unit_model.model.abilities:
                 how = config.get(ability.name)
-                if how is None:
+                if how is None or how.get("phase", "command") != game.phase:
                     continue
                 base = _base(game, unit_model)
                 targets = [
@@ -81,13 +82,14 @@ def repair(game: Game, unit: Unit, name: str, unit_model_id: int) -> int:
     # The unit's ability repairs the model: the wounds it regained.
     found = next((a for a in available(game) if a[0].id == unit.id and a[1] == name), None)
     if found is None:
-        raise _bad_request(f"{name} is used once in its player's Command phase")
+        phase = _config().get(name, {}).get("phase", "command")
+        raise _bad_request(f"{name} is used once, in its player's {phase} phase")
     target = next((m for m in found[2] if m.id == unit_model_id), None)
     if target is None:
         how = _config()[name]
         raise _bad_request(
             f'{name} targets a friendly {" ".join(how["keywords"])} model within '
-            f'{how["range"]:g}" of the model with it, once a Command phase'
+            f'{how["range"]:g}" of the model with it, each model once a turn'
         )
     how = _config()[name]
     rolled, _ = roll_dice_faces(how["heal"])

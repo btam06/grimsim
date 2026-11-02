@@ -103,3 +103,31 @@ def test_terrain_areas_without_features_dont_obscure():
     assert not sight.sees(viewer, target)
     # Not from within it.
     assert sight.sees(Base(12, 12, 32, 32), target)
+
+
+async def test_the_agent_offers_close_quarters_or_other_guns_not_both(
+    client: AsyncClient, session, tmp_path
+):
+    # D has a pistol and an assault gun: each model fires one or the other
+    # (24.07), so the agent offers each - and both shots are allowed.
+    from app.routers import agent
+    from app.schemas import ShootingWeaponOut
+
+    game_id, u = await _game(
+        client, session, tmp_path, d_kwargs={"gun_abilities": (PISTOL,), "assault_range": 24}
+    )
+    await _place(session, u["A"], [(20, 20)])
+    target = _target(await _targets(client, game_id, u["D"]), u["A"])
+    game = await _load_game(session, game_id)
+    d_ = deployment.find_unit(game, u["D"]["unit_id"])
+    weapons = [ShootingWeaponOut(**w) for w in target["weapons"]]
+    choices = agent._weapon_choices(game, d_, weapons)
+    names = {w.id: w.name for w in weapons}
+    assert sorted([names[i] for i in c["weapon_ids"]] for c in choices) == [
+        ["D assault gun"], ["D gun"]
+    ]
+    # Both together are refused; each alone is fine.
+    both = [i for c in choices for i in c["weapon_ids"]]
+    assert (await _shoot(client, game_id, u["D"], u["A"], both)).status_code == 400
+    response = await _shoot(client, game_id, u["D"], u["A"], choices[0]["weapon_ids"])
+    assert response.status_code == 200, response.text

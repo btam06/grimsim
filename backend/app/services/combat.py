@@ -144,6 +144,9 @@ class _Target:
     feel_no_pain_mortal: int | None = None
     # Its invulnerable save is against ranged attacks only.
     invulnerable_ranged_only: bool = False
+    # An invulnerable save it has against ranged attacks only, from a rule
+    # (e.g. Emanatus Force Field) - on top of its own.
+    ranged_invulnerable: int | None = None
     is_leader        : bool = False
     is_support       : bool = False
     # Its W characteristic, and whether it's a CHARACTER model (for its
@@ -153,6 +156,8 @@ class _Target:
     # Rolls to explode when destroyed (a datasheet ability with the
     # deadly_demise effect, e.g. "Deadly Demise D3").
     deadly_demise    : bool = False
+    # -1 Damage for each attack allocated to it (e.g. Implacable Resilience).
+    minus_one_damage : bool = False
     # Defender rules only this model has (from a per-model detachment rule,
     # e.g. War-Form Mantles: TECH-PRIEST models have a 4+ invulnerable save),
     # applied to an attack once it's allocated to this model.
@@ -173,19 +178,21 @@ def _wounded(target: _Target) -> bool:
 class _Allocation:
     # The defending unit's allocation groups (05.03), in allocation order:
     # one group for each CHARACTER model, and one for all other models with the
-    # same W, Sv and InSv. A non-CHARACTER group with a wounded model is first,
+    # same W, Sv and InSv (against these attacks - `ranged` or not: e.g. a
+    # model with Emanatus Force Field's 4+ against ranged attacks is in a
+    # group of its own). A non-CHARACTER group with a wounded model is first,
     # CHARACTER groups last (wounded ones before the rest); otherwise in the
-    # defender's `order` (group ids - see _group_id), or with the least
+    # defender's `order` (group ids - see _group_id), or with the best
     # protected first. Attacks are allocated to the current group - the first
     # with models left - each to a wounded model in it if there is one.
 
-    def __init__(self, targets: deque[_Target], order: list[int] | None):
+    def __init__(self, targets: deque[_Target], order: list[int] | None, ranged: bool = True):
         groups: dict[tuple, list[_Target]] = {}
         for t in targets:
             key = (
                 ("character", id(t))
                 if t.is_character
-                else ("group", t.wounds_characteristic, t.save, t.invulnerable)
+                else ("group", t.wounds_characteristic, t.save, _invulnerable_of(t, ranged))
             )
             groups.setdefault(key, []).append(t)
         preference = {group_id: i for i, group_id in enumerate(order or [])}
@@ -194,7 +201,10 @@ class _Allocation:
             return (
                 not any(_wounded(t) for t in group),
                 preference.get(_group_id(group), len(preference)),
-                -min(_effective_save_of(t) for t in group),
+                # The best save first - and of equal ones, the better
+                # invulnerable save (it beats AP).
+                min(_effective_save_of(t, ranged) for t in group),
+                min(_invulnerable_of(t, ranged) or 7 for t in group),
             )
 
         regular = sorted((g for g in groups.values() if not g[0].is_character), key=rank)
@@ -227,7 +237,7 @@ class AllocationGroup:
 
 
 def allocation_groups(unit: Unit, wounds: dict[int, int] | None = None) -> list[AllocationGroup]:
-    # The unit's allocation groups in their default order (the least protected
+    # The unit's allocation groups in their default order (the best protected
     # first) - only its models with wounds left, if `wounds` ({unit model id:
     # wounds left}) is given.
     targets = deque(
@@ -253,10 +263,22 @@ def allocation_groups(unit: Unit, wounds: dict[int, int] | None = None) -> list[
     ]
 
 
-def _effective_save_of(target: _Target) -> int:
-    if target.invulnerable is not None:
-        return min(target.save, target.invulnerable)
-    return target.save
+def _invulnerable_of(target: _Target, ranged: bool = True) -> int | None:
+    # Its best invulnerable save against ranged attacks, or melee ones.
+    found = [
+        save
+        for save, applies in (
+            (target.invulnerable, ranged or not target.invulnerable_ranged_only),
+            (target.ranged_invulnerable, ranged),
+        )
+        if save is not None and applies
+    ]
+    return min(found, default=None)
+
+
+def _effective_save_of(target: _Target, ranged: bool = True) -> int:
+    invulnerable = _invulnerable_of(target, ranged)
+    return min(target.save, invulnerable) if invulnerable is not None else target.save
 
 
 def _mortal_wound_target(targets: deque[_Target]) -> _Target:
@@ -562,22 +584,50 @@ def resolve_combat(
     )
     unit_rerolls_failed_hits = unit_wide_state.get("reroll_failed_hits", False)
 
-    def model_state(unit_model) -> dict:
-        # What the defender's rules do for one of its models in particular -
-        # e.g. the Aegis Protocol's +1 Toughness for KASTELAN ROBOT models, or
-        # Robotic Bodyguard's Feel No Pain 4+ for the Datasmith leading them.
-        state: dict = {}
-        _apply_triggered_effects(
-            defender_rules,
-            {
-                "step": "target_model",
-                "target_model_keywords": enhancement_rules.model_keywords(defender, unit_model),
-                "defender_keywords": defender_keywords,
-                "defender_model_keywords": defender_model_keywords,
-            },
-            state,
-            deque(),
+    def own_rules(unit_model) -> tuple:
+        # Rules only this model has: per-model detachment rules (e.g.
+        # War-Form Mantles), those a game gives it (e.g. a repair's Feel No
+        # Pain, or an aura it's wholly within), and its wargear's protective
+        # abilities (e.g. a Shield Dome's 5+ invulnerable save) - and those of
+        # wargear another model in the unit has that reaches the bearer's unit.
+        return (
+            tuple(
+                ability
+                for ability in model_abilities(
+                    list(defender_detachment_rules or []),
+                    enhancement_rules.model_keywords(defender, unit_model),
+                    "defender",
+                )
+                if isinstance(ability, Rule)
+            )
+            + tuple((defender_model_rules or {}).get(unit_model.id, ()))
+            + tuple(
+                ability
+                for other in defender.unit_models
+                for gear in other.wargear
+                if other is unit_model or gear.scope == "bearers_unit"
+                for ability in gear.abilities
+                if _protective(ability)
+            )
         )
+
+    def model_state(unit_model) -> dict:
+        # What the defender's rules - and its own - do for one of its models in
+        # particular: e.g. the Aegis Protocol's +1 Toughness for KASTELAN ROBOT
+        # models, Robotic Bodyguard's Feel No Pain 4+ for the Datasmith leading
+        # them, or Emanatus Force Field's 4+ against ranged attacks.
+        state: dict = {}
+        context = {
+            "step": "target_model",
+            "target_model_keywords": enhancement_rules.model_keywords(defender, unit_model),
+            # (Its datasheet abilities' names - e.g. for "other CHARACTER
+            # models", the one with the ability aside: Veteran Bodyguard.)
+            "target_model_abilities": {a.name for a in unit_model.model.abilities},
+            "defender_keywords": defender_keywords,
+            "defender_model_keywords": defender_model_keywords,
+        }
+        _apply_triggered_effects(defender_rules, context, state, deque())
+        _apply_triggered_effects(list(own_rules(unit_model)), context, state, deque())
         return state
 
     model_states = {id(unit_model): model_state(unit_model) for unit_model in ordered_unit_models}
@@ -586,7 +636,19 @@ def resolve_combat(
             toughness=unit_model.model.toughness
             + (1 if model_states[id(unit_model)].get("plus_one_toughness") else 0),
             save=unit_model.model.save,
-            invulnerable=unit_model.model.invulnerable,
+            # (With any its rules give it - e.g. Defend the Divine Work's 4+ -
+            # so its allocation group knows it.)
+            invulnerable=min(
+                (
+                    save
+                    for save in (
+                        unit_model.model.invulnerable,
+                        model_states[id(unit_model)].get("invulnerable_save"),
+                    )
+                    if save is not None
+                ),
+                default=None,
+            ),
             feel_no_pain=min(
                 (
                     fnp
@@ -600,6 +662,8 @@ def resolve_combat(
             ),
             feel_no_pain_mortal=unit_model.model.feel_no_pain_mortal,
             invulnerable_ranged_only=unit_model.model.invulnerable_ranged_only,
+            ranged_invulnerable=model_states[id(unit_model)].get("ranged_invulnerable"),
+            minus_one_damage=bool(model_states[id(unit_model)].get("minus_one_damage")),
             remaining_wounds=(
                 unit_model.wounds
                 if defender_wounds is None
@@ -618,33 +682,18 @@ def resolve_combat(
                 for ability in unit_model.model.abilities
                 for effect in ability.effects
             ),
-            rules=tuple(
-                ability
-                for ability in model_abilities(
-                    list(defender_detachment_rules or []),
-                    enhancement_rules.model_keywords(defender, unit_model),
-                    "defender",
-                )
-                if isinstance(ability, Rule)
-            )
-            + tuple((defender_model_rules or {}).get(unit_model.id, ()))
-            # Its wargear's protective abilities (e.g. a Shield Dome's 5+
-            # invulnerable save) - and those of wargear another model in the
-            # unit has that reaches the bearer's unit.
-            + tuple(
-                ability
-                for other in defender.unit_models
-                for gear in other.wargear
-                if other is unit_model or gear.scope == "bearers_unit"
-                for ability in gear.abilities
-                if _protective(ability)
-            ),
+            rules=own_rules(unit_model),
         )
         for unit_model in ordered_unit_models
     )
     # Every model attacked, destroyed or not (the queue loses them as they die).
     all_targets = list(targets)
-    allocation = _Allocation(targets, allocation_order)
+    # (Ranged attacks, unless every weapon chosen is a melee one.)
+    chosen = [
+        w for m in attacker.unit_models for w in m.weapons if w.id in selected_weapon_ids
+    ]
+    ranged_attacks = not chosen or any(w.weapon_type != "melee" for w in chosen)
+    allocation = _Allocation(targets, allocation_order, ranged=ranged_attacks)
 
     def unit_toughness() -> int:
         # The T an attack against the unit uses (19.02): the highest of its
@@ -812,6 +861,9 @@ def resolve_combat(
                     "attacker_model_keywords": enhancement_rules.model_keywords(
                         attacker, unit_model
                     ),
+                    # ...and its datasheet abilities' names - e.g. for "this
+                    # model's attacks" (Calgar's Champion).
+                    "attacker_model_abilities": {a.name for a in unit_model.model.abilities},
                 }
 
                 # Weapon eligibility: a static, no-dice-rolled check of this
@@ -965,8 +1017,9 @@ def resolve_combat(
         damage = (
             rolled_damage + fired["damage_bonus"] + (1 if attack.get("plus_one_damage") else 0)
         )
-        # e.g. Nanoassembly Protocols: -1 Damage, to a minimum of 1.
-        if attack.get("minus_one_damage"):
+        # e.g. Nanoassembly Protocols: -1 Damage, to a minimum of 1 - or the
+        # model's own (e.g. Implacable Resilience).
+        if attack.get("minus_one_damage") or target.minus_one_damage:
             damage = max(1, damage - 1)
         fnps = [target.feel_no_pain, attack.get("feel_no_pain")]
         if mortal:
@@ -1001,7 +1054,8 @@ def resolve_combat(
         queue = deque(profile_attacks)
         while queue:
             attack, fired = queue.popleft()
-            if attack["auto_hit"]:
+            # (A weapon with no skill - [TORRENT]'s "N/A" - never rolls.)
+            if attack["auto_hit"] or not fired["weapon"].skill:
                 successful_hits.append((attack, fired))
                 continue
             weapon = fired["weapon"]
@@ -1071,6 +1125,9 @@ def resolve_combat(
                 effective_skill += 1
             if not is_ranged and attack.get("plus_one_skill_melee"):
                 effective_skill -= 1
+            # (Worsened, e.g. by Data-spike: the characteristic, outside the cap.)
+            if not is_ranged and attack.get("worse_melee_skill"):
+                effective_skill += 1
 
             # The unmodified roll that scores a Critical Hit: a 6, or lower for
             # some attacks (e.g. Enslaved Artifice's 5+).
@@ -1253,10 +1310,9 @@ def resolve_combat(
             save_needed = target.save - ap
             # (A ranged-only invulnerable save, e.g. an ion shield, doesn't
             # help against melee attacks.)
-            if target.invulnerable is not None and (
-                fired["is_ranged"] or not target.invulnerable_ranged_only
-            ):
-                save_needed = min(save_needed, target.invulnerable)
+            invulnerable = _invulnerable_of(target, fired["is_ranged"])
+            if invulnerable is not None:
+                save_needed = min(save_needed, invulnerable)
             # An invulnerable save granted by a rule (e.g. Waaagh!'s 5+ while
             # riled up) - also unaffected by AP.
             if attack.get("invulnerable_save") is not None:

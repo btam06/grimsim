@@ -81,6 +81,13 @@ CORE_ENTRIES = [
         [],
     ),
     (
+        "Damaged: 1-4 Wounds Remaining",
+        "While this model has 1-4 wounds remaining, each time this model makes an attack, "
+        "subtract 1 from the Hit roll.",
+        [],
+        [],
+    ),
+    (
         "Damaged: 1-5 Wounds Remaining",
         "While this model has 1-5 wounds remaining, subtract 3 from this model's Objective "
         "Control characteristic and each time this model makes an attack, subtract 1 from the "
@@ -207,11 +214,13 @@ _DAMAGED_RULE = Rule(
 # is Damaged (see app/services/in_game/casualties.py): -1 to its Hit rolls,
 # and less OC.
 DAMAGED_PROFILES = {
+    "Damaged: 1-4 Wounds Remaining": (4, 0),
     "Damaged: 1-5 Wounds Remaining": (5, 3),
     "Damaged: 1-10 Wounds Remaining": (10, 5),
 }
 
 CORE_RULES = {
+    "Damaged: 1-4 Wounds Remaining": [_DAMAGED_RULE],
     "Damaged: 1-5 Wounds Remaining": [_DAMAGED_RULE],
     "Damaged: 1-10 Wounds Remaining": [_DAMAGED_RULE],
     "Stealth": [
@@ -309,6 +318,21 @@ COMBINED = (
     "STRATAGEM_TARGET_CP",
     "STRATAGEM_COSTS",
     "START_OF_SHOOTING",
+    "PHASE_START_ABILITIES",
+    "AFTER_SHOOTING_EFFECTS",
+    "SURGE_WHEN_SHOT",
+    "FORMATION_GRANTS",
+    "FIGHT_ABILITIES",
+    "STRATAGEM_DISCOUNTS",
+    "MOVED_OVER_MORTALS",
+    "CHARGE_MORTALS",
+    "TURN_END_RESERVES",
+    "BATTLE_SHOCK_AURAS",
+    "AFTER_SHOOTING_BATTLE_SHOCK",
+    "ELIGIBLE_AFTER",
+    "CANNOT_BE_WARLORD",
+    "DESPERATE_ESCAPE_REROLLS",
+    "ADVANCE_REROLLS",
     "REACTIVE_MOVES",
     "RALLIES",
     "REPAIRS",
@@ -348,6 +372,21 @@ def _combine() -> dict:
                 "STRATAGEM_TARGET_CP": {},
                 "STRATAGEM_COSTS": {},
                 "START_OF_SHOOTING": {},
+                "PHASE_START_ABILITIES": {},
+                "AFTER_SHOOTING_EFFECTS": {},
+                "SURGE_WHEN_SHOT": {},
+                "FORMATION_GRANTS": {},
+                "FIGHT_ABILITIES": {},
+                "STRATAGEM_DISCOUNTS": {},
+                "MOVED_OVER_MORTALS": {},
+                "CHARGE_MORTALS": {},
+                "TURN_END_RESERVES": {},
+                "BATTLE_SHOCK_AURAS": {},
+                "AFTER_SHOOTING_BATTLE_SHOCK": {},
+                "ELIGIBLE_AFTER": {},
+                "CANNOT_BE_WARLORD": set(),
+                "DESPERATE_ESCAPE_REROLLS": set(),
+                "ADVANCE_REROLLS": set(),
                 "REACTIVE_MOVES": {},
                 "RALLIES": {},
                 "REPAIRS": {},
@@ -381,6 +420,21 @@ def _combine() -> dict:
                     ("STRATAGEM_TARGET_CP", {}),
                     ("STRATAGEM_COSTS", {}),
                     ("START_OF_SHOOTING", {}),
+                    ("PHASE_START_ABILITIES", {}),
+                    ("AFTER_SHOOTING_EFFECTS", {}),
+                    ("SURGE_WHEN_SHOT", {}),
+                    ("FORMATION_GRANTS", {}),
+                    ("FIGHT_ABILITIES", {}),
+                    ("STRATAGEM_DISCOUNTS", {}),
+                    ("MOVED_OVER_MORTALS", {}),
+                    ("CHARGE_MORTALS", {}),
+                    ("TURN_END_RESERVES", {}),
+                    ("BATTLE_SHOCK_AURAS", {}),
+                    ("AFTER_SHOOTING_BATTLE_SHOCK", {}),
+                    ("ELIGIBLE_AFTER", {}),
+                    ("CANNOT_BE_WARLORD", set()),
+                    ("DESPERATE_ESCAPE_REROLLS", set()),
+                    ("ADVANCE_REROLLS", set()),
                     ("REACTIVE_MOVES", {}),
                     ("RALLIES", {}),
                     ("REPAIRS", {}),
@@ -499,6 +553,45 @@ def _combine() -> dict:
             "START_OF_SHOOTING": {
                 k: v for source in sources for k, v in source["START_OF_SHOOTING"].items()
             },
+            "PHASE_START_ABILITIES": {
+                k: v for source in sources for k, v in source["PHASE_START_ABILITIES"].items()
+            },
+            "AFTER_SHOOTING_EFFECTS": {
+                k: v for source in sources for k, v in source["AFTER_SHOOTING_EFFECTS"].items()
+            },
+            "SURGE_WHEN_SHOT": {
+                k: v for source in sources for k, v in source["SURGE_WHEN_SHOT"].items()
+            },
+            "FORMATION_GRANTS": {
+                k: v for source in sources for k, v in source["FORMATION_GRANTS"].items()
+            },
+            "FIGHT_ABILITIES": {
+                k: v for source in sources for k, v in source["FIGHT_ABILITIES"].items()
+            },
+            "STRATAGEM_DISCOUNTS": {
+                k: v for source in sources for k, v in source["STRATAGEM_DISCOUNTS"].items()
+            },
+            "MOVED_OVER_MORTALS": {
+                k: v for source in sources for k, v in source["MOVED_OVER_MORTALS"].items()
+            },
+            "CHARGE_MORTALS": {
+                k: v for source in sources for k, v in source["CHARGE_MORTALS"].items()
+            },
+            "TURN_END_RESERVES": {
+                k: v for source in sources for k, v in source["TURN_END_RESERVES"].items()
+            },
+            "BATTLE_SHOCK_AURAS": {
+                k: v for source in sources for k, v in source["BATTLE_SHOCK_AURAS"].items()
+            },
+            "AFTER_SHOOTING_BATTLE_SHOCK": {
+                k: v for source in sources for k, v in source["AFTER_SHOOTING_BATTLE_SHOCK"].items()
+            },
+            "ELIGIBLE_AFTER": {
+                k: v for source in sources for k, v in source["ELIGIBLE_AFTER"].items()
+            },
+            "CANNOT_BE_WARLORD": {n for source in sources for n in source["CANNOT_BE_WARLORD"]},
+            "DESPERATE_ESCAPE_REROLLS": {n for source in sources for n in source["DESPERATE_ESCAPE_REROLLS"]},
+            "ADVANCE_REROLLS": {n for source in sources for n in source["ADVANCE_REROLLS"]},
             # Abilities that let their unit move in its opponent's Movement
             # phase when an enemy unit ends a move near it (see
             # app/services/in_game/reactive_move.py).

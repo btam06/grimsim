@@ -30,6 +30,7 @@ function MovementPanel({
   checking,
   onSelectUnit,
   onToggleAdvance,
+  onRerollAdvance,
   onOptions,
   onReset,
 }) {
@@ -60,11 +61,24 @@ function MovementPanel({
             />
             {unit.name}
             <span className="hint"> · {unitStatus(unit)}</span>
+            {(unit.effects ?? []).map((effect) => (
+              <span key={effect} className="hint">
+                {' '}
+                · {effect}
+              </span>
+            ))}
           </label>
         ))}
       </div>
       {movement.units.length === 0 && <p className="hint">They have no units on the battlefield.</p>}
 
+      {selected?.can_reroll_advance && (
+        <div className="inline-controls">
+          <button type="button" onClick={() => onRerollAdvance(selected)}>
+            Re-roll Advance ({selected.advance_roll})
+          </button>
+        </div>
+      )}
       {canMove && (
         <div className="move-kinds">
           {kinds.includes('fall_back') ? (

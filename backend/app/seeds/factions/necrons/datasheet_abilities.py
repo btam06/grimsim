@@ -1,14 +1,21 @@
-from app.combat_rules import Rule, RuleOption
+from app.combat_rules import FightAbility, Rule, RuleOption
 from app.combat_rules.conditions import (
     ALWAYS,
     ATTACKER_LED_BY_CHARACTER,
+    CHARGED,
     CRITICAL_WOUND,
     DEFENDER_IN_RANGE_OF_OBJECTIVE,
     MELEE_ATTACK,
+    STRENGTH_EXCEEDS_TOUGHNESS,
+    TARGET_LED_BY_CHARACTER,
     TARGET_MODEL_CHARACTER,
 )
 from app.combat_rules.effects import (
     ADD_EXTRA_HIT,
+    AUTO_PASS_WOUND,
+    FEEL_NO_PAIN_5,
+    MINUS_ONE_TO_WOUND,
+    NO_SAVE,
     CRITICAL_HIT_5,
     FEEL_NO_PAIN_MORTAL_5,
     REROLL_FAILED_WOUNDS,
@@ -34,6 +41,11 @@ from app.seeds.factions.necrons.conditions import (
     RANGED_VS_CLOSEST_ON_OBJECTIVE,
     COLD_FERVOUR_SPREAD,
     DESTROYER_CULT_RANGED_VS_CLOSEST,
+    ENMITIC_EXTERMINATOR_VS_NON_MONSTER,
+    GAUSS_DESTRUCTOR_VS_MONSTER,
+    IMPLACABLE_TARGET_MODEL,
+    MELEE_CRITICAL_HIT,
+    TARGET_LED_BY_NOBLE,
     NON_MONSTER_VS_OBJECTIVE_TARGET,
     RANGED_ATTACK_SET_UP_THIS_TURN,
     TARGET_IS_UNRAVELLING,
@@ -45,6 +57,108 @@ from app.seeds.factions.necrons.conditions import (
 
 # (name, description, [condition keywords], [effect keywords])
 ENTRIES = [
+    (
+        "Nanoscarab Reanimation Beam (Aura)",
+        "While a friendly NECRONS unit is within 3\" of this model, each time that unit's "
+        "Reanimation Protocols activate, that unit heals an additional D3 wounds.",
+        [],
+        [],
+    ),
+    (
+        "Tunnelling Horrors",
+        "At the end of your opponent's turn, if this unit is unengaged, you can use this "
+        "ability. If you do:\n"
+        "- Place this unit in strategic reserves.\n"
+        "- This unit must make an ingress move in your next Movement phase (including in your "
+        "first turn).",
+        [],
+        [],
+    ),
+    (
+        "Rites of Reanimation",
+        "While this model is leading a unit, models in that unit have the Feel No Pain 5+ "
+        "ability.",
+        [],
+        [],
+    ),
+    (
+        "Technomancer",
+        "At the end of your Movement phase, you can select one friendly NECRONS model within 6\" "
+        "of the bearer. That model regains up to D3 lost wounds. Each model can only be selected "
+        "for this ability once per turn.",
+        [],
+        [],
+    ),
+    (
+        "Wraith Form",
+        "Each time this unit ends a Normal move, you can select one enemy unit it moved over "
+        "during that move and roll one D6 for each model in this unit: for each 4+, that enemy "
+        "unit suffers 1 mortal wound.",
+        [],
+        [],
+    ),
+    (
+        "Optimised for Slaughter",
+        "Each time a model in this unit makes an attack with an enmitic exterminator that "
+        "targets a unit (excluding MONSTERS and VEHICLES), re-roll a Wound roll of 1. Each time "
+        "a model in this unit makes an attack with a gauss destructor that targets a MONSTER or "
+        "VEHICLE, re-roll a Wound roll of 1.",
+        [],
+        [],
+    ),
+    (
+        "My Will Be Done",
+        "Once per battle round, one unit from your army with this ability can use it when its "
+        "unit is targeted with a Stratagem. If it does, reduce the CP cost of that use of that "
+        "Stratagem by 1CP.",
+        [],
+        [],
+    ),
+    (
+        "Implacable Resilience",
+        "Each time an attack is allocated to this model, subtract 1 from that attack's Damage "
+        "characteristic.",
+        [],
+        [],
+    ),
+    (
+        "Guardian Protocols",
+        "While a NOBLE model is leading this unit, each time an attack targets this unit, if the "
+        "Strength characteristic of that attack is greater than this unit's Toughness "
+        "characteristic, subtract 1 from the Wound roll.",
+        [],
+        [],
+    ),
+    (
+        "United In Destruction",
+        "While this model is leading a unit, melee weapons equipped by models in that unit have "
+        "the [LETHAL HITS] ability.",
+        [],
+        [],
+    ),
+    (
+        "Crimson Harvest",
+        "Each time this model ends a Charge move, select one enemy unit within Engagement Range "
+        "of this model and roll one D6: on a 2-5, that unit suffers D3 mortal wounds; on a 6, "
+        "that unit suffers D3+3 mortal wounds.",
+        [],
+        [],
+    ),
+    (
+        "Whirling Onslaught",
+        "Each time a model in this unit makes a melee attack, re-roll a Hit roll of 1. If this "
+        "unit made a Charge move this turn, you can re-roll the Hit roll instead.",
+        [],
+        [],
+    ),
+    (
+        "Plasmacyte",
+        "Once per battle for each Plasmacyte this unit has, when this unit is selected to fight, "
+        "you can use this ability. If you do, until the end of the phase, melee weapons equipped "
+        "by models in this unit have the [DEVASTATING WOUNDS] ability.",
+        [],
+        [],
+    ),
     (
         "Necrodermis",
         "Each time an attack is allocated to this model, subtract 1 from the Damage "
@@ -251,6 +365,66 @@ ENTRIES = [
 
 # Code-defined rules for abilities above, by name.
 RULES = {
+    "Rites of Reanimation": [
+        Rule(
+            conditions=(TARGET_LED_BY_CHARACTER,),
+            effects=(FEEL_NO_PAIN_5,),
+            side="defender",
+            description="Feel No Pain 5+ for its unit while this CHARACTER leads it.",
+        ),
+    ],
+    "Optimised for Slaughter": [
+        Rule(
+            conditions=(ENMITIC_EXTERMINATOR_VS_NON_MONSTER,),
+            effects=(REROLL_WOUND_ONES,),
+            description=(
+                "Enmitic exterminators re-roll wound rolls of 1 against units with no MONSTER "
+                "or VEHICLE model."
+            ),
+        ),
+        Rule(
+            conditions=(GAUSS_DESTRUCTOR_VS_MONSTER,),
+            effects=(REROLL_WOUND_ONES,),
+            description="Gauss destructors re-roll wound rolls of 1 against MONSTERS and VEHICLES.",
+        ),
+    ],
+    "Implacable Resilience": [
+        Rule(
+            conditions=(IMPLACABLE_TARGET_MODEL,),
+            effects=(MINUS_ONE_DAMAGE,),
+            side="defender",
+            description="-1 Damage (to a minimum of 1) for attacks allocated to this model.",
+        ),
+    ],
+    "Guardian Protocols": [
+        Rule(
+            conditions=(STRENGTH_EXCEEDS_TOUGHNESS, TARGET_LED_BY_NOBLE),
+            effects=(MINUS_ONE_TO_WOUND,),
+            side="defender",
+            description=(
+                "While a NOBLE leads it, attacks against it with Strength greater than its "
+                "Toughness are -1 to wound."
+            ),
+        ),
+    ],
+    "United In Destruction": [
+        Rule(
+            conditions=(ATTACKER_LED_BY_CHARACTER, MELEE_CRITICAL_HIT),
+            effects=(AUTO_PASS_WOUND,),
+            description="While this CHARACTER leads its unit, its melee weapons have [LETHAL HITS].",
+        ),
+    ],
+    "Whirling Onslaught": [
+        Rule(conditions=(MELEE_ATTACK,), effects=(REROLL_HIT_ONES,)),
+        Rule(
+            conditions=(MELEE_ATTACK, CHARGED),
+            effects=(REROLL_FAILED_HITS,),
+            description=(
+                "Melee attacks re-roll hit rolls of 1 - any failed hit roll if it made a Charge "
+                "move this turn."
+            ),
+        ),
+    ],
     "Destroyer Cult": [
         Rule(
             conditions=(RANGED_ATTACK_LED_BY_CHARACTER,),
@@ -421,12 +595,48 @@ RULES = {
 # How the calculator handles abilities above, where that needs saying:
 # {ability name: note}.
 CALCULATOR_NOTES = {
-    "Resurrection Orb": "Descriptive only: healing between attacks isn't modelled.",
-    "Protective Disciples": "Descriptive only: targeting restrictions aren't modelled.",
-    "Matter Absorption": (
-        "Descriptive only: a start-of-Shooting-phase action outside the attack sequence."
+    "Nanoscarab Reanimation Beam (Aura)": (
+        "Descriptive only in the calculator; in a game, units within 3\" heal an additional D3 "
+        "as their Reanimation Protocols activate."
     ),
-    "Enslaved Star God": "Descriptive only: an army-building restriction.",
+    "Tunnelling Horrors": (
+        "Descriptive only in the calculator; in a game, its player declares it in the "
+        "opponent's turn, and at its end the unit goes into Strategic Reserves - to arrive in "
+        "their next Movement phase, even the first."
+    ),
+    "Technomancer": (
+        "Descriptive only in the calculator; in a game, at the end of your Movement phase a "
+        "friendly NECRONS model within 6\" regains up to D3 wounds."
+    ),
+    "Wraith Form": (
+        "Descriptive only in the calculator; in a game, after a Normal move a D6 for each of its "
+        "models (4+: a mortal wound) against an enemy unit it moved over."
+    ),
+    "My Will Be Done": (
+        "Descriptive only in the calculator; in a game, the first Stratagem each battle round "
+        "that targets a unit with it costs 1CP less."
+    ),
+    "Crimson Harvest": (
+        "Descriptive only in the calculator; in a game, mortal wounds on an enemy unit within "
+        "Engagement Range of it after its Charge move."
+    ),
+    "Plasmacyte": (
+        "Pick its fight option for [DEVASTATING WOUNDS] on melee weapons; in a game, its player "
+        "can use it when the unit's selected to fight - once a battle for each Plasmacyte."
+    ),
+    "Resurrection Orb": (
+        "Descriptive only in the calculator; in a game, its player declares it during a phase "
+        "and the unit heals D6 wounds as the phase ends (once a battle; one unit a turn)."
+    ),
+    "Protective Disciples": (
+        "Descriptive only in the calculator; in a game, models more than 12\" away can't shoot "
+        "it while it's within 3\" of another friendly DESTROYER CULT unit (Lone Operative)."
+    ),
+    "Matter Absorption": (
+        "Descriptive only in the calculator; in a game, used at the start of its player's "
+        "Shooting phase on an enemy VEHICLE unit within 12\"."
+    ),
+    "Enslaved Star God": "An army-building restriction: a list can't make it its Warlord.",
     "Command Protocols": (
         "Leader attachment is approximated: a unit with a CHARACTER model and other models "
         "counts as led."
@@ -436,7 +646,17 @@ CALCULATOR_NOTES = {
 # Selectable options for abilities above: {ability name: {option name:
 # RuleOption}}. In the calculator, picking one means the unit is within
 # range; in a game, it applies by itself to units within its aura_range.
+# Plasmacyte: [DEVASTATING WOUNDS] for its unit's melee weapons (it's used
+# fighting, so its attacks are melee ones).
+_PLASMACYTE_RULES = (Rule(conditions=(CRITICAL_WOUND,), effects=(NO_SAVE,)),)
+
 OPTIONS = {
+    "Plasmacyte": {
+        "Plasmacyte (fight)": RuleOption(
+            rules=_PLASMACYTE_RULES,
+            description="Its unit's melee weapons have [DEVASTATING WOUNDS] (a Plasmacyte used).",
+        ),
+    },
     "Infectious Murder-madness (Aura)": {
         "Infectious Murder-madness": RuleOption(
             rules=(Rule(conditions=(MURDER_MADNESS_CRITICAL_HIT,), effects=(ADD_EXTRA_HIT,)),),
@@ -479,3 +699,62 @@ ARMY_RULES = {
         ),
     ],
 }
+
+
+# In a game: abilities that let their player repair a model (see
+# app/services/in_game/repair.py) - Technomancer: at the end of their
+# Movement phase.
+REPAIRS = {
+    "Technomancer": {"keywords": ("NECRONS",), "range": 6.0, "heal": "D3", "phase": "movement"},
+}
+
+# In a game: abilities their unit can use when it's selected to fight (see
+# app/services/in_game/fight_abilities.py).
+FIGHT_ABILITIES = {
+    "Plasmacyte": FightAbility(rules=_PLASMACYTE_RULES, uses_wargear="Plasmacyte"),
+}
+
+# In a game: abilities that take CP off a Stratagem that targets their unit,
+# the first time each battle round for their army (see
+# app/services/in_game/game.py) - how much.
+STRATAGEM_DISCOUNTS = {"My Will Be Done": 1}
+
+# In a game: abilities whose unit, ending a move of one of these kinds, rolls
+# a D6 for each of its models against an enemy unit it moved over - each
+# roll of `roll` or more, 1 mortal wound (see app/services/in_game/movement.py).
+MOVED_OVER_MORTALS = {"Wraith Form": {"kinds": ("normal",), "roll": 4}}
+
+# In a game: abilities whose model, ending a Charge move, rolls a D6 against
+# an enemy unit within Engagement Range of it - the mortal wounds for each
+# result, highest first (see app/services/in_game/charging.py).
+CHARGE_MORTALS = {"Crimson Harvest": ((6, "D3+3"), (2, "D3"))}
+
+
+# In a game: abilities that put their unit in Strategic Reserves at the end of
+# its opponent's turn, to arrive in its player's next Movement phase (see
+# app/services/in_game/reinforcements.py).
+TURN_END_RESERVES = {"Tunnelling Horrors": {"must_arrive": True}}
+
+
+# In a game: abilities used at the start of their player's Shooting phase
+# (see app/services/in_game/shooting_start.py) - Matter Absorption: an enemy
+# VEHICLE unit within 12", 2+, D3 mortal wounds, and the model regains up to
+# that many.
+START_OF_SHOOTING = {
+    "Matter Absorption": {
+        "target_keywords": ("VEHICLE",),
+        "range": 12.0,
+        "roll": 2,
+        "mortal_wounds": "D3",
+        "heal_self": True,
+    },
+}
+
+# In a game: abilities that give their unit Lone Operative while within a
+# distance of another friendly unit with some keywords (see
+# app/services/in_game/shooting.py).
+CONDITIONAL_LONE_OPERATIVE = {"Protective Disciples": (3.0, ("DESTROYER CULT",))}
+
+# Abilities whose model can't be its list's Warlord (see
+# app/services/list_building/warlord.py).
+CANNOT_BE_WARLORD = {"Enslaved Star God"}

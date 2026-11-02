@@ -306,6 +306,8 @@ def take(
         return test
     from app.seeds.factions.chaos_knights import dread
 
+    # Enemy auras that worsen it (e.g. Neurostatic Interference).
+    test.modifier += aura_modifier(game, unit)
     test.first_die, test.second_die = (dice.randint(1, 6) for _ in range(DICE))
     test.passed = test.first_die + test.second_die + test.modifier >= needed(game, unit)
     if not test.passed and dread.delirium(game, unit):
@@ -319,3 +321,62 @@ def take(
 
         actions.check_started(game)
     return test
+
+
+def aura_modifier(game: Game, unit: Unit) -> int:
+    # What enemy auras do to the unit's Battle-shock tests (datasheet_abilities
+    # BATTLE_SHOCK_AURAS - e.g. Neurostatic Interference: -1 within 6", -2
+    # while the aura's unit is near a friendly ADEPTUS MECHANICUS BATTLELINE
+    # unit). The worst counts.
+    from app.seeds import datasheet_abilities
+    from app.services.in_game import regions
+    from app.services.in_game.deployment import TOLERANCE, gap
+
+    config = datasheet_abilities.BATTLE_SHOCK_AURAS
+    seat = deployment.owner(game, unit).seat
+    placed = deployment.positions(game)
+
+    def bases(u):
+        return [
+            deployment.base_at(m, placed[m.id].x, placed[m.id].y, placed[m.id].rotation)
+            for m in u.unit_models
+            if m.id in placed
+        ]
+
+    mine = bases(unit)
+    worst = 0
+    for player in game.players:
+        if player.seat == seat:
+            continue
+        for other in deployment.deployable_units(player):
+            names = {a.name for m in deployment.models_on_battlefield(game, other) for a in m.model.abilities}
+            for name in names & set(config):
+                how = config[name]
+                if not any(gap(a, b) <= how["range"] + TOLERANCE for a in bases(other) for b in mine):
+                    continue
+                value = how["modifier"]
+                if (near := how.get("near")) is not None:
+                    keywords, reach, instead = near
+                    if regions.near_friendly(game, other, keywords, reach):
+                        value = instead
+                worst = min(worst, value)
+    return worst
+
+
+def after_shooting(game: Game, unit: Unit, target: Unit, hits: int) -> None:
+    # The unit has shot `target` in its Shooting phase, scoring `hits`: its
+    # abilities that make a unit it hit take a Battle-shock test (e.g. Dread
+    # Snipers) do.
+    from app.seeds import datasheet_abilities
+
+    config = datasheet_abilities.AFTER_SHOOTING_BATTLE_SHOCK
+    if game.phase != "shooting" or deployment.owner(game, unit).seat != game.turn_seat:
+        return
+    if hits <= 0 or not deployment.models_on_battlefield(game, target):
+        return
+    if is_battle_shocked(game, target) or any(t.unit_id == target.id for t in pending(game)):
+        return
+    names = {a.name for m in deployment.models_on_battlefield(game, unit) for a in m.model.abilities}
+    for name in sorted(names & set(config)):
+        require(game, target, name, config[name])
+        return

@@ -12,6 +12,7 @@ from app.engine.state import (
     BATTLE_ROUNDS,
     PHASES,
     Game,
+    GameAbilityUse,
     GamePlayer,
     GameScore,
     GameSecondary,
@@ -120,18 +121,21 @@ async def create_game(session: AsyncSession, payload: GameIn) -> Live:
         if reason:
             raise _bad_request(f"player {seat}: {reason}")
 
-        # The player's disposition comes from their list's detachments.
+        # The player's disposition is their list's (one its detachments offer)
+        # - or, if they offer just one, that.
         candidates = {
             d.id: d for detachment in army_list.detachments for d in detachment.dispositions
         }
-        if spec.disposition_id is not None:
-            if spec.disposition_id not in candidates:
-                raise _bad_request(f"player {seat}: that disposition isn't on their detachments")
-            disposition_id = spec.disposition_id
+        if army_list.disposition_id is not None:
+            if army_list.disposition_id not in candidates:
+                raise _bad_request(
+                    f"player {seat}: their list's disposition isn't on its detachments"
+                )
+            disposition_id = army_list.disposition_id
         elif len(candidates) == 1:
             disposition_id = next(iter(candidates))
         elif len(candidates) > 1:
-            raise _bad_request(f"player {seat}: choose one of their list's dispositions")
+            raise _bad_request(f"player {seat}: choose their list's disposition (on the list)")
         else:
             disposition_id = None
 
@@ -197,6 +201,13 @@ async def create_game(session: AsyncSession, payload: GameIn) -> Live:
         layout = await terrain_service.pick_layout(
             session, attacker.disposition_id, defender.disposition_id
         )
+    if layout is None and attacker.disposition_id and defender.disposition_id:
+        # (With terrain layouts, but none for these dispositions, there'd be
+        # no deployment zones: the battle would begin with nothing set up.)
+        if reason := await terrain_service.missing_layout_reason(
+            session, attacker.disposition_id, defender.disposition_id
+        ):
+            raise _bad_request(reason)
     if layout is not None:
         game.layout_link = GameTerrainLayout(layout_id=layout.id)
     catalog = await loader.load(
@@ -427,6 +438,12 @@ async def advance(session: AsyncSession, game: Game) -> None:
         raise _bad_request(
             "set up the units emergency disembarking from a destroyed transport first"
         )
+    from app.services.in_game import phase_start
+
+    if (reason := phase_start.blocks(game)) is not None:
+        raise _bad_request(reason)
+    if heal_service.placing(game):
+        raise _bad_request("set up the returned models first")
     if game.phase == START_OF_ROUND:
         if missing := battle_round_service.missing_choices(game):
             raise _bad_request("choose an option first for " + ", ".join(missing))
@@ -460,15 +477,26 @@ async def advance(session: AsyncSession, game: Game) -> None:
         # The end of the charge phase: the opponent can use Heroic
         # Intervention - it pauses here for them to.
         return
+    if game.phase == "movement" and (late := reinforcements_service.still_to_arrive(game)):
+        # (Units that must arrive this phase - e.g. Tunnelling Horrors.)
+        raise _bad_request(
+            "bring in " + ", ".join(u.label for u in late) + " from Strategic Reserves first"
+        )
     if game.phase == "movement" and not reinforcements_service.movement_ended(game):
         # The end of the movement phase: if the opponent could use Rapid
         # Ingress or Fire Overwatch, it pauses here for them to.
         if await rapid_ingress_open(session, game) or await overwatch_open(session, game):
             reinforcements_service.end_movement(game)
             return
-    # The end of the phase: destroyed models left on the battlefield till then
-    # (Duty in Death) go; secured objectives lost since, then rules that
-    # secure objectives then (e.g. Raise the Banner).
+    # The end of the phase: units declared to resurrect do (Resurrection
+    # Orb) - and if that returns destroyed models, it waits for them to be
+    # set up.
+    reanimation_service.resurrect(game)
+    if heal_service.placing(game):
+        return
+    # Destroyed models left on the battlefield till then (Duty in Death) go;
+    # secured objectives lost since, then rules that secure objectives then
+    # (e.g. Raise the Banner).
     duty_in_death_service.remove(game)
     objectives_service.refresh_secured(game)
     objectives_service.secure_at_end_of(game, game.phase)
@@ -491,8 +519,10 @@ async def advance(session: AsyncSession, game: Game) -> None:
     if not scoring_service.evaluated(game, scoring_service.TURN_END):
         # Units out of coherency regain it (03.03).
         coherency_service.regain(game)
-        # The opponent's AIRCRAFT go back into Strategic Reserves (23.02).
+        # The opponent's AIRCRAFT go back into Strategic Reserves (23.02) -
+        # and units declared to (e.g. Tunnelling Horrors).
         reinforcements_service.aircraft_to_reserves(game)
+        reinforcements_service.resolve_turn_end(game)
         # Objective control, determined at the end of the turn too.
         objectives_service.determine(game)
         actions_service.end_of_turn(game)
@@ -649,6 +679,30 @@ def stratagem_unavailable_reason(
     return _unavailable(game, player, stratagem, cp_discount, target)
 
 
+def ability_discount(game: Game, player: GamePlayer, unit: Unit | None) -> tuple[int, str | None]:
+    # What an ability takes off a Stratagem targeting the player's unit (e.g.
+    # My Will Be Done: 1CP, the first time each battle round for the army),
+    # and which: (CP, ability name) - (0, None) if none.
+    from app.seeds import datasheet_abilities
+
+    if unit is None or deployment_service.owner(game, unit).seat != player.seat:
+        return 0, None
+    config = datasheet_abilities.STRATAGEM_DISCOUNTS
+    names = {
+        a.name
+        for m in deployment_service.models_on_battlefield(game, unit)
+        for a in m.model.abilities
+    }
+    for name in sorted(names & set(config)):
+        used = any(
+            u.seat == player.seat and u.ability == name and u.battle_round == game.battle_round
+            for u in game.ability_uses
+        )
+        if not used:
+            return config[name], name
+    return 0, None
+
+
 def _unavailable(
     game: Game,
     player: GamePlayer,
@@ -656,6 +710,7 @@ def _unavailable(
     cp_discount: int,
     target: Unit | None,
 ) -> str | None:
+    cp_discount += ability_discount(game, player, target)[0]
     cp, repeatable = stratagem_cost(stratagem, target)
     if game.status != "in_progress":
         return "the game isn't in progress"
@@ -830,7 +885,20 @@ async def use_stratagem(
     elif target_secondary_id is not None:
         raise _bad_request(f"{stratagem.name} doesn't take a target")
 
-    cost = max(0, stratagem_cost(stratagem, target_unit or targeted_unit)[0] - cp_discount)
+    base = max(0, stratagem_cost(stratagem, target_unit or targeted_unit)[0] - cp_discount)
+    # (An ability that takes CP off it - e.g. My Will Be Done - used if it does.)
+    extra, ability = ability_discount(game, player, target_unit or targeted_unit)
+    cost = max(0, base - extra)
+    if ability is not None and cost < base:
+        game.ability_uses.append(
+            GameAbilityUse(
+                seat=player.seat,
+                unit_id=(target_unit or targeted_unit).id,
+                ability=ability,
+                battle_round=game.battle_round,
+                turn_seat=game.turn_seat,
+            )
+        )
     player.cp -= cost
     use = GameStratagemUse(
         stratagem_id=stratagem.id,
@@ -932,10 +1000,14 @@ def discard_secondary(game: Game, card: GameSecondary) -> None:
 
 def score_primary(game: Game, player: GamePlayer, points: int) -> None:
     # VP from primary missions scored by hand - within the 15VP a battle
-    # round.
+    # round, and 45VP a battle.
     _require_in_progress(game)
     allowed = min(points, scoring_service.room(player, game.battle_round, "primary"))
     if allowed < points and allowed == 0:
+        if sum(s.points for s in player.scores if s.kind == "primary") >= (
+            scoring_service.MAX_PER_BATTLE["primary"]
+        ):
+            raise _bad_request("they've already scored 45VP from primary missions this battle")
         raise _bad_request("they've already scored 15VP from primary missions this battle round")
     player.scores.append(
         GameScore(

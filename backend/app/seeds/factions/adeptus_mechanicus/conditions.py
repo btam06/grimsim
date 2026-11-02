@@ -5,6 +5,9 @@ from app.combat_rules.conditions import attacker_is_battleline, target_led_by_ch
 # ones in app/combat_rules/conditions.py, which combines them.
 
 MELEE_ATTACK_AGAINST_BATTLELINE = "melee_attack_against_battleline"
+TARGET_MODEL_BATTLELINE = "target_model_battleline"
+RADIUM_JEZZAIL_VS_INFANTRY = "radium_jezzail_vs_infantry"
+ARQUEBUS_VS_MONSTER_OR_VEHICLE = "arquebus_vs_monster_or_vehicle"
 ATTACKER_NEAR_ADMECH_BATTLELINE = "attacker_near_admech_battleline"
 ATTACKER_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE = "attacker_battleline_or_near_admech_battleline"
 MELEE_VS_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE = "melee_vs_battleline_or_near_admech_battleline"
@@ -46,6 +49,32 @@ def melee_attack_against_battleline(context: dict) -> bool:
         context.get("step") == "pre_hit"
         and not context.get("is_ranged", True)
         and "BATTLELINE" in context.get("defender_keywords", set())
+    )
+
+
+def radium_jezzail_vs_infantry(context: dict) -> bool:
+    # True at every step for a radium jezzail's attack against a unit with an
+    # INFANTRY model - Achillan Eye.
+    return "radium jezzail" in context.get("weapon_name", "").lower() and "INFANTRY" in context.get(
+        "defender_keywords", set()
+    )
+
+
+def arquebus_vs_monster_or_vehicle(context: dict) -> bool:
+    # True at every step for a transuranic arquebus's attack against a unit
+    # with a MONSTER or VEHICLE model - Achillan Eye.
+    keywords = context.get("defender_keywords", set())
+    return "transuranic arquebus" in context.get("weapon_name", "").lower() and bool(
+        keywords & {"MONSTER", "VEHICLE"}
+    )
+
+
+def target_model_battleline(context: dict) -> bool:
+    # A defending BATTLELINE model (checked per model, as each model's profile
+    # is worked out) - e.g. Emanatus Force Field's 4+ invulnerable save
+    # against ranged attacks.
+    return context.get("step") == "target_model" and "BATTLELINE" in context.get(
+        "target_model_keywords", set()
     )
 
 
@@ -165,6 +194,9 @@ def defender_on_acquisition(context: dict) -> bool:
 # {keyword: check}
 CONDITIONS = {
     MELEE_ATTACK_AGAINST_BATTLELINE: melee_attack_against_battleline,
+    TARGET_MODEL_BATTLELINE: target_model_battleline,
+    RADIUM_JEZZAIL_VS_INFANTRY: radium_jezzail_vs_infantry,
+    ARQUEBUS_VS_MONSTER_OR_VEHICLE: arquebus_vs_monster_or_vehicle,
     ATTACKER_NEAR_ADMECH_BATTLELINE: attacker_near_admech_battleline,
     ATTACKER_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE: attacker_battleline_or_near_admech_battleline,
     MELEE_VS_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE: melee_vs_battleline_or_near_admech_battleline,
@@ -189,6 +221,21 @@ ENTRIES = [
         MELEE_ATTACK_AGAINST_BATTLELINE,
         "Melee Attack Against Battleline",
         "A melee attack against a defending unit that contains a BATTLELINE model.",
+    ),
+    (
+        TARGET_MODEL_BATTLELINE,
+        "Target Model is Battleline",
+        "The defending model is a BATTLELINE model (checked per model).",
+    ),
+    (
+        RADIUM_JEZZAIL_VS_INFANTRY,
+        "Radium Jezzail vs Infantry",
+        "A radium jezzail's attack against a unit with an INFANTRY model.",
+    ),
+    (
+        ARQUEBUS_VS_MONSTER_OR_VEHICLE,
+        "Transuranic Arquebus vs Monster/Vehicle",
+        "A transuranic arquebus's attack against a unit with a MONSTER or VEHICLE model.",
     ),
     (
         ATTACKER_NEAR_ADMECH_BATTLELINE,

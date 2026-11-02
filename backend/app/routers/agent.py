@@ -11,12 +11,16 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
+from app.engine import context
 from app.engine import store as game_store
 from app.engine.state import Game
 from app.models.stratagem import UNIT_TARGET_ACTIONS
 from app.routers import games as g
 from app.schemas import (
     ActionIn,
+    ResurrectionIn,
+    FormationGrantIn,
+    PhaseStartIn,
     BattleShockTakeIn,
     CommandChoiceIn,
     ConsolidateIn,
@@ -53,7 +57,10 @@ from app.services.in_game import (
     reinforcements,
     scouts,
 )
+from app.services.in_game import shooting as shooting_service
 from app.services.in_game import emergency as emergency_service
+from app.services.in_game import phase_end as phase_end_service
+from app.services.in_game import phase_start as phase_start_service
 
 # The agent interface: everything a player can do in a game, as one list of
 # legal actions and one way to apply them - for a program to play the game
@@ -85,6 +92,10 @@ router = APIRouter(prefix="/games", tags=["agent"])
 
 # How many spots to try when looking for a default placement.
 PLACEMENT_TRIES = 40
+# How far a searched placement's models are nudged to a free spot at most
+# (see deployment.formation): a spot that needs more is passed over for the
+# next - near enough where it was wanted, and far quicker than packing them in.
+SEARCH_NUDGE = 2.0
 
 
 @dataclass
@@ -205,6 +216,98 @@ def _zone_spots(game: Game, seat: int | None) -> list[tuple[float, float]]:
     return spots
 
 
+def _deployment_anchors(game: Game, seat: int) -> list[tuple[str, tuple[float, float]]]:
+    # Where in their deployment zone a unit can be deployed, for an agent to
+    # choose between - each the closest spot that fits to: their home
+    # objective, the middle of the battlefield (as far forward as it can),
+    # and each flank (as far to either side as it can).
+    zone = regions.deployment_zone(game, seat)
+    if not zone:
+        return [("", (30.0, 22.0))]
+    cx = sum(p[0] for p in zone) / len(zone)
+    cy = sum(p[1] for p in zone) / len(zone)
+    anchors = [
+        ("on its home objective", (o.x, o.y))
+        for o in g.objectives_service.objectives(game)
+        if g.objectives_service.is_home(game, o, seat)
+    ][:1]
+    anchors.append(("forward", (30.0, 22.0)))
+    fx, fy = 30.0 - cx, 22.0 - cy
+    d = math.hypot(fx, fy) or 1.0
+    px, py = -fy / d, fx / d
+    anchors += [("on the left flank", (cx + px * 60, cy + py * 60)),
+                ("on the right flank", (cx - px * 60, cy - py * 60))]
+    return anchors
+
+
+def _deploy_spot(game: Game, unit, where: str, anchor, spots) -> dict | None:
+    # The closest spot to the anchor where the unit fits (see _search) -
+    # kept through deployment (the actions are listed again after each unit's
+    # deployed): checked again as it is, and only looked for again if it's
+    # no longer clear (or, if none was found, once the board's changed).
+    cache = context.cache("deploy_spots")
+    key = (unit.id, where)
+    check = lambda p: deployment.check_placement(game, unit, p)  # noqa: E731
+    board = _board(game)
+    if cache is not None and key in cache:
+        kept, kept_board = cache[key]
+        if kept is None and kept_board == board:
+            return None
+        if kept is not None and _valid(lambda: check(kept)):
+            return kept
+    found = _search(
+        sorted(spots, key=lambda p: math.dist(p, anchor)),
+        lambda x, y: deployment.formation(game, unit, x, y, nudge=SEARCH_NUDGE),
+        check,
+    )
+    if cache is not None:
+        cache[key] = (found, board)
+    return found
+
+
+def _arrival_spot(game: Game, unit, deep_strike: bool) -> dict | None:
+    # Where the unit can arrive from Reserves (see _search) - kept for the
+    # phase, like _deploy_spot.
+    cache = context.cache("arrival_spots")
+    key = (game.battle_round, game.turn_seat, game.phase, unit.id)
+    check = lambda p: reinforcements.check_arrival(game, unit, p)  # noqa: E731
+    board = _board(game)
+    if cache is not None and key in cache:
+        kept, kept_board = cache[key]
+        if kept is None and kept_board == board:
+            return None
+        if kept is not None and _valid(lambda: check(kept)):
+            return kept
+    if deep_strike:
+        found = _search(
+            _zone_spots(game, None), lambda x, y: deployment.formation(game, unit, x, y, nudge=SEARCH_NUDGE), check
+        )
+    else:
+        # (In two ranks flush with the edge: wholly within 6" of it.)
+        found = _search(_edge_spots(), lambda x, y: _along_edge(game, unit, x, y), check)
+    if cache is not None:
+        cache[key] = (found, board)
+    return found
+
+
+def _along_edge(game: Game, unit, x: float, y: float) -> dict:
+    # The unit set up at an edge spot (see _edge_spots) in two ranks along
+    # that edge, against it.
+    if x in (3.5, 56.5):
+        return deployment.formation(
+            game, unit, 0.0 if x < 30 else 60.0, y, ranks=2, upright=True, nudge=SEARCH_NUDGE
+        )
+    return deployment.formation(
+        game, unit, x, 0.0 if y < 22 else 44.0, ranks=2, nudge=SEARCH_NUDGE
+    )
+
+
+def _board(game: Game) -> int:
+    # Where every model stands, in short: a spot not found is only looked for
+    # again once something's moved (or been set up, or removed).
+    return hash(tuple(sorted((p.unit_model_id, p.x, p.y) for p in game.model_positions)))
+
+
 def _edge_spots() -> list[tuple[float, float]]:
     spots = [(x, y) for x in range(4, 58, 4) for y in (3.5, 40.5)] + [
         (x, y) for x in (3.5, 56.5) for y in range(4, 42, 4)
@@ -229,6 +332,104 @@ def _towards(game: Game, unit, targets: list, reach: float) -> dict:
         step = max(0.0, min(reach, d - 2.0))
         moved[i] = (x + (tx - x) * step / d, y + (ty - y) * step / d, r) if d else (x, y, r)
     return moved
+
+
+def _centre(placed: dict) -> tuple[float, float]:
+    return (
+        sum(p[0] for p in placed.values()) / len(placed),
+        sum(p[1] for p in placed.values()) / len(placed),
+    )
+
+
+# Where a move towards a point is tried: the whole way (as far as it can go),
+# three quarters, half - each straight there, or to one side or the other.
+MOVE_STEPS = (1.0, 0.75, 0.5)
+MOVE_SIDESTEPS = (0.0, 1.5, -1.5, 3.0, -3.0)
+# How many of them (clear of terrain and other models) are checked in full.
+MOVE_CHECKS = 3
+
+
+def _move_towards(game: Game, unit, kind: str, point, reach: float) -> dict | None:
+    # The unit moved towards the point - the first of the spots tried that's
+    # clear of terrain features and other models, and passes the move check
+    # (paths and all). None if none does.
+    #
+    # Kept for the phase (the actions are listed again after every action):
+    # while the unit hasn't moved, only other models overlapping it could
+    # change - enemy models (round which it paths) don't move in its phase.
+    placed = _positions(game, unit)
+    if not placed or reach < 0.5:
+        return None
+    cx, cy = _centre(placed)
+    d = math.dist((cx, cy), point)
+    if d < 0.5:
+        return None
+    others = deployment.placed_bases(game, unit)
+    models = deployment.models_on_battlefield(game, unit)
+
+    def clear(guess) -> bool:
+        _, bases = deployment.unit_bases(unit, guess, models)
+        return not any(deployment.physical_problems(game, models, bases, others).values())
+
+    cache = context.cache("moves_towards")
+    key = (
+        game.battle_round, game.turn_seat, game.phase, unit.id, kind,
+        tuple(sorted(placed.items())), point, round(reach, 2),
+    )
+    if cache is not None and key in cache:
+        guess = cache[key]
+        if guess is None or clear(guess):
+            return guess
+    guess = _search_towards(game, unit, kind, placed, point, reach, clear)
+    if cache is not None:
+        cache[key] = guess
+    return guess
+
+
+def _search_towards(game: Game, unit, kind: str, placed: dict, point, reach: float, clear):
+    cx, cy = _centre(placed)
+    d = math.dist((cx, cy), point)
+    ux, uy = (point[0] - cx) / d, (point[1] - cy) / d
+    checks = 0
+    for fraction in MOVE_STEPS:
+        step = min(reach, d) * fraction
+        if step < 0.5:
+            continue
+        for side in MOVE_SIDESTEPS:
+            dx, dy = ux * step - uy * side, uy * step + ux * side
+            guess = {i: (x + dx, y + dy, r) for i, (x, y, r) in placed.items()}
+            if not clear(guess):
+                continue
+            if _valid(lambda: movement.check_move(game, unit, kind, guess)):
+                return guess
+            checks += 1
+            if checks >= MOVE_CHECKS:
+                return None
+    return None
+
+
+def _objective_to_move_to(game: Game, unit, seat: int, control: list) -> list:
+    # The closest objective the player doesn't control (or if they control
+    # them all, the closest) - not if the unit's already at it. `control`:
+    # objectives.control(game, live=True).
+    placed = _positions(game, unit)
+    if not placed or not control:
+        return []
+    centre = _centre(placed)
+    open_ = [c.objective for c in control if c.live_controller != seat]
+    picked = min(
+        open_ or [c.objective for c in control],
+        key=lambda o: math.dist(centre, (o.x, o.y)),
+    )
+    return [picked] if math.dist(centre, (picked.x, picked.y)) >= 1.0 else []
+
+
+# Waiting on a player's abilities for the start of the phase (see
+# app/services/in_game/phase_start.py window_seat).
+START_OF_PHASE = "abilities for the start of the phase"
+# And on their declarations for the end of the phase (see
+# app/services/in_game/phase_end.py).
+END_OF_PHASE = "declarations for the end of the phase"
 
 
 # --- the decision holding the game up ---
@@ -258,6 +459,10 @@ async def _waiting_for(session: AsyncSession, game: Game) -> dict:
     emergency = g._emergency_out(game)
     if emergency.units:
         return {"seat": emergency.units[0].seat, "reason": "emergency disembarking"}
+    if (seat := phase_start_service.window_seat(game)) is not None:
+        return {"seat": seat, "reason": START_OF_PHASE}
+    if (seat := phase_end_service.window_seat(game)) is not None:
+        return {"seat": seat, "reason": END_OF_PHASE}
     battle_shock = await g._battle_shock_out(session, game)
     if battle_shock.pending:
         return {"seat": battle_shock.pending[0].seat, "reason": "taking Battle-shock tests"}
@@ -343,15 +548,24 @@ async def _legal_actions(session: AsyncSession, game: Game, waiting: dict) -> li
                     continue
                 if deployment.battle_formation(game, unit) is not None:
                     continue
-                default = _search(
-                    _zone_spots(game, seat),
-                    lambda x, y, u=unit: deployment.formation(game, u, x, y),
-                    lambda p, u=unit: deployment.check_placement(game, u, p),
-                )
-                add(Action(
-                    "deploy", seat, f"Deploy {unit.label}", {"unit_id": unit.id},
-                    _placement(game, unit, "deployment", None, default),
-                ))
+                # Where: a few spots to choose from (see _deployment_anchors).
+                spots = _zone_spots(game, seat)
+                found_any = False
+                for where, anchor in _deployment_anchors(game, seat):
+                    default = _deploy_spot(game, unit, where, anchor, spots)
+                    if default is None:
+                        continue
+                    found_any = True
+                    add(Action(
+                        "deploy", seat, f"Deploy {unit.label} {where}".rstrip(),
+                        {"unit_id": unit.id, "where": where},
+                        _placement(game, unit, "deployment", None, default),
+                    ))
+                if not found_any:
+                    add(Action(
+                        "deploy", seat, f"Deploy {unit.label}", {"unit_id": unit.id},
+                        _placement(game, unit, "deployment", None, None),
+                    ))
         elif step == "first_turn":
             add(Action("roll_first_turn", waiting["seat"], "Roll off for the first turn"))
         else:
@@ -363,7 +577,7 @@ async def _legal_actions(session: AsyncSession, game: Game, waiting: dict) -> li
                     if su.in_reserves:
                         default = _search(
                             _zone_spots(game, seat),
-                            lambda x, y, u=unit: deployment.formation(game, u, x, y),
+                            lambda x, y, u=unit: deployment.formation(game, u, x, y, nudge=SEARCH_NUDGE),
                             lambda p, u=unit: scouts.check(game, seat, u, p),
                         )
                     else:
@@ -391,6 +605,47 @@ async def _legal_actions(session: AsyncSession, game: Game, waiting: dict) -> li
             "emergency_disembark", eu.seat, f"Emergency disembark {eu.name}",
             {"unit_id": eu.unit_id}, placement,
         ))
+    # ... abilities for the start of the phase, one player at a time: the
+    # player whose turn it is first (e.g. Secutor of Olympus, Data-spike), then
+    # their opponent (e.g. Data-spike, Defend the Divine Work) - nothing else
+    # until each is done.
+    if waiting.get("reason") == START_OF_PHASE:
+        seat = waiting["seat"]
+        for ability in await g.get_shooting_start(gid, session):
+            if deployment.owner(game, units[ability.unit_id]).seat != seat:
+                continue
+            for target in ability.targets:
+                add(Action("shooting_start", seat,
+                           f"{ability.unit_name}: {ability.ability} on {target.name}",
+                           {"unit_id": ability.unit_id, "ability": ability.ability,
+                            "target_unit_id": target.unit_id}))
+        if phase_start_service.waiting(game) == seat:
+            for available in phase_start_service.available(game):
+                add(Action("phase_start_ability", seat,
+                           f"{available.ability}: {available.unit.label}",
+                           {"seat": seat, "unit_id": available.unit.id,
+                            "ability": available.ability}))
+        add(Action("finish_phase_start", seat, "Done with abilities for the start of the phase",
+                   {"seat": seat}))
+        return found
+    # ... and declarations for the end of the phase, likewise, once the player
+    # whose turn it is ends it: Resurrection Orbs; units going into Strategic
+    # Reserves at the end of the turn (e.g. Tunnelling Horrors).
+    if waiting.get("reason") == END_OF_PHASE:
+        seat = waiting["seat"]
+        for ru in (await g.get_resurrection(gid, session)).units:
+            if not ru.declared and ru.seat == seat:
+                add(Action("resurrect", seat, f"{ru.name} resurrects at the end of the phase",
+                           {"seat": seat, "unit_id": ru.unit_id}))
+        if game.phase == g.game_service.PHASES[-1]:
+            for tu in (await g.get_turn_end_reserves(gid, session)).units:
+                if not tu.declared and tu.seat == seat:
+                    add(Action("turn_end_reserves", seat,
+                               f"{tu.name} goes into Strategic Reserves at the end of the turn",
+                               {"seat": seat, "unit_id": tu.unit_id}))
+        add(Action("finish_phase_end", seat, "Done with declarations for the end of the phase",
+                   {"seat": seat}))
+        return found
     battle_shock = await g._battle_shock_out(session, game)
     for test in battle_shock.pending:
         add(Action("battle_shock", test.seat, f"Take {test.unit_name}'s Battle-shock test",
@@ -429,12 +684,20 @@ async def _legal_actions(session: AsyncSession, game: Game, waiting: dict) -> li
     if _round_choice_seat(game) is None and not (
         game.phase == "command" and command_phase.missing_choices(game)
     ):
-        add(Action("advance", waiting["seat"], "Next phase / end of phase"))
+        # (The player whose turn it is ending their phase, with something to
+        # declare for its end: the declarations first - see phase_end.py.)
+        if waiting["seat"] == game.turn_seat and phase_end_service.to_open(game):
+            add(Action("end_phase", waiting["seat"], "End of phase: declarations for it first"))
+        else:
+            add(Action("advance", waiting["seat"], "Next phase / end of phase"))
 
     if game.phase == "start_of_round":
         for player in (await g.round_start(gid, session)).players:
             for rule in player.rules:
                 if not rule.options or rule.faction_ability_id is None:
+                    continue
+                # (Likewise once chosen.)
+                if rule.chosen is not None:
                     continue
                 for option in rule.options + ([] if rule.required else [None]):
                     add(Action("round_start_choice", player.seat, f"{rule.name}: {option or 'none'}",
@@ -467,7 +730,13 @@ async def _legal_actions(session: AsyncSession, game: Game, waiting: dict) -> li
                              "ability": ability.ability, "option": option,
                              "target_unit_id": target.unit_id if target else None},
                         ))
+            # (Once selected, not again: changing it would only go round in
+            # circles - a person can, but an agent needn't.)
             for selection in command.objective_selections:
+                if g.selected_objectives_service.own_selection(
+                    game, command.seat, selection.name
+                ) is not None:
+                    continue
                 for option in selection.options:
                     add(Action("select_objective", command.seat,
                                f"{selection.name}: {option.name}",
@@ -557,6 +826,16 @@ async def _formation_actions(game: Game, add, units) -> None:
                         add(Action("set_formation", seat, f"{fu.name}: embarked in {t.name}",
                                    {"seat": seat, "unit_id": fu.unit_id, "place": "embarked",
                                     "transport_unit_id": t.unit_id}))
+        # Abilities that give a unit an ability now (e.g. Thunderhawk
+        # Insertion: Deep Strike).
+        for grant in player.grants:
+            for target in grant.targets:
+                if target.unit_id == grant.unit_id:
+                    continue
+                add(Action("grant_formation", seat,
+                           f"{grant.ability}: {grant.grants} for {target.name}",
+                           {"seat": seat, "source_unit_id": grant.source_unit_id,
+                            "ability": grant.ability, "unit_id": target.unit_id}))
         if all(
             not is_aircraft(units[fu.unit_id]) or fu.place == "reserves" for fu in player.units
         ):
@@ -567,6 +846,7 @@ async def _movement_actions(session, game: Game, add, units, turn) -> None:
     gid = game.id
     if not reinforcements.movement_ended(game):
         move_state = g._movement_out(game)
+        control = g.objectives_service.control(game, live=True)
         for mu in move_state.units:
             unit = units[mu.unit_id]
             # Each unit moves once a phase here: a person can redo a move
@@ -577,6 +857,9 @@ async def _movement_actions(session, game: Game, add, units, turn) -> None:
             speeds = {m.unit_model_id: m.movement for m in mu.models}
             if "advance" in mu.allowed_kinds and mu.advance_roll is None:
                 add(Action("roll_advance", turn, f"Roll to Advance with {mu.name}",
+                           {"unit_id": mu.unit_id}))
+            if mu.can_reroll_advance:
+                add(Action("reroll_advance", turn, f"Re-roll {mu.name}'s Advance roll",
                            {"unit_id": mu.unit_id}))
             for kind in mu.allowed_kinds:
                 if kind == "advance" and mu.advance_roll is None:
@@ -596,23 +879,34 @@ async def _movement_actions(session, game: Game, add, units, turn) -> None:
                                    lambda m, e=extra: speeds.get(m.id, 0) + e, None),
                     ))
                 # The same move, its default towards the closest enemy unit
-                # (as far as it can go, short of Engagement Range).
+                # (as far as it can go, short of Engagement Range) - and
+                # towards the closest objective its player doesn't control
+                # (if it isn't there yet).
                 if kind != "fall_back":
                     reach = min(speeds.values(), default=0) + extra
                     enemies = charging.enemy_units(game, unit)
-                    closest = sorted(enemies, key=lambda e: charging.distance(game, unit, e))[:1]
-                    for step in (reach, reach * 0.5):
-                        guess = _towards(game, unit, closest, max(0.0, step - 0.1))
-                        if closest and _valid(lambda: movement.check_move(game, unit, kind, guess)):
+                    closest = min(
+                        enemies, key=lambda e: charging.distance(game, unit, e), default=None
+                    )
+                    goals = []
+                    if closest is not None and _positions(game, closest):
+                        gap = charging.distance(game, unit, closest)
+                        goals.append((closest.label, _centre(_positions(game, closest)),
+                                      min(reach, gap - movement.ENGAGEMENT_RANGE - 0.5)))
+                    for objective in _objective_to_move_to(game, unit, turn, control):
+                        goals.append((f"the {objective.kind} objective at "
+                                      f"({objective.x:g}, {objective.y:g})",
+                                      (objective.x, objective.y), reach))
+                    for name, point, step in goals:
+                        guess = _move_towards(game, unit, kind, point, step - 0.1)
+                        if guess is not None:
                             add(Action(
                                 "move", turn,
-                                f"{movement.KIND_NAMES[kind]}: {mu.name} towards "
-                                f"{closest[0].label}",
+                                f"{movement.KIND_NAMES[kind]}: {mu.name} towards {name}",
                                 {"unit_id": mu.unit_id, "kind": kind},
                                 _placement(game, unit, "move",
                                            lambda m, e=extra: speeds.get(m.id, 0) + e, guess),
                             ))
-                            break
         embarked_state = g._embarked_out(game)
         for eu in embarked_state.units:
             unit = units[eu.unit_id]
@@ -624,7 +918,7 @@ async def _movement_actions(session, game: Game, add, units, turn) -> None:
                 default = _search(
                     spots,
                     lambda x, y, u=unit: deployment.formation(
-                        game, u, x, y, embarked.surviving_models(game, u)
+                        game, u, x, y, embarked.surviving_models(game, u), nudge=SEARCH_NUDGE
                     ),
                     lambda p, u=unit, c=combat: embarked.check_disembark(game, u, p, c),
                 )
@@ -642,11 +936,7 @@ async def _movement_actions(session, game: Game, add, units, turn) -> None:
     if reserves.seat is not None:
         for ru in reserves.units:
             unit = units[ru.unit_id]
-            default = _search(
-                _edge_spots() if not ru.deep_strike else _zone_spots(game, None),
-                lambda x, y, u=unit: deployment.formation(game, u, x, y),
-                lambda p, u=unit: reinforcements.check_arrival(game, u, p),
-            )
+            default = _arrival_spot(game, unit, ru.deep_strike)
             add(Action("bring_in", reserves.seat, f"Bring in {ru.name} from Reserves",
                        {"unit_id": ru.unit_id},
                        _placement(game, unit, "reserves", None, default)))
@@ -666,12 +956,43 @@ async def _movement_actions(session, game: Game, add, units, turn) -> None:
             if not ou.can_shoot:
                 continue
             for target in await g.overwatch_targets(gid, ou.unit_id, session):
-                weapons = _weapons(target.weapons)
-                if target.visible and weapons:
+                if not target.visible:
+                    continue
+                choices = _weapon_choices(game, units[ou.unit_id], target.weapons)
+                for weapons in choices:
                     add(Action("overwatch", overwatch.seat,
-                               f"Fire Overwatch: {ou.name} at {target.name}",
+                               f"Fire Overwatch: {ou.name} at {target.name}"
+                               + _with(weapons, target.weapons, choices),
                                {"unit_id": ou.unit_id, "target_unit_id": target.unit_id,
                                 **weapons}))
+
+
+def _weapon_choices(game: Game, unit, weapons) -> list[dict]:
+    # The weapons to shoot with (see _weapons) - split, if a model would fire
+    # both its [CLOSE-QUARTERS] weapons and its other ranged weapons (it can
+    # only fire one or the other, 24.07): its other weapons (with the
+    # close-quarters ones no such model has), or the close-quarters ones.
+    choice = _weapons(weapons)
+    if not choice:
+        return []
+    chosen = set(choice["weapon_ids"])
+    models = [
+        [w for w in shooting_service.ranged_weapons(m) if w.id in chosen]
+        for m in deployment.models_on_battlefield(game, unit)
+        if not shooting_service._big(unit, m)
+    ]
+    cq = shooting_service.close_quarters
+    clashing = [ws for ws in models if {cq(w) for w in ws} == {True, False}]
+    if not clashing:
+        return [choice]
+    blocked = {w.id for ws in clashing for w in ws if cq(w)}
+    close = {w.id for ws in models for w in ws if cq(w)}
+    others = {**choice, "weapon_ids": [i for i in choice["weapon_ids"] if i not in blocked]}
+    close_only = {
+        **{k: [] for k in choice},
+        "weapon_ids": [i for i in choice["weapon_ids"] if i in close],
+    }
+    return [others, close_only]
 
 
 def _weapons(weapons) -> dict:
@@ -694,6 +1015,14 @@ def _weapons(weapons) -> dict:
     }
 
 
+def _with(choice: dict, weapons, choices: list[dict]) -> str:
+    # " (with X, Y)": which weapons, when there's more than one choice.
+    if len(choices) < 2:
+        return ""
+    names = [w.name for w in weapons if w.id in choice["weapon_ids"] and not w.enhancement]
+    return f" (with {', '.join(names)})"
+
+
 async def _shooting_actions(session, game: Game, add, units, turn) -> None:
     gid = game.id
     shooting_state = await g.get_shooting(gid, session)
@@ -702,9 +1031,11 @@ async def _shooting_actions(session, game: Game, add, units, turn) -> None:
             for target in await g.shooting_targets(gid, su.unit_id, session):
                 if not (target.visible or target.indirect):
                     continue
-                weapons = _weapons(target.weapons)
-                if weapons:
-                    add(Action("shoot", turn, f"{su.name} shoots {target.name}",
+                choices = _weapon_choices(game, units[su.unit_id], target.weapons)
+                for weapons in choices:
+                    add(Action("shoot", turn,
+                               f"{su.name} shoots {target.name}"
+                               + _with(weapons, target.weapons, choices),
                                {"unit_id": su.unit_id, "target_unit_id": target.unit_id,
                                 **weapons}))
         if su.shoot_scoot and su.shoot_scoot_reach:
@@ -721,11 +1052,6 @@ async def _shooting_actions(session, game: Game, add, units, turn) -> None:
             for target in option.targets:
                 add(Action("start_action", turn, f"{name_of(units, unit_id)}: {option.action} on {target.label}",
                            {"unit_id": unit_id, "action": option.action, "target_id": target.id}))
-    for ability in await g.get_shooting_start(gid, session):
-        for target in ability.targets:
-            add(Action("shooting_start", turn, f"{ability.unit_name}: {ability.ability} on {target.name}",
-                       {"unit_id": ability.unit_id, "ability": ability.ability,
-                        "target_unit_id": target.unit_id}))
 
 
 def name_of(units, unit_id) -> str:
@@ -792,10 +1118,16 @@ async def _fight_actions(session, game: Game, add, units) -> None:
                 picked = [w for w in target.weapons if w.default and w.in_range]
                 if not picked and not any(w.extra_attacks for w in target.weapons):
                     continue
-                add(Action("fight", fu.seat, f"{fu.name} fights {target.name}",
-                           {"unit_id": fu.unit_id, "target_unit_id": target.unit_id,
-                            "weapon_ids": [w.id for w in picked if not w.enhancement],
-                            "enhancement_weapon_ids": [w.id for w in picked if w.enhancement]}))
+                params = {"unit_id": fu.unit_id, "target_unit_id": target.unit_id,
+                          "weapon_ids": [w.id for w in picked if not w.enhancement],
+                          "enhancement_weapon_ids": [w.id for w in picked if w.enhancement]}
+                add(Action("fight", fu.seat, f"{fu.name} fights {target.name}", params))
+                # The same, using its abilities for fighting (e.g. Banner of
+                # Macragge).
+                for ability in fu.abilities:
+                    add(Action("fight", fu.seat,
+                               f"{fu.name} fights {target.name}, using {ability}",
+                               {**params, "abilities": [ability]}))
         if fight_state.can_pass and seat is not None:
             add(Action("pass_fight", seat, "Pass (nothing within 5\")", {"seat": seat}))
     if fight_state.step == "consolidate":
@@ -867,6 +1199,25 @@ async def _apply(session: AsyncSession, gid: int, a: AgentActionIn):
         return await g.roll_first_turn(gid, session)
     if t == "finish_teleport_homers":
         return await g.finish_teleport_homers(gid, TeleportHomerIn(seat=seat), session)
+    if t == "phase_start_ability":
+        return await g.use_phase_start(gid, PhaseStartIn(**p), session)
+    if t in ("end_phase", "finish_phase_end"):
+        # Declarations for the end of the phase (see phase_end.py): once
+        # they're all made, the phase ends.
+        game = await g._load_game(session, gid)
+        if t == "end_phase":
+            if seat != game.turn_seat or not phase_end_service.to_open(game):
+                raise HTTPException(status_code=400, detail="there's nothing to declare first")
+            phase_end_service.open(game)
+        else:
+            if phase_end_service.window_seat(game) != seat:
+                raise HTTPException(status_code=400, detail="it isn't that player's to declare now")
+            phase_end_service.finish(game, seat)
+        if phase_end_service.window_seat(game) is None:
+            return await g.advance(gid, session)
+        return await g._commit_and_reload(session, gid)
+    if t == "finish_phase_start":
+        return await g.finish_phase_start(gid, SeatIn(seat=seat), session)
     if t == "scout_move":
         return await g.scout_move(gid, UnitPlacementIn(unit_id=p["unit_id"], positions=_pos(p)), session)
     if t == "finish_scouts":
@@ -930,6 +1281,8 @@ async def _apply(session: AsyncSession, gid: int, a: AgentActionIn):
         return await g.use_psychic(gid, PsychicIn(**p), session)
     if t == "roll_charge":
         return await g.roll_charge(gid, UnitIdIn(unit_id=p["unit_id"]), session)
+    if t == "reroll_advance":
+        return await g.reroll_advance(gid, UnitIdIn(unit_id=p["unit_id"]), session)
     if t == "reroll_charge":
         return await g.reroll_charge(gid, UnitIdIn(unit_id=p["unit_id"]), session)
     if t == "charge":
@@ -945,6 +1298,12 @@ async def _apply(session: AsyncSession, gid: int, a: AgentActionIn):
         return await g.finish_piling_in(gid, SeatIn(seat=seat), session)
     if t == "fight":
         return await g.fight(gid, FightIn(**p), session)
+    if t == "turn_end_reserves":
+        return await g.declare_turn_end_reserves(gid, ResurrectionIn(**p), session)
+    if t == "resurrect":
+        return await g.declare_resurrection(gid, ResurrectionIn(**p), session)
+    if t == "grant_formation":
+        return await g.grant_formation_ability(gid, FormationGrantIn(**p), session)
     if t == "pass_fight":
         return await g.pass_fight(gid, SeatIn(seat=seat), session)
     if t == "consolidate":

@@ -22,6 +22,7 @@ ANTI_VEHICLE_3 = "anti_vehicle_3"
 ANTI_VEHICLE_4 = "anti_vehicle_4"
 ANTI_MONSTER_4 = "anti_monster_4"
 ANTI_FLY_2 = "anti_fly_2"
+ANTI_FLY_4 = "anti_fly_4"
 ANTI_WALKER_2 = "anti_walker_2"
 RANGED_CRITICAL_HIT = "ranged_critical_hit"
 STATIONARY_RANGED_CRITICAL_HIT = "stationary_ranged_critical_hit"
@@ -257,6 +258,15 @@ def anti_fly_2(context: dict) -> bool:
     return (
         context.get("step") == "wound"
         and context.get("roll", 0) >= 2
+        and "FLY" in context.get("defender_keywords", set())
+    )
+
+
+def anti_fly_4(context: dict) -> bool:
+    # As anti_fly_2, on a 4+ (e.g. for "Anti-Fly 4+").
+    return (
+        context.get("step") == "wound"
+        and context.get("roll", 0) >= 4
         and "FLY" in context.get("defender_keywords", set())
     )
 
@@ -521,6 +531,7 @@ CORE_CONDITIONS = {
     DEFENDER_IN_RANGE_OF_OBJECTIVE: defender_in_range_of_objective,
     CHARGED: charged,
     ANTI_FLY_2: anti_fly_2,
+    ANTI_FLY_4: anti_fly_4,
     ANTI_WALKER_2: anti_walker_2,
     RANGED_CRITICAL_HIT: ranged_critical_hit,
     STATIONARY_RANGED_CRITICAL_HIT: stationary_ranged_critical_hit,

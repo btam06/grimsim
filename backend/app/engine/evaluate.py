@@ -25,7 +25,7 @@ from app.engine.env import Decision, GameEnv, Policy, random_policy
 # From the command line (policies as module:function):
 #
 #     python -m app.engine.evaluate saves/3/r1-s2-start_of_round.json \
-#         --policy mypackage.policies:greedy --games 40 --processes 4
+#         --policy app.engine.scripted:scripted --games 40 --processes 4
 
 
 @dataclass

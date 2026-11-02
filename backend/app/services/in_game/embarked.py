@@ -325,7 +325,7 @@ def check_disembark(
             if any(gap(base, e) < reinforcements.ENEMY_DISTANCE - TOLERANCE for e in far_from):
                 found.append('is within 8" of an enemy model (its transport arrived this turn)')
             if (
-                not reinforcements.has_deep_strike(carrier)
+                not reinforcements.has_deep_strike(carrier, game)
                 and game.battle_round <= reinforcements.FIRST_ROUND
                 and enemy_zone
                 and deployment.distance_to_polygon(base, enemy_zone) <= TOLERANCE

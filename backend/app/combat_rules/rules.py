@@ -50,6 +50,9 @@ class RuleOption:
     # units with a model within it of the model with the ability, rather than
     # to every unit it reaches in the list (see app/services/in_game/auras.py).
     aura_range: float | None = None
+    # In a game: the aura reaches only models wholly within its range - each
+    # such model gets it, not the whole unit (e.g. Emanatus Force Field).
+    wholly_within: bool = False
     # In a game: picking it means selecting one enemy unit on the battlefield
     # (anywhere, seen or not), and it only applies to attacks against that
     # unit (e.g. Invocation of Machine Vengeance).
@@ -79,3 +82,61 @@ class CommandChoice:
     target_visible: bool = False
     phase: str = "command"
     faction_options: tuple[str, str] | None = None
+
+
+@dataclass(frozen=True)
+class PhaseStartAbility:
+    # In a game, a datasheet ability its owner can use at the start of one of
+    # their opponent's `phases` (see app/services/in_game/phase_start.py) -
+    # only once a battle, if `once_per_battle` - giving its unit `rules` (for
+    # attacks against it) until the end of the phase. E.g. Defend the Divine
+    # Work: a 4+ invulnerable save.
+    phases: tuple[str, ...]
+    rules: tuple[Rule, ...]
+    once_per_battle: bool = True
+
+
+@dataclass(frozen=True)
+class UnitEffect:
+    # In a game, what an ability does to an enemy unit for a while (see
+    # app/services/in_game/unit_effects.py): what it adds to its Move
+    # characteristic and its Advance and Charge rolls (e.g. Electro-shock:
+    # -2 each) - not to units with any of `excluded_keywords`.
+    move: int = 0
+    advance: int = 0
+    charge: int = 0
+    excluded_keywords: tuple[str, ...] = ()
+    # Only a unit with one of these (e.g. Shattered Defences: a MONSTER or
+    # VEHICLE).
+    required_keywords: tuple[str, ...] = ()
+    # Ranged attacks that target it, by units with `by_keyword` (e.g.
+    # ADEPTUS ASTARTES), have this much better AP.
+    ranged_ap: int = 0
+    by_keyword: str | None = None
+    # How long: until the end of the affected unit's next turn ("their next
+    # turn"), or of this one ("this turn").
+    lasts: str = "their next turn"
+
+
+@dataclass(frozen=True)
+class FormationGrant:
+    # In a game, an ability that, in the Declare Battle Formations step, lets
+    # its player select one of their units with any of `keywords` to have the
+    # ability `grants` (see app/services/in_game/battle_formations.py) - e.g.
+    # Thunderhawk Insertion: a GRAVIS, PHOBOS or TACTICUS unit has Deep Strike.
+    keywords: tuple[str, ...]
+    grants: str
+
+
+@dataclass(frozen=True)
+class FightAbility:
+    # In a game, an ability its unit can use when it's selected to fight (see
+    # app/services/in_game/fight_abilities.py), giving its attacks `rules` for
+    # that fight - once a battle (for its unit, or `per_army`: for its whole
+    # army). E.g. Banner of Macragge: +1 A and S.
+    rules: tuple[Rule, ...]
+    once_per_battle: bool = True
+    per_army: bool = False
+    # Once a battle for each model in the unit with this wargear (e.g.
+    # Plasmacyte) - none: it can't be used.
+    uses_wargear: str | None = None

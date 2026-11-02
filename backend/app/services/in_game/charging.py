@@ -244,12 +244,44 @@ def reroll_charge(game: Game, unit: Unit) -> GameUnitCharge:
     return charge
 
 
+def _charge_mortals(game: Game, unit: Unit) -> None:
+    # Abilities whose model, as its unit ends a Charge move, rolls a D6
+    # against an enemy unit within Engagement Range of it (e.g. Crimson
+    # Harvest: 2-5, D3 mortal wounds; 6, D3+3) - the closest one.
+    from app.seeds import datasheet_abilities
+    from app.services.combat import roll_dice
+    from app.services.in_game import casualties
+
+    config = datasheet_abilities.CHARGE_MORTALS
+    bases = _bases(game, unit)
+    for model in deployment.models_on_battlefield(game, unit):
+        for name in sorted({a.name for a in model.model.abilities} & set(config)):
+            base = bases.get(model.id)
+            if base is None:
+                continue
+            near = [
+                (min(gap(base, e) for e in _bases(game, enemy).values()), enemy.id, enemy)
+                for enemy in enemy_units(game, unit)
+                if _bases(game, enemy)
+            ]
+            near = [n for n in near if n[0] <= ENGAGEMENT_RANGE + TOLERANCE]
+            if not near:
+                continue
+            target = min(near, key=lambda n: (n[0], n[1]))[2]
+            roll = dice.randint(1, 6)
+            wounds = next((d for least, d in config[name] if roll >= least), None)
+            if wounds is not None:
+                casualties.mortal_wounds(game, target, roll_dice(wounds), destroyed_by=unit)
+
+
 def _after_charge(game: Game, unit: Unit) -> None:
-    # The unit ended a charge move: abilities that make the enemy units
-    # engaged with it take a Battle-shock test.
+    # The unit ended a charge move: abilities that inflict mortal wounds then
+    # (e.g. Crimson Harvest), and that make the enemy units engaged with it
+    # take a Battle-shock test.
     from app.seeds import datasheet_abilities
     from app.services.in_game import battle_shock
 
+    _charge_mortals(game, unit)
     config = datasheet_abilities.AFTER_CHARGE_BATTLE_SHOCK
     rules = [(name, config[name]) for name in _abilities(unit) if name in config]
     if not rules:
@@ -289,7 +321,7 @@ def charge_roll(game: Game, unit: Unit) -> int | None:
     charge = unit_charge(game, unit)
     if charge is None:
         return None
-    roll = charge.roll + charge_bonus(game, unit)
+    roll = max(0, charge.roll + charge_bonus(game, unit))
     if _heroic(game, unit) == core_stratagems.INTO_THE_FRAY:
         roll = min(roll, core_stratagems.FRAY_MAX_ROLL)
     return roll

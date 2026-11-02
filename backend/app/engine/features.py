@@ -42,7 +42,7 @@ ACTION_TYPES = (
     "start_action", "shooting_start", "psychic", "roll_charge", "reroll_charge", "charge",
     "pile_in", "finish_piling_in", "fight", "pass_fight", "consolidate",
     "skip_consolidation", "surge_move", "discard_secondary", "achieve_secondary",
-    "use_stratagem", "other",
+    "use_stratagem", "phase_start_ability", "finish_phase_start", "grant_formation", "resurrect", "turn_end_reserves", "reroll_advance", "end_phase", "finish_phase_end", "other",
 )
 KEYWORDS = (
     "INFANTRY", "VEHICLE", "MONSTER", "CHARACTER", "FLY", "BATTLELINE", "TRANSPORT",
@@ -52,7 +52,7 @@ MOVE_KINDS = ("normal", "advance", "fall_back")
 
 GLOBAL_SIZE = 8 + len(STATUSES) + len(PHASES) + 7 * MAX_OBJECTIVES
 UNIT_SIZE = 35 + len(KEYWORDS)
-ACTION_SIZE = len(ACTION_TYPES) + len(MOVE_KINDS) + 11
+ACTION_SIZE = len(ACTION_TYPES) + len(MOVE_KINDS) + 12
 # Attacks that hit automatically (24.39).
 TORRENT = "Torrent"
 
@@ -264,6 +264,8 @@ class _View:
             float(bool(params.get("take_to_skies") or params.get("mobile"))),
             float(" towards " in action.get("label", "")),
             _stratagem_cp(params.get("stratagem_id")) / 3,
+            # (Using a once-a-battle ability with it - e.g. Banner of Macragge.)
+            float(bool(params.get("abilities"))),
         ]
         # An attack: the damage it's expected to do, and how much of the
         # target that is (its wounds left, and its models).

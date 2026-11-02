@@ -1,7 +1,8 @@
-from app.combat_rules import CommandChoice, Rule, RuleOption
+from app.combat_rules import CommandChoice, PhaseStartAbility, Rule, RuleOption, UnitEffect
 from app.combat_rules.conditions import (
     ALWAYS,
     ATTACKER_LED_BY_CHARACTER,
+    CRITICAL_HIT,
     PRE_WEAPON,
     TARGET_HAS_CHARACTER,
     TARGET_MONSTER_OR_VEHICLE,
@@ -12,14 +13,17 @@ from app.combat_rules.effects import (
     ADD_THREE_ATTACKS,
     ADD_TWO_ATTACKS,
     ASSAULT,
+    AUTO_PASS_WOUND,
     FEEL_NO_PAIN_4,
     FEEL_NO_PAIN_5,
     IGNORE_COVER,
     INVULNERABLE_4,
     MINUS_ONE_TO_WOUND,
+    RANGED_INVULNERABLE_4,
     PLUS_ONE_TO_HIT,
     PLUS_ONE_TOUGHNESS,
     REROLL_FAILED_HITS,
+    REROLL_FAILED_WOUNDS,
     REROLL_HIT_ONES,
     REROLL_WOUND_ONES,
 )
@@ -33,7 +37,10 @@ from app.seeds.factions.adeptus_mechanicus.conditions import (
     KASTELAN_RANGED_WEAPON,
     NEUTRON_FUSIL_WEAPON,
     OMNISSIAN_AXE_WEAPON,
+    ARQUEBUS_VS_MONSTER_OR_VEHICLE,
     PROTECTOR_IMPERATIVE_ACTIVE,
+    RADIUM_JEZZAIL_VS_INFANTRY,
+    TARGET_MODEL_BATTLELINE,
     TARGET_ELECTRO_PRIESTS_LED_BY_CHARACTER,
     TARGET_MODEL_DATASMITH_LEADING_KASTELANS,
     TARGET_MODEL_KASTELAN,
@@ -352,11 +359,89 @@ ENTRIES = [
         [],
         [],
     ),
+    (
+        "Dread Snipers",
+        "In your Shooting phase, after this model has shot, select one enemy unit hit by one or "
+        "more of those attacks. That unit must take a Battle-shock test.",
+        [],
+        [],
+    ),
+    (
+        "Achillan Eye",
+        "Each time this model makes an attack with a radium jezzail that targets an INFANTRY "
+        "unit, you can re-roll the Wound roll. Each time this model makes an attack with a "
+        "Skatros transuranic arquebus that targets a MONSTER or VEHICLE unit, you can re-roll "
+        "the Wound roll.",
+        [],
+        [],
+    ),
+    (
+        "Sydonian Sentinel",
+        "This model cannot be your WARLORD.",
+        [],
+        [],
+    ),
+    (
+        "Galvanic Field",
+        "While this model is leading a unit, weapons equipped by models in that unit have the "
+        "[LETHAL HITS] ability.",
+        [],
+        [],
+    ),
+    (
+        "Defend the Divine Work",
+        "Once per battle, at the start of any phase, this model can use this ability. If it "
+        "does, until the end of the phase, all models in this model's unit have a 4+ "
+        "invulnerable save.",
+        [],
+        [],
+    ),
+    (
+        "Electro-shock",
+        "In your Shooting phase, after this unit has shot, select one enemy unit (excluding "
+        "MONSTERS and VEHICLES) hit by one or more of those attacks. Until the end of your "
+        "opponent's next turn, that enemy unit is shocked. While a unit is shocked, subtract "
+        "2\" from its Move characteristic and subtract 2 from Advance and Charge rolls made "
+        "for it.",
+        [],
+        [],
+    ),
+    (
+        "Emanatus Force Field (Aura)",
+        "While a friendly ADEPTUS MECHANICUS BATTLELINE model is wholly within 6\" of this "
+        "model, that BATTLELINE model has a 4+ invulnerable save against ranged attacks.",
+        [],
+        [],
+    ),
+    (
+        "Scuttling Walker",
+        "Each time this model makes a Normal, Advance or Fall Back move, it can move through "
+        "friendly MONSTER and VEHICLE models and sections of terrain features that are 4\" or "
+        "less in height.",
+        [],
+        [],
+    ),
 ]
 
 # How the calculator handles abilities above, where that needs saying:
 # {ability name: note}.
 CALCULATOR_NOTES = {
+    "Dread Snipers": (
+        "Descriptive only in the calculator; in a game, the enemy unit it shoots and hits in "
+        "its Shooting phase takes a Battle-shock test."
+    ),
+    "Sydonian Sentinel": "An army-building restriction: a list can't make it its Warlord.",
+    "Defend the Divine Work": (
+        "Pick it for this model's unit to give it a 4+ invulnerable save; in a game, its "
+        "player can use it once a battle, at the start of their opponent's Shooting or Fight "
+        "phase."
+    ),
+    "Electro-shock": (
+        "Descriptive only in the calculator; in a game, the enemy unit this unit shoots and "
+        "hits in its Shooting phase (not a MONSTER or VEHICLE) is shocked until the end of its "
+        "next turn: -2\" Move, and -2 to its Advance and Charge rolls."
+    ),
+    "Scuttling Walker": "Descriptive only: moving through models and terrain isn't modelled.",
     "Servo-skull Uplink": (
         "Descriptive only in the calculator; in a game, once per battle it rallies a friendly "
         "Battle-shocked SKITARII unit within 6\"."
@@ -387,8 +472,8 @@ CALCULATOR_NOTES = {
         "Descriptive only in the calculator; in a game, added to its Advance and charge rolls."
     ),
     "Data-spike": (
-        "Descriptive only: a start-of-Fight-phase action outside the attack "
-        "sequence the combat engine resolves."
+        "Descriptive only in the calculator; in a game, its player can use it at the start of "
+        "the Fight phase on an enemy VEHICLE unit engaged with its unit."
     ),
     "Elevated Strider": (
         "Shooting after Advancing is modelled as every weapon having [ASSAULT]; "
@@ -398,11 +483,15 @@ CALCULATOR_NOTES = {
         "Descriptive only in the calculator; in a game, a Stratagem used on its unit (with a "
         "unit target, or Rapid Ingress) rolls for the CP."
     ),
-    "Dynamic Efficiency": "Descriptive only: charging and Desperate Escape aren't modelled.",
+    "Dynamic Efficiency": (
+        "Descriptive only in the calculator; in a game, it can declare a charge after Advancing "
+        "or Falling Back, and re-rolls failed Desperate Escape tests."
+    ),
     "Voices in the Code": "Descriptive only: Battle-shock is outside the combat engine.",
     "Neurostatic Interference (Aura)": (
-        "Descriptive only: Battle-shock/Leadership is outside the combat "
-        "engine."
+        "Descriptive only in the calculator; in a game, enemy units within 6\" take -1 to "
+        "their Battle-shock tests (-2 while it's within 6\" of a friendly ADEPTUS MECHANICUS "
+        "BATTLELINE unit)."
     ),
     "Mechanicus Bodyguard": (
         "Descriptive only in the calculator; in a game, models more than 12\" away can't shoot "
@@ -435,6 +524,30 @@ CALCULATOR_NOTES = {
 
 # Code-defined rules for abilities above, by name.
 RULES = {
+    "Achillan Eye": [
+        Rule(
+            conditions=(RADIUM_JEZZAIL_VS_INFANTRY,),
+            effects=(REROLL_FAILED_WOUNDS,),
+            description="Radium jezzails re-roll the Wound roll against INFANTRY units.",
+        ),
+        Rule(
+            conditions=(ARQUEBUS_VS_MONSTER_OR_VEHICLE,),
+            effects=(REROLL_FAILED_WOUNDS,),
+            description=(
+                "Transuranic arquebuses re-roll the Wound roll against MONSTER and VEHICLE units."
+            ),
+        ),
+    ],
+    "Galvanic Field": [
+        Rule(
+            conditions=(ATTACKER_LED_BY_CHARACTER, CRITICAL_HIT),
+            effects=(AUTO_PASS_WOUND,),
+            description=(
+                "While this CHARACTER leads its unit, its unit's attacks have [LETHAL HITS]: "
+                "critical hits wound automatically."
+            ),
+        ),
+    ],
     "Control Edict": [
         Rule(
             conditions=(ATTACKER_LED_BY_CHARACTER,),
@@ -564,6 +677,30 @@ RULES = {
 # Selectable options for abilities above: {ability name: {option name:
 # RuleOption}}.
 OPTIONS = {
+    "Defend the Divine Work": {
+        "Defend the Divine Work": RuleOption(
+            rules=(Rule(conditions=(ALWAYS,), effects=(INVULNERABLE_4,), side="defender"),),
+            description="This model's unit has a 4+ invulnerable save (once per battle, for a phase).",
+        ),
+    },
+    "Emanatus Force Field (Aura)": {
+        "Emanatus Force Field": RuleOption(
+            rules=(
+                Rule(
+                    conditions=(TARGET_MODEL_BATTLELINE,),
+                    effects=(RANGED_INVULNERABLE_4,),
+                    side="defender",
+                ),
+            ),
+            army_wide=True,
+            aura_range=6.0,
+            wholly_within=True,
+            description=(
+                "Friendly ADEPTUS MECHANICUS BATTLELINE models have a 4+ invulnerable save "
+                "against ranged attacks (in a game, those wholly within 6\" of this model)."
+            ),
+        ),
+    },
     "Omnissiah's Blessing": {
         "Omnissiah's Blessing": RuleOption(
             rules=(
@@ -764,4 +901,64 @@ START_OF_SHOOTING = {
         "roll": 2,
         "mortal_wounds": "D3+1",
     },
+    # At the start of the Fight phase (either player's), an enemy VEHICLE unit
+    # within Engagement Range of this model's unit.
+    "Data-spike": {
+        "phase": "fight",
+        "target_keywords": ("VEHICLE",),
+        "range": 2.0,
+        "from_unit": True,
+        "roll": 4,
+        "mortal_wounds": "D6",
+        "melee_skill": 1,
+    },
 }
+
+
+# In a game: abilities their owner can use at the start of their opponent's
+# phases (see app/services/in_game/phase_start.py).
+PHASE_START_ABILITIES = {
+    "Defend the Divine Work": PhaseStartAbility(
+        phases=("shooting", "fight"),
+        rules=(Rule(conditions=(ALWAYS,), effects=(INVULNERABLE_4,), side="defender"),),
+    ),
+}
+
+# In a game: abilities whose unit, after shooting in its Shooting phase, does
+# something to an enemy unit it hit for a while (see
+# app/services/in_game/unit_effects.py) - until the end of that unit's next
+# turn.
+AFTER_SHOOTING_EFFECTS = {
+    "Electro-shock": UnitEffect(
+        move=-2, advance=-2, charge=-2, excluded_keywords=("MONSTER", "VEHICLE")
+    ),
+}
+
+
+# In a game: abilities that let their unit do things after Advancing or
+# Falling Back (see app/services/in_game/command_phase.py eligible_after) -
+# and re-roll Desperate Escape tests (app/services/in_game/movement.py).
+ELIGIBLE_AFTER = {"Dynamic Efficiency": {"advanced": ("charge",), "fell_back": ("charge",)}}
+DESPERATE_ESCAPE_REROLLS = {"Dynamic Efficiency"}
+
+# In a game: auras that worsen enemy units' Battle-shock and Leadership tests
+# (see app/services/in_game/battle_shock.py) - Neurostatic Interference: -1
+# within 6", or -2 while its unit's within 6" of a friendly ADEPTUS MECHANICUS
+# BATTLELINE unit.
+BATTLE_SHOCK_AURAS = {
+    "Neurostatic Interference (Aura)": {
+        "range": 6.0,
+        "modifier": -1,
+        "near": (("ADEPTUS MECHANICUS", "BATTLELINE"), 6.0, -2),
+    },
+}
+
+
+# Abilities whose model can't be its list's Warlord (see
+# app/services/list_building/warlord.py).
+CANNOT_BE_WARLORD = {"Sydonian Sentinel"}
+
+# In a game: abilities whose unit, after shooting in its Shooting phase, makes
+# the enemy unit it hit take a Battle-shock test - with this modifier (see
+# app/services/in_game/battle_shock.py after_shooting).
+AFTER_SHOOTING_BATTLE_SHOCK = {"Dread Snipers": 0}

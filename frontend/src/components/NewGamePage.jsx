@@ -15,7 +15,6 @@ const EMPTY_PLAYER = {
   user_id: '',
   list_id: '',
   secondary_mode: 'tactical',
-  disposition_id: '',
   fixed_secondary_ids: [],
 }
 
@@ -40,15 +39,19 @@ function NewGamePage({ onCreated, onCancel }) {
   const update = (index, changes) =>
     setPlayers(players.map((p, i) => (i === index ? { ...p, ...changes } : p)))
 
-  // The dispositions a player's list offers, from its detachments.
-  const dispositionOptions = (player) => {
+  // A player's disposition: their list's (chosen on the list), or the only
+  // one its detachments offer - undefined if it has to be chosen there.
+  const dispositionOf = (player) => {
     const list = lists.find((l) => String(l.id) === player.list_id)
+    if (!list) return null
+    if (list.disposition_id != null) return dispositions.find((d) => d.id === list.disposition_id)
     const ids = new Set(
       detachments
-        .filter((d) => list?.detachment_ids.includes(d.id))
+        .filter((d) => list.detachment_ids.includes(d.id))
         .flatMap((d) => d.disposition_ids)
     )
-    return dispositions.filter((d) => ids.has(d.id))
+    const offered = dispositions.filter((d) => ids.has(d.id))
+    return offered.length === 1 ? offered[0] : offered.length === 0 ? null : undefined
   }
   const fixedOptions = secondaries
     .filter((m) => m.fixed_points !== null)
@@ -71,7 +74,6 @@ function NewGamePage({ onCreated, onCancel }) {
           user_id: Number(p.user_id),
           list_id: Number(p.list_id),
           secondary_mode: p.secondary_mode,
-          disposition_id: p.disposition_id === '' ? null : Number(p.disposition_id),
           fixed_secondary_ids: p.secondary_mode === 'fixed' ? p.fixed_secondary_ids : [],
         })),
         // Who goes first is rolled off once everything is set up.
@@ -90,7 +92,7 @@ function NewGamePage({ onCreated, onCancel }) {
       <form onSubmit={handleSubmit}>
         {players.map((player, index) => {
           const userLists = lists.filter((l) => String(l.user_id) === player.user_id)
-          const playerDispositions = dispositionOptions(player)
+          const disposition = dispositionOf(player)
           return (
             <fieldset key={index} className="form-section">
               <legend>Player {index + 1}</legend>
@@ -98,9 +100,7 @@ function NewGamePage({ onCreated, onCancel }) {
                 <Select
                   options={users}
                   value={player.user_id}
-                  onChange={(user_id) =>
-                    update(index, { user_id, list_id: '', disposition_id: '' })
-                  }
+                  onChange={(user_id) => update(index, { user_id, list_id: '' })}
                   placeholder="Select user"
                 />
               </Field>
@@ -108,22 +108,13 @@ function NewGamePage({ onCreated, onCancel }) {
                 <Select
                   options={userLists}
                   value={player.list_id}
-                  onChange={(list_id) => update(index, { list_id, disposition_id: '' })}
+                  onChange={(list_id) => update(index, { list_id })}
                   placeholder={player.user_id ? 'Select list' : 'Select a user first'}
                 />
               </Field>
-              {playerDispositions.length > 1 && (
-                <Field label="Disposition">
-                  <Select
-                    options={playerDispositions}
-                    value={player.disposition_id}
-                    onChange={(disposition_id) => update(index, { disposition_id })}
-                    placeholder="Select disposition"
-                  />
-                </Field>
-              )}
-              {playerDispositions.length === 1 && (
-                <p className="hint">Disposition: {playerDispositions[0].name}</p>
+              {disposition && <p className="hint">Disposition: {disposition.name}</p>}
+              {disposition === undefined && (
+                <p className="error">Choose the list's disposition (on the list) first.</p>
               )}
               <div className="radio-group">
                 Secondaries

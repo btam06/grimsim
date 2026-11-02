@@ -131,7 +131,11 @@ async def _unit(
             keyword="assault", name="Assault"
         )
         query = select(Condition).where(Condition.keyword == "always")
-        always = (await session.execute(query)).scalar_one_or_none() or Condition(
+        # (The gun's, if it has one - it isn't in the session yet.)
+        always = next(
+            (c for w in weapons for a in w.abilities for c in a.conditions if c.keyword == "always"),
+            None,
+        ) or (await session.execute(query)).scalar_one_or_none() or Condition(
             keyword="always", name="Always"
         )
         weapons.append(

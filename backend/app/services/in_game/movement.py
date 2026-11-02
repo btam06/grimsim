@@ -15,6 +15,7 @@ from app.services.in_game import (
     pathing,
     regions,
     reinforcements,
+    unit_effects,
 )
 from app.services.in_game.deployment import TOLERANCE, Placement
 
@@ -52,6 +53,9 @@ ENGAGEMENT_RANGE = 2.0
 # A Super-heavy Walker's roll after a move it made MOBILE for, this phase
 # (kept as a marked unit - see app/services/in_game/mission_state.py).
 SUPER_HEAVY_ROLL = "super_heavy_roll"
+# (Marks that a unit has rolled for an enemy unit it moved over this phase.)
+MOVED_OVER = "moved_over_mortals"
+ADVANCE_REROLLED = "advance_rerolled"
 KIND_NAMES = {"normal": "Normal move", "advance": "Advance", "fall_back": "Fall Back"}
 
 
@@ -178,13 +182,23 @@ def allowed_kinds(game: Game, unit: Unit) -> list[str]:
 
 
 def allowance(
-    model: UnitModel, kind: str, move: GameUnitMove | None, take_to_skies: bool = False
+    model: UnitModel,
+    kind: str,
+    move: GameUnitMove | None,
+    take_to_skies: bool = False,
+    change: int = 0,
 ) -> float:
-    # How far a model can move: its M, plus the D6 if it's Advancing - 2"
-    # less if it takes to the skies (but for Hover).
+    # How far a model can move: its M (plus `change` - e.g. -2 shocked, see
+    # app/services/in_game/unit_effects.py), plus the D6 if it's Advancing -
+    # 2" less if it takes to the skies (but for Hover).
     extra = move.advance_roll if kind == "advance" and move and move.advance_roll else 0
     skies = 2 if take_to_skies and not _hovers(model) else 0
-    return float(model.model.movement + extra - skies)
+    return float(max(0, model.model.movement + change) + extra - skies)
+
+
+def move_characteristic(game: Game, unit: Unit, model: UnitModel) -> int:
+    # The model's Move characteristic now - its effects' changes included.
+    return max(0, model.model.movement + unit_effects.move_change(game, unit))
 
 
 FLY = "FLY"
@@ -251,7 +265,9 @@ def _check_unit(game: Game, unit: Unit) -> None:
 def roll_bonus(game: Game, unit: Unit, roll: str) -> int:
     # What the unit's abilities add to its `roll` ("advance", "charge") now -
     # e.g. Optimised Gait: +1, or +2 within 6" of a friendly ADEPTUS
-    # MECHANICUS BATTLELINE unit. (The best one counts.)
+    # MECHANICUS BATTLELINE unit (the best one counts) - and what's being
+    # done to it takes off (e.g. -2 shocked - see
+    # app/services/in_game/unit_effects.py).
     from app.seeds import datasheet_abilities
 
     config = datasheet_abilities.ROLL_BONUSES
@@ -267,7 +283,7 @@ def roll_bonus(game: Game, unit: Unit, roll: str) -> int:
             if regions.near_friendly(game, unit, keywords, reach):
                 value = instead
         best = max(best, value)
-    return best
+    return best + unit_effects.roll_change(game, unit, roll)
 
 
 def roll_advance(game: Game, unit: Unit) -> GameUnitMove:
@@ -281,17 +297,49 @@ def roll_advance(game: Game, unit: Unit) -> GameUnitMove:
         # Already moved (normally) this phase: roll now; already rolled: that
         # roll stands.
         if move.advance_roll is None:
-            move.advance_roll = dice.randint(1, 6) + roll_bonus(game, unit, "advance")
+            move.advance_roll = max(0, dice.randint(1, 6) + roll_bonus(game, unit, "advance"))
         return move
     move = GameUnitMove(
         unit_id=unit.id,
         battle_round=game.battle_round,
         turn_seat=game.turn_seat,
         kind="advance",
-        advance_roll=dice.randint(1, 6) + roll_bonus(game, unit, "advance"),
+        advance_roll=max(0, dice.randint(1, 6) + roll_bonus(game, unit, "advance")),
         completed=False,
     )
     game.unit_moves.append(move)
+    return move
+
+
+def can_reroll_advance(game: Game, unit: Unit) -> bool:
+    # Whether the unit can re-roll its Advance roll now: an ability lets it
+    # (e.g. Karnivore), it's rolled but hasn't Advanced, and it hasn't
+    # re-rolled already this phase.
+    from app.seeds import datasheet_abilities
+
+    move = unit_move(game, unit)
+    names = {a.name for m in unit.unit_models for a in m.model.abilities}
+    return (
+        move is not None
+        and move.advance_roll is not None
+        and not (move.completed and move.kind == "advance")
+        and bool(names & datasheet_abilities.ADVANCE_REROLLS)
+        and not any(
+            m.unit_id == unit.id
+            and m.battle_round == game.battle_round
+            and m.turn_seat == game.turn_seat
+            for m in mission_state.marked(game, ADVANCE_REROLLED)
+        )
+    )
+
+
+def reroll_advance(game: Game, unit: Unit) -> GameUnitMove:
+    _check_unit(game, unit)
+    if not can_reroll_advance(game, unit):
+        raise _bad_request("that unit can't re-roll its Advance roll")
+    move = unit_move(game, unit)
+    move.advance_roll = max(0, dice.randint(1, 6) + roll_bonus(game, unit, "advance"))
+    mission_state.mark(game, deployment.owner(game, unit).seat, ADVANCE_REROLLED, unit.id)
     return move
 
 
@@ -332,15 +380,16 @@ def check_move(
     enemies = _enemy_bases(game, unit)
     # How far each model moves: round dense terrain and enemy models, unless
     # it can go through them (see app/services/in_game/pathing.py).
+    change = unit_effects.move_change(game, unit)
     pather = pathing.for_unit(
         game, unit, start,
-        max((allowance(m, kind, move, take_to_skies) for m in models), default=0),
+        max((allowance(m, kind, move, take_to_skies, change) for m in models), default=0),
         through(game, unit, kind, take_to_skies),
         mobile and pathing.is_super_heavy_walker(unit),
     )
     for model in models:
         found = []
-        limit = allowance(model, kind, move, take_to_skies)
+        limit = allowance(model, kind, move, take_to_skies, change)
         if problem := pathing.too_far(pather, start[model.id], bases[model.id], limit):
             found.append(problem)
         if any(
@@ -504,6 +553,7 @@ def move_unit(
     move.distance = round(distance, 3)
     move.completed = True
     mission_state.after_move(game, unit)
+    _moved_over_mortals(game, unit, kind, start, placement)
     if mobile:
         _super_heavy_walker(game, unit)
     # Enemy units it ended its move near that can react (e.g. Tactica
@@ -511,6 +561,99 @@ def move_unit(
     from app.services.in_game import reactive_move
 
     reactive_move.after_enemy_move(game, unit)
+
+
+def moved_over(
+    game: Game,
+    unit: Unit,
+    start: dict[int, tuple[float, float, float]],
+    placement: dict[int, tuple[float, float, float]],
+) -> dict[int, int]:
+    # The enemy units the unit's models moved over, going straight from
+    # `start` to `placement`: {unit id: how many of its models did}.
+    models = {m.id: m for m in unit.unit_models}
+    found: dict[int, int] = {}
+    for enemy in _enemy_units(game, unit):
+        bases = list(_unit_bases(game, enemy).values())
+        count = 0
+        for i, (x, y, rotation) in placement.items():
+            if i not in start or i not in models:
+                continue
+            reach = max(deployment.base_at(models[i], x, y, rotation).semi_axes)
+            a, b = start[i][:2], (x, y)
+            if any(
+                _segment_distance((e.x, e.y), a, b) <= max(e.semi_axes) + reach
+                for e in bases
+            ):
+                count += 1
+        if count:
+            found[enemy.id] = count
+    return found
+
+
+def _segment_distance(p, a, b) -> float:
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    length2 = dx * dx + dy * dy
+    t = max(0.0, min(1.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / length2)) if length2 else 0.0
+    return math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy))
+
+
+def _enemy_units(game: Game, unit: Unit) -> list[Unit]:
+    seat = deployment.owner(game, unit).seat
+    placed = deployment.positions(game)
+    return [
+        u
+        for p in game.players
+        if p.seat != seat
+        for u in deployment.deployable_units(p)
+        if deployment.is_deployed(u, placed)
+    ]
+
+
+def _unit_bases(game: Game, unit: Unit) -> dict[int, deployment.Base]:
+    placed = deployment.positions(game)
+    return {
+        m.id: deployment.base_at(m, placed[m.id].x, placed[m.id].y, placed[m.id].rotation)
+        for m in unit.unit_models
+        if m.id in placed
+    }
+
+
+def _moved_over_mortals(
+    game: Game,
+    unit: Unit,
+    kind: str,
+    start: dict[int, tuple[float, float, float]],
+    placement: dict[int, tuple[float, float, float]],
+) -> None:
+    # Abilities that, as the unit ends a move of some kinds, roll a D6 for
+    # each of its models against an enemy unit it moved over (e.g. Wraith
+    # Form: each 4+, a mortal wound) - once a phase, however often it's
+    # moved again. The enemy unit is the one most of its models moved over.
+    from app.seeds import datasheet_abilities
+    from app.services.in_game import casualties
+
+    config = datasheet_abilities.MOVED_OVER_MORTALS
+    names = {a.name for m in deployment.models_on_battlefield(game, unit) for a in m.model.abilities}
+    rules = [config[n] for n in sorted(names & set(config)) if kind in config[n]["kinds"]]
+    if not rules:
+        return
+    seat = deployment.owner(game, unit).seat
+    if any(
+        m.unit_id == unit.id and m.battle_round == game.battle_round
+        and m.turn_seat == game.turn_seat
+        for m in mission_state.marked(game, MOVED_OVER, seat)
+    ):
+        return
+    over = moved_over(game, unit, start, placement)
+    if not over:
+        return
+    mission_state.mark(game, seat, MOVED_OVER, unit.id)
+    target = deployment.find_unit(game, min(over, key=lambda i: (-over[i], i)))
+    rolls = [dice.randint(1, 6) for _ in deployment.models_on_battlefield(game, unit)]
+    wounds = sum(r >= rules[0]["roll"] for r in rolls)
+    if wounds:
+        casualties.mortal_wounds(game, target, wounds, destroyed_by=unit)
 
 
 def _desperate_escape(game: Game, unit: Unit) -> None:
@@ -527,9 +670,17 @@ def _desperate_escape(game: Game, unit: Unit) -> None:
     ):
         return
     mission_state.mark(game, seat, DESPERATE_ESCAPE, unit.id)
+    from app.seeds import datasheet_abilities
+
     models = deployment.models_on_battlefield(game, unit)
     per = hazard_wounds([{k.name for k in m.model.keywords} for m in models])
-    failed = sum(hazard_failed(dice.randint(1, 6)) for _ in models)
+    rolls = [dice.randint(1, 6) for _ in models]
+    # (Failed tests re-rolled, if an ability lets it - e.g. Dynamic Efficiency.)
+    if {a.name for m in models for a in m.model.abilities} & (
+        datasheet_abilities.DESPERATE_ESCAPE_REROLLS
+    ):
+        rolls = [dice.randint(1, 6) if hazard_failed(r) else r for r in rolls]
+    failed = sum(hazard_failed(r) for r in rolls)
     if failed:
         casualties.mortal_wounds(game, unit, failed * per)
 

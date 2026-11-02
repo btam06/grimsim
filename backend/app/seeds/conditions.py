@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.combat_rules.conditions import (
     ALWAYS,
     ANTI_FLY_2,
+    ANTI_FLY_4,
     ANTI_INFANTRY_2,
     ANTI_INFANTRY_3,
     ANTI_INFANTRY_4,
@@ -181,6 +182,11 @@ CORE_ENTRIES = [
         ANTI_FLY_2,
         "Anti-Fly 2+",
         "The wound roll was a 2+ against a defending unit that contains a FLY model.",
+    ),
+    (
+        ANTI_FLY_4,
+        "Anti-Fly 4+",
+        "The wound roll was a 4+ against a defending unit that contains a FLY model.",
     ),
     (
         RANGED_CRITICAL_HIT,

@@ -9,11 +9,14 @@ from app.config import settings
 from app.engine import state
 from app.engine.catalog import Catalog
 
-# Autosaves: a game's state at the start of each phase, so it can be played
-# again from there (restore). Each game has a folder under settings.saves_dir:
-# catalog.json (what it's played with - see app/engine/catalog.py) and a file
-# per phase it's reached, named for the battle round, whose turn and the
-# phase - e.g. r2-s1-shooting.json. Deleting a game deletes its folder.
+# Autosaves: a game's state as it's made, and at the start of each phase, so
+# it can be played again from there (restore). Each game has a folder under
+# settings.saves_dir: catalog.json (what it's played with - see
+# app/engine/catalog.py), setup.json (the game as it was made: into
+# deployment, nothing deployed yet - e.g. to learn deployment from), and a
+# file per phase
+# it's reached, named for the battle round, whose turn and the phase - e.g.
+# r2-s1-shooting.json. Deleting a game deletes its folder.
 #
 # A game put away while it's being played (see app/engine/store.py
 # evict_idle) is saved just as it is, to current.json - and comes back from
@@ -24,6 +27,7 @@ from app.engine.catalog import Catalog
 VERSION = 1
 CATALOG = "catalog.json"
 CURRENT = "current.json"
+SETUP = "setup.json"
 SUMMARY = "summary.json"
 
 
@@ -49,6 +53,11 @@ def autosave(game: state.Game, catalog: Catalog, summary: dict | None = None) ->
     if save_name is None:
         return None
     return _save(game, catalog, save_name, summary)
+
+
+def save_setup(game: state.Game, catalog: Catalog, summary: dict | None = None) -> Path:
+    # Saves the game as it's made (see SETUP).
+    return _save(game, catalog, SETUP, summary)
 
 
 def save_current(game: state.Game, catalog: Catalog, summary: dict | None = None) -> Path:
@@ -98,7 +107,9 @@ def restore(path: str | Path) -> tuple[state.Game, Catalog]:
 
 def saves(game_id: int) -> list[Path]:
     # A game's saves, oldest first.
-    found = [p for p in folder(game_id).glob("r*.json")]
+    found = [p for p in folder(game_id).glob("r*.json")] + [
+        p for p in [folder(game_id) / SETUP] if p.exists()
+    ]
     return sorted(found, key=lambda p: p.stat().st_mtime)
 
 

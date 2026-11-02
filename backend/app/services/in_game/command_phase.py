@@ -193,6 +193,14 @@ def eligible_after(game: Game, unit: Unit, action: str, to: str) -> bool:
     # a charge) after `action` ("advanced", "fell_back") this turn: its own,
     # one that applies to it, or its army rule's (e.g. the Tactical
     # Doctrine).
+    from app.seeds import datasheet_abilities
+
+    # (Its datasheet abilities - e.g. Dynamic Efficiency: charging after
+    # Advancing or Falling Back.)
+    names = {a.name for m in unit.unit_models for a in m.model.abilities}
+    for name in names & set(datasheet_abilities.ELIGIBLE_AFTER):
+        if to in datasheet_abilities.ELIGIBLE_AFTER[name].get(action, ()):
+            return True
     seat = deployment.owner(game, unit).seat
     held = _held_army_rules(unit)
     army_options = [o for a, o in _active_army_choices(game, seat) if a in held]

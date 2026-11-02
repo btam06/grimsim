@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import math
 import re
 from dataclasses import dataclass
@@ -97,9 +98,15 @@ def _inside_convex(point: Point, polygon: list[Point]) -> bool:
 
 def _rotate(x: float, y: float, degrees: float) -> Point:
     # Turns a point about the origin, clockwise on screen (y points down).
-    radians = math.radians(degrees)
-    cos, sin = math.cos(radians), math.sin(radians)
+    cos, sin = _turn(degrees)
     return x * cos - y * sin, x * sin + y * cos
+
+
+@functools.lru_cache(maxsize=1024)
+def _turn(degrees: float) -> tuple[float, float]:
+    # (Bases and features keep their few rotations: worked out once each.)
+    radians = math.radians(degrees)
+    return math.cos(radians), math.sin(radians)
 
 
 def rectangle(x: float, y: float, width: float, height: float, rotation: float) -> list[Point]:
@@ -285,17 +292,48 @@ async def pick_layout(
     session: AsyncSession, attacker_disposition_id: int | None, defender_disposition_id: int | None
 ) -> TerrainLayout | None:
     # A terrain layout for the attacker's and defender's dispositions, at
-    # random if there are several; None if neither has one or none fits.
+    # random if there are several; None if neither has one or none fits. A
+    # layout's for its two dispositions either way round - the zones are the
+    # attacker's and the defender's, whichever disposition each has (e.g.
+    # Take & Hold vs Purge the Foe is also Purge the Foe vs Take & Hold).
     if attacker_disposition_id is None or defender_disposition_id is None:
         return None
-    layouts = list(
-        (
-            await session.execute(
-                select(TerrainLayout).where(
-                    TerrainLayout.attacker_disposition_id == attacker_disposition_id,
-                    TerrainLayout.defender_disposition_id == defender_disposition_id,
-                )
-            )
-        ).scalars()
-    )
+    layouts = [
+        l
+        for l in (await session.execute(select(TerrainLayout))).scalars()
+        if _fits(l, attacker_disposition_id, defender_disposition_id)
+    ]
     return dice.choice(layouts) if layouts else None
+
+
+def _fits(layout: TerrainLayout, attacker_disposition_id: int, defender_disposition_id: int) -> bool:
+    return {layout.attacker_disposition_id, layout.defender_disposition_id} == {
+        attacker_disposition_id, defender_disposition_id
+    }
+
+
+async def missing_layout_reason(
+    session: AsyncSession, attacker_disposition_id: int, defender_disposition_id: int
+) -> str | None:
+    # Why a game with these dispositions can't be played: there are terrain
+    # layouts, but none for them - or None (there's one, or there are none
+    # at all).
+    from app.models import Disposition
+
+    layouts = list((await session.execute(select(TerrainLayout))).scalars())
+    if not layouts:
+        return None
+    if any(_fits(l, attacker_disposition_id, defender_disposition_id) for l in layouts):
+        return None
+    names = {d.id: d.name for d in (await session.execute(select(Disposition))).scalars()}
+    pairings = sorted(
+        {
+            f"{names.get(l.attacker_disposition_id)} vs {names.get(l.defender_disposition_id)}"
+            for l in layouts
+        }
+    )
+    return (
+        f"there's no terrain layout for {names.get(attacker_disposition_id)} vs "
+        f"{names.get(defender_disposition_id)} (either way round) - there are for: "
+        + "; ".join(pairings)
+    )

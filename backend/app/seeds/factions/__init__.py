@@ -746,7 +746,7 @@ async def seed_datasheets(session: AsyncSession) -> None:
             await session.execute(
                 select(Model).options(
                     selectinload(Model.weapons).selectinload(Weapon.abilities),
-                    selectinload(Model.wargear),
+                    selectinload(Model.wargear).selectinload(Wargear.abilities),
                     selectinload(Model.abilities),
                     selectinload(Model.faction_abilities),
                 )
@@ -868,11 +868,26 @@ async def seed_datasheets(session: AsyncSession) -> None:
                                         )
                                     )
                                     changed = True
-                    wargear_names = {g.name for g in model.wargear}
+                    wargear_by_name = {g.name: g for g in model.wargear}
                     for gear in spec.wargear:
-                        if gear.name not in wargear_names:
+                        existing_gear = wargear_by_name.get(gear.name)
+                        if existing_gear is None:
                             model.wargear.append(build_wargear(gear, datasheet.name))
                             changed = True
+                            continue
+                        # Abilities added to it since it was seeded.
+                        gear_ability_names = {a.name for a in existing_gear.abilities}
+                        for ability_name in gear.abilities:
+                            if ability_name not in gear_ability_names:
+                                existing_gear.abilities.append(
+                                    lookup(
+                                        wargear_abilities,
+                                        ability_name,
+                                        "wargear ability",
+                                        datasheet.name,
+                                    )
+                                )
+                                changed = True
                     continue
 
                 session.add(

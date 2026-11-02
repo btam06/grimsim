@@ -1366,3 +1366,66 @@ async def test_seed_datasheets_marks_an_existing_weapon_as_default(
         w for w in (await _test_squad(session))["Test Trooper"].weapons if w.name == "Test Rifle"
     )
     assert rifle.is_default
+
+
+def test_every_datasheet_weapon_is_valid():
+    # Each faction's datasheets load (see app/seeds/datasheets.py _weapon):
+    # attacks and damage in dice notation, and skill 0 for [TORRENT] alone.
+    from app.seeds import data_files
+    from app.seeds import datasheets as datasheet_seeds
+
+    folder = data_files.data_dir() / "factions"
+    for faction in sorted(p.name for p in folder.iterdir() if p.is_dir()) if folder.exists() else []:
+        datasheet_seeds.load(faction)
+
+
+@pytest.mark.parametrize(
+    "weapon,problem",
+    [
+        ({"attacks": "D6x", "damage": "1", "skill": 3}, "attacks"),
+        ({"attacks": "2", "damage": "2D", "skill": 3}, "damage"),
+        ({"attacks": "D6", "damage": "1", "skill": 0}, "TORRENT"),
+        ({"attacks": "D6", "damage": "1", "skill": 3, "abilities": ["Torrent"]}, "TORRENT"),
+    ],
+)
+def test_a_bad_weapon_isnt_seeded(weapon, problem):
+    from app.seeds import datasheets as datasheet_seeds
+
+    base = {"name": "Gun", "weapon_type": "ranged", "strength": 4, "ap": 0, "range": 12}
+    with pytest.raises(ValueError, match=problem):
+        datasheet_seeds._weapon(base | weapon)
+    # Dice notation that's fine: 3D3, D6+1.
+    datasheet_seeds._weapon(base | {"attacks": "3D3", "damage": "D6+1", "skill": 3})
+
+
+async def test_wargear_seeded_before_gets_its_new_abilities(session, monkeypatch, tmp_path):
+    # Wargear seeded without an ability (e.g. the Overlord's Resurrection
+    # orb, before it gave Resurrection Orb) gains it on the next seed.
+    import json
+    import shutil
+    from pathlib import Path
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from app.models import Wargear
+    from app.seeds import data_files, factions, run_all
+
+    data = tmp_path / "data"
+    shutil.copytree(Path(__file__).parent / "fixtures" / "data", data)
+    monkeypatch.setattr(data_files, "DATA_DIR", data)
+    sheets_file = data / "factions" / "adeptus_mechanicus" / "datasheets.json"
+    sheets = json.loads(sheets_file.read_text())
+    gear = {"name": "Test shield", "description": "A shield."}
+    sheets["datasheets"][0]["models"][0]["wargear"] = [gear]
+    sheets_file.write_text(json.dumps(sheets))
+    await run_all(session)
+    gear["abilities"] = ["Dispersion Shield"]
+    sheets_file.write_text(json.dumps(sheets))
+    await factions.seed_datasheets(session)
+    session.expire_all()
+    query = select(Wargear).options(selectinload(Wargear.abilities)).where(
+        Wargear.name == "Test shield"
+    )
+    shield = (await session.execute(query)).scalar_one()
+    assert [a.name for a in shield.abilities] == ["Dispersion Shield"]

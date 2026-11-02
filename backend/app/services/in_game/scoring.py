@@ -21,9 +21,11 @@ from app.services.in_game.mission_context import Context
 # are scored by hand, as before.
 #
 # A player scores at most 15VP from primary missions, and 15VP from
-# secondaries, in each battle round (see `room`): anything over is lost.
+# secondaries, in each battle round - and 45VP from primary missions in the
+# battle (see `room`): anything over is lost.
 
 MAX_PER_ROUND = {"primary": 15, "secondary": 15}
+MAX_PER_BATTLE = {"primary": 45}
 COMMAND_END = "command_end"
 TURN_END = "turn_end"
 BATTLE_END = "battle_end"
@@ -54,13 +56,25 @@ def _reasons(lines: list[tuple[str, int]]) -> list[GameScoreReason]:
     return [GameScoreReason(text=text, points=points) for text, points in lines]
 
 
-def room(player, battle_round: int, kind: str) -> int:
-    # How much more of `kind` ("primary" or "secondary") VP the player can
-    # score in that battle round.
+def _round_room(player, battle_round: int, kind: str) -> int:
     scored = sum(
         s.points for s in player.scores if s.battle_round == battle_round and s.kind == kind
     )
     return max(0, MAX_PER_ROUND[kind] - scored)
+
+
+def _battle_room(player, kind: str) -> int | None:
+    if kind not in MAX_PER_BATTLE:
+        return None
+    return max(0, MAX_PER_BATTLE[kind] - sum(s.points for s in player.scores if s.kind == kind))
+
+
+def room(player, battle_round: int, kind: str) -> int:
+    # How much more of `kind` ("primary" or "secondary") VP the player can
+    # score in that battle round (and the battle).
+    battle = _battle_room(player, kind)
+    this_round = _round_room(player, battle_round, kind)
+    return this_round if battle is None else min(this_round, battle)
 
 
 def capped(player, battle_round: int, kind: str, lines: list[tuple[str, int]]):
@@ -69,9 +83,13 @@ def capped(player, battle_round: int, kind: str, lines: list[tuple[str, int]]):
     total = sum(p for _, p in lines)
     allowed = min(total, room(player, battle_round, kind))
     if allowed < total:
-        lines = lines + [
-            (f"Capped at {MAX_PER_ROUND[kind]}VP {kind} per battle round", allowed - total)
-        ]
+        battle = _battle_room(player, kind)
+        note = (
+            f"Capped at {MAX_PER_BATTLE[kind]}VP {kind} per battle"
+            if battle is not None and battle < _round_room(player, battle_round, kind)
+            else f"Capped at {MAX_PER_ROUND[kind]}VP {kind} per battle round"
+        )
+        lines = lines + [(note, allowed - total)]
     return allowed, lines
 
 

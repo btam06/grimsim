@@ -202,6 +202,8 @@ export const getDeploymentFormation = (id, payload) =>
 export const checkDeployment = (id, payload) =>
   request(`/games/${id}/deployment/check`, { method: 'POST', body: JSON.stringify(payload) })
 export const getMovement = (id) => request(`/games/${id}/movement`)
+export const rerollAdvance = (id, payload) =>
+  request(`/games/${id}/movement/advance/reroll`, { method: 'POST', body: JSON.stringify(payload) })
 export const rollAdvance = (id, payload) =>
   request(`/games/${id}/movement/advance`, { method: 'POST', body: JSON.stringify(payload) })
 export const checkMove = (id, payload) =>
@@ -310,6 +312,8 @@ export const chooseRuleOption = (id, payload) =>
 export const getReach = (id, payload) =>
   request(`/games/${id}/reach`, { method: 'POST', body: JSON.stringify(payload) })
 export const getFormations = (id) => request(`/games/${id}/formations`)
+export const grantFormationAbility = (id, payload) =>
+  request(`/games/${id}/formations/grant`, { method: 'POST', body: JSON.stringify(payload) })
 export const setFormation = (id, payload) =>
   request(`/games/${id}/formations`, { method: 'POST', body: JSON.stringify(payload) })
 export const declareFormations = (id, payload) =>
@@ -321,6 +325,17 @@ export const checkDisembark = (id, payload) =>
   request(`/games/${id}/embarked/check`, { method: 'POST', body: JSON.stringify(payload) })
 export const disembark = (id, payload) =>
   request(`/games/${id}/embarked`, { method: 'POST', body: JSON.stringify(payload) })
+export const getResurrection = (id) => request(`/games/${id}/resurrection`)
+export const getTurnEndReserves = (id) => request(`/games/${id}/turn-end-reserves`)
+export const declareTurnEndReserves = (id, payload) =>
+  request(`/games/${id}/turn-end-reserves`, { method: 'POST', body: JSON.stringify(payload) })
+export const declareResurrection = (id, payload) =>
+  request(`/games/${id}/resurrection`, { method: 'POST', body: JSON.stringify(payload) })
+export const getPhaseStart = (id) => request(`/games/${id}/phase-start`)
+export const applyPhaseStart = (id, payload) =>
+  request(`/games/${id}/phase-start`, { method: 'POST', body: JSON.stringify(payload) })
+export const finishPhaseStart = (id, payload) =>
+  request(`/games/${id}/phase-start/done`, { method: 'POST', body: JSON.stringify(payload) })
 export const getTeleportHomers = (id) => request(`/games/${id}/teleport-homers`)
 export const placeTeleportHomer = (id, payload) =>
   request(`/games/${id}/teleport-homers`, { method: 'POST', body: JSON.stringify(payload) })

@@ -26,7 +26,7 @@ function ReanimationPanel({ game, reanimation, draft, checking, onSelectUnit, on
 
   return (
     <div className="deployment-panel">
-      <h3>End of command: Reanimation Protocols</h3>
+      <h3>Returned models (Reanimation Protocols)</h3>
       <p>
         <strong>{player?.user_name}</strong> sets up their reanimated models.{' '}
         <span className="hint">

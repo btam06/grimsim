@@ -79,6 +79,14 @@ from app.schemas import (
     PsychicOut,
     PsychicUnitOut,
     PsychicUseOut,
+    FormationGrantIn,
+    FormationGrantOut,
+    PhaseStartIn,
+    ResurrectionIn,
+    ResurrectionOut,
+    ResurrectionUnitOut,
+    PhaseStartOut,
+    PhaseStartAbilityOut,
     TeleportHomersOut,
     TeleportHomerUnitOut,
     MarkedUnitOut,
@@ -152,6 +160,9 @@ from app.services.in_game import charging as charging_service
 from app.services.in_game import command_phase as command_phase_service
 from app.services.in_game import deployment as deployment_service
 from app.services.in_game import embarked as embarked_service
+from app.services.in_game import fight_abilities as fight_abilities_service
+from app.services.in_game import phase_start as phase_start_service
+from app.services.in_game import unit_effects as unit_effects_service
 from app.services.in_game import emergency as emergency_service
 from app.services.in_game import psychic as psychic_service
 from app.seeds.factions.adeptus_mechanicus import fire_support, vengeance
@@ -173,6 +184,7 @@ from app.services.in_game import selected_objectives as selected_objectives_serv
 from app.services.in_game import overwatch as overwatch_service
 from app.services.in_game import pathing as pathing_service
 from app.seeds import factions as faction_seeds
+from app.seeds import datasheet_abilities as datasheet_ability_seeds
 from app.seeds.factions.necrons import reanimation as reanimation_service
 from app.services.in_game import heal as heal_service
 from app.services.in_game import regions as regions_service
@@ -379,6 +391,9 @@ async def create_game(payload: GameIn, session: AsyncSession = Depends(get_sessi
     game_store.put(live)
     game = await _load_game(session, live.game.id)
     game_service.enter_deployment(game)
+    # Saved as it's made, to be played again from there (deployment and all).
+    if live.autosave:
+        saves.save_setup(game, live.catalog, _summary(live))
     return await _commit_and_reload(session, game.id)
 
 
@@ -690,15 +705,20 @@ def _movement_out(game: Game) -> MovementOut:
                 in_engagement_range=movement_service.in_engagement_range(game, unit),
                 kind=move.kind if move and move.completed else None,
                 advance_roll=move.advance_roll if move else None,
+                can_reroll_advance=movement_service.can_reroll_advance(game, unit),
                 moved=bool(move and move.completed),
                 arrived=bool(move and move.kind == reinforcements_service.ARRIVED),
+                effects=[
+                    unit_effects_service.describe(e)
+                    for e in unit_effects_service.active(game, unit)
+                ],
                 disembarked=bool(move and move.kind == embarked_service.DISEMBARKED),
                 can_fly=movement_service.can_fly(unit),
                 super_heavy_walker=pathing_service.is_super_heavy_walker(unit),
                 models=[
                     MovementModelOut(
                         unit_model_id=m.id,
-                        movement=m.model.movement,
+                        movement=movement_service.move_characteristic(game, unit, m),
                         start=(
                             ModelPositionOut(
                                 unit_model_id=m.id,
@@ -733,6 +753,16 @@ async def roll_advance(
     game = await _load_game(session, game_id)
     unit = deployment_service.find_unit(game, payload.unit_id)
     movement_service.roll_advance(game, unit)
+    return _movement_out(await _load_game(session, game_id))
+
+
+@router.post("/{game_id}/movement/advance/reroll", response_model=MovementOut)
+async def reroll_advance(
+    game_id: int, payload: UnitIdIn, session: AsyncSession = Depends(get_session)
+):
+    # Re-rolls the unit's Advance roll, if an ability lets it (e.g. Karnivore).
+    game = await _load_game(session, game_id)
+    movement_service.reroll_advance(game, deployment_service.find_unit(game, payload.unit_id))
     return _movement_out(await _load_game(session, game_id))
 
 
@@ -831,6 +861,22 @@ def _near_friendly(game: Game, unit: Unit) -> list[str]:
         for position, (keywords, reach) in NEAR_FRIENDLY.items()
         if regions_service.near_friendly(game, unit, keywords, reach)
     ]
+
+
+def _model_rules(game: Game, unit: Unit) -> dict[int, list]:
+    # Rules particular models in the unit have now, for attacks against them:
+    # their repairs' Feel No Pain, and auras that reach models one by one
+    # (e.g. Emanatus Force Field) - {unit model id: [Rule]}.
+    found = repair_service.model_rules(game, unit)
+    for extra in (
+        auras_service.model_rules(game, unit),
+        # Abilities used at the start of the phase (e.g. Defend the Divine
+        # Work's 4+ invulnerable save).
+        phase_start_service.model_rules(game, unit),
+    ):
+        for model_id, rules in extra.items():
+            found.setdefault(model_id, []).extend(rules)
+    return found
 
 
 def _rule_options(game: Game, unit: Unit, attacking: Unit | None = None) -> list[str]:
@@ -1107,10 +1153,18 @@ async def _fire(
         defender_wounds=defender_wounds,
         attacker_wounds=attacker_wounds,
         firing_deck=firing_deck,
-        attacker_extra_rules=fire_support.rules(game, unit, target),
-        defender_model_rules=repair_service.model_rules(game, target),
+        attacker_extra_rules=fire_support.rules(game, unit, target)
+        # (What's been done to the target - e.g. Shattered Defences' +1 AP.)
+        + unit_effects_service.attack_rules(game, unit, target),
+        defender_model_rules=_model_rules(game, target),
     )
     fire_support.after_shooting(game, unit, target, combat.hits)
+    # Abilities that do something to the unit it hit (e.g. Electro-shock,
+    # Dread Snipers).
+    unit_effects_service.after_shooting(game, unit, target, combat.hits)
+    battle_shock_service.after_shooting(game, unit, target, combat.hits)
+    # [ONE SHOT] weapons it fired are spent.
+    shooting_service.record_one_shots(game, unit, reach.firing, set(payload.weapon_ids))
     destroyed = casualties_service.apply_attack(
         game,
         unit,
@@ -1119,6 +1173,9 @@ async def _fire(
         combat.defender_wounds_remaining,
         combat.attacker_damage,
     )
+    # Abilities that let the target surge after losing models to it (e.g.
+    # Glory of Ultramar).
+    surge_service.after_losses(game, target, destroyed)
     game.unit_shots.append(
         GameUnitShot(
             unit_id=unit.id,
@@ -1507,6 +1564,7 @@ def _fight_out(game: Game) -> FightOut:
                     can_fight=reason is None,
                     reason=reason,
                     overrun=fighting_service.overrun_due(game, unit),
+                    abilities=fight_abilities_service.available(game, unit),
                 )
             )
     consolidations = [_consolidating_out(game, f) for f in fighting_service.consolidations(game)]
@@ -1584,6 +1642,8 @@ async def fight(game_id: int, payload: FightIn, session: AsyncSession = Depends(
         for split in payload.splits
     }
     attacks = fighting_service.check_fight(game, unit, target, weapon_ids, splits)
+    # Abilities it uses as it fights (e.g. Banner of Macragge's +1 A and S).
+    ability_rules = fight_abilities_service.use(game, unit, payload.abilities)
     chosen = fighting_service.selected_weapons(unit, weapon_ids)
     charged = fighting_service.charged(game, unit)
     fights_first = fighting_service.has_fights_first(game, unit)
@@ -1627,12 +1687,15 @@ async def fight(game_id: int, payload: FightIn, session: AsyncSession = Depends(
             firing=firing,
             defender_wounds=defender_wounds,
             attacker_wounds=attacker_wounds,
-            defender_model_rules=repair_service.model_rules(game, defender),
+            defender_model_rules=_model_rules(game, defender),
             attack_limits=limits,
             hazards_rolled=hazards_rolled,
             # Epic Challenge: its CHARACTER model's melee weapons have
             # [PRECISION].
             precision_models=core_stratagems_service.precision_models(game, unit),
+            # (And what's being done to it - e.g. Data-spike's worse WS.)
+            attacker_extra_rules=ability_rules
+            + unit_effects_service.own_attack_rules(game, unit),
         )
         destroyed += casualties_service.apply_attack(
             game,
@@ -1824,6 +1887,24 @@ def _formations_out(game: Game) -> FormationsOut:
                 reserves_points=battle_formations_service.reserves_points(game, player),
                 reserves_limit=battle_formations_service.reserves_limit(game, player),
                 units=units,
+                grants=[
+                    FormationGrantOut(
+                        source_unit_id=source.id,
+                        source_name=source.label,
+                        ability=ability,
+                        grants=datasheet_ability_seeds.FORMATION_GRANTS[ability].grants,
+                        unit_id=battle_formations_service.grant_of(game, source, ability),
+                        targets=[
+                            UnitIdNameOut(unit_id=u.id, name=u.label)
+                            for u in battle_formations_service.grant_targets(
+                                game, player.seat, ability
+                            )
+                        ],
+                    )
+                    for source, ability in battle_formations_service.grant_sources(
+                        game, player.seat
+                    )
+                ],
             )
         )
     return FormationsOut(step=deployment_service.deployment_step(game), players=players)
@@ -1854,6 +1935,25 @@ async def set_formation(
         deployment_service.find_unit(game, payload.unit_id),
         payload.place,
         transport,
+    )
+    return _formations_out(await _load_game(session, game_id))
+
+
+@router.post("/{game_id}/formations/grant", response_model=FormationsOut)
+async def grant_formation_ability(
+    game_id: int, payload: FormationGrantIn, session: AsyncSession = Depends(get_session)
+):
+    # Selects the unit a unit's ability gives an ability to as battle
+    # formations are declared (e.g. Thunderhawk Insertion's Deep Strike).
+    game = await _load_game(session, game_id)
+    battle_formations_service.grant(
+        game,
+        payload.seat,
+        deployment_service.find_unit(game, payload.source_unit_id),
+        payload.ability,
+        deployment_service.find_unit(game, payload.unit_id)
+        if payload.unit_id is not None
+        else None,
     )
     return _formations_out(await _load_game(session, game_id))
 
@@ -1900,7 +2000,7 @@ def _reserves_out(game: Game) -> ReservesOut:
             ReserveUnitOut(
                 unit_id=u.id,
                 name=u.label,
-                deep_strike=reinforcements_service.has_deep_strike(u),
+                deep_strike=reinforcements_service.has_deep_strike(u, game),
                 teleport_homer=(
                     {"x": token.x, "y": token.y}
                     if (token := teleport_homer_service.token(game, u)) is not None
@@ -2002,11 +2102,15 @@ async def get_reanimation(game_id: int, session: AsyncSession = Depends(get_sess
     # The Reanimation Protocols activated at the end of this turn's command
     # phase - each unit's roll, what it healed - and, while there are
     # returned models to set up (`placing`), where to start each.
+    # (Or, at the end of any phase, Resurrection Orbs.)
     game = await _load_game(session, game_id)
-    if game.status != "in_progress" or game.phase != "command":
+    if game.status != "in_progress":
         return ReanimationOut(placing=False, seat=None, units=[])
     units = []
-    for record in reanimation_service.reanimations(game):
+    records = (reanimation_service.reanimations(game) if game.phase == "command" else []) + [
+        r for r in reanimation_service.resurrections(game) if r.roll is not None
+    ]
+    for record in records:
         unit = deployment_service.find_unit(game, record.unit_id)
         start = (
             heal_service.suggested(game, unit)
@@ -2027,8 +2131,75 @@ async def get_reanimation(game_id: int, session: AsyncSession = Depends(get_sess
             )
         )
     return ReanimationOut(
-        placing=heal_service.placing(game), seat=game.turn_seat, units=units
+        placing=heal_service.placing(game),
+        seat=heal_service.placing_seat(game) or game.turn_seat,
+        units=units,
     )
+
+
+@router.get("/{game_id}/resurrection", response_model=ResurrectionOut)
+async def get_resurrection(game_id: int, session: AsyncSession = Depends(get_session)):
+    # Resurrection Orbs: the units that could resurrect at the end of this
+    # phase, and those declared to.
+    game = await _load_game(session, game_id)
+    declared = {r.unit_id for r in reanimation_service.resurrections(game) if r.roll is None}
+    units = reanimation_service.resurrectable(game) + [
+        deployment_service.find_unit(game, i) for i in sorted(declared)
+    ]
+    return ResurrectionOut(
+        units=[
+            ResurrectionUnitOut(
+                unit_id=u.id,
+                name=u.label,
+                seat=deployment_service.owner(game, u).seat,
+                declared=u.id in declared,
+            )
+            for u in units
+        ]
+    )
+
+
+@router.get("/{game_id}/turn-end-reserves", response_model=ResurrectionOut)
+async def get_turn_end_reserves(game_id: int, session: AsyncSession = Depends(get_session)):
+    # Units that could go into Strategic Reserves at the end of this turn
+    # (e.g. Tunnelling Horrors), and those declared to.
+    game = await _load_game(session, game_id)
+    return ResurrectionOut(
+        units=[
+            ResurrectionUnitOut(
+                unit_id=u.id, name=u.label, seat=deployment_service.owner(game, u).seat,
+                declared=declared,
+            )
+            for u, declared in reinforcements_service.turn_end_units(game)
+        ]
+    )
+
+
+@router.post("/{game_id}/turn-end-reserves", response_model=GameOut)
+async def declare_turn_end_reserves(
+    game_id: int, payload: ResurrectionIn, session: AsyncSession = Depends(get_session)
+):
+    # The unit goes into Strategic Reserves at the end of this turn - or,
+    # `cancel`, doesn't.
+    game = await _load_game(session, game_id)
+    reinforcements_service.declare_turn_end(
+        game, payload.seat, deployment_service.find_unit(game, payload.unit_id), payload.cancel
+    )
+    return await _commit_and_reload(session, game_id)
+
+
+@router.post("/{game_id}/resurrection", response_model=GameOut)
+async def declare_resurrection(
+    game_id: int, payload: ResurrectionIn, session: AsyncSession = Depends(get_session)
+):
+    # The unit resurrects at the end of this phase - or, `cancel`, doesn't.
+    game = await _load_game(session, game_id)
+    unit = deployment_service.find_unit(game, payload.unit_id)
+    if payload.cancel:
+        reanimation_service.cancel(game, payload.seat, unit)
+    else:
+        reanimation_service.declare(game, payload.seat, unit)
+    return await _commit_and_reload(session, game_id)
 
 
 @router.post("/{game_id}/reanimation/check", response_model=DeploymentCheckOut)
@@ -2903,6 +3074,69 @@ async def finish_teleport_homers(
     return await _commit_and_reload(session, game_id)
 
 
+# --- abilities for the start of a phase (see app/services/in_game/phase_start.py) ---
+
+
+def _phase_start_out(game: Game) -> PhaseStartOut:
+    descriptions = {
+        a.name: a.description
+        for p in game.players
+        for u in p.army_list.units
+        for m in u.unit_models
+        for a in m.model.abilities
+    }
+
+    def out(unit_id: int, ability: str) -> PhaseStartAbilityOut:
+        unit = deployment_service.find_unit(game, unit_id)
+        return PhaseStartAbilityOut(
+            unit_id=unit_id, unit_name=unit.label, ability=ability,
+            description=descriptions.get(ability),
+        )
+
+    seat = phase_start_service.waiting(game)
+    return PhaseStartOut(
+        seat=seat,
+        phase=game.phase,
+        abilities=(
+            [out(a.unit.id, a.ability) for a in phase_start_service.available(game)]
+            if seat is not None
+            else []
+        ),
+        used=[
+            out(r.unit_id, r.ability)
+            for r in game.phase_start_uses
+            if r.unit_id is not None
+            and (r.battle_round, r.turn_seat, r.phase)
+            == (game.battle_round, game.turn_seat, game.phase)
+        ],
+    )
+
+
+@router.get("/{game_id}/phase-start", response_model=PhaseStartOut)
+async def get_phase_start(game_id: int, session: AsyncSession = Depends(get_session)):
+    return _phase_start_out(await _load_game(session, game_id))
+
+
+@router.post("/{game_id}/phase-start", response_model=GameOut)
+async def use_phase_start(
+    game_id: int, payload: PhaseStartIn, session: AsyncSession = Depends(get_session)
+):
+    # The player uses one of their abilities for the start of the phase.
+    game = await _load_game(session, game_id)
+    phase_start_service.use(game, payload.seat, payload.unit_id, payload.ability)
+    return await _commit_and_reload(session, game_id)
+
+
+@router.post("/{game_id}/phase-start/done", response_model=GameOut)
+async def finish_phase_start(
+    game_id: int, payload: SeatIn, session: AsyncSession = Depends(get_session)
+):
+    # The player's done with them: on with the phase.
+    game = await _load_game(session, game_id)
+    phase_start_service.finish(game, payload.seat)
+    return await _commit_and_reload(session, game_id)
+
+
 # --- rallying, and repairing (see app/services/in_game/rally.py, repair.py) ---
 
 
@@ -3081,8 +3315,9 @@ async def make_surge_move(
 
 @router.get("/{game_id}/shooting-start", response_model=list[UnitAbilityTargetsOut])
 async def get_shooting_start(game_id: int, session: AsyncSession = Depends(get_session)):
-    # The abilities the player whose turn it is can use now, at the start of
-    # their Shooting phase (e.g. Secutor of Olympus).
+    # The abilities that can be used now, at the start of the phase (e.g.
+    # Secutor of Olympus, in their Shooting phase; Data-spike, in the Fight
+    # phase).
     game = await _load_game(session, game_id)
     return [
         UnitAbilityTargetsOut(

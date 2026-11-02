@@ -33,6 +33,15 @@ class ListSubfaction(Base):
     name: Mapped[str] = mapped_column(String(255))
 
 
+class ListDisposition(Base):
+    # The disposition a list plays with (one its detachments offer), if one's
+    # been chosen - its games use it (see app/services/in_game/game.py).
+    __tablename__ = "list_dispositions"
+
+    list_id: Mapped[int] = mapped_column(ForeignKey("lists.id"), primary_key=True)
+    disposition_id: Mapped[int] = mapped_column(ForeignKey("dispositions.id"))
+
+
 class ArmyList(Base):
     __tablename__ = "lists"
 
@@ -54,6 +63,14 @@ class ArmyList(Base):
     subfaction_link: Mapped["ListSubfaction | None"] = relationship(
         uselist=False, cascade="all, delete-orphan", lazy="selectin"
     )
+
+    disposition_link: Mapped["ListDisposition | None"] = relationship(
+        uselist=False, cascade="all, delete-orphan", lazy="selectin"
+    )
+
+    @property
+    def disposition_id(self) -> int | None:
+        return self.disposition_link.disposition_id if self.disposition_link else None
 
     @property
     def subfaction(self) -> str | None:

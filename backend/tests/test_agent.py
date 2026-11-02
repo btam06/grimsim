@@ -250,3 +250,109 @@ async def test_an_emergency_disembark_is_always_ready(
                                     "positions": action["placement"]["default"]}}},
     )
     assert response.json()["log"]["ok"], response.json()["log"]["error"]
+
+
+async def test_start_of_phase_abilities_one_player_then_the_other(
+    client: AsyncClient, session, tmp_path, monkeypatch
+):
+    # Both players have Data-spike, each engaged with an enemy VEHICLE, at the
+    # start of seat 2's Fight phase: the agent waits on seat 2 first (only its
+    # start-of-phase abilities, or done), then seat 1, then the fight goes on.
+    from tests.test_admech_characters import _give
+    from tests.test_deployment import _unit_named
+    from tests.test_fighting import BLADE, _to_fight
+
+    vehicle = {**BLADE, "keywords": ("VEHICLE",)}
+    units = {1: [("T", 1, BLADE), ("W", 1, vehicle)], 2: [("U", 1, BLADE), ("V", 1, vehicle)]}
+    places = {"V": [(20, 4)], "T": [(20, 6)], "W": [(40, 6)], "U": [(40, 4)]}
+    game_id, deployment = await _to_fight(client, session, tmp_path, monkeypatch, units, places)
+    t, u = _unit_named(deployment, "T"), _unit_named(deployment, "U")
+    for unit in (t, u):
+        await _give(session, unit, "Data-spike")
+
+    async def apply(action):
+        response = await client.post(f"/games/{game_id}/agent/apply", json={"action": {
+            "type": action["type"], "seat": action["seat"], "params": action["params"],
+        }})
+        assert response.json()["log"]["ok"], response.text
+        return response.json()["decision"]
+
+    decision = await _decision(client, game_id)
+    assert decision["waiting_for"] == {"seat": 2, "reason": "abilities for the start of the phase"}
+    assert {a["type"] for a in decision["actions"]} == {"shooting_start", "finish_phase_start"}
+    assert all(a["seat"] == 2 for a in decision["actions"])
+    spike = next(a for a in decision["actions"] if a["type"] == "shooting_start")
+    decision = await apply(spike)
+    # (Seat 2 has nothing more for the start of the phase: on to seat 1.)
+    assert decision["waiting_for"]["seat"] == 1
+    assert {a["type"] for a in decision["actions"]} == {"shooting_start", "finish_phase_start"}
+    done = next(a for a in decision["actions"] if a["type"] == "finish_phase_start")
+    decision = await apply(done)
+    assert decision["waiting_for"]["reason"] != "abilities for the start of the phase"
+    assert "shooting_start" not in decision["counts"]
+
+
+async def test_end_of_phase_declarations_wait_for_the_phase_to_end(
+    client: AsyncClient, session, tmp_path, monkeypatch
+):
+    # Seat 1's N has a Resurrection Orb. In seat 2's Shooting phase, it isn't
+    # offered: seat 2 ends the phase, then seat 1 declares it (or is done) -
+    # and the phase ends.
+    from tests.test_admech_characters import _give
+    from tests.test_reanimation import _hurt, _reanimation_game
+    from tests.test_reinforcements import _advance_to
+
+    game_id, n = await _reanimation_game(client, session, tmp_path, monkeypatch, roll=2)
+    await _give(session, n, "Resurrection Orb")
+    await _advance_to(client, game_id, 1, 2, "shooting")
+    await _hurt(session, game_id, n["models"][0]["unit_model_id"], 2, destroyed=True)
+
+    async def apply(action):
+        response = await client.post(f"/games/{game_id}/agent/apply", json={"action": {
+            "type": action["type"], "seat": action["seat"], "params": action["params"],
+        }})
+        assert response.json()["log"]["ok"], response.text
+        return response.json()["decision"]
+
+    decision = await _decision(client, game_id)
+    assert decision["waiting_for"]["seat"] == 2
+    assert "resurrect" not in decision["counts"] and "advance" not in decision["counts"]
+    end = next(a for a in decision["actions"] if a["type"] == "end_phase")
+    decision = await apply(end)
+    assert decision["waiting_for"] == {
+        "seat": 1, "reason": "declarations for the end of the phase"
+    }
+    assert {a["type"] for a in decision["actions"]} == {"resurrect", "finish_phase_end"}
+    # Done without it: the phase ends.
+    done = next(a for a in decision["actions"] if a["type"] == "finish_phase_end")
+    decision = await apply(done)
+    assert decision["state"] == "round 1, seat 2's charge"
+
+
+async def test_an_end_of_phase_declaration_then_the_phase_ends(
+    client: AsyncClient, session, tmp_path, monkeypatch
+):
+    # Likewise - seat 1 resurrects N: nothing more to declare, so seat 2 ends
+    # the phase, and N heals.
+    from tests.test_admech_characters import _give
+    from tests.test_reanimation import _hurt, _reanimation_game
+    from tests.test_reinforcements import _advance_to
+
+    game_id, n = await _reanimation_game(client, session, tmp_path, monkeypatch, roll=2)
+    await _give(session, n, "Resurrection Orb")
+    await _advance_to(client, game_id, 1, 2, "shooting")
+    await _hurt(session, game_id, n["models"][1]["unit_model_id"], 1)
+
+    async def apply(type_, seat, params=None):
+        response = await client.post(f"/games/{game_id}/agent/apply", json={"action": {
+            "type": type_, "seat": seat, "params": params or {},
+        }})
+        assert response.json()["log"]["ok"], response.text
+        return response.json()["decision"]
+
+    await apply("end_phase", 2)
+    decision = await apply("resurrect", 1, {"seat": 1, "unit_id": n["unit_id"]})
+    assert decision["waiting_for"]["seat"] == 2
+    assert "advance" in decision["counts"] and "end_phase" not in decision["counts"]
+    decision = await apply("advance", 2)
+    assert decision["state"] == "round 1, seat 2's charge"

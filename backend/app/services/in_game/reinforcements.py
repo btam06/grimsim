@@ -87,11 +87,17 @@ def _arrivals(unit: Unit) -> list[dict]:
     return found
 
 
-def has_deep_strike(unit: Unit) -> bool:
-    # Every model has Deep Strike, or an enhancement gives the unit it.
-    return all(
-        any(a.name == DEEP_STRIKE for a in m.model.abilities) for m in unit.unit_models
-    ) or any(a.get("deep_strike") for a in _arrivals(unit))
+def has_deep_strike(unit: Unit, game: Game | None = None) -> bool:
+    # Every model has Deep Strike, or an enhancement gives the unit it - or,
+    # in `game`, a rule did at Declare Battle Formations (e.g. Thunderhawk
+    # Insertion).
+    from app.services.in_game import battle_formations
+
+    return (
+        all(any(a.name == DEEP_STRIKE for a in m.model.abilities) for m in unit.unit_models)
+        or any(a.get("deep_strike") for a in _arrivals(unit))
+        or (game is not None and battle_formations.granted(game, unit, DEEP_STRIKE))
+    )
 
 
 def rapid_ingress_discount(unit: Unit) -> int:
@@ -134,10 +140,131 @@ def ingressed(game: Game, unit: Unit) -> bool:
 def arrival_round(game: Game, unit: Unit | None = None, rapid_ingress: bool = False) -> bool:
     # Whether units can arrive from Reserves this battle round - or, given
     # one, whether that unit can (one that can make an ingress move can in
-    # the first, but not by Rapid Ingress).
+    # the first, but not by Rapid Ingress - nor can one that must arrive,
+    # e.g. Tunnelling Horrors).
     if game.battle_round >= FIRST_ROUND:
         return True
-    return unit is not None and not rapid_ingress and ingress_move(unit)
+    return unit is not None and not rapid_ingress and (
+        ingress_move(unit) or must_arrive(game, unit)
+    )
+
+
+# --- going into Strategic Reserves at the end of the opponent's turn (e.g.
+# Tunnelling Horrors: declared during it, if the unit's unengaged then - and
+# it must make an ingress move in its player's next Movement phase, even
+# their first) - see datasheet_abilities TURN_END_RESERVES ---
+
+
+def _turn_end_config() -> dict:
+    from app.seeds import datasheet_abilities
+
+    return datasheet_abilities.TURN_END_RESERVES
+
+
+def _turn_end_ability(game: Game, unit: Unit) -> str | None:
+    names = {a.name for m in deployment.models_on_battlefield(game, unit) for a in m.model.abilities}
+    return next(iter(sorted(names & set(_turn_end_config()))), None)
+
+
+def turn_end_reason(game: Game, seat: int, unit: Unit) -> str | None:
+    # Why the player can't declare the unit going into Strategic Reserves at
+    # the end of this turn, or None.
+    from app.services.in_game import fighting
+
+    if game.status != "in_progress" or game.turn_seat in (None, seat):
+        return "it's declared in the opponent's turn"
+    if deployment.owner(game, unit).seat != seat:
+        return "it isn't one of their units"
+    if _turn_end_ability(game, unit) is None:
+        return "it has no ability to"
+    if any(
+        r.unit_id == unit.id and (r.battle_round, r.turn_seat) == (game.battle_round, game.turn_seat)
+        for r in game.turn_end_reserves
+    ):
+        return "it's already going into Strategic Reserves at the end of this turn"
+    if fighting.engaged(game, unit):
+        return "it's within Engagement Range of an enemy unit"
+    return None
+
+
+def turn_end_units(game: Game) -> list[tuple[Unit, bool]]:
+    # Units that could go into Strategic Reserves at the end of this turn,
+    # and those declared to: (unit, declared).
+    found = []
+    for player in game.players:
+        for unit in deployment.deployable_units(player):
+            declared = any(
+                r.unit_id == unit.id and not r.resolved
+                and (r.battle_round, r.turn_seat) == (game.battle_round, game.turn_seat)
+                for r in game.turn_end_reserves
+            )
+            if declared or (
+                deployment.models_on_battlefield(game, unit)
+                and turn_end_reason(game, player.seat, unit) is None
+            ):
+                found.append((unit, declared))
+    return found
+
+
+def declare_turn_end(game: Game, seat: int, unit: Unit, cancel: bool = False) -> None:
+    current = [
+        r for r in game.turn_end_reserves
+        if r.unit_id == unit.id and not r.resolved
+        and (r.battle_round, r.turn_seat) == (game.battle_round, game.turn_seat)
+    ]
+    if cancel:
+        if not current or current[0].seat != seat:
+            raise _bad_request("that unit isn't going into Strategic Reserves this turn")
+        game.turn_end_reserves.remove(current[0])
+        return
+    if (reason := turn_end_reason(game, seat, unit)) is not None:
+        raise _bad_request(f"it can't: {reason}")
+    from app.engine.state import GameTurnEndReserves
+
+    game.turn_end_reserves.append(
+        GameTurnEndReserves(
+            seat=seat, unit_id=unit.id, ability=_turn_end_ability(game, unit),
+            battle_round=game.battle_round, turn_seat=game.turn_seat,
+        )
+    )
+
+
+def resolve_turn_end(game: Game) -> None:
+    # The end of the turn: units declared go into Strategic Reserves - if
+    # they're still on the battlefield and unengaged.
+    from app.services.in_game import fighting, mission_state
+
+    for record in game.turn_end_reserves:
+        if record.resolved or (record.battle_round, record.turn_seat) != (
+            game.battle_round, game.turn_seat
+        ):
+            continue
+        unit = deployment.find_unit(game, record.unit_id)
+        if not deployment.models_on_battlefield(game, unit) or fighting.engaged(game, unit):
+            game.turn_end_reserves.remove(record)
+            continue
+        models = {m.id for m in unit.unit_models}
+        for position in [p for p in game.model_positions if p.unit_model_id in models]:
+            game.model_positions.remove(position)
+        game.battle_formations.append(GameBattleFormation(unit_id=unit.id, place="reserves"))
+        mission_state.mark(game, record.seat, REPOSITIONED, unit.id)
+        record.resolved = True
+
+
+def must_arrive(game: Game, unit: Unit) -> bool:
+    # Whether the unit went into Strategic Reserves at the end of its
+    # opponent's turn and must arrive in its player's next Movement phase.
+    return in_reserves(game, unit) and any(
+        r.unit_id == unit.id and r.resolved for r in game.turn_end_reserves
+    )
+
+
+def still_to_arrive(game: Game) -> list[Unit]:
+    # The player whose turn it is's units that must arrive this Movement
+    # phase and haven't.
+    if game.phase != "movement":
+        return []
+    return [u for u in reserve_units(game, game.turn_seat) if must_arrive(game, u)]
 
 
 def _extent(base: Base) -> tuple[float, float, float, float]:
@@ -193,7 +320,7 @@ def check_arrival(
     seat = deployment.owner(game, unit).seat
     enemies = [b for p, _, b in others if p.seat != seat]
     problems = deployment.physical_problems(game, models, bases, others)
-    deep_strike = has_deep_strike(unit)
+    deep_strike = has_deep_strike(unit, game)
     layout = game.layout
     side = "attacker" if seat == game.attacker_seat else "defender"
     enemy_side = "defender" if side == "attacker" else "attacker"

@@ -298,6 +298,33 @@ class Game(State):
     lingering_models: list['GameLingeringModel'] = field(default_factory=list)
     # Psychic abilities used.
     psychic_uses: list['GamePsychicUse'] = field(default_factory=list)
+    # Abilities used at the start of an opponent's phase - and the decisions
+    # not to (see app/services/in_game/phase_start.py).
+    phase_start_uses: list['GamePhaseStartUse'] = field(default_factory=list)
+    # For a program playing: the end of a phase's window, and each player
+    # done with it (see app/services/in_game/phase_end.py).
+    phase_end_windows: list['GamePhaseEnd'] = field(default_factory=list)
+    # What abilities do to units for a while - e.g. Electro-shock's -2" Move
+    # (see app/services/in_game/unit_effects.py).
+    unit_effects: list['GameUnitEffect'] = field(default_factory=list)
+    # Abilities given to units at Declare Battle Formations - e.g. Thunderhawk
+    # Insertion's Deep Strike (see app/services/in_game/battle_formations.py).
+    formation_grants: list['GameFormationGrant'] = field(default_factory=list)
+    # Abilities used when a unit's selected to fight - e.g. Banner of Macragge
+    # (see app/services/in_game/fight_abilities.py).
+    fight_ability_uses: list['GameFightAbilityUse'] = field(default_factory=list)
+    # [ONE SHOT] weapons fired, by the model that fired each (see
+    # app/services/in_game/shooting.py).
+    weapon_uses: list['GameWeaponUse'] = field(default_factory=list)
+    # Other abilities used, where how often they can be counts - e.g. My Will
+    # Be Done, once a battle round (see app/services/in_game/game.py).
+    ability_uses: list['GameAbilityUse'] = field(default_factory=list)
+    # Resurrection Orbs used: declared during a phase, resolved at its end
+    # (see app/seeds/factions/necrons/reanimation.py).
+    resurrections: list['GameResurrection'] = field(default_factory=list)
+    # Units going into Strategic Reserves at the end of their opponent's turn
+    # - e.g. Tunnelling Horrors (see app/services/in_game/reinforcements.py).
+    turn_end_reserves: list['GameTurnEndReserves'] = field(default_factory=list)
     # Objectives secured (sticky) by a player.
     secured_objectives: list['GameSecuredObjective'] = field(default_factory=list)
     # Who controls each objective, as determined at the end of the last phase
@@ -829,6 +856,131 @@ class GamePsychicUse(State):
     phase: str = None  # type: ignore[assignment]
     roll: int = None  # type: ignore[assignment]
     target_unit_id: int | None = None
+
+
+@dataclass(eq=False, kw_only=True)
+class GamePhaseStartUse(State):
+    id: int = field(default_factory=next_id)
+    game_id: int = None  # type: ignore[assignment]
+    seat: int = None  # type: ignore[assignment]
+    battle_round: int = None  # type: ignore[assignment]
+    turn_seat: int = None  # type: ignore[assignment]
+    phase: str = None  # type: ignore[assignment]
+    # The unit and its ability used - neither: the player's done.
+    unit_id: int | None = None
+    ability: str | None = None
+
+
+@dataclass(eq=False, kw_only=True)
+class GamePhaseEnd(State):
+    id: int = field(default_factory=next_id)
+    game_id: int = None  # type: ignore[assignment]
+    battle_round: int = None  # type: ignore[assignment]
+    turn_seat: int = None  # type: ignore[assignment]
+    phase: str = None  # type: ignore[assignment]
+    # The player done with it - none: the window's opened.
+    seat: int | None = None
+
+
+@dataclass(eq=False, kw_only=True)
+class GameFormationGrant(State):
+    id: int = field(default_factory=next_id)
+    game_id: int = None  # type: ignore[assignment]
+    seat: int = None  # type: ignore[assignment]
+    # The unit with the ability (e.g. Thunderhawk Insertion), and the unit it
+    # gives `grants` to (e.g. Deep Strike).
+    source_unit_id: int = None  # type: ignore[assignment]
+    ability: str = None  # type: ignore[assignment]
+    unit_id: int = None  # type: ignore[assignment]
+    grants: str = None  # type: ignore[assignment]
+
+
+@dataclass(eq=False, kw_only=True)
+class GameFightAbilityUse(State):
+    id: int = field(default_factory=next_id)
+    game_id: int = None  # type: ignore[assignment]
+    seat: int = None  # type: ignore[assignment]
+    unit_id: int = None  # type: ignore[assignment]
+    ability: str = None  # type: ignore[assignment]
+    battle_round: int = None  # type: ignore[assignment]
+    turn_seat: int = None  # type: ignore[assignment]
+
+
+@dataclass(eq=False, kw_only=True)
+class GameWeaponUse(State):
+    id: int = field(default_factory=next_id)
+    game_id: int = None  # type: ignore[assignment]
+    unit_model_id: int = None  # type: ignore[assignment]
+    weapon_id: int = None  # type: ignore[assignment]
+    battle_round: int = None  # type: ignore[assignment]
+    turn_seat: int = None  # type: ignore[assignment]
+
+
+@dataclass(eq=False, kw_only=True)
+class GameTurnEndReserves(State):
+    id: int = field(default_factory=next_id)
+    game_id: int = None  # type: ignore[assignment]
+    seat: int = None  # type: ignore[assignment]
+    unit_id: int = None  # type: ignore[assignment]
+    ability: str = None  # type: ignore[assignment]
+    # The opponent's turn it's at the end of.
+    battle_round: int = None  # type: ignore[assignment]
+    turn_seat: int = None  # type: ignore[assignment]
+    # Whether it's happened (the unit's in Strategic Reserves, to arrive).
+    resolved: bool = False
+
+
+@dataclass(eq=False, kw_only=True)
+class GameResurrection(State):
+    id: int = field(default_factory=next_id)
+    game_id: int = None  # type: ignore[assignment]
+    seat: int = None  # type: ignore[assignment]
+    unit_id: int = None  # type: ignore[assignment]
+    battle_round: int = None  # type: ignore[assignment]
+    turn_seat: int = None  # type: ignore[assignment]
+    phase: str = None  # type: ignore[assignment]
+    # Once resolved (at the end of the phase): its D6, and what it healed.
+    roll: int | None = None
+    healed: int = 0
+    returned: int = 0
+
+
+@dataclass(eq=False, kw_only=True)
+class GameAbilityUse(State):
+    id: int = field(default_factory=next_id)
+    game_id: int = None  # type: ignore[assignment]
+    seat: int = None  # type: ignore[assignment]
+    unit_id: int = None  # type: ignore[assignment]
+    ability: str = None  # type: ignore[assignment]
+    battle_round: int = None  # type: ignore[assignment]
+    turn_seat: int = None  # type: ignore[assignment]
+
+
+@dataclass(eq=False, kw_only=True)
+class GameUnitEffect(State):
+    id: int = field(default_factory=next_id)
+    game_id: int = None  # type: ignore[assignment]
+    unit_id: int = None  # type: ignore[assignment]
+    # The ability it's from, and the unit it's from.
+    source: str = None  # type: ignore[assignment]
+    source_unit_id: int | None = None
+    # What it adds to the unit's Move characteristic, and its Advance and
+    # Charge rolls (e.g. -2).
+    move: int = 0
+    advance: int = 0
+    charge: int = 0
+    # How much better the AP of ranged attacks that target it is, for
+    # attacking units with `by_keyword` (e.g. Shattered Defences).
+    ranged_ap: int = 0
+    by_keyword: str | None = None
+    # Its own melee weapons' Weapon Skill worsened by this much (e.g.
+    # Data-spike).
+    melee_skill: int = 0
+    # When it started, and the last turn it lasts (see
+    # app/services/in_game/unit_effects.py turn_index).
+    battle_round: int = None  # type: ignore[assignment]
+    turn_seat: int = None  # type: ignore[assignment]
+    until_turn: int = None  # type: ignore[assignment]
 
 
 @dataclass(eq=False, kw_only=True)

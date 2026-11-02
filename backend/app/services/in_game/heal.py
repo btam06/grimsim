@@ -15,11 +15,11 @@ from app.services.in_game.deployment import BOARD, TOLERANCE, Base, Placement, g
 # this way doesn't take more of the wounds while there are destroyed models
 # left to return: they spill over into the next.
 #
-# A returned model isn't on the battlefield until the player sets it up: in
+# A returned model isn't on the battlefield until its player sets it up: in
 # coherency with its unit, not overlapping other models or terrain features,
 # and not within Engagement Range of an enemy model. Until every returned
-# model is, the game stays at the end of the command phase (where models
-# are returned now).
+# model is, the game stays at the end of the phase it returned in (the
+# Command phase, for Reanimation Protocols; any, for a Resurrection Orb).
 
 ENGAGEMENT_RANGE = 2.0
 
@@ -80,13 +80,18 @@ def units_to_place(game: Game, seat: int) -> list[Unit]:
     return [u for u in deployment.deployable_units(player) if to_place(game, u)]
 
 
+def placing_seat(game: Game) -> int | None:
+    # The player the game's waiting on to set up returned models, if any
+    # (the player whose turn it is first).
+    if game.status != "in_progress" or game.turn_seat is None:
+        return None
+    seats = [game.turn_seat] + [p.seat for p in game.players if p.seat != game.turn_seat]
+    return next((s for s in seats if units_to_place(game, s)), None)
+
+
 def placing(game: Game) -> bool:
     # Whether the game is waiting for returned models to be set up.
-    return (
-        game.status == "in_progress"
-        and game.phase == "command"
-        and bool(units_to_place(game, game.turn_seat))
-    )
+    return placing_seat(game) is not None
 
 
 def _enemies(game: Game, unit: Unit) -> list[Base]:
@@ -128,8 +133,8 @@ def check_turn(game: Game, unit: Unit) -> None:
     # That the unit has returned models its owner can set up now.
     if not placing(game):
         raise _bad_request("there are no returned models to set up")
-    if deployment.owner(game, unit).seat != game.turn_seat:
-        raise _bad_request("only the player whose turn it is sets up their returned models")
+    if deployment.owner(game, unit).seat != placing_seat(game):
+        raise _bad_request("it's the other player's returned models to set up first")
     if not to_place(game, unit):
         raise _bad_request("that unit has no returned models to set up")
 

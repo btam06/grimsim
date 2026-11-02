@@ -34,6 +34,8 @@ MINUS_ONE_TO_HIT = "minus_one_to_hit"
 IMPROVE_AP = "improve_ap"
 INVULNERABLE_5 = "invulnerable_5"
 INVULNERABLE_4 = "invulnerable_4"
+WORSE_MELEE_SKILL = "worse_melee_skill"
+RANGED_INVULNERABLE_4 = "ranged_invulnerable_4"
 CANNOT_ATTACK = "cannot_attack"
 ADD_SIX_ATTACKS = "add_six_attacks"
 MINUS_ONE_TO_WOUND = "minus_one_to_wound"
@@ -187,6 +189,19 @@ def invulnerable_4(state: dict[str, Any], pending: deque[dict[str, Any]]) -> Non
     # The model this attack targets has a 4+ invulnerable save against it
     # (e.g. Bulwark Imperative). If it already has a better one, that's kept.
     state["invulnerable_save"] = min(state.get("invulnerable_save", 7), 4)
+
+
+def worse_melee_skill(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # The attacking model's melee weapons' Weapon Skill is worsened by 1 (e.g.
+    # Data-spike) - the characteristic, not a hit roll modifier.
+    state["worse_melee_skill"] = True
+
+
+def ranged_invulnerable_4(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # A model has a 4+ invulnerable save against ranged attacks (e.g. Emanatus
+    # Force Field) - part of its profile for the attack, so its allocation
+    # group (05.03) knows it.
+    state["ranged_invulnerable"] = min(state.get("ranged_invulnerable", 7), 4)
 
 
 def cannot_attack(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
@@ -454,6 +469,8 @@ EFFECTS = {
     IMPROVE_AP: improve_ap,
     INVULNERABLE_5: invulnerable_5,
     INVULNERABLE_4: invulnerable_4,
+    WORSE_MELEE_SKILL: worse_melee_skill,
+    RANGED_INVULNERABLE_4: ranged_invulnerable_4,
     CANNOT_ATTACK: cannot_attack,
     ADD_SIX_ATTACKS: add_six_attacks,
     MINUS_ONE_TO_WOUND: minus_one_to_wound,

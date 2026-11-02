@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.combat_rules.effects import ASSAULT
 from app.engine import context
-from app.engine.state import Game, GameFiringDeckUse, GameUnitMove
+from app.engine.state import Game, GameFiringDeckUse, GameUnitMove, GameWeaponUse
 from app.models import DetachmentRule, Unit, UnitModel
 from app.services import weapon_profiles
 from app.services.in_game import actions, command_phase, deployment, embarked
@@ -796,6 +796,38 @@ def _weapon_allowed(engaged: _Engaged, unit_model: UnitModel, weapon) -> bool:
     return True
 
 
+ONE_SHOT = "One Shot"
+
+
+def one_shot(weapon) -> bool:
+    return any(a.name == ONE_SHOT for a in getattr(weapon, "abilities", []))
+
+
+def one_shot_used(game: Game, unit_model: UnitModel, weapon) -> bool:
+    # Whether the model has fired the [ONE SHOT] weapon already this battle.
+    return one_shot(weapon) and any(
+        u.unit_model_id == unit_model.id and u.weapon_id == weapon.id for u in game.weapon_uses
+    )
+
+
+def record_one_shots(game: Game, unit: Unit, firing: dict[int, dict], weapon_ids: set) -> None:
+    # The unit has shot: the [ONE SHOT] weapons its models fired (`firing`:
+    # {unit model id: {weapon id: ...}} - see reach) are spent.
+    models = {m.id: m for m in unit.unit_models}
+    for model_id, weapons in firing.items():
+        model = models.get(model_id)
+        if model is None:
+            continue
+        for weapon in ranged_weapons(model):
+            if weapon.id in weapons and weapon.id in weapon_ids and one_shot(weapon):
+                game.weapon_uses.append(
+                    GameWeaponUse(
+                        unit_model_id=model_id, weapon_id=weapon.id,
+                        battle_round=game.battle_round, turn_seat=game.turn_seat,
+                    )
+                )
+
+
 def reach(game: Game, unit: Unit, target: Unit, assault: set | None = None) -> TargetReach:
     # `assault` is the unit's Assault weapons (see assault_weapons): if it
     # Advanced, only those can fire. A target with Lone Operative is only in
@@ -859,6 +891,8 @@ def reach(game: Game, unit: Unit, target: Unit, assault: set | None = None) -> T
             limit = min(weapon.range, target_limit) if target_limit else weapon.range
             if entry.unusable or nearest is None or nearest > limit + TOLERANCE:
                 continue
+            if one_shot_used(game, unit_model, weapon):
+                continue
             if _weapon_allowed(engaged, unit_model, weapon):
                 half = nearest <= weapon.range / 2 + TOLERANCE
                 entry.in_range += 1
@@ -906,6 +940,8 @@ def reach(game: Game, unit: Unit, target: Unit, assault: set | None = None) -> T
                 entry = reaches[weapon.id]
                 limit = min(weapon.range, target_limit) if target_limit else weapon.range
                 if entry.unusable or not _indirect(weapon) or nearest > limit + TOLERANCE:
+                    continue
+                if one_shot_used(game, unit_model, weapon):
                     continue
                 if _weapon_allowed(engaged, unit_model, weapon):
                     half = nearest <= weapon.range / 2 + TOLERANCE
@@ -1101,6 +1137,10 @@ def cant_shoot_reason(game: Game, unit: Unit, assault: set | None = None) -> str
         return "units can only shoot in the shooting phase"
     if deployment.owner(game, unit).seat != game.turn_seat:
         return "only the player whose turn it is can shoot with their units"
+    from app.services.in_game import phase_start
+
+    if (reason := phase_start.blocks(game)) is not None:
+        return reason
     if not deployment.is_deployed(unit, deployment.positions(game)):
         return "it isn't on the battlefield"
     if unit_shot(game, unit) is not None:

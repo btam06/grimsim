@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.combat_rules.conditions import (
     ALWAYS,
     ANTI_FLY_2,
+    ANTI_FLY_4,
     ANTI_INFANTRY_2,
     ANTI_INFANTRY_3,
     ANTI_INFANTRY_4,
@@ -91,6 +92,12 @@ ENTRIES = [
         "Anti-Fly 2+",
         "Against a defending unit that contains a FLY model, a wound roll of 2+ is a critical wound.",
         [ANTI_FLY_2],
+        [FORCE_CRITICAL_WOUND],
+    ),
+    (
+        "Anti-Fly 4+",
+        "Against a defending unit that contains a FLY model, a wound roll of 4+ is a critical wound.",
+        [ANTI_FLY_4],
         [FORCE_CRITICAL_WOUND],
     ),
     (
@@ -413,6 +420,14 @@ ENTRIES = [
         "Each critical hit (an unmodified roll of 6 to hit) scores D3 additional hits.",
         [CRITICAL_HIT],
         [ADD_D3_EXTRA_HITS],
+    ),
+    (
+        # In a game, the bearer can't fire it again once it has (see
+        # app/services/in_game/shooting.py one_shot_used).
+        "One Shot",
+        "The bearer can only shoot with this weapon once per battle.",
+        [],
+        [],
     ),
     (
         "Torrent",

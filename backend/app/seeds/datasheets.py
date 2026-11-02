@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Literal
 
 from app.models.model import TransportCapacity
+from app.schemas import DICE_PATTERN
 from app.seeds import data_files
 
 # The shape of a datasheet, loaded from app/data/factions/<faction>/datasheets.json
@@ -69,6 +71,20 @@ class Datasheet:
 
 
 def _weapon(data: dict) -> WeaponSpec:
+    # (Its attacks and damage must be a number or dice notation - D3, 2D6,
+    # D6+1... - as the API insists too; and only a [TORRENT] weapon, which
+    # never rolls to hit, has no skill: 0.)
+    for field_name in ("attacks", "damage"):
+        if not re.match(DICE_PATTERN, str(data.get(field_name, ""))):
+            raise ValueError(
+                f"{data.get('name')}: {field_name} {data.get(field_name)!r} isn't a number or "
+                "dice notation (e.g. 3, D6, 2D3, D6+1)"
+            )
+    torrent = "Torrent" in data.get("abilities", ())
+    if torrent != (not data.get("skill")):
+        raise ValueError(
+            f"{data.get('name')}: a [TORRENT] weapon has skill 0, and only a [TORRENT] weapon does"
+        )
     return WeaponSpec(**{**data, "abilities": tuple(data.get("abilities", ()))})
 
 
