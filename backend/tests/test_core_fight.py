@@ -4,7 +4,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models import UnitModel, Weapon, WeaponAbility
 from tests.test_deployment import R32, _deployment, _unit_named
-from tests.test_fighting import BLADE, _done, _fight_state, _row_at, _to_fight
+from tests.test_fighting import BLADE, _done, _fight, _fight_state, _row_at, _to_fight
 from tests.test_movement import _battle, _shifted
 from tests.test_shooting import _place
 
@@ -104,6 +104,44 @@ async def test_passing_ends_the_fight_step(
     response = await client.post(f"/games/{game_id}/fight/pass", json={"seat": 2})
     assert response.status_code == 200, response.text
     assert (await _fight_state(client, game_id))["step"] == "done"
+
+
+async def test_a_pass_with_no_fights_first_unit_to_answer_it_moves_on(
+    client: AsyncClient, session, tmp_path, monkeypatch
+):
+    # D charged (so fights first), but A's now more than 5" away; B and E,
+    # neither fighting first, are engaged. D's player passes: A's player has
+    # no Fights First unit to pick, so the sequence moves on to the Remaining
+    # Combats step, A's player picking first - rather than coming back to
+    # D's player to pass again, for ever.
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
+    units = {1: [("A", 1, BLADE), ("B", 1, BLADE)], 2: [("D", 1, BLADE), ("E", 1, BLADE)]}
+    spots = {"A": (20, 38), "B": (40, 38), "D": (20, 4), "E": (40, 4)}
+    game, deployment = await _battle(client, session, tmp_path, units=units, spots=spots)
+    game_id = game["id"]
+    d, a, b, e = (_unit_named(deployment, n) for n in "DABE")
+    await _place(session, a, [(20, 4 + 2 * R32 + 4)])
+    for _ in ("shooting", "charge"):
+        await client.post(f"/games/{game_id}/advance")
+    await client.post(f"/games/{game_id}/charge/roll", json={"unit_id": d["unit_id"]})
+    response = await client.post(
+        f"/games/{game_id}/charge",
+        json={"unit_id": d["unit_id"], "target_unit_id": a["unit_id"],
+              "positions": _shifted(d, dy=3)},
+    )
+    assert response.status_code == 200, response.text
+    await _place(session, a, [(20, 7 + 2 * R32 + 7)])
+    await _place(session, b, [(40, 4 + 2 * R32 + 0.5)])
+    await client.post(f"/games/{game_id}/advance")
+    for seat in (2, 1):
+        await _done(client, game_id, seat)
+    state = await _fight_state(client, game_id)
+    assert (state["step"], state["seat"], state["can_pass"]) == ("fights_first", 2, True)
+    response = await client.post(f"/games/{game_id}/fight/pass", json={"seat": 2})
+    assert response.status_code == 200, response.text
+    state = await _fight_state(client, game_id)
+    assert (state["step"], state["seat"]) == ("remaining", 1)
+    assert (await _fight(client, game_id, b, e)).status_code == 200
 
 
 async def test_no_passing_within_5(client: AsyncClient, session, tmp_path, monkeypatch):

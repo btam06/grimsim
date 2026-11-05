@@ -974,7 +974,7 @@ def achieve_secondary(game: Game, card: GameSecondary, points: int | None = None
     wanted = mission_points(card) if points is None else points
     allowed = min(wanted, scoring_service.room(player, game.battle_round, "secondary"))
     if allowed < wanted and allowed == 0:
-        raise _bad_request("they've already scored 15VP from secondaries this battle round")
+        _over_cap(player, "secondary", "secondaries")
     player.scores.append(
         GameScore(
             battle_round=game.battle_round,
@@ -1003,17 +1003,26 @@ def discard_secondary(game: Game, card: GameSecondary) -> None:
     card.player.cp += DISCARD_CP
 
 
+def _over_cap(player: GamePlayer, kind: str, what: str) -> None:
+    # Refused: the player has no room left for `kind` VP - which cap's met.
+    if sum(s.points for s in player.scores if s.kind == kind) >= (
+        scoring_service.MAX_PER_BATTLE[kind]
+    ):
+        raise _bad_request(
+            f"they've already scored {scoring_service.MAX_PER_BATTLE[kind]}VP from {what} this battle"
+        )
+    raise _bad_request(
+        f"they've already scored {scoring_service.MAX_PER_ROUND[kind]}VP from {what} this battle round"
+    )
+
+
 def score_primary(game: Game, player: GamePlayer, points: int) -> None:
     # VP from primary missions scored by hand - within the 15VP a battle
     # round, and 45VP a battle.
     _require_in_progress(game)
     allowed = min(points, scoring_service.room(player, game.battle_round, "primary"))
     if allowed < points and allowed == 0:
-        if sum(s.points for s in player.scores if s.kind == "primary") >= (
-            scoring_service.MAX_PER_BATTLE["primary"]
-        ):
-            raise _bad_request("they've already scored 45VP from primary missions this battle")
-        raise _bad_request("they've already scored 15VP from primary missions this battle round")
+        _over_cap(player, "primary", "primary missions")
     player.scores.append(
         GameScore(
             battle_round=game.battle_round,

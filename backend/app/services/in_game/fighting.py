@@ -525,11 +525,24 @@ def fight_step(game: Game) -> str | None:
     if piling_seat(game) is not None:
         return "pile_in"
     eligible = _eligible(game)
-    if any(has_fights_first(game, u) for u in eligible):
+    first = [u for u in eligible if has_fights_first(game, u)]
+    if first and not _first_passed(game, first):
         return "fights_first"
     if eligible:
         return "remaining"
     return "consolidate" if _unconsolidated(game) else "done"
+
+
+def _first_passed(game: Game, first: list[Unit]) -> bool:
+    # Whether the last pick was a pass by the only player with Fights First
+    # units eligible: their opponent has none to pick, and the sequence
+    # (12.04) would come back to them to pass again, for ever - so it moves
+    # on to the Remaining Combats step, the opponent picking first (the
+    # user's ruling; the core rules don't say).
+    passes = _passes(game)
+    if not passes or passes[-1].fights != len(_fights(game)):
+        return False
+    return all(deployment.owner(game, u).seat == passes[-1].seat for u in first)
 
 
 def step_units(game: Game) -> list[Unit]:

@@ -43,6 +43,9 @@ async def test_thunderhawk_insertion(client: AsyncClient, session, tmp_path):
     game = await _load_game(session, game_id)
     assert reinforcements.has_deep_strike(deployment.find_unit(game, named["T"]["unit_id"]), game)
     assert not reinforcements.has_deep_strike(deployment.find_unit(game, named["X"]["unit_id"]), game)
+    # (Agents choose it once.)
+    decision = (await client.get(f"/games/{game_id}/agent")).json()
+    assert not any(a["type"] == "grant_formation" for a in decision["actions"])
     # Declared: it stays as chosen.
     await _declare(client, game_id, 1)
     response = await client.post(f"/games/{game_id}/formations/grant", json=payload(named["T"]))

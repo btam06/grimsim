@@ -426,3 +426,7 @@ export const applyAgentAction = (id, action) =>
 export const randomAgentAction = (id) =>
   request(`/games/${id}/agent/random`, { method: 'POST' })
 export const getAgentLog = (id) => request(`/games/${id}/agent/log?limit=200`)
+
+// The ML runs' diagnose files (ml/diagnose.py), newest first, and one summed up.
+export const listDiagnoses = () => request('/ml/diagnoses')
+export const getDiagnosis = (name) => request(`/ml/diagnoses/${encodeURIComponent(name)}`)

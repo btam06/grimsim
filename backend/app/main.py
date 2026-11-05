@@ -25,6 +25,7 @@ from app.routers import (
     keywords,
     lists,
     missions,
+    ml,
     models,
     stratagems,
     terrain,
@@ -78,6 +79,7 @@ async def game_requests(request, call_next):
 
 
 app.include_router(factions.router)
+app.include_router(ml.router)
 app.include_router(faction_units.router)
 app.include_router(faction_abilities.router)
 app.include_router(dispositions.router)

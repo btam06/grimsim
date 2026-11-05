@@ -8,7 +8,7 @@ import torch
 from app.engine import features
 from ml import batch, model
 from ml.policy import ModelPolicy
-from ml.ppo import Sequences, Step, advantages
+from ml.ppo import Sequences, Step, _learn, advantages
 
 # The model and its training's bookkeeping, on made-up observations (the
 # shapes features.observe gives - see backend/app/engine/features.py).
@@ -83,6 +83,43 @@ def test_each_players_rewards_until_their_next_decision():
     assert [(s.reward, s.done) for s in sequences.finished[(0, 1)]] == [(0.75, False), (1.0, True)]
     assert [(s.reward, s.done) for s in sequences.finished[(0, 2)]] == [(-1.5, True)]
     assert not sequences.open and sequences.count() == 3
+
+
+def test_a_value_warmup_leaves_the_policy_be():
+    torch.manual_seed(0)
+    policy = model.Policy(hidden=32, layers=1, heads=2)
+    sequences = Sequences()
+    for i in range(6):
+        sequences.decide((0, 1), Step(batch.encode(_obs(3, seed=i)), i % 3, -1.1, 0.0))
+        sequences.reward(0, {1: 1.0})
+    sequences.end(0)
+    args = SimpleNamespace(gamma=0.9, lam=0.9, epochs=2, minibatch=4, clip=0.2,
+                           value_weight=0.5, entropy=0.01)
+    before = {name: p.clone() for name, p in policy.named_parameters()}
+    warmup = torch.optim.Adam(policy.value.parameters(), lr=1e-2)
+    _learn(policy, warmup, sequences, args, batch, torch, value_only=True)
+    changed = {name for name, p in policy.named_parameters() if not torch.equal(p, before[name])}
+    assert changed and all(name.startswith("value.") for name in changed)
+
+
+def test_an_update_stops_once_the_policy_has_moved_enough():
+    torch.manual_seed(0)
+    policy = model.Policy(hidden=32, layers=1, heads=2)
+    args = SimpleNamespace(gamma=0.9, lam=0.9, epochs=5, minibatch=4, clip=0.2,
+                           value_weight=0.5, entropy=0.01, target_kl=1e-9)
+
+    def learn(target_kl):
+        sequences = Sequences()
+        for i in range(8):
+            sequences.decide((0, 1), Step(batch.encode(_obs(3, seed=i)), i % 3, -1.1, 0.0))
+            sequences.reward(0, {1: float(i % 2)})
+        sequences.end(0)
+        args.target_kl = target_kl
+        optimiser = torch.optim.Adam(policy.parameters(), lr=1e-2)
+        return _learn(policy, optimiser, sequences, args, batch, torch)
+
+    assert learn(1e-9)["epochs"] == 1
+    assert learn(0.0)["epochs"] == 5
 
 
 def test_a_checkpoint_round_trips(tmp_path):

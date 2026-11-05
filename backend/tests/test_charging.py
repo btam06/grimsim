@@ -154,6 +154,25 @@ async def test_models_that_cant_reach_must_get_closer(
     assert check["valid"], check
 
 
+async def test_an_agent_is_offered_a_charge_its_whole_unit_can_make(
+    client: AsyncClient, session, tmp_path, monkeypatch
+):
+    # Five models in a row charging A's one: each heading straight for it,
+    # they'd end on top of each other - the default slides them all in.
+    game_id, d, a = await _charge_game(client, session, tmp_path, monkeypatch, d=5)
+    await _roll(client, game_id, d)
+    decision = (await client.get(f"/games/{game_id}/agent")).json()
+    [charge] = [x for x in decision["actions"] if x["type"] == "charge"]
+    assert charge["concrete"], charge
+    params = charge["params"] | {"positions": charge["placement"]["default"]}
+    response = await client.post(f"/games/{game_id}/agent/apply", json={"action": {
+        "type": "charge", "seat": charge["seat"], "params": params,
+    }})
+    assert response.json()["log"]["ok"], response.text
+    [unit] = [u for u in (await _charge(client, game_id))["units"] if u["unit_id"] == d["unit_id"]]
+    assert unit["charged"]
+
+
 async def test_only_in_the_charge_phase(client: AsyncClient, session, tmp_path, monkeypatch):
     units = {1: [("A", 1, {})], 2: [("D", 1, {})]}
     game, deployment = await _battle(client, session, tmp_path, units=units)

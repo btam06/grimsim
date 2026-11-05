@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -119,9 +120,22 @@ def _arguments(argv):
     parser.add_argument("--lam", type=float, default=0.95)
     parser.add_argument("--clip", type=float, default=0.2)
     parser.add_argument("--entropy", type=float, default=0.01)
+    parser.add_argument(
+        "--target-kl", type=float, default=0.0,
+        help="stop an update's epochs once the policy's moved this far (KL; 0: never)",
+    )
     parser.add_argument("--value-weight", type=float, default=0.5)
     parser.add_argument("--hidden", type=int, default=128)
     parser.add_argument("--init", help="a checkpoint to start from (e.g. from ml.imitate)")
+    parser.add_argument(
+        "--resume", action="store_true",
+        help="carry on the run from its model.pt, at the update after the one it saved",
+    )
+    parser.add_argument(
+        "--value-warmup", type=int, default=0,
+        help="updates at first training only the value head, the policy left as it is",
+    )
+    parser.add_argument("--warmup-lr", type=float, default=3e-4)
     parser.add_argument("--max-steps", type=int, default=5000)
     parser.add_argument("--threads", type=int, default=2, help="torch's (the envs have theirs)")
     parser.add_argument("--seed", type=int, default=0)
@@ -130,6 +144,10 @@ def _arguments(argv):
         help="updates between evaluations against random play (0: none)",
     )
     parser.add_argument("--eval-games", type=int, default=4)
+    parser.add_argument(
+        "--keep-every", type=int, default=5,
+        help="updates between checkpoints kept as model-<update>.pt (0: none)",
+    )
     return parser.parse_args(argv)
 
 
@@ -141,13 +159,23 @@ def train(args) -> Path:
     from ml import batch, model
     from ml.policy import ModelPolicy
 
-    torch.manual_seed(args.seed)
     torch.set_num_threads(args.threads)
     folder = RUNS / args.run
     folder.mkdir(parents=True, exist_ok=True)
     writer = _writer(folder)
+    first = 1
+    if args.resume:
+        # (The optimiser's state isn't kept: Adam starts afresh.)
+        args.init = str(folder / "model.pt")
+        first = int(torch.load(args.init, weights_only=False).get("update") or 0) + 1
+        args.seed += first
+    torch.manual_seed(args.seed)
     policy = model.load(args.init) if args.init else model.Policy(hidden=args.hidden)
     optimiser = torch.optim.Adam(policy.parameters(), lr=args.lr)
+    # (A checkpoint's value head may have learnt against another opponent:
+    # fitted afresh first, so the policy isn't pushed about by bad advantage
+    # estimates meanwhile.)
+    warmup = torch.optim.Adam(policy.value.parameters(), lr=args.warmup_lr)
     if args.opponent == "self":
         envs = VecEnv(args.envs, saves=args.saves, seed=args.seed, max_steps=args.max_steps)
     else:
@@ -163,7 +191,7 @@ def train(args) -> Path:
     ready = {i: (obs[i], infos[i]) for i in range(len(envs))}
     started = time.time()
     try:
-        for update in range(1, args.updates + 1):
+        for update in range(first, args.updates + 1):
             decided = 0
             while sequences.count() < args.rollout:
                 decided += _decide(policy, batch, ready, envs, sequences, seats)
@@ -176,13 +204,21 @@ def train(args) -> Path:
                             "end": "terminated" if terminated else "truncated",
                             "learner": seats.get(i),
                         })
+                        _log_game(folder, update, episodes[-1])
                     sequences.reward(i, info["rewards"])
                     ready[i] = (o, info)
-            stats = _learn(policy, optimiser, sequences, args, batch, torch)
+            warming = update <= args.value_warmup
+            stats = _learn(
+                policy, warmup if warming else optimiser, sequences, args, batch, torch,
+                value_only=warming,
+            )
             elapsed = time.time() - started
             stats |= _episode_stats(episodes, against=args.opponent != "self")
             episodes.clear()
             model.save(policy, folder / "model.pt", update=update, args=vars(args))
+            # (And kept every few updates, to go back to the best.)
+            if args.keep_every and update % args.keep_every == 0:
+                model.save(policy, folder / f"model-{update}.pt", update=update, args=vars(args))
             line = ", ".join(f"{k} {v:.3g}" for k, v in stats.items())
             print(f"update {update}: {decided} decisions, {elapsed:.0f}s - {line}", flush=True)
             for name, value in stats.items():
@@ -226,8 +262,10 @@ def _decide(policy, batch, ready, envs, sequences, seats) -> int:
     return len(order)
 
 
-def _learn(policy, optimiser, sequences, args, batch, torch) -> dict:
-    # One PPO update on the finished decisions (then let go of them).
+def _learn(policy, optimiser, sequences, args, batch, torch, value_only=False) -> dict:
+    # One PPO update on the finished decisions (then let go of them) - or
+    # with `value_only`, the value loss alone (`optimiser` then the value
+    # head's).
     steps, returns, advantage = [], [], []
     for key, finished in sequences.finished.items():
         following = sequences.open.get(key)
@@ -245,9 +283,15 @@ def _learn(policy, optimiser, sequences, args, batch, torch) -> dict:
     returns_t = torch.tensor(returns)
     actions_t = torch.tensor([s.action for s in steps])
     old_logp = torch.tensor([s.logp for s in steps])
-    totals = {"loss/policy": 0.0, "loss/value": 0.0, "entropy": 0.0, "clipped": 0.0}
-    batches = 0
+    totals = {"loss/policy": 0.0, "loss/value": 0.0, "entropy": 0.0, "clipped": 0.0, "kl": 0.0}
+    batches, epochs = 0, 0
     for _ in range(args.epochs):
+        # (Moved far enough from the policy that played: the rest of the
+        # update's steps would only follow these games' noise further.)
+        if epochs and getattr(args, "target_kl", 0.0) and kl > args.target_kl:
+            break
+        epochs += 1
+        kls = []
         order = torch.randperm(len(steps))
         for start in range(0, len(steps), args.minibatch):
             index = order[start : start + args.minibatch]
@@ -262,7 +306,9 @@ def _learn(policy, optimiser, sequences, args, batch, torch) -> dict:
             value_loss = (values - returns_t[index]).pow(2).mean()
             entropy = distribution.entropy().mean()
             loss = policy_loss + args.value_weight * value_loss - args.entropy * entropy
-            optimiser.zero_grad()
+            if value_only:
+                loss = value_loss
+            policy.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(policy.parameters(), 0.5)
             optimiser.step()
@@ -270,9 +316,14 @@ def _learn(policy, optimiser, sequences, args, batch, torch) -> dict:
             totals["loss/value"] += value_loss.item()
             totals["entropy"] += entropy.item()
             totals["clipped"] += float(((ratio - 1).abs() > args.clip).float().mean())
+            # (An estimate of the KL that's never negative: (r - 1) - log r.)
+            kls.append(float(((ratio - 1) - (logp - old_logp[index])).mean()))
+            totals["kl"] += kls[-1]
             batches += 1
+        kl = sum(kls) / max(len(kls), 1)
     return {name: total / max(batches, 1) for name, total in totals.items()} | {
         "decisions": float(len(steps)),
+        "epochs": float(epochs),
         "return": float(returns_t.mean()) if len(steps) else 0.0,
     }
 
@@ -287,12 +338,32 @@ def _episode_stats(episodes: list[dict], against: bool) -> dict:
         "game_steps": sum(e["steps"] for e in episodes) / len(episodes),
         "unfinished": sum(e["end"] != "terminated" for e in episodes) / len(episodes),
     }
+    # The VP a player left on the table, of the 90 a battle gives (falling
+    # in self-play too, where the win rate can't).
+    left = [v for e in episodes if e.get("left") for v in e["left"].values()]
+    if left:
+        stats["vp_left"] = sum(left) / len(left)
+    # And the points of a player's units still in the battle at the end.
+    points = [v for e in episodes if e.get("points_left") for v in e["points_left"].values()]
+    if points:
+        stats["points_left"] = sum(points) / len(points)
     scored = [e for e in episodes if e["learner"] is not None]
     if against and scored:
         leads = [e["vp"][e["learner"]] - e["vp"][3 - e["learner"]] for e in scored]
         stats["vp_difference"] = sum(leads) / len(leads)
         stats["win_rate"] = sum((lead > 0) + 0.5 * (lead == 0) for lead in leads) / len(leads)
     return stats
+
+
+def _log_game(folder: Path, update: int, episode: dict) -> None:
+    # Each finished game, a line in games.jsonl: its save (so its lists),
+    # VP (and VP left on the table) and the learner's seat - e.g. for each
+    # list's win rate.
+    line = {"update": update, "save": episode.get("save"), "end": episode["end"],
+            "learner": episode["learner"], "vp": episode["vp"], "left": episode.get("left"),
+            "points_left": episode.get("points_left"), "steps": episode["steps"]}
+    with open(folder / "games.jsonl", "a") as out:
+        out.write(json.dumps(line) + "\n")
 
 
 def _writer(folder: Path):

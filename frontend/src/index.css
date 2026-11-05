@@ -1311,3 +1311,206 @@ section .app-dialog form {
   background: #8881;
   padding: 0.5rem;
 }
+
+/* The ML page (components/MlPanel.jsx): a diagnose run as charts. Its two
+   series colors, stepped for each theme. */
+:root {
+  --ml-series-1: #2a78d6;
+  --ml-series-2: #eb6834;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ml-series-1: #3987e5;
+    --ml-series-2: #d95926;
+  }
+}
+
+.ml-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.ml-page h2,
+.ml-page h3 {
+  margin: 0;
+}
+
+.ml-page h3 {
+  font-size: 1rem;
+}
+
+.ml-run {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.ml-run select {
+  padding: 0.4rem;
+  max-width: 100%;
+}
+
+.ml-takeaway {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.ml-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: 0.5rem;
+}
+
+.ml-tile {
+  display: grid;
+  gap: 0.15rem;
+  align-content: start;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #8884;
+  border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ml-big {
+  font-size: 1.6rem;
+  line-height: 1.1;
+}
+
+.ml-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  font-size: 0.85rem;
+}
+
+.ml-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-right: 6px;
+  vertical-align: baseline;
+}
+
+.ml-section {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.ml-section .hint {
+  margin: 0;
+}
+
+.ml-chart {
+  position: relative;
+}
+
+.ml-chart svg {
+  display: block;
+  overflow: visible;
+}
+
+.ml-chart text {
+  fill: currentColor;
+  font-size: 11px;
+}
+
+.ml-chart text.ml-muted {
+  opacity: 0.65;
+  font-variant-numeric: tabular-nums;
+}
+
+.ml-chart .ml-grid {
+  stroke: #8883;
+}
+
+.ml-chart .ml-reference {
+  stroke: #888a;
+  stroke-dasharray: 4 3;
+}
+
+.ml-chart .ml-whisker {
+  stroke: currentColor;
+  opacity: 0.55;
+}
+
+.ml-chart .ml-span {
+  stroke: #888a;
+  stroke-width: 2;
+}
+
+.ml-chart .ml-dot {
+  stroke: Canvas;
+  stroke-width: 2;
+}
+
+.ml-chart .ml-faded {
+  opacity: 0.35;
+}
+
+.ml-tip {
+  position: absolute;
+  right: 0;
+  transform: translateY(-100%);
+  pointer-events: none;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid #8886;
+  border-radius: 4px;
+  background: Canvas;
+  box-shadow: 0 2px 8px #0003;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  z-index: 2;
+}
+
+.ml-tip-title {
+  opacity: 0.7;
+  margin-bottom: 2px;
+}
+
+.ml-table-box {
+  overflow: auto;
+  max-height: 32rem;
+  border: 1px solid #8884;
+  border-radius: 4px;
+}
+
+.ml-table {
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ml-table th,
+.ml-table td {
+  padding: 0.25rem 0.5rem;
+  text-align: right;
+  border-bottom: 1px solid #8883;
+}
+
+.ml-table th:nth-child(-n + 2),
+.ml-table td:nth-child(-n + 2) {
+  text-align: left;
+}
+
+.ml-table th {
+  position: sticky;
+  top: 0;
+  background: Canvas;
+}
+
+.ml-table th button {
+  all: unset;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.ml-table th button:focus-visible {
+  outline: 2px solid currentColor;
+}
+
+.ml-table tr.ml-all td {
+  font-weight: bold;
+}

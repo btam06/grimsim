@@ -60,6 +60,34 @@ async def test_primary_vp_is_capped_at_45_a_battle(
     assert sum(s["points"] for s in await _scores(client, game_id, 2) if s["kind"] == "primary") <= 45
 
 
+async def test_secondary_vp_is_capped_at_45_a_battle(
+    client: AsyncClient, session, tmp_path, monkeypatch
+):
+    # 15VP in each of three battle rounds: a secondary achieved by hand in
+    # the fourth scores nothing, and one scored automatically is capped.
+    from app.engine.state import GameScore
+    from app.services.in_game import scoring
+
+    game_id, a, d = await _game(client, session, tmp_path, monkeypatch)
+    card_id = await _secondary(session, game_id, 2, "By Hand", points=4)
+    game = await _load_game(session, game_id)
+    player = next(p for p in game.players if p.seat == 2)
+    for battle_round in (1, 2, 3):
+        player.scores.append(
+            GameScore(battle_round=battle_round, turn_seat=2, kind="secondary", points=15)
+        )
+    await _advance_to(client, game_id, 4, 2, "command")
+    response = await client.post(f"/games/{game_id}/secondaries/{card_id}/achieve")
+    assert response.status_code == 400
+    assert "45VP" in response.json()["detail"]
+    assert sum(
+        s["points"] for s in await _scores(client, game_id, 2) if s["kind"] == "secondary"
+    ) == 45
+    allowed, lines = scoring.capped(player, 4, "secondary", [("By Hand", 4)])
+    assert allowed == 0
+    assert ("Capped at 45VP secondary per battle", -4) in lines
+
+
 # --- what counts as a kill ---
 
 

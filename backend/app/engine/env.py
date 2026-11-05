@@ -41,11 +41,83 @@ from app.engine.play import Engine  # noqa: E402
 # it, both seats are played through the env (self-play): each step's reward
 # is for the player who took it, and info["rewards"] has both players'.
 #
-# Reward: the change in the player's VP lead (their VP minus their
-# opponent's) over `vp_scale`, and at the end, `win_reward` for a win (minus
-# that for a loss, nothing for a draw). An action the game refuses leaves it
+# Reward: for VP as they're scored - `primary_reward` for each player's
+# primary VP over VP_CAP (the most a battle gives), `secondary_reward` for
+# their secondary VP (each counted up to VP_CAP), and `lead_reward` for
+# their lead (their VP minus their opponent's) over VP_CAP - and at the end,
+# `win_reward` for a win (minus that for a loss, nothing for a draw). A
+# player maxing out both kinds gets less than a win; points for playing
+# well (damage, kills) are left out, as a battle can be won by a player
+# with no models left. An action the game refuses leaves it
 # as it was (info["refused"] says why) and isn't offered again until
 # something else happens.
+
+
+# The most primary VP a battle gives (and secondary VP rewarded) - see
+# app/services/in_game/scoring.py.
+VP_CAP = 45
+
+
+def standing(game) -> dict[int, tuple[int, int, int]]:
+    # Each seat's primary VP and secondary VP (each up to VP_CAP), and all
+    # its VP.
+    found = {}
+    for p in game.players:
+        primary = sum(s.points for s in p.scores if s.kind == "primary")
+        secondary = sum(s.points for s in p.scores if s.kind == "secondary")
+        found[p.seat] = (min(primary, VP_CAP), min(secondary, VP_CAP), features.vp(game, p.seat))
+    return found
+
+
+def left_on_table(game) -> dict[int, dict[str, int]]:
+    # The VP each seat didn't score, of the VP_CAP primary and VP_CAP
+    # secondary a battle gives - and where some of it went: lost to the caps
+    # (per battle round, and battle), and on tactical secondaries discarded,
+    # or met but held and never claimed (what they were last held at).
+    standings = standing(game)
+    found = {}
+    for p in game.players:
+        primary, secondary, _ = standings[p.seat]
+        capped = {"primary": 0, "secondary": 0}
+        for score in p.scores:
+            for reason in score.reasons:
+                if score.kind in capped and reason.text.startswith("Capped at"):
+                    capped[score.kind] -= reason.points
+        cards = {c.id: c for c in p.secondaries}
+        held = {}
+        for offer in game.claim_offers:
+            if offer.game_secondary_id in cards and offer.status == "held":
+                held[offer.game_secondary_id] = offer.points
+        tactical = [c for c in p.secondaries if not c.fixed]
+        found[p.seat] = {
+            "left": 2 * VP_CAP - primary - secondary,
+            "primary_left": VP_CAP - primary,
+            "secondary_left": VP_CAP - secondary,
+            "primary_capped": capped["primary"],
+            "secondary_capped": capped["secondary"],
+            "discarded": sum(c.status == "discarded" for c in tactical),
+            "achieved": sum(c.status == "achieved" for c in tactical),
+            "held_unclaimed": sum(
+                points for card_id, points in held.items()
+                if cards[card_id].status != "achieved"
+            ),
+        }
+    return found
+
+
+def army_left(game) -> dict[int, dict[str, int]]:
+    # The points of each seat's units still in the battle (a model left, on
+    # the battlefield or in Reserves), and of those destroyed.
+    destroyed = {d.unit_id for d in game.models_destroyed if d.unit_destroyed}
+    found = {}
+    for p in game.players:
+        units = p.army_list.units
+        lost = sum(u.points or 0 for u in units if u.id in destroyed)
+        found[p.seat] = {
+            "points_left": sum(u.points or 0 for u in units) - lost,
+            "points_lost": lost,
+        }
+    return found
 
 
 @functools.cache
@@ -86,7 +158,9 @@ class GameEnv:
         saves: str | Path | list[str | Path],
         seat: int | str | None = None,
         opponent: Policy = random_policy,
-        vp_scale: float = 100.0,
+        primary_reward: float = 0.25,
+        secondary_reward: float = 0.25,
+        lead_reward: float = 0.5,
         win_reward: float = 1.0,
         max_steps: int = 5000,
         seed: int | None = None,
@@ -95,7 +169,9 @@ class GameEnv:
         self.seats = seat
         self.seat = seat if seat != "random" else None
         self.opponent = opponent
-        self.vp_scale = vp_scale
+        self.primary_reward = primary_reward
+        self.secondary_reward = secondary_reward
+        self.lead_reward = lead_reward
         self.win_reward = win_reward
         self.max_steps = max_steps
         self.rng = random.Random(seed)
@@ -111,7 +187,8 @@ class GameEnv:
         if seed is not None:
             self.rng.seed(seed)
         self.close_game()
-        game, catalog = _restored(str(save) if save is not None else self.rng.choice(self.saves))
+        self.save = str(save) if save is not None else self.rng.choice(self.saves)
+        game, catalog = _restored(self.save)
         game = copy.deepcopy(game)
         if self.seats == "random":
             self.seat = self.rng.choice([p.seat for p in game.players])
@@ -120,7 +197,7 @@ class GameEnv:
         self.engine = Engine(Live(game, catalog, autosave=False))
         self.steps = 0
         self._refused: set[str] = set()
-        self._lead = self._vp_lead()
+        self._standing = standing(game)
         rewards = {p.seat: 0.0 for p in game.players}
         done = self._next(rewards)
         return self._observe(), self._info(rewards, done)
@@ -170,11 +247,10 @@ class GameEnv:
             self._refused.add(_key(action["type"], decision.seat, action["params"]))
             return result["error"] or "refused"
         self._refused.clear()
-        lead = self._vp_lead()
+        now = standing(self.game)
         for seat in rewards:
-            change = lead - self._lead
-            rewards[seat] += (change if seat == self._first_seat() else -change) / self.vp_scale
-        self._lead = lead
+            rewards[seat] += self._earned(self._standing, now, seat)
+        self._standing = now
         return None
 
     def _next(self, rewards: dict) -> str | None:
@@ -218,6 +294,18 @@ class GameEnv:
             mine = lead if seat == first else -lead
             rewards[seat] += self.win_reward * ((mine > 0) - (mine < 0))
 
+    def _earned(self, before: dict, after: dict, seat: int) -> float:
+        # The reward for VP scored between two standings (see standing).
+        (other,) = (s for s in after if s != seat)
+        primary = after[seat][0] - before[seat][0]
+        secondary = after[seat][1] - before[seat][1]
+        lead = (after[seat][2] - after[other][2]) - (before[seat][2] - before[other][2])
+        return (
+            self.primary_reward * primary
+            + self.secondary_reward * secondary
+            + self.lead_reward * lead
+        ) / VP_CAP
+
     def _first_seat(self) -> int:
         return min(p.seat for p in self.game.players)
 
@@ -241,9 +329,21 @@ class GameEnv:
         game = self.game
         return {
             "seat": self.decision.seat if self.decision else None,
+            "save": self.save,
             "actions": self.decision.actions if self.decision else [],
             "rewards": rewards,
             "vp": {p.seat: features.vp(game, p.seat) for p in game.players},
+            # (At the end: the VP each seat left on the table - see
+            # left_on_table.)
+            "left": (
+                {seat: found["left"] for seat, found in left_on_table(game).items()}
+                if done == "terminated" else None
+            ),
+            # (And the points of their units still in the battle.)
+            "points_left": (
+                {seat: found["points_left"] for seat, found in army_left(game).items()}
+                if done == "terminated" else None
+            ),
             "refused": refused,
             "steps": self.steps,
             "state": f"round {game.battle_round}, seat {game.turn_seat}, {game.phase or game.status}",

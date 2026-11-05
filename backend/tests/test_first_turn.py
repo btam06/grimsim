@@ -66,6 +66,9 @@ async def test_roll_off_then_scouts_moves_before_the_battle(
     )
     assert response.status_code == 200, response.text
     assert response.json()["units"][0]["moved"]
+    # (Agents move it once.)
+    decision = (await client.get(f"/games/{game_id}/agent")).json()
+    assert [a["type"] for a in decision["actions"]] == ["finish_scouts"]
 
     # Done: the battle begins, seat 2 first.
     response = await client.post(f"/games/{game_id}/scouts/done", json={"seat": 1})

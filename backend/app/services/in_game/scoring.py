@@ -21,11 +21,11 @@ from app.services.in_game.mission_context import Context
 # are scored by hand, as before.
 #
 # A player scores at most 15VP from primary missions, and 15VP from
-# secondaries, in each battle round - and 45VP from primary missions in the
-# battle (see `room`): anything over is lost.
+# secondaries, in each battle round - and 45VP of each in the battle (see
+# `room`): anything over is lost.
 
 MAX_PER_ROUND = {"primary": 15, "secondary": 15}
-MAX_PER_BATTLE = {"primary": 45}
+MAX_PER_BATTLE = {"primary": 45, "secondary": 45}
 COMMAND_END = "command_end"
 TURN_END = "turn_end"
 BATTLE_END = "battle_end"

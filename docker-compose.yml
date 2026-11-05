@@ -26,6 +26,8 @@ services:
     volumes:
       # Games' autosaves (see backend/app/engine/saves.py), on the host.
       - ./saves:/app/saves
+      # The ML runs' diagnose files, for the ML page (app/routers/ml.py).
+      - ./ml/data:/app/ml/data:ro
     networks:
       - internal
 

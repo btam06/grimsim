@@ -334,6 +334,92 @@ def _towards(game: Game, unit, targets: list, reach: float) -> dict:
     return moved
 
 
+# How close a charge's default ends to the target (its nearest models' bases,
+# within Engagement Range); the sidesteps tried, and the spots round the
+# target a formation's tried at (how many, how far out from its edge); and
+# how many tries are checked in full.
+CHARGE_GAPS = (1.5, 0.75)
+CHARGE_SIDESTEPS = (0.0, 1.0, -1.0, 2.0, -2.0, 3.0, -3.0)
+CHARGE_SPOTS, CHARGE_SPOT_OUT = 12, 3.0
+CHARGE_CHECKS = 8
+
+
+def _charge_towards(game: Game, unit, enemy, roll: int) -> dict | None:
+    # The unit moved into a charge against the enemy unit (_towards' models
+    # each heading for the closest enemy model end up on top of each other):
+    # all of it slid the same way, its nearest model stopping just short of
+    # the target - straight there or to one side, as it stands, or set out
+    # afresh beside the target (the nearest spots first). The first that's
+    # clear, in reach and passes the charge check; None if none does.
+    placed = _positions(game, unit)
+    theirs = list(charging._bases(game, enemy).values())
+    if not placed or not theirs:
+        return None
+    others = deployment.placed_bases(game, unit)
+    models = deployment.models_on_battlefield(game, unit)
+
+    def nearest(guess) -> tuple[float, object, object]:
+        _, bases = deployment.unit_bases(unit, guess, models)
+        return min(
+            ((deployment.gap(b, t), b, t) for b in bases.values() for t in theirs),
+            key=lambda found: found[0],
+        )
+
+    def slid(guess, ending: float) -> dict | None:
+        # Slid until its nearest model's `ending` from the target (twice: the
+        # nearest model can change on the way).
+        for _ in range(2):
+            gap, base, target = nearest(guess)
+            d = math.dist((base.x, base.y), (target.x, target.y))
+            if d < 0.01:
+                return None
+            step = gap - ending
+            if abs(step) < 0.05:
+                break
+            ux, uy = (target.x - base.x) / d * step, (target.y - base.y) / d * step
+            guess = {i: (x + ux, y + uy, r) for i, (x, y, r) in guess.items()}
+        return guess
+
+    def starts():
+        gap, base, target = nearest(placed)
+        d = math.dist((base.x, base.y), (target.x, target.y))
+        if d >= 0.01:
+            ux, uy = (target.x - base.x) / d, (target.y - base.y) / d
+            for side in CHARGE_SIDESTEPS:
+                yield {i: (x - uy * side, y + ux * side, r) for i, (x, y, r) in placed.items()}
+        cx, cy = _centre({t: (b.x, b.y, 0) for t, b in enumerate(theirs)})
+        out = max(math.dist((cx, cy), (b.x, b.y)) for b in theirs) + CHARGE_SPOT_OUT
+        here = _centre(placed)
+        spots = [
+            (cx + out * math.cos(2 * math.pi * k / CHARGE_SPOTS),
+             cy + out * math.sin(2 * math.pi * k / CHARGE_SPOTS))
+            for k in range(CHARGE_SPOTS)
+        ]
+        for x, y in sorted(spots, key=lambda s: math.dist(s, here)):
+            try:
+                yield deployment.formation(game, unit, x, y, models, nudge=SEARCH_NUDGE)
+            except HTTPException:
+                continue
+
+    checks = 0
+    for start in starts():
+        for ending in CHARGE_GAPS:
+            guess = slid(start, ending)
+            if guess is None or any(
+                math.dist(guess[i][:2], placed[i][:2]) > roll for i in guess
+            ):
+                continue
+            _, bases = deployment.unit_bases(unit, guess, models)
+            if any(deployment.physical_problems(game, models, bases, others).values()):
+                continue
+            if _valid(lambda: charging.check_charge(game, unit, [enemy], guess)):
+                return guess
+            checks += 1
+            if checks >= CHARGE_CHECKS:
+                return None
+    return None
+
+
 def _centre(placed: dict) -> tuple[float, float]:
     return (
         sum(p[0] for p in placed.values()) / len(placed),
@@ -573,6 +659,10 @@ async def _legal_actions(session: AsyncSession, game: Game, waiting: dict) -> li
             if seat is not None:
                 scouting = g._scouts_out(game)
                 for su in scouting.units:
+                    # (Moved once: to move it again would only let a policy
+                    # go on moving it forever.)
+                    if su.moved:
+                        continue
                     unit = units[su.unit_id]
                     if su.in_reserves:
                         default = _search(
@@ -827,11 +917,12 @@ async def _formation_actions(game: Game, add, units) -> None:
                                    {"seat": seat, "unit_id": fu.unit_id, "place": "embarked",
                                     "transport_unit_id": t.unit_id}))
         # Abilities that give a unit an ability now (e.g. Thunderhawk
-        # Insertion: Deep Strike).
+        # Insertion: Deep Strike) - chosen once (to change it would only let
+        # a policy flip between two units forever).
         for grant in player.grants:
+            if grant.unit_id is not None:
+                continue
             for target in grant.targets:
-                if target.unit_id == grant.unit_id:
-                    continue
                 add(Action("grant_formation", seat,
                            f"{grant.ability}: {grant.grants} for {target.name}",
                            {"seat": seat, "source_unit_id": grant.source_unit_id,
@@ -1080,7 +1171,7 @@ async def _charge_actions(session, game: Game, add, units) -> None:
             guess = _towards(game, unit, [enemy], cu.roll)
             default = guess if _valid(
                 lambda: charging.check_charge(game, unit, [enemy], guess)
-            ) else None
+            ) else _charge_towards(game, unit, enemy, cu.roll)
             add(Action("charge", seat, f"{cu.name} charges {target.name} (rolled {cu.roll})",
                        {"unit_id": cu.unit_id, "target_unit_ids": [target.unit_id]},
                        _placement(game, unit, "charge", cu.roll, default)))

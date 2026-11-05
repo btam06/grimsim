@@ -1,5 +1,7 @@
 import random
 
+import pytest
+
 from httpx import AsyncClient
 
 from app.engine import context, features, saves, store
@@ -82,14 +84,86 @@ async def test_an_episode_replays_from_its_seed(client: AsyncClient, session, tm
     env.close()
 
 
+async def test_rewards_for_vp_scored(client: AsyncClient, session, tmp_path):
+    from app.engine.env import VP_CAP, standing
+    from app.engine.state import GameScore
+
+    path = await _save(client, session, tmp_path)
+    env = GameEnv(path, max_steps=300)
+    env.reset(seed=1)
+    before = standing(env.game)
+    one, two = sorted(env.game.players, key=lambda p: p.seat)
+
+    def score(player, kind, points):
+        player.scores.append(GameScore(game_player_id=player.id, battle_round=1,
+                                       turn_seat=player.seat, kind=kind, points=points))
+
+    # Seat 1 scores 9 primary and 6 secondary, seat 2 a secondary 5: each is
+    # rewarded for its own, and for its lead.
+    score(one, "primary", 9)
+    score(one, "secondary", 6)
+    score(two, "secondary", 5)
+    after = standing(env.game)
+    lead = (9 + 6) - 5
+    assert env._earned(before, after, 1) == pytest.approx(
+        (0.25 * 9 + 0.25 * 6 + 0.5 * lead) / VP_CAP
+    )
+    assert env._earned(before, after, 2) == pytest.approx((0.25 * 5 - 0.5 * lead) / VP_CAP)
+    # Secondary VP past the cap counts for the lead, not for itself.
+    score(one, "secondary", VP_CAP)
+    later = standing(env.game)
+    assert later[1][1] == VP_CAP
+    assert env._earned(after, later, 1) == pytest.approx(
+        (0.25 * (VP_CAP - 6) + 0.5 * VP_CAP) / VP_CAP
+    )
+    # Maxing out both kinds is worth less than a win.
+    assert (env.primary_reward + env.secondary_reward) < env.win_reward
+    env.close()
+
+
+async def test_vp_left_on_the_table(client: AsyncClient, session, tmp_path):
+    from app.engine.env import left_on_table
+    from app.engine.state import GameClaimOffer, GameScore, GameScoreReason, GameSecondary
+
+    path = await _save(client, session, tmp_path)
+    env = GameEnv(path, max_steps=300)
+    env.reset(seed=1)
+    game = env.game
+    one = next(p for p in game.players if p.seat == 1)
+    before = left_on_table(game)[1]
+    one.scores.append(GameScore(game_player_id=one.id, battle_round=1, turn_seat=1,
+                                kind="primary", points=15))
+    # 4 secondary VP over the battle round's 15: lost to the cap.
+    one.scores.append(GameScore(
+        game_player_id=one.id, battle_round=1, turn_seat=1, kind="secondary", points=15,
+        reasons=[GameScoreReason(text="Card", points=19),
+                 GameScoreReason(text="Capped at 15VP secondary per battle round", points=-4)],
+    ))
+    discarded = GameSecondary(game_player_id=one.id, status="discarded")
+    held = GameSecondary(game_player_id=one.id, status="active")
+    claimed = GameSecondary(game_player_id=one.id, status="achieved")
+    one.secondaries += [discarded, held, claimed]
+    # The held card was last held at 5VP, and never claimed; the claimed one
+    # was held first, so doesn't count.
+    for card, points, status in ((held, 3, "held"), (held, 5, "held"), (claimed, 4, "held"),
+                                 (claimed, 4, "claimed")):
+        game.claim_offers.append(GameClaimOffer(game_id=game.id, game_secondary_id=card.id,
+                                                points=points, status=status))
+    found = left_on_table(game)[1]
+    assert found["primary_left"] == before["primary_left"] - 15
+    assert found["secondary_left"] == before["secondary_left"] - 15
+    assert found["left"] == found["primary_left"] + found["secondary_left"] == before["left"] - 30
+    assert (found["secondary_capped"], found["primary_capped"]) == (4, 0)
+    assert (found["discarded"], found["achieved"], found["held_unclaimed"]) == (1, 1, 5)
+    env.close()
+
+
 async def test_self_play_rewards(client: AsyncClient, session, tmp_path):
     path = await _save(client, session, tmp_path)
     env = GameEnv(path, max_steps=300)
     trace = _play(env, seed=2, steps=300)
     seats = set()
     for reward, rewards, vp, _ in trace:
-        # Zero-sum: one player's gain is the other's loss.
-        assert abs(rewards[1] + rewards[2]) < 1e-9
         assert reward in rewards.values()
     # Both seats get decisions.
     obs, info = env.reset(seed=2)
@@ -260,6 +334,32 @@ async def test_the_scripted_player_plays_a_battle(client: AsyncClient, session, 
     assert result.count("unfinished") == 0
 
 
+async def test_the_scripted_player_tells_fighters_from_shooters(
+    client: AsyncClient, session, tmp_path
+):
+    # F has only a blade, S only a gun, B both: F fights, S shoots - and the
+    # charges each rolls for need longer odds the better it fights.
+    from app.engine import scripted
+    from app.engine.play import Engine
+    from tests.test_deployment import _unit_named
+    from tests.test_movement import _battle
+
+    units = {
+        1: [("F", 5, {"melee": True}), ("S", 5, {"weapon_range": 24}),
+            ("B", 5, {"weapon_range": 24, "melee": True})],
+        2: [("D", 5, {"weapon_range": 24, "melee": True})],
+    }
+    spots = {"F": (10, 38), "S": (25, 38), "B": (40, 38), "D": (20, 4)}
+    game, deployment = await _battle(client, session, tmp_path, units=units, spots=spots)
+    engine = Engine.of(game["id"])
+    with context.bound(engine.live):
+        player = scripted._Player(engine.game, 1)
+        ratio = {n: player.melee_ratio(_unit_named(deployment, n)["unit_id"]) for n in "FSB"}
+        assert player.melee(_unit_named(deployment, "F")["unit_id"])
+        assert not player.melee(_unit_named(deployment, "S")["unit_id"])
+    assert ratio["S"] == 0 < ratio["B"] < ratio["F"]
+
+
 async def test_an_episode_from_the_games_start(client: AsyncClient, session, tmp_path):
     # From the save made with the game: deployment is played too.
     game_id = await _armed_battle(client, session, tmp_path)
@@ -276,4 +376,25 @@ async def test_an_episode_from_the_games_start(client: AsyncClient, session, tmp
             break
     assert statuses[0] == "deployment"
     assert statuses[-1] == "in_progress"
+    env.close()
+
+
+async def test_points_of_units_left_in_the_battle(client: AsyncClient, session, tmp_path):
+    from app.engine.env import army_left
+    from app.engine.state import GameModelDestroyed
+
+    path = await _save(client, session, tmp_path)
+    env = GameEnv(path, max_steps=300)
+    env.reset(seed=1)
+    game = env.game
+    two = next(p for p in game.players if p.seat == 2)
+    total = sum(u.points for u in two.army_list.units)
+    assert army_left(game)[2] == {"points_left": total, "points_lost": 0}
+    # One of seat 2's units destroyed: its points are lost (a model of
+    # another lost isn't).
+    gone, *rest = two.army_list.units
+    game.models_destroyed.append(GameModelDestroyed(unit_id=gone.id, unit_destroyed=True))
+    if rest:
+        game.models_destroyed.append(GameModelDestroyed(unit_id=rest[0].id))
+    assert army_left(game)[2] == {"points_left": total - gone.points, "points_lost": gone.points}
     env.close()

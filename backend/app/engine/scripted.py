@@ -5,8 +5,8 @@ import random
 
 from app.engine import context
 from app.engine.env import Decision
-from app.engine.features import _View
-from app.services.in_game import charging, deployment, objectives, shooting
+from app.engine.features import _View, _weapon_damage
+from app.services.in_game import charging, deployment, fighting, objectives, shooting
 from app.services.in_game.movement import ENGAGEMENT_RANGE
 
 # A scripted player: rules of thumb, no learning - an opponent better than
@@ -21,8 +21,9 @@ from app.services.in_game.movement import ENGAGEMENT_RANGE
 # the first unit on the home objective, the rest anywhere; move towards the
 # closest objective it doesn't hold (melee units towards the closest enemy),
 # one unit staying put on each objective held; shoot and fight for the most
-# expected damage, finishing units off first; charge when the roll's likely;
-# bring in Reserves; take the default for everything else; no stratagems.
+# expected damage, finishing units off first; charge on odds by how much
+# better the unit fights than shoots; bring in Reserves; take the default for
+# everything else; no stratagems.
 
 # What each action type scores, when nothing more particular applies.
 SCORES = {
@@ -40,6 +41,14 @@ SCORES = {
     "achieve_secondary": 3.0, "discard_secondary": -0.5, "use_stratagem": -0.5,
     "pass_fight": 0.0, "skip_consolidation": 0.0,
 }
+
+
+# A unit's melee damage over its shooting damage (see _Player.melee_ratio):
+# from this, it fights; and the chance of making a charge it rolls for, by
+# that ratio - a melee unit on a third's chance, one about as good either way
+# (e.g. Deathwatch Terminators) on even odds, any other on four in five.
+MELEE_MINDED = 1.0
+CHARGE_ODDS = ((MELEE_MINDED, 1 / 3), (0.5, 0.5), (0.0, 0.8))
 
 
 def scripted(decision: Decision, rng: random.Random) -> int:
@@ -89,12 +98,35 @@ class _Player:
         return deployment.find_unit(self.game, unit_id)
 
     def melee(self, unit_id: int) -> bool:
-        # A unit with no ranged weapon of 12" or more: it fights. (All its
-        # models, as it's deployed too.)
-        models = deployment.unit_models(self.unit(unit_id))
-        return not any(
-            (w.range or 0) >= 12 for m in models for w in shooting.ranged_weapons(m)
-        )
+        # A unit that does at least as much damage fighting as shooting: it
+        # fights (heads for the enemy, charges on longer odds).
+        return self.melee_ratio(unit_id) >= MELEE_MINDED
+
+    def melee_ratio(self, unit_id: int) -> float:
+        # The unit's expected melee damage over its shooting damage, against
+        # the enemy army's units (on average - each model fighting with its
+        # best melee weapon, shooting with all its ranged ones). All its
+        # models, as it's deployed too; the same all game (kept for the
+        # game).
+        unit = self.unit(unit_id)
+        enemy = next(p for p in self.game.players if p.seat != self.seat).army_list
+        ratios = context.cache("melee_ratios")
+        ratios = {} if ratios is None else ratios
+        if unit.id not in ratios:
+            targets = [u.unit_models[0].model for u in enemy.units if u.unit_models]
+            fighting_, shooting_ = 0.0, 0.0
+            for target in targets:
+                keywords = {k.name for k in target.keywords}
+
+                def dealt(weapon) -> float:
+                    hits, damage = _weapon_damage(weapon, target, keywords, 5, False, False, False)
+                    return hits * min(damage, target.wounds)
+
+                for m in deployment.unit_models(unit):
+                    fighting_ += max(map(dealt, fighting.melee_weapons(m)), default=0.0)
+                    shooting_ += sum(map(dealt, shooting.ranged_weapons(m)))
+            ratios[unit.id] = fighting_ / shooting_ if shooting_ else math.inf
+        return ratios[unit.id]
 
     def centre(self, unit) -> tuple[float, float] | None:
         placed = deployment.positions(self.game)
@@ -204,13 +236,15 @@ class _Player:
     # --- charging and attacking ---
 
     def charge_roll(self, unit_id: int) -> float:
-        # Roll when it's likely to make it: a melee unit at a third's chance,
-        # any other at four in five.
+        # Roll when it's likely enough to make it, by how much better it
+        # fights than shoots (see CHARGE_ODDS).
         unit = self.unit(unit_id)
         enemies = charging.enemy_units(self.game, unit)
         gap = min((charging.distance(self.game, unit, e) for e in enemies), default=math.inf)
         chance = _chance_2d6(gap - ENGAGEMENT_RANGE)
-        return 2.0 if chance >= (1 / 3 if self.melee(unit_id) else 0.8) else -1.0
+        ratio = self.melee_ratio(unit_id)
+        needed = next(odds for least, odds in CHARGE_ODDS if ratio >= least)
+        return 2.0 if chance >= needed else -1.0
 
     def attack(self, action: dict) -> float:
         # The share of the target it's expected to destroy (its wounds, its

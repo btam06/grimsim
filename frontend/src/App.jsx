@@ -10,6 +10,7 @@ import FactionsPanel from './components/FactionsPanel'
 import GamesPanel from './components/GamesPanel'
 import KeywordsPanel from './components/KeywordsPanel'
 import ListsPanel from './components/ListsPanel'
+import MlPanel from './components/MlPanel'
 import { PrimaryMissions, SecondaryMissions } from './components/MissionsPanel'
 import ModelsPanel from './components/ModelsPanel'
 import StratagemsPanel from './components/StratagemsPanel'
@@ -44,6 +45,7 @@ const TAB_GROUPS = {
     'Faction Abilities',
   ],
   Calculator: ['Calculator'],
+  ML: ['Checkpoints'],
 }
 
 const GROUPS = Object.keys(TAB_GROUPS)
@@ -100,6 +102,7 @@ function App() {
 
       {tab === 'Calculator' && <CalculatorPanel />}
       {tab === 'Games' && <GamesPanel />}
+      {tab === 'Checkpoints' && <MlPanel />}
       {tab === 'Users' && <UsersPanel />}
       {tab === 'Secondary Missions' && <SecondaryMissions />}
       {tab === 'Primary Missions' && <PrimaryMissions />}
