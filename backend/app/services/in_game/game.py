@@ -41,6 +41,7 @@ from app.services.in_game import command_phase as command_phase_service
 from app.services.in_game import deployment as deployment_service
 from app.services.in_game import duty_in_death as duty_in_death_service
 from app.services.in_game import overwatch as overwatch_service
+from app.seeds.factions.adepta_sororitas import acts_of_faith, miracle_rules
 from app.seeds.factions.necrons import reanimation as reanimation_service
 from app.services.in_game import heal as heal_service
 from app.services.in_game import mission_state as mission_state_service
@@ -198,6 +199,7 @@ async def create_game(session: AsyncSession, payload: GameIn) -> Live:
         rng_seed=payload.seed if payload.seed is not None else dice.new_seed(),
         rng_rolls=0,
         players=players,
+        ml=payload.ml,
     )
     # Its terrain: a layout for the attacker's and defender's dispositions.
     attacker = next(p for p in players if p.seat == payload.attacker_seat)
@@ -318,6 +320,8 @@ async def _begin_command_phase(session: AsyncSession, game: Game) -> None:
     turn_record_service.snapshot_turn_start(game)
     mission_state_service.start_of_turn(game)
     game.phase = "command"
+    # Adepta Sororitas armies gain a Miracle dice (Acts of Faith).
+    acts_of_faith.start_of_turn(game)
     # Its start: the objectives the player selected for their rules last
     # turn (e.g. their Acquisition objective marker) are theirs no longer -
     # they select them again in this phase.
@@ -478,6 +482,10 @@ async def advance(session: AsyncSession, game: Game) -> None:
                 return
         # Enhancements that gain CP then (e.g. Magos).
         selected_objectives_service.end_of_command(game)
+        # Miracle dice for objectives held with a Simulacrum Imperialis.
+        from app.seeds.factions.adepta_sororitas import unit_abilities
+
+        unit_abilities.simulacrum(game)
     if game.phase == "charge" and await heroic_intervention_open(session, game):
         # The end of the charge phase: the opponent can use Heroic
         # Intervention - it pauses here for them to.
@@ -497,6 +505,8 @@ async def advance(session: AsyncSession, game: Game) -> None:
     # Orb) - and if that returns destroyed models, it waits for them to be
     # set up.
     reanimation_service.resurrect(game)
+    # Divine Intervention: models set up again.
+    miracle_rules.end_of_phase(game)
     if heal_service.placing(game):
         return
     # Destroyed models left on the battlefield till then (Duty in Death) go;
@@ -684,6 +694,32 @@ def stratagem_unavailable_reason(
     return _unavailable(game, player, stratagem, cp_discount, target)
 
 
+def free_rule(game: Game, player: GamePlayer, stratagem: Stratagem) -> str | None:
+    # The player's detachment rule that lets them use the stratagem for 0CP
+    # now, if one does (e.g. Tyrannical Court: Claimed for the Dark Gods,
+    # once per battle round, while their WARLORD is on the battlefield).
+    from app.seeds import factions as faction_seeds
+
+    configs = faction_seeds.FREE_STRATAGEMS
+    for detachment in player.army_list.detachments:
+        for rule in detachment.rules:
+            config = configs.get(rule.name)
+            if config is None or config["stratagem"] != stratagem.name:
+                continue
+            if any(
+                u.seat == player.seat and u.ability == rule.name
+                and u.battle_round == game.battle_round
+                for u in game.ability_uses
+            ):
+                continue
+            if config.get("warlord_on_battlefield"):
+                warlord = player.army_list.warlord
+                if warlord is None or not deployment_service.models_on_battlefield(game, warlord):
+                    continue
+            return rule.name
+    return None
+
+
 def ability_discount(game: Game, player: GamePlayer, unit: Unit | None) -> tuple[int, str | None]:
     # What an ability takes off a Stratagem targeting the player's unit (e.g.
     # My Will Be Done: 1CP, the first time each battle round for the army),
@@ -717,6 +753,8 @@ def _unavailable(
 ) -> str | None:
     cp_discount += ability_discount(game, player, target)[0]
     cp, repeatable = stratagem_cost(stratagem, target)
+    if free_rule(game, player, stratagem) is not None:
+        cp_discount = cp
     if game.status != "in_progress":
         return "the game isn't in progress"
     if not stratagem.is_core and not (
@@ -893,7 +931,23 @@ async def use_stratagem(
     base = max(0, stratagem_cost(stratagem, target_unit or targeted_unit)[0] - cp_discount)
     # (An ability that takes CP off it - e.g. My Will Be Done - used if it does.)
     extra, ability = ability_discount(game, player, target_unit or targeted_unit)
-    cost = max(0, base - extra)
+    # (Or a rule that makes it free - e.g. Tyrannical Court - used instead.)
+    free = free_rule(game, player, stratagem) if base > 0 else None
+    if free is not None:
+        extra, ability = 0, None
+        game.ability_uses.append(
+            GameAbilityUse(
+                seat=player.seat,
+                unit_id=(target_unit or targeted_unit).id
+                if (target_unit or targeted_unit) is not None
+                else None,
+                ability=free,
+                battle_round=game.battle_round,
+                turn_seat=game.turn_seat,
+                phase=game.phase,
+            )
+        )
+    cost = 0 if free is not None else max(0, base - extra)
     if ability is not None and cost < base:
         game.ability_uses.append(
             GameAbilityUse(

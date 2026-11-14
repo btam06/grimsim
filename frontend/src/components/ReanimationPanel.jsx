@@ -12,6 +12,8 @@ function rollText(unit) {
   if (unit.returned) {
     parts.push(`${unit.returned} ${unit.returned === 1 ? 'model' : 'models'} returned`)
   }
+  // (No roll: another rule returned them - e.g. Sacred Healing.)
+  if (unit.roll === null) return parts.join(', ')
   return `rolled ${unit.roll}: ${parts.join(', ') || 'nothing to heal'}`
 }
 

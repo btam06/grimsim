@@ -125,6 +125,10 @@ def declare(game: Game, seat: int) -> None:
         formation = deployment.battle_formation(game, unit)
         if is_aircraft(unit) and (formation is None or formation.place != "reserves"):
             raise _bad_request(f"{unit.label} is an AIRCRAFT: it must start in Strategic Reserves")
+    # A unit split in two (e.g. by an Immolator): one half starts embarked.
+    from app.services.in_game import unit_splits
+
+    unit_splits.check_declared(game, seat)
     game.formations_done.append(GameFormationsDone(seat=seat))
 
 

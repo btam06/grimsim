@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getChargeTargets } from '../api'
+import { MiracleDiePicker } from './MiracleDice'
 
 // Charging in the charge phase (see app/services/in_game/charging.py, which
 // decides what a unit can reach and whether a charge is allowed). The player
@@ -37,6 +38,9 @@ function ChargePanel({
   onError,
 }) {
   const [targets, setTargets] = useState([])
+  // An Act of Faith for its charge roll: a Miracle dice's value, or null.
+  const [miracleDie, setMiracleDie] = useState(null)
+  useEffect(() => setMiracleDie(null), [draft.unitId])
   const selected = charge?.units.find((u) => u.unit_id === draft.unitId) ?? null
   const rolled = selected?.roll ?? null
   const canMove = selected && rolled !== null && !selected.charged && !selected.failed
@@ -99,8 +103,15 @@ function ChargePanel({
 
       {selected && rolled === null && (
         <div className="inline-controls">
-          <button type="button" onClick={() => onRoll(selected)}>
-            Roll charge (2D6)
+          <MiracleDiePicker
+            game={game}
+            unitId={selected.unit_id}
+            roll="charge"
+            value={miracleDie}
+            onChange={setMiracleDie}
+          />
+          <button type="button" onClick={() => onRoll(selected, false, miracleDie)}>
+            {miracleDie !== null ? `Roll charge (${miracleDie} + D6)` : 'Roll charge (2D6)'}
           </button>
         </div>
       )}

@@ -7,6 +7,7 @@ from app.combat_rules.effects import (
     ADD_EXTRA_ATTACK,
     ADD_EXTRA_HIT,
     ADD_FOUR_ATTACKS,
+    REROLL_ATTACKS,
     ADD_NINE_ATTACKS,
     ADD_SIX_ATTACKS,
     ADD_THREE_ATTACKS,
@@ -223,6 +224,12 @@ ENTRIES = [
         ADD_FOUR_ATTACKS,
         "Add Four Attacks",
         "Adds four additional attacks to this weapon, each with its own hit roll.",
+    ),
+    (
+        REROLL_ATTACKS,
+        "Re-roll Attacks",
+        "The weapon's roll for its Attacks characteristic is re-rolled if it came up below "
+        "its average (checked once per weapon).",
     ),
     (
         IMPROVE_AP,

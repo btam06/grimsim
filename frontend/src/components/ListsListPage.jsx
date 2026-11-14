@@ -1,3 +1,4 @@
+import { listPoints } from '../listPoints'
 import FactionFilter from './FactionFilter'
 import { DeleteButton, EditButton } from './IconButtons'
 
@@ -7,6 +8,8 @@ function ListsListPage({
   factionFilter,
   onFactionFilterChange,
   detachments,
+  units,
+  enhancements,
   error,
   onEdit,
   onAddNew,
@@ -34,7 +37,12 @@ function ListsListPage({
       <ul>
         {visibleLists.map((l) => (
           <li key={l.id}>
-            {l.name} — {l.points_limit}pts, {factionName(l.faction_id)}
+            {l.name} —{' '}
+            {listPoints(
+              units.filter((u) => u.list_id === l.id),
+              enhancements
+            )}
+            /{l.points_limit}pts, {factionName(l.faction_id)}
             {l.detachment_ids.length > 0 &&
               `, ${l.detachment_ids.map(detachmentName).join(', ')}`}
             <EditButton onClick={() => onEdit(l)} />

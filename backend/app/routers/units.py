@@ -19,6 +19,7 @@ from app.models import (
 from app.routers.enhancements import used_in_list
 from app.schemas import SelectableRuleOut, UnitIn, UnitModelIn, UnitModelOut, UnitOut
 from app.services.list_building import allies as list_building
+from app.services import unit_points
 from app.services.list_building import enhancements as enhancement_rules
 
 router = APIRouter(prefix="/units", tags=["units"])
@@ -282,6 +283,30 @@ async def _list_context(
     return context
 
 
+async def _price(
+    session: AsyncSession,
+    payload: UnitIn,
+    unit_models: list[UnitModel],
+    models: list[Model],
+    unit_id: int | None,
+) -> int:
+    # The unit's points: from its datasheet's costs (the Munitorum Field
+    # Manual's - see app/services/unit_points.py), else as given.
+    copy = await unit_points.copy_number(
+        session, payload.list_id, payload.faction_unit_id, unit_id
+    )
+    points = await unit_points.price_unit(
+        session, payload.faction_unit_id, copy, unit_models, models
+    )
+    if points is not None:
+        return points
+    if payload.points is None:
+        raise HTTPException(
+            status_code=400, detail="this datasheet has no points values: give its points"
+        )
+    return payload.points
+
+
 def _check_list_building(
     context: list_building.ListContext | None,
     faction_unit: FactionUnit,
@@ -358,14 +383,15 @@ async def create_unit(payload: UnitIn, session: AsyncSession = Depends(get_sessi
     context = await _list_context(session, payload.list_id, None)
 
     unit_models, models = await _build_unit_models(session, payload.unit_models)
-    _check_list_building(context, faction_unit, payload.points, models)
+    points = await _price(session, payload, unit_models, models, None)
+    _check_list_building(context, faction_unit, points, models)
     selected = await _check_rule_selections(session, payload, models, None)
     upgrade = await _apply_enhancements(
         session, payload, unit_models, models, None, context, selected
     )
     unit = Unit(
         faction_unit_id=payload.faction_unit_id,
-        points=payload.points,
+        points=points,
         list_id=payload.list_id,
         unit_models=unit_models,
         upgrade=upgrade,
@@ -399,19 +425,30 @@ async def update_unit(
     context = await _list_context(session, payload.list_id, unit_id)
 
     new_unit_models, models = await _build_unit_models(session, payload.unit_models)
-    _check_list_building(context, faction_unit, payload.points, models)
+    points = await _price(session, payload, new_unit_models, models, unit_id)
+    _check_list_building(context, faction_unit, points, models)
     selected = await _check_rule_selections(session, payload, models, unit_id)
     upgrade = await _apply_enhancements(
         session, payload, new_unit_models, models, unit_id, context, selected
     )
 
+    before = (unit.list_id, unit.faction_unit_id)
     unit.faction_unit_id = payload.faction_unit_id
-    unit.points = payload.points
+    unit.points = points
     unit.list_id = payload.list_id
     unit.unit_models = new_unit_models
     unit.upgrade = upgrade
     unit.selected_rule_ids = selected
 
+    await session.flush()
+    # (Moved to another list or datasheet: the units of its old one there may
+    # now be earlier copies, and of its new one later ones - at a different
+    # requisition threshold.)
+    after = (unit.list_id, unit.faction_unit_id)
+    if before != after:
+        for list_id, faction_unit_id in (before, after):
+            if list_id is not None:
+                await unit_points.reprice(session, list_id, faction_unit_id)
     await session.commit()
 
     result = await session.execute(
@@ -436,5 +473,11 @@ async def delete_unit(unit_id: int, session: AsyncSession = Depends(get_session)
 
     # No longer any list's Warlord.
     await session.execute(delete(ListWarlord).where(ListWarlord.unit_id == unit_id))
+    group = (unit.list_id, unit.faction_unit_id)
     await session.delete(unit)
+    await session.flush()
+    # (Later units of its datasheet in its list move up a copy - maybe below
+    # a requisition threshold.)
+    if group[0] is not None:
+        await unit_points.reprice(session, *group)
     await session.commit()

@@ -15,6 +15,7 @@ CRITICAL_HIT = "critical_hit"
 CRITICAL_WOUND = "critical_wound"
 ALWAYS = "always"
 ANTI_INFANTRY_2 = "anti_infantry_2"
+ANTI_PSYKER_2 = "anti_psyker_2"
 ANTI_INFANTRY_3 = "anti_infantry_3"
 ANTI_INFANTRY_4 = "anti_infantry_4"
 ANTI_VEHICLE_2 = "anti_vehicle_2"
@@ -113,6 +114,16 @@ def anti_infantry_2(context: dict) -> bool:
         context.get("step") == "wound"
         and context.get("roll", 0) >= 2
         and "INFANTRY" in context.get("defender_keywords", set())
+    )
+
+
+def anti_psyker_2(context: dict) -> bool:
+    # As anti_infantry_2, against a unit that contains a PSYKER model (e.g.
+    # for "Anti-Psyker 2+").
+    return (
+        context.get("step") == "wound"
+        and context.get("roll", 0) >= 2
+        and "PSYKER" in context.get("defender_keywords", set())
     )
 
 
@@ -508,6 +519,7 @@ CORE_CONDITIONS = {
     CRITICAL_WOUND: critical_wound,
     ALWAYS: always,
     ANTI_INFANTRY_2: anti_infantry_2,
+    ANTI_PSYKER_2: anti_psyker_2,
     ANTI_INFANTRY_3: anti_infantry_3,
     ANTI_INFANTRY_4: anti_infantry_4,
     ANTI_VEHICLE_2: anti_vehicle_2,

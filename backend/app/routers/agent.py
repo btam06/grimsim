@@ -15,9 +15,18 @@ from app.engine import context
 from app.engine import store as game_store
 from app.engine.state import Game
 from app.models.stratagem import UNIT_TARGET_ACTIONS
+from app.routers import agent_sororitas as sororitas
 from app.routers import games as g
 from app.schemas import (
+    AttackDecisionIn,
+    FormationSplitIn,
+    ScentingFearIn,
     ActionIn,
+    CondemnIn,
+    HagiomnifexIn,
+    MiracleDiceIn,
+    MiracleOfferIn,
+    SacredHealingIn,
     ResurrectionIn,
     FormationGrantIn,
     PhaseStartIn,
@@ -41,6 +50,7 @@ from app.schemas import (
     TeleportHomerIn,
     UnitAbilityTargetIn,
     UnitIdIn,
+    UnitRollIn,
     UnitMoveIn,
     UnitPlacementIn,
 )
@@ -57,6 +67,7 @@ from app.services.in_game import (
     reinforcements,
     scouts,
 )
+from app.services.in_game import attack_decisions, unit_splits
 from app.services.in_game import shooting as shooting_service
 from app.services.in_game import emergency as emergency_service
 from app.services.in_game import phase_end as phase_end_service
@@ -513,6 +524,9 @@ def _objective_to_move_to(game: Game, unit, seat: int, control: list) -> list:
 # Waiting on a player's abilities for the start of the phase (see
 # app/services/in_game/phase_start.py window_seat).
 START_OF_PHASE = "abilities for the start of the phase"
+# An attack's waiting on a player's decision as it's made (e.g. the
+# defender's Act of Faith for a save - see attack_decisions.py).
+ATTACK_DECISION = "a decision as an attack's made"
 # And on their declarations for the end of the phase (see
 # app/services/in_game/phase_end.py).
 END_OF_PHASE = "declarations for the end of the phase"
@@ -527,6 +541,9 @@ async def _waiting_for(session: AsyncSession, game: Game) -> dict:
         return {"seat": game.attacker_seat, "reason": "the game hasn't started"}
     if game.status == "finished":
         return {"seat": None, "reason": "the game is over"}
+    if game.pending_attack is not None:
+        # (An attack's waiting on the defender - see attack_decisions.py.)
+        return {"seat": game.pending_attack.decision["seat"], "reason": ATTACK_DECISION}
     step = g.deployment_service.deployment_step(game)
     if game.status == "deployment":
         if step == "formations":
@@ -621,6 +638,13 @@ async def _legal_actions(session: AsyncSession, game: Game, waiting: dict) -> li
         add(Action("start_game", waiting["seat"], "Start the game"))
         return found
     if game.status == "finished":
+        return found
+    if (pending := game.pending_attack) is not None:
+        # Only its decision: one action for each option.
+        decision = pending.decision
+        for option in decision["options"]:
+            add(Action("attack_decision", decision["seat"],
+                       f"{decision['prompt']} {option['label']}", {"choice": option["id"]}))
         return found
 
     # --- before the battle ---
@@ -740,6 +764,10 @@ async def _legal_actions(session: AsyncSession, game: Game, waiting: dict) -> li
     for test in battle_shock.pending:
         add(Action("battle_shock", test.seat, f"Take {test.unit_name}'s Battle-shock test",
                    {"test_id": test.id, "insane_bravery": False}))
+        if pool := sororitas.act_of_faith_pool(game, units[test.unit_id]):
+            add(Action("battle_shock", test.seat,
+                       f"Take {test.unit_name}'s Battle-shock test: Miracle dice {max(pool)}",
+                       {"test_id": test.id, "insane_bravery": False, "miracle_die": max(pool)}))
         if battle_shock.insane_bravery.get(test.seat) is None:
             add(Action("battle_shock", test.seat,
                        f"Insane Bravery for {test.unit_name}'s Battle-shock test",
@@ -788,6 +816,19 @@ async def _legal_actions(session: AsyncSession, game: Game, waiting: dict) -> li
                     continue
                 # (Likewise once chosen.)
                 if rule.chosen is not None:
+                    continue
+                if rule.choice_rule is not None:
+                    # A detachment rule's extra choice (e.g. Paragons of
+                    # Terror): once the army rule's is made - or not at all.
+                    own = next((r for r in player.rules if r.choice_rule is None
+                                and r.faction_ability_id == rule.faction_ability_id), None)
+                    if own is None or own.chosen is None:
+                        continue
+                    for option in rule.options:
+                        add(Action("round_start_choice", player.seat, f"{rule.name}: {option}",
+                                   {"seat": player.seat,
+                                    "faction_ability_id": rule.faction_ability_id,
+                                    "option": option, "rule": rule.choice_rule}))
                     continue
                 for option in rule.options + ([] if rule.required else [None]):
                     add(Action("round_start_choice", player.seat, f"{rule.name}: {option or 'none'}",
@@ -883,6 +924,16 @@ async def _legal_actions(session: AsyncSession, game: Game, waiting: dict) -> li
                 add(Action("discard_secondary", player.seat, f"Discard {card.mission.name}",
                            {"card_id": card.id}))
 
+    # Adepta Sororitas: Miracle dice rules, Condemnatory Psalms, Judged for
+    # Execution, Hagiomnifex (see agent_sororitas.py).
+    for action in sororitas.actions(game, units):
+        add(Action(action.type, action.seat, action.label, action.params))
+    # Scenting Fear (Hunting Warpack): each enemy unit it could select.
+    scenting = g._scenting_fear_out(game)
+    for target in scenting.targets:
+        add(Action("scenting_fear", scenting.seat, f"Scenting Fear: {target.name}",
+                   {"seat": scenting.seat, "target_unit_id": target.unit_id}))
+
     # Stratagems either player can use now.
     for seat in (1, 2):
         await _stratagem_actions(session, game, add, seat)
@@ -927,7 +978,20 @@ async def _formation_actions(game: Game, add, units) -> None:
                            f"{grant.ability}: {grant.grants} for {target.name}",
                            {"seat": seat, "source_unit_id": grant.source_unit_id,
                             "ability": grant.ability, "unit_id": target.unit_id}))
-        if all(
+        # Transports that split a unit (e.g. an Immolator): each unit it could
+        # (once - not undone, or a policy could flip forever).
+        for sp in player.splits:
+            for target in sp.candidates:
+                add(Action("split_unit", seat, f"{sp.transport_name} splits {target.name}",
+                           {"seat": seat, "transport_unit_id": sp.transport_unit_id,
+                            "unit_id": target.unit_id}))
+        try:
+            # (One half of each unit split starts embarked in its transport.)
+            unit_splits.check_declared(game, seat)
+            halves_ok = True
+        except HTTPException:
+            halves_ok = False
+        if halves_ok and all(
             not is_aircraft(units[fu.unit_id]) or fu.place == "reserves" for fu in player.units
         ):
             add(Action("declare_formations", seat, "Declare battle formations", {"seat": seat}))
@@ -949,6 +1013,11 @@ async def _movement_actions(session, game: Game, add, units, turn) -> None:
             if "advance" in mu.allowed_kinds and mu.advance_roll is None:
                 add(Action("roll_advance", turn, f"Roll to Advance with {mu.name}",
                            {"unit_id": mu.unit_id}))
+                # (An Act of Faith: its highest Miracle dice.)
+                if pool := sororitas.act_of_faith_pool(game, unit):
+                    add(Action("roll_advance", turn,
+                               f"Advance with {mu.name}: Miracle dice {max(pool)}",
+                               {"unit_id": mu.unit_id, "miracle_die": max(pool)}))
             if mu.can_reroll_advance:
                 add(Action("reroll_advance", turn, f"Re-roll {mu.name}'s Advance roll",
                            {"unit_id": mu.unit_id}))
@@ -1124,11 +1193,16 @@ async def _shooting_actions(session, game: Game, add, units, turn) -> None:
                     continue
                 choices = _weapon_choices(game, units[su.unit_id], target.weapons)
                 for weapons in choices:
-                    add(Action("shoot", turn,
-                               f"{su.name} shoots {target.name}"
-                               + _with(weapons, target.weapons, choices),
-                               {"unit_id": su.unit_id, "target_unit_id": target.unit_id,
-                                **weapons}))
+                    params = {"unit_id": su.unit_id, "target_unit_id": target.unit_id,
+                              **weapons}
+                    label = f"{su.name} shoots {target.name}" + _with(
+                        weapons, target.weapons, choices
+                    )
+                    add(Action("shoot", turn, label, params))
+                    # (Adepta Sororitas: with an Act of Faith, or discarding
+                    # Miracle dice for its abilities.)
+                    for extra, note in sororitas.attack_variants(game, units[su.unit_id]):
+                        add(Action("shoot", turn, f"{label} ({note})", {**params, **extra}))
         if su.shoot_scoot and su.shoot_scoot_reach:
             unit = units[su.unit_id]
             add(Action("shoot_scoot", turn, f"{su.shoot_scoot}: move {su.name}",
@@ -1160,6 +1234,10 @@ async def _charge_actions(session, game: Game, add, units) -> None:
             if cu.reason is None:
                 add(Action("roll_charge", seat, f"Declare a charge with {cu.name}",
                            {"unit_id": cu.unit_id}))
+                if pool := sororitas.act_of_faith_pool(game, units[cu.unit_id]):
+                    add(Action("roll_charge", seat,
+                               f"Declare a charge with {cu.name}: Miracle dice {max(pool)}",
+                               {"unit_id": cu.unit_id, "miracle_die": max(pool)}))
             continue
         if cu.can_reroll:
             add(Action("reroll_charge", seat, f"Re-roll {cu.name}'s charge", {"unit_id": cu.unit_id}))
@@ -1213,6 +1291,9 @@ async def _fight_actions(session, game: Game, add, units) -> None:
                           "weapon_ids": [w.id for w in picked if not w.enhancement],
                           "enhancement_weapon_ids": [w.id for w in picked if w.enhancement]}
                 add(Action("fight", fu.seat, f"{fu.name} fights {target.name}", params))
+                for extra, note in sororitas.attack_variants(game, unit, fighting=True):
+                    add(Action("fight", fu.seat, f"{fu.name} fights {target.name} ({note})",
+                               {**params, **extra}))
                 # The same, using its abilities for fighting (e.g. Banner of
                 # Macragge).
                 for ability in fu.abilities:
@@ -1276,6 +1357,10 @@ def _pos(params: dict) -> list[ModelPositionIn]:
 async def _apply(session: AsyncSession, gid: int, a: AgentActionIn):
     p, seat = a.params, a.seat
     t = a.type
+    if t == "attack_decision":
+        return await g.decide_attack(gid, AttackDecisionIn(seat=seat, choice=p["choice"]), session)
+    if (reason := attack_decisions.waiting_reason(game_store.get(gid).game)) is not None:
+        raise HTTPException(status_code=409, detail=reason)
     if t == "start_game":
         return await g.start_game(gid, session)
     if t == "advance":
@@ -1317,7 +1402,11 @@ async def _apply(session: AsyncSession, gid: int, a: AgentActionIn):
         return await g.emergency_disembark(gid, DeployUnitIn(unit_id=p["unit_id"], positions=_pos(p)), session)
     if t == "battle_shock":
         return await g.take_battle_shock_test(
-            gid, p["test_id"], BattleShockTakeIn(insane_bravery=p.get("insane_bravery", False)), session
+            gid, p["test_id"],
+            BattleShockTakeIn(
+                insane_bravery=p.get("insane_bravery", False), miracle_die=p.get("miracle_die")
+            ),
+            session,
         )
     if t == "mission_prompt":
         return await g.answer_mission_prompt(gid, p["prompt_id"], MissionAnswerIn(ids=p.get("ids", [])), session)
@@ -1338,7 +1427,9 @@ async def _apply(session: AsyncSession, gid: int, a: AgentActionIn):
     if t == "repair":
         return await g.repair(gid, RepairIn(**p), session)
     if t == "roll_advance":
-        return await g.roll_advance(gid, UnitIdIn(unit_id=p["unit_id"]), session)
+        return await g.roll_advance(
+            gid, UnitRollIn(unit_id=p["unit_id"], miracle_die=p.get("miracle_die")), session
+        )
     if t == "move":
         return await g.move_unit(gid, UnitMoveIn(
             unit_id=p["unit_id"], kind=p["kind"], positions=_pos(p),
@@ -1362,6 +1453,34 @@ async def _apply(session: AsyncSession, gid: int, a: AgentActionIn):
         return await g.fire_overwatch(gid, ShootIn(**p), session)
     if t == "shoot":
         return await g.shoot(gid, ShootIn(**p), session)
+    if t == "miracle_manual":
+        return await g.use_manual(gid, MiracleDiceIn(seat=seat, values=p["values"]), session)
+    if t == "miracle_chaplet":
+        return await g.use_chaplet(gid, MiracleDiceIn(seat=seat, values=p["values"]), session)
+    if t == "miracle_psalm":
+        return await g.resolve_psalm(
+            gid, MiracleOfferIn(seat=seat, offer_id=p["offer_id"], value=p.get("value")), session
+        )
+    if t == "sacred_healing":
+        return await g.sacred_healing(
+            gid, SacredHealingIn(unit_id=p["unit_id"], discard=p.get("discard")), session
+        )
+    if t == "split_unit":
+        return await g.split_unit(gid, FormationSplitIn(**p), session)
+    if t == "scenting_fear":
+        return await g.use_scenting_fear(gid, ScentingFearIn(**p), session)
+    if t == "condemn":
+        return await g.condemn(
+            gid, CondemnIn(unit_id=p["unit_id"], target_unit_id=p["target_unit_id"]), session
+        )
+    if t == "judge":
+        return await g.judge_for_execution(
+            gid, CondemnIn(unit_id=p["unit_id"], target_unit_id=p["target_unit_id"]), session
+        )
+    if t == "hagiomnifex":
+        return await g.use_hagiomnifex(
+            gid, HagiomnifexIn(unit_id=p["unit_id"], ability=p["ability"]), session
+        )
     if t == "shoot_scoot":
         return await g.shoot_scoot(gid, UnitPlacementIn(unit_id=p["unit_id"], positions=_pos(p)), session)
     if t == "start_action":
@@ -1371,7 +1490,9 @@ async def _apply(session: AsyncSession, gid: int, a: AgentActionIn):
     if t == "psychic":
         return await g.use_psychic(gid, PsychicIn(**p), session)
     if t == "roll_charge":
-        return await g.roll_charge(gid, UnitIdIn(unit_id=p["unit_id"]), session)
+        return await g.roll_charge(
+            gid, UnitRollIn(unit_id=p["unit_id"], miracle_die=p.get("miracle_die")), session
+        )
     if t == "reroll_advance":
         return await g.reroll_advance(gid, UnitIdIn(unit_id=p["unit_id"]), session)
     if t == "reroll_charge":
@@ -1423,6 +1544,11 @@ def _summary(result) -> str | None:
         return f"{len(data)} entries"
     if not isinstance(data, dict):
         return str(data)[:200]
+    if data.get("kind") in ("shoot", "overwatch", "fight"):
+        # (An attack decision: the attack, made with it.)
+        data = data.get("shot") or data.get("fight") or {}
+    if isinstance(data.get("pending"), dict):
+        return f"waiting on seat {data['pending']['seat']}: {data['pending']['prompt']}"
     combat = data.get("combat")
     if isinstance(combat, dict):
         return (
@@ -1439,7 +1565,7 @@ def _summary(result) -> str | None:
 
 async def _decision(session: AsyncSession, game_id: int) -> dict:
     started = time.perf_counter()
-    game = await g._load_game(session, game_id)
+    game = await g._load_game(session, game_id, pending_ok=True)
     rolls = game.rng_rolls
     waiting = await _waiting_for(session, game)
     actions = await _legal_actions(session, game, waiting)
@@ -1466,7 +1592,7 @@ async def get_decision(game_id: int, session: AsyncSession = Depends(get_session
 
 
 async def _do(session: AsyncSession, game_id: int, action: AgentActionIn, listed_keys: set[str]):
-    game = await g._load_game(session, game_id)
+    game = await g._load_game(session, game_id, pending_ok=True)
     live = game_store.get(game_id)
     state = _state(game)
     listed = _key(action.type, action.seat, action.params) in listed_keys

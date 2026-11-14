@@ -48,6 +48,7 @@ def record_destruction(
     unit_model: UnitModel,
     destroyed_by: Unit | None = None,
     controlled_objectives: list[int] = (),
+    position=None,
 ) -> None:
     # The model has just been destroyed (and taken off the battlefield) - the
     # last of its unit, within range of `controlled_objectives` its player
@@ -61,6 +62,9 @@ def record_destruction(
         unit_model_id=unit_model.id,
         destroyed_by_unit_id=destroyed_by.id if destroyed_by else None,
         unit_destroyed=unit_destroyed,
+        x=position.x if position is not None else None,
+        y=position.y if position is not None else None,
+        rotation=position.rotation if position is not None else 0,
     )
     game.models_destroyed.append(record)
     if unit_destroyed:
@@ -71,6 +75,11 @@ def record_destruction(
         from app.services.in_game import mission_state
 
         mission_state.unit_destroyed_by(game, destroyed_by)
+        # (e.g. Psalm of Righteous Judgement.)
+        from app.seeds.factions.adepta_sororitas import miracle_rules, unit_abilities
+
+        miracle_rules.unit_destroyed(game, unit, destroyed_by)
+        unit_abilities.unit_destroyed(game, unit, destroyed_by)
         # Whether the unit that destroyed it was within range of an objective.
         if destroyed_by is not None and deployment.is_deployed(
             destroyed_by, deployment.positions(game)

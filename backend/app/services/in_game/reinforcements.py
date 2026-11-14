@@ -416,6 +416,11 @@ def destroy_unarrived(game: Game) -> None:
                         destroyed=True,
                     )
                 )
+            # (Still a unit destroyed, for Acts of Faith's Miracle dice.)
+            from app.seeds.factions.adepta_sororitas import acts_of_faith
+
+            for unit_model in unit.unit_models:
+                acts_of_faith.model_destroyed(game, unit, unit_model)
 
 
 def aircraft_to_reserves(game: Game) -> None:

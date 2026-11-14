@@ -1,7 +1,12 @@
 import { useEffect, useState } from 'react'
-import { fight, getFightTargets, passFight } from '../api'
+import { fight, getFightTargets, getMiracleDice, passFight } from '../api'
 import AllocationOrder from './AllocationOrder'
 import CombatResults from './CombatResults'
+import {
+  ATTACK_ROLLS,
+  AttackMiraclePicker,
+  SelectionDiscards,
+} from './MiracleDice'
 import { onePerProfile, otherProfile } from '../weaponProfiles'
 
 // Fighting, once both players have piled in (see
@@ -190,6 +195,15 @@ function FightPanel({
   const [busy, setBusy] = useState(false)
   // Abilities it uses as it fights (e.g. Banner of Macragge).
   const [abilities, setAbilities] = useState([])
+  // Acts of Faith in the attack: the fighting unit's and its target's
+  // (MiracleIn, or null).
+  const [miracle, setMiracle] = useState(null)
+  // Miracle dice discarded as it's selected (e.g. Righteous Repugnance).
+  const [discards, setDiscards] = useState({})
+  // Righteous Rage: how many Miracle dice the unit can discard as it fights
+  // (0: it can't), the pool, and the dice picked (indexes into the pool).
+  const [rage, setRage] = useState({ max: 0, pool: [] })
+  const [rageDice, setRageDice] = useState([])
   const selected = fightState?.units.find((u) => u.unit_id === focus.unitId) ?? null
   const target = targets.find((t) => t.unit_id === focus.targetId) ?? null
   const weapons = weaponsByKey(targets)
@@ -200,8 +214,17 @@ function FightPanel({
     setSplits({})
     setOrders({})
     setAbilities([])
+    setRage({ max: 0, pool: [] })
+    setRageDice([])
     if (!selected?.can_fight) return
     let cancelled = false
+    getMiracleDice(game.id)
+      .then((players) => {
+        if (cancelled) return
+        const owner = players.find((p) => p.righteous_rage[selected.unit_id])
+        if (owner) setRage({ max: owner.righteous_rage[selected.unit_id], pool: owner.pool })
+      })
+      .catch((err) => onError(err.message))
     getFightTargets(game.id, selected.unit_id)
       .then((t) => !cancelled && setTargets(t))
       .catch((err) => onError(err.message))
@@ -219,6 +242,8 @@ function FightPanel({
       )
     )
     setSplits({})
+    setMiracle(null)
+    setDiscards({})
   }, [target])
 
   if (!fightState) return null
@@ -258,8 +283,12 @@ function FightPanel({
           Object.entries(orders).filter(([t]) => Number(t) !== target.unit_id)
         ),
         abilities,
+        miracle,
+        miracle_discards: discards,
+        righteous_rage: rageDice.map((i) => rage.pool[i]),
       })
-      setOutcome({ unit: selected.name, target: target.name, ...result })
+      // (Waiting on the defender's decision: see AttackDecisionPanel.)
+      setOutcome(result.pending ? null : { unit: selected.name, target: target.name, ...result })
       onFocus({ unitId: null, targetId: null })
       onFought()
     } catch (err) {
@@ -509,6 +538,53 @@ function FightPanel({
               onChange={(order) => setOrders((o) => ({ ...o, [t.unit_id]: order }))}
             />
           ))}
+          {rage.max > 0 && (
+            <div className="miracle-picker">
+              <span>
+                Righteous Rage{' '}
+                <span className="hint">
+                  (discard up to {rage.max} Miracle dice: +1 A and S to the bearer's melee weapons
+                  for each, until the end of the phase)
+                </span>
+              </span>
+              <div className="inline-controls">
+                {rage.pool.map((value, i) => {
+                  const on = rageDice.includes(i)
+                  return (
+                    <label key={i} className="radio-option">
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        disabled={!on && rageDice.length >= rage.max}
+                        onChange={() =>
+                          setRageDice((d) => (on ? d.filter((p) => p !== i) : [...d, i]))
+                        }
+                      />
+                      {value}
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+          <SelectionDiscards
+            game={game}
+            unitId={selected.unit_id}
+            value={discards}
+            onChange={setDiscards}
+            onError={onError}
+          />
+          <AttackMiraclePicker
+            game={game}
+            unitId={selected.unit_id}
+            who={selected.name}
+            rolls={ATTACK_ROLLS}
+            weapons={Object.values(weapons)
+              .map((e) => e.weapon)
+              .filter((w) => (weaponIds.has(key(w)) || w.extra_attacks) && !w.enhancement)}
+            value={miracle}
+            onChange={setMiracle}
+          />
           {(selected.abilities ?? []).map((name) => (
             <label key={name} className="radio-option">
               <input

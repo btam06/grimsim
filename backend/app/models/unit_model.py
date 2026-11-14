@@ -43,6 +43,28 @@ class UnitModel(Base):
         bonus = datasheet_abilities.WARGEAR_WOUNDS
         return self.model.wounds + sum(bonus.get(w.name, 0) for w in self.wargear)
 
+    def set_by_wargear(self, characteristic: str, value: int) -> int:
+        # A characteristic its wargear sets (see app/seeds/datasheet_abilities.py
+        # WARGEAR_CHARACTERISTICS - e.g. an Anchorite Sarcophagus: M7", Sv3+),
+        # or `value`. Needs its wargear loaded.
+        from app.seeds import datasheet_abilities
+
+        config = datasheet_abilities.WARGEAR_CHARACTERISTICS
+        for gear in self.wargear:
+            if characteristic in config.get(gear.name, {}):
+                return config[gear.name][characteristic]
+        return value
+
+    @property
+    def movement(self) -> int:
+        # Its Move characteristic: its model's, or what its wargear sets it to.
+        return self.set_by_wargear("movement", self.model.movement)
+
+    @property
+    def save(self) -> int:
+        # Its Save characteristic: its model's, or what its wargear sets it to.
+        return self.set_by_wargear("save", self.model.save)
+
     enhancement: Mapped["Enhancement | None"] = relationship(
         secondary=unit_model_enhancements, uselist=False, lazy="selectin"
     )

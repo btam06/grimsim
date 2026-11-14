@@ -40,6 +40,8 @@ SCORES = {
     "roll_reactive_move": 0.5, "reactive_move": 0.5,
     "achieve_secondary": 3.0, "discard_secondary": -0.5, "use_stratagem": -0.5,
     "pass_fight": 0.0, "skip_consolidation": 0.0,
+    # (Splitting a unit means embarking half of it, which it doesn't plan.)
+    "split_unit": -2.0,
 }
 
 
@@ -90,6 +92,15 @@ class _Player:
             return 0.5
         if kind == "round_start_choice" and params.get("option") is None:
             return -1.0
+        if kind == "attack_decision":
+            # Defending: an Act of Faith (the highest Miracle dice), Artisan,
+            # Necromechanic... rather than nothing.
+            choice = params["choice"]
+            if choice == "decline":
+                return 0.0
+            if choice.startswith("miracle:"):
+                return 1.0 + int(choice.split(":", 1)[1]) / 10
+            return 1.0
         return SCORES.get(kind, 0.0)
 
     # --- units ---

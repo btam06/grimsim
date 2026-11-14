@@ -909,3 +909,54 @@ async def test_deleting_a_selected_rule_clears_selections(client: AsyncClient, f
     assert (await client.delete(f"/detachment-rules/{alphas.rule}")).status_code == 204
     units = (await client.get("/units")).json()
     assert next(u for u in units if u["id"] == unit)["selected_rule_ids"] == []
+
+
+@pytest.mark.parametrize("selected,status", [(True, 200), (False, 400)])
+async def test_an_alpha_war_dog_can_be_the_warlord(
+    client: AsyncClient, faction_id: int, selected, status
+):
+    # Houndpack Alphas: the WAR DOG units selected for it are CHARACTERs - so
+    # one can be the Warlord.
+    detachment, list_id, model, _ = await _war_dog_list(
+        client, faction_id, "CHARACTER", with_rule=False
+    )
+    war_dog = await _id(client, "/keywords", "WAR DOG")
+    character = await _id(client, "/keywords", "CHARACTER")
+    rule = (
+        await client.post(
+            "/detachment-rules",
+            json={
+                "detachment_id": detachment,
+                "name": "Houndpack Alphas",
+                "keyword_option_ids": [[war_dog]],
+                "granted_keyword_ids": [character],
+                "selection_limit": 3,
+            },
+        )
+    ).json()["id"]
+    faction_unit = (
+        await client.post("/faction-units", json={"name": "Alpha", "faction_id": faction_id})
+    ).json()["id"]
+    response = await client.post(
+        "/units",
+        json={
+            "faction_unit_id": faction_unit,
+            "points": 160,
+            "list_id": list_id,
+            "unit_models": [{"model_id": model}],
+            "selected_rule_ids": [rule] if selected else [],
+        },
+    )
+    assert response.status_code == 201, response.text
+    alpha = response.json()["id"]
+    response = await client.put(
+        f"/lists/{list_id}",
+        json={
+            "name": "Hounds",
+            "points_limit": 2000,
+            "faction_id": faction_id,
+            "detachment_ids": [detachment],
+            "warlord_unit_id": alpha,
+        },
+    )
+    assert response.status_code == status, response.text

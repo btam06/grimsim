@@ -29,6 +29,14 @@ from app.seeds.factions.adeptus_mechanicus.conditions import (
     VENGEANCE,
     VENGEANCE_ACTIVE,
 )
+from app.seeds.factions.adepta_sororitas.conditions import (
+    ATTACKER_BELOW_HALF_STRENGTH,
+    ATTACKER_BELOW_STARTING_STRENGTH,
+    RANGED_TARGET_WITHIN_6,
+    RANGED_VS_SORORITAS_KILLER,
+    TARGET_KILLED_SORORITAS,
+    WITHIN_6_OF_TARGET,
+)
 from app.seeds.factions.chaos_knights.conditions import (
     MARKED_PREY_CRITICAL_HIT,
     MARKED_PREY_TARGET,
@@ -76,6 +84,10 @@ POSITIONS = {
     ),
     MARKED_PREY_TARGET: "Targeting the unit selected for Marked Prey",
     WITHIN_9_OF_TARGET: 'Target is within 9" of the attacking unit',
+    WITHIN_6_OF_TARGET: 'Target is within 6" of the attacking unit',
+    TARGET_KILLED_SORORITAS: (
+        "Target has destroyed one or more ADEPTA SORORITAS units from the attacking army"
+    ),
     CONTROLLING_OBJECTIVE: "Controlling an objective",
     VENGEANCE: (
         'A friendly ADEPTUS MECHANICUS VEHICLE model was destroyed within 12" '
@@ -103,9 +115,12 @@ POSITION_CONDITIONS = {
     IN_RANGE_OF_OBJECTIVE: {"attacker": set(), "defender": {DEFENDER_IN_RANGE_OF_OBJECTIVE}},
     REMAINED_STATIONARY: {"attacker": {STATIONARY_RANGED_CRITICAL_HIT}, "defender": set()},
     ISOLATED_TARGET: {"attacker": {TARGET_ISOLATED}, "defender": set()},
-    BELOW_STARTING_STRENGTH: {"attacker": set(), "defender": {DEFENDER_BELOW_STARTING_STRENGTH}},
+    BELOW_STARTING_STRENGTH: {
+        "attacker": {ATTACKER_BELOW_STARTING_STRENGTH},
+        "defender": {DEFENDER_BELOW_STARTING_STRENGTH},
+    },
     BELOW_HALF_STRENGTH: {
-        "attacker": set(),
+        "attacker": {ATTACKER_BELOW_STARTING_STRENGTH, ATTACKER_BELOW_HALF_STRENGTH},
         "defender": {DEFENDER_BELOW_STARTING_STRENGTH, DEFENDER_BELOW_HALF_STRENGTH},
     },
     SET_UP_THIS_TURN: {
@@ -131,6 +146,8 @@ POSITION_CONDITIONS = {
     },
     MARKED_PREY_TARGET: {"attacker": {MARKED_PREY_CRITICAL_HIT}, "defender": set()},
     WITHIN_9_OF_TARGET: {"attacker": {TARGET_WITHIN_9}, "defender": set()},
+    WITHIN_6_OF_TARGET: {"attacker": {RANGED_TARGET_WITHIN_6}, "defender": set()},
+    TARGET_KILLED_SORORITAS: {"attacker": {RANGED_VS_SORORITAS_KILLER}, "defender": set()},
     CONTROLLING_OBJECTIVE: {"attacker": set(), "defender": {DEFENDER_CONTROLLING_OBJECTIVE}},
     VENGEANCE: {"attacker": {VENGEANCE_ACTIVE}, "defender": set()},
     ON_ACQUISITION: {

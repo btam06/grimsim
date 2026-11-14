@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { deleteGame, listGames } from '../api'
+import { SHOW_ML_GAMES, getOption } from '../options'
 import ConfirmDialog from './ConfirmDialog'
 import GameView from './GameView'
 import { DeleteButton } from './IconButtons'
@@ -19,6 +20,9 @@ function GamesPanel() {
   const [error, setError] = useState(null)
   // The game waiting on delete confirmation, if any.
   const [pendingDelete, setPendingDelete] = useState(null)
+  // Games made for machine learning (e.g. scripts/spread_games.py): hidden
+  // unless Debug > Options says to show them.
+  const [showMl] = useState(() => getOption(SHOW_ML_GAMES, false))
 
   const refresh = () => listGames().then(setGames).catch((err) => setError(err.message))
 
@@ -58,6 +62,8 @@ function GamesPanel() {
     }
   }
 
+  const shown = showMl ? games : games.filter((g) => !g.ml)
+
   const matchup = (game) => game.players.map((p) => p.user_name).join(' vs ')
 
   return (
@@ -77,8 +83,13 @@ function GamesPanel() {
         + New Game
       </button>
       <ul>
-        {games.map((g) => (
+        {shown.map((g) => (
           <li key={g.id}>
+            {g.ml && (
+              <span className="round-start-decision" title="Made for machine learning">
+                ML
+              </span>
+            )}{' '}
             {g.players.map((p) => `${p.user_name} (${p.list_name}) ${p.vp} VP`).join(' vs ')} —{' '}
             {statusLabel(g)}
             <button

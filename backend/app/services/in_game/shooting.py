@@ -37,8 +37,12 @@ from app.services.list_building.enhancements import granted_weapons
 #   obstacle in them are obscuring (13.10): solid too - unless one of the two
 #   models is within that area. Obstacles (orange) are light and can be shot
 #   through, and models don't block sight. A hidden model (13.09) - INFANTRY,
-#   BEASTS or SWARM within a terrain area with a ruin wall, whose unit hasn't
-#   made ranged attacks this turn or last - is only visible within 15".
+#   BEASTS or SWARM within a terrain area with a light or dense terrain
+#   feature in it (an obstacle or a ruin wall), whose unit hasn't made ranged
+#   attacks this turn or last - is only visible to enemy models within its
+#   detection range: 15", unless a rule says otherwise (see detection_range).
+#   (Light or dense as an FAQ has it, the user says - the June 2026 Core
+#   Rules PDF says dense only.)
 # - Which weapons each model can fire: those with a visible target model
 #   within range (base to base) - at half range if one is within half.
 # - Targets must be unengaged (04.02), but for an engaged MONSTER/VEHICLE
@@ -402,13 +406,12 @@ def obscuring_areas(game: Game, bases: list[Base]) -> list[list[Point]]:
 @dataclass
 class _Terrain:
     # A layout's terrain, for sight: its ruin walls' parts, its terrain areas
-    # (each with whether it's obscuring - has a ruin wall or obstacle in it -
-    # and whether it has a ruin wall, for Hidden), and the gaps between
+    # (each with whether it's obscuring - has a ruin wall or obstacle in it,
+    # which is also what makes a model in it hidden), and the gaps between
     # neighbouring areas (see _bridges).
     dense: list[list[Point]]
     areas: list[list[Point]]
     obscuring: list[bool]
-    has_dense: list[bool]
     bridges: list[tuple[int, int, list[Point]]]
     # Whether one base sees another, as worked out (see Sight.sees).
     seen: dict = field(default_factory=dict)
@@ -423,7 +426,7 @@ def terrain(game: Game) -> _Terrain:
     # app/engine/context.py cache).
     layout = game.layout
     if layout is None:
-        return _Terrain([], [], [], [], [])
+        return _Terrain([], [], [], [])
     cache = context.cache("terrain")
     if cache is None:
         return _layout_terrain(layout)
@@ -450,7 +453,6 @@ def _layout_terrain(layout) -> _Terrain:
         dense=[polygon for kind, polygon in features if kind == DENSE],
         areas=areas,
         obscuring=[has(a, {DENSE, "obstacle"}) for a in areas],
-        has_dense=[has(a, {DENSE}) for a in areas],
         bridges=_bridges(areas),
     )
 
@@ -496,22 +498,39 @@ class Sight:
             for p in _sight_points(b)
         )
 
-    def in_area(self, base: Base, dense_only: bool = False) -> bool:
-        # Whether the base is within a terrain area (one with a ruin wall).
+    def in_area(self, base: Base, featured_only: bool = False) -> bool:
+        # Whether the base is within a terrain area (`featured_only`: one with
+        # a light or dense terrain feature in it).
         return any(
             within(base, area)
-            for area, dense in zip(self.terrain.areas, self.terrain.has_dense)
-            if dense or not dense_only
+            for area, featured in zip(self.terrain.areas, self.terrain.obscuring)
+            if featured or not featured_only
         )
 
 
 DETECTION_RANGE = 15.0
 
 
+def detection_range(game: Game, unit: Unit, viewer: Unit | None = None) -> float:
+    # The detection range of the unit's models (13.09) - to `viewer`'s models,
+    # if it's shooting: 15", unless a rule says otherwise - e.g. +3" while it's
+    # condemned (Condemnatory Psalms), +6" to a unit shooting with Rite of
+    # Revelation (Hagiomnifex), +6" while it's selected with Scenting Fear.
+    from app.seeds.factions.adepta_sororitas import condemnation, hagiomnifex
+    from app.seeds.factions.chaos_knights import scenting_fear
+
+    return (
+        DETECTION_RANGE
+        + condemnation.detection_bonus(game, unit)
+        + hagiomnifex.detection_bonus(game, viewer)
+        + scenting_fear.detection_bonus(game, unit)
+    )
+
+
 def hidden_models(game: Game, unit: Unit, sight: Sight) -> set[int]:
     # The unit's hidden models (13.09): INFANTRY/BEASTS/SWARM models within a
-    # terrain area with a ruin wall in it, if the unit hasn't made ranged
-    # attacks this turn or the previous one.
+    # terrain area with a light or dense terrain feature in it, if the unit
+    # hasn't made ranged attacks this turn or the previous one.
     if _shot_recently(game, unit):
         return set()
     bases = _bases(game, unit)
@@ -520,7 +539,7 @@ def hidden_models(game: Game, unit: Unit, sight: Sight) -> set[int]:
         for m in unit.unit_models
         if m.id in bases
         and enhancements.model_keywords(unit, m) & COVER_KEYWORDS
-        and sight.in_area(bases[m.id], dense_only=True)
+        and sight.in_area(bases[m.id], featured_only=True)
     }
 
 
@@ -847,15 +866,17 @@ def reach(game: Game, unit: Unit, target: Unit, assault: set | None = None) -> T
     targets = list(target_bases.values())
     sight = Sight(game)
     hidden = hidden_models(game, target, sight)
+    detection = detection_range(game, target, unit)
     engaged = _Engaged(game, unit, target)
 
     def sees(base: Base) -> list[Base]:
-        # The target models the base can see: hidden ones only within 15".
+        # The target models the base can see: hidden ones only within their
+        # detection range.
         return [
             t
             for i, t in target_bases.items()
             if sight.sees(base, t)
-            and (i not in hidden or gap(base, t) <= DETECTION_RANGE + TOLERANCE)
+            and (i not in hidden or gap(base, t) <= detection + TOLERANCE)
         ]
     reaches: dict[object, WeaponReach] = {}
     firing: dict[int, dict] = {}

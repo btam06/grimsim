@@ -103,6 +103,9 @@ class Engine:
     def restore(self, snapshot: state.Game) -> None:
         # The game as it was at `snapshot` (which is kept: restore it again).
         self.live.game = copy.deepcopy(snapshot)
+        from app.services.in_game import unit_splits
+
+        unit_splits.sync(self.live.game, self.live.catalog)
 
     def save(self) -> Path | None:
         # Saved now, if it's at the start of a phase (see app/engine/saves.py).

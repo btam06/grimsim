@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   deleteList,
+  listDetachmentRules,
   listDetachments,
   listEligible,
   listEnhancements,
@@ -30,6 +31,7 @@ function ListsPanel() {
   const [weapons, setWeapons] = useState([])
   const [wargear, setWargear] = useState([])
   const [enhancements, setEnhancements] = useState([])
+  const [detachmentRules, setDetachmentRules] = useState([])
   const [factionUnits, setFactionUnits] = useState([])
   const [keywords, setKeywords] = useState([])
   const [users, setUsers] = useState([])
@@ -54,6 +56,9 @@ function ListsPanel() {
     listWeapons().then(setWeapons).catch((err) => setError(err.message))
     listWargear().then(setWargear).catch((err) => setError(err.message))
     listEnhancements().then(setEnhancements).catch((err) => setError(err.message))
+    listDetachmentRules()
+      .then(setDetachmentRules)
+      .catch((err) => setError(err.message))
     listFactionUnits().then(setFactionUnits).catch((err) => setError(err.message))
     listKeywords().then(setKeywords).catch((err) => setError(err.message))
     listUsers().then(setUsers).catch((err) => setError(err.message))
@@ -78,6 +83,7 @@ function ListsPanel() {
     setView('list')
     setEditingList(null)
     refreshLists()
+    refreshUnits()
     refreshUnits()
   }
 
@@ -129,6 +135,7 @@ function ListsPanel() {
         wargear={wargear}
         factionUnits={factionUnits}
         enhancements={enhancements}
+        detachmentRules={detachmentRules}
         onSaved={goToList}
         onCancel={goToList}
         onUnitsChanged={refreshUnits}
@@ -162,6 +169,8 @@ function ListsPanel() {
         factionFilter={factionFilter}
         onFactionFilterChange={setFactionFilter}
         detachments={detachments}
+        units={units}
+        enhancements={enhancements}
         error={error}
         onEdit={(list) => {
           setEditingList(list)

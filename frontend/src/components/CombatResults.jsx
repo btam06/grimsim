@@ -68,6 +68,12 @@ function CombatResults({ result, showFnp = false }) {
 
       <h3>Overall</h3>
       <ul>
+        {(result.acts_of_faith ?? []).map((text) => (
+          <li key={text}>Act of Faith: {text}</li>
+        ))}
+        {(result.choices ?? []).map((text, i) => (
+          <li key={`choice-${i}`}>{text}</li>
+        ))}
         <li>Total damage dealt: {result.total_damage}</li>
         <li>Defending models destroyed: {result.models_destroyed}</li>
         <li>Defending models remaining: {result.defending_models_remaining}</li>

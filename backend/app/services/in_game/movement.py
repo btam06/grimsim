@@ -193,12 +193,12 @@ def allowance(
     # 2" less if it takes to the skies (but for Hover).
     extra = move.advance_roll if kind == "advance" and move and move.advance_roll else 0
     skies = 2 if take_to_skies and not _hovers(model) else 0
-    return float(max(0, model.model.movement + change) + extra - skies)
+    return float(max(0, model.movement + change) + extra - skies)
 
 
 def move_characteristic(game: Game, unit: Unit, model: UnitModel) -> int:
     # The model's Move characteristic now - its effects' changes included.
-    return max(0, model.model.movement + unit_effects.move_change(game, unit))
+    return max(0, model.movement + unit_effects.move_change(game, unit))
 
 
 FLY = "FLY"
@@ -286,25 +286,40 @@ def roll_bonus(game: Game, unit: Unit, roll: str) -> int:
     return best + unit_effects.roll_change(game, unit, roll)
 
 
-def roll_advance(game: Game, unit: Unit) -> GameUnitMove:
+def roll_advance(game: Game, unit: Unit, miracle_die: int | None = None) -> GameUnitMove:
     # Rolls the unit's Advance D6, before it moves - once a phase: if it's
     # already rolled, that roll stands. (What its abilities add is added to
-    # it then - see roll_bonus.)
+    # it then - see roll_bonus.) `miracle_die`: an Act of Faith - that
+    # Miracle dice instead of the D6.
+    from app.seeds.factions.adepta_sororitas import acts_of_faith
+
     _check_unit(game, unit)
     if "advance" not in allowed_kinds(game, unit):
         raise _bad_request("that unit can't Advance")
-    if (move := unit_move(game, unit)) is not None:
-        # Already moved (normally) this phase: roll now; already rolled: that
-        # roll stands.
-        if move.advance_roll is None:
-            move.advance_roll = max(0, dice.randint(1, 6) + roll_bonus(game, unit, "advance"))
+    move = unit_move(game, unit)
+    if move is not None and move.advance_roll is not None:
+        # Already rolled: that roll stands.
+        if miracle_die is not None:
+            raise _bad_request("that unit has already rolled its Advance roll")
+        return move
+
+    def roll() -> int:
+        if miracle_die is not None:
+            die = acts_of_faith.perform(game, unit, acts_of_faith.ADVANCE, miracle_die)
+        else:
+            die = dice.randint(1, 6)
+        return max(0, die + roll_bonus(game, unit, "advance"))
+
+    if move is not None:
+        # Already moved (normally) this phase: roll now.
+        move.advance_roll = roll()
         return move
     move = GameUnitMove(
         unit_id=unit.id,
         battle_round=game.battle_round,
         turn_seat=game.turn_seat,
         kind="advance",
-        advance_roll=max(0, dice.randint(1, 6) + roll_bonus(game, unit, "advance")),
+        advance_roll=roll(),
         completed=False,
     )
     game.unit_moves.append(move)
@@ -324,6 +339,7 @@ def can_reroll_advance(game: Game, unit: Unit) -> bool:
         and move.advance_roll is not None
         and not (move.completed and move.kind == "advance")
         and bool(names & datasheet_abilities.ADVANCE_REROLLS)
+        and not miracle_rolled(game, unit, "advance")
         and not any(
             m.unit_id == unit.id
             and m.battle_round == game.battle_round
@@ -331,6 +347,14 @@ def can_reroll_advance(game: Game, unit: Unit) -> bool:
             for m in mission_state.marked(game, ADVANCE_REROLLED)
         )
     )
+
+
+def miracle_rolled(game: Game, unit: Unit, roll: str) -> bool:
+    # Whether a Miracle dice substituted the unit's `roll` this phase (an
+    # Act of Faith): it can't be re-rolled.
+    from app.seeds.factions.adepta_sororitas import acts_of_faith
+
+    return acts_of_faith.substituted(game, unit, roll)
 
 
 def reroll_advance(game: Game, unit: Unit) -> GameUnitMove:

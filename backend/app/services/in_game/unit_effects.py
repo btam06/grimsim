@@ -39,6 +39,8 @@ def apply(
     ranged_ap: int = 0,
     by_keyword: str | None = None,
     melee_skill: int = 0,
+    no_cover: bool = False,
+    phase: str | None = None,
 ) -> GameUnitEffect:
     for old in [e for e in game.unit_effects if e.unit_id == unit.id and e.source == source]:
         game.unit_effects.remove(old)
@@ -52,6 +54,8 @@ def apply(
         ranged_ap=ranged_ap,
         by_keyword=by_keyword,
         melee_skill=melee_skill,
+        no_cover=no_cover,
+        phase=phase,
         battle_round=game.battle_round,
         turn_seat=game.turn_seat,
         until_turn=until_turn,
@@ -64,12 +68,26 @@ def active(game: Game, unit: Unit) -> list[GameUnitEffect]:
     if game.status != "in_progress" or game.turn_seat is None:
         return []
     now = turn_index(game)
-    return [e for e in game.unit_effects if e.unit_id == unit.id and now <= e.until_turn]
+    return [
+        e
+        for e in game.unit_effects
+        if e.unit_id == unit.id
+        and now <= e.until_turn
+        and (e.phase is None or (now == e.until_turn and game.phase == e.phase))
+    ]
+
+
+def no_cover(game: Game, unit: Unit) -> bool:
+    # Whether it can't have the Benefit of Cover now (e.g. Purge and Cleanse).
+    return any(e.no_cover for e in active(game, unit))
 
 
 def move_change(game: Game, unit: Unit) -> int:
-    # What its effects add to its models' Move characteristic now.
-    return sum(e.move for e in active(game, unit))
+    # What its effects add to its models' Move characteristic now (and
+    # Hagiomnifex's Catechism of Raging Fervour).
+    from app.seeds.factions.adepta_sororitas import hagiomnifex
+
+    return sum(e.move for e in active(game, unit)) + hagiomnifex.move_bonus(game, unit)
 
 
 def roll_change(game: Game, unit: Unit, roll: str) -> int:
@@ -83,7 +101,7 @@ def attack_rules(game: Game, attacker: Unit, target: Unit) -> list:
     # (Shattered Defences).
     from app.combat_rules import Rule
     from app.combat_rules.conditions import RANGED_ATTACK
-    from app.combat_rules.effects import IMPROVE_AP
+    from app.combat_rules.effects import IGNORE_COVER, IMPROVE_AP
 
     keywords = {k.name for m in attacker.unit_models for k in m.model.keywords}
     seat = deployment.owner(game, attacker).seat
@@ -95,11 +113,17 @@ def attack_rules(game: Game, attacker: Unit, target: Unit) -> list:
         source = deployment.find_unit(game, effect.source_unit_id)
         return deployment.owner(game, source).seat == seat
 
+    effects = active(game, target)
     return [
         Rule(conditions=(RANGED_ATTACK,), effects=(IMPROVE_AP,))
-        for e in active(game, target)
+        for e in effects
         if e.ranged_ap and (e.by_keyword is None or e.by_keyword in keywords) and friendly(e)
-    ]
+    ] + [
+        # (It can't have the Benefit of Cover - e.g. Purge and Cleanse.)
+        Rule(conditions=(RANGED_ATTACK,), effects=(IGNORE_COVER,))
+        for e in effects
+        if e.no_cover
+    ][:1]
 
 
 def own_attack_rules(game: Game, unit: Unit) -> list:
@@ -144,6 +168,8 @@ def after_shooting(game: Game, unit: Unit, target: Unit, hits: int) -> list[Game
                 game, target, name, until,
                 move=effect.move, advance=effect.advance, charge=effect.charge,
                 source_unit=unit, ranged_ap=effect.ranged_ap, by_keyword=effect.by_keyword,
+                no_cover=effect.no_cover,
+                phase=game.phase if effect.lasts == "this phase" else None,
             )
         )
     return found
@@ -165,6 +191,8 @@ def describe(effect: GameUnitEffect) -> str:
         parts += [f"{getattr(effect, r):+d} to {r.capitalize()} rolls" for r in rolls]
     if effect.melee_skill:
         parts.append(f"melee Weapon Skill worsened by {effect.melee_skill}")
+    if effect.no_cover:
+        parts.append("it can't have the Benefit of Cover")
     if effect.ranged_ap:
         parts.append(
             f"+{effect.ranged_ap} AP for ranged attacks against it"

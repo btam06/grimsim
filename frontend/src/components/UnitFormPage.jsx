@@ -213,7 +213,9 @@ function UnitFormPage({
     try {
       const payload = {
         faction_unit_id: Number(factionUnitId),
-        points: Number(points),
+        // (Blank: priced from the datasheet's Munitorum Field Manual points -
+        // the backend ignores a given value for a datasheet that has them.)
+        points: points === '' ? null : Number(points),
         list_id: listId === '' ? null : Number(listId),
         unit_models: slots.map((s) => ({
           model_id: Number(s.model_id),
@@ -249,7 +251,13 @@ function UnitFormPage({
           />
         </Field>
         <Field label="Points">
-          <input type="number" value={points} onChange={(e) => setPoints(e.target.value)} required />
+          <input
+            type="number"
+            value={points}
+            onChange={(e) => setPoints(e.target.value)}
+            placeholder="Automatic (Munitorum Field Manual)"
+            title="Leave blank: worked out from the datasheet's points values. Only needed for a datasheet with none."
+          />
         </Field>
         {upgrades.length > 0 && (
           <Field label="Upgrade">

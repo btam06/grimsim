@@ -207,6 +207,11 @@ async def reload(session: AsyncSession, live) -> None:
         ],
         layout=layout,
     )
+    # (Units split in the game made again - see
+    # app/services/in_game/unit_splits.py.)
+    from app.services.in_game import unit_splits
+
+    unit_splits.sync(game, catalog)
     for record in game.records():
         for attr, (id_attr, class_name) in record._refs.items():
             ref_id = getattr(record, id_attr)

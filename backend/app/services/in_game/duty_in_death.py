@@ -14,6 +14,11 @@ from app.services.in_game import deployment
 # yet - it lingers, destroyed (it has no wounds left and can't be attacked
 # again) but still there, so it fights with its unit. It's removed when its
 # unit has fought, or at the end of the phase, whichever comes first.
+#
+# Abilities do the same for their own unit (datasheet_abilities
+# FIGHTS_ON_DEATH: {ability name: the D6 needed} - e.g. Anguish of the
+# Unredeemed, 2+): a model destroyed by an enemy unit's attacks in the Fight
+# phase (melee attacks), if its unit hasn't fought this phase.
 
 DUTY_IN_DEATH = "duty_in_death"
 LINGERS_ON = 4
@@ -59,12 +64,22 @@ def lingers(game: Game, unit: Unit, unit_model, destroyed_by: Unit | None = None
     # (recorded, if so) - Duty in Death is active for its unit, which hasn't
     # fought this phase, and the roll is a 4+.
     # (Imported here: fighting imports the casualties module.)
+    from app.seeds import datasheet_abilities
     from app.services.in_game import fighting
 
-    if not active(game, unit) or fighting.fought(game, unit):
+    if game.phase != "fight" or fighting.fought(game, unit):
         return False
-    roll = dice.randint(1, 6) + (1 if _assault_doctrine(game, unit) else 0)
-    if roll < LINGERS_ON:
+    if active(game, unit):
+        needed = LINGERS_ON
+        roll = dice.randint(1, 6) + (1 if _assault_doctrine(game, unit) else 0)
+    else:
+        config = datasheet_abilities.FIGHTS_ON_DEATH
+        own = [config[a.name] for a in unit_model.model.abilities if a.name in config]
+        if not own or destroyed_by is None:
+            return False
+        needed = min(own)
+        roll = dice.randint(1, 6)
+    if roll < needed:
         return False
     game.lingering_models.append(
         GameLingeringModel(

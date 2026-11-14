@@ -72,6 +72,10 @@ class RoundStartRule:
     option_descriptions: dict[str, str] = field(default_factory=dict)
     # Required: one of its options must be chosen (there's no "none").
     required: bool = False
+    # For a detachment rule giving an army rule one more choice (e.g.
+    # Paragons of Terror): its name - chosen with the army rule's
+    # faction_ability_id and this (see choose).
+    choice_rule: str | None = None
 
     @property
     def decision(self) -> bool:
@@ -113,6 +117,8 @@ def player_rules(game: Game, player: GamePlayer, battle_round: int) -> list[Roun
     for detachment in player.army_list.detachments:
         for rule in detachment.rules:
             add("detachment rule", rule.name, rule.description, None)
+            if ("detachment rule", rule.name) in found:
+                _extra_choice(game, player, found[("detachment rule", rule.name)])
     placed = deployment.positions(game)
     for unit in deployment.deployable_units(player):
         if not deployment.is_deployed(unit, placed):
@@ -130,6 +136,46 @@ def player_rules(game: Game, player: GamePlayer, battle_round: int) -> list[Roun
             for ability in model.faction_abilities:
                 add("army rule", ability.name, ability.description, name, ability)
     return list(found.values())
+
+
+def _army_ability(player: GamePlayer, name: str):
+    # The player's army rule (faction ability) called `name`, if they have it.
+    return next(
+        (
+            a
+            for u in player.army_list.units
+            for m in u.unit_models
+            for a in m.model.faction_abilities
+            if a.name == name
+        ),
+        None,
+    )
+
+
+def _extra_choice(game: Game, player: GamePlayer, rule: RoundStartRule) -> None:
+    # A detachment rule that gives an army rule one more choice now (e.g.
+    # Paragons of Terror: one more Dread ability, not rolled for): its options
+    # - those not chosen already (but this one).
+    config = faction_seeds.EXTRA_ROUND_CHOICES.get(rule.name)
+    if config is None:
+        return
+    ability = _army_ability(player, config["ability"])
+    if ability is None:
+        return
+    key = (ability.faction.name, ability.name)
+    taken = {
+        c.option
+        for c in game.rule_choices
+        if c.seat == player.seat and c.faction_ability_id == ability.id and c.rule != rule.name
+    }
+    rule.faction_ability_id = ability.id
+    rule.choice_rule = rule.name
+    rule.options = [
+        o
+        for o in faction_seeds.ROUND_START_CHOICES.get(key, ())
+        if o not in taken and o not in config.get("exclude", ())
+    ]
+    rule.option_descriptions = faction_seeds.ROUND_START_DESCRIPTIONS.get(key, {})
 
 
 def round_start_rules(game: Game, battle_round: int) -> dict[int, list[RoundStartRule]]:
@@ -152,9 +198,13 @@ def _bad_request(detail: str) -> HTTPException:
     return HTTPException(status_code=400, detail=detail)
 
 
-def _round_choices(game: Game, seat: int) -> list[GameRuleChoice]:
+def _round_choices(game: Game, seat: int, rule: str | None = None) -> list[GameRuleChoice]:
+    # The player's choices this battle round: their army rules' own (or, if
+    # `rule`, that detachment rule's extra ones).
     return [
-        c for c in game.rule_choices if c.seat == seat and c.battle_round == game.battle_round
+        c
+        for c in game.rule_choices
+        if c.seat == seat and c.battle_round == game.battle_round and c.rule == rule
     ]
 
 
@@ -163,11 +213,12 @@ def _round_choices(game: Game, seat: int) -> list[GameRuleChoice]:
 ROLL_TWO = "Roll two D6"
 
 
-def choices(game: Game, seat: int) -> dict[int, str]:
+def choices(game: Game, seat: int, rule: str | None = None) -> dict[int, str]:
     # The options the player chose this battle round, by faction ability id
-    # (several, together, for a roll).
+    # (several, together, for a roll) - their army rules' own, or `rule`'s
+    # extra ones (e.g. Paragons of Terror).
     found: dict[int, list[str]] = {}
-    for c in _round_choices(game, seat):
+    for c in _round_choices(game, seat, rule):
         found.setdefault(c.faction_ability_id, []).append(c.option)
     return {ability_id: " + ".join(options) for ability_id, options in found.items()}
 
@@ -238,9 +289,17 @@ def active_options(game: Game, seat: int) -> list[str]:
     ]
 
 
-def choose(game: Game, seat: int, faction_ability_id: int, option: str | None) -> None:
+def choose(
+    game: Game,
+    seat: int,
+    faction_ability_id: int,
+    option: str | None,
+    extra_rule: str | None = None,
+) -> None:
     # The player picks an option for one of their army rules with options
-    # this battle round (or none), at its start.
+    # this battle round (or none), at its start - or, with `extra_rule`, that
+    # detachment rule's extra option for it (e.g. Paragons of Terror: one more
+    # Dread ability, once the army rule's are selected).
     if game.status != "in_progress" or game.phase != START_OF_ROUND:
         raise _bad_request("options are chosen at the start of the battle round")
     player = next(p for p in game.players if p.seat == seat)
@@ -248,20 +307,43 @@ def choose(game: Game, seat: int, faction_ability_id: int, option: str | None) -
         (
             r
             for r in player_rules(game, player, game.battle_round)
-            if r.faction_ability_id == faction_ability_id
+            if r.faction_ability_id == faction_ability_id and r.choice_rule == extra_rule
         ),
         None,
     )
     if rule is None or not rule.options:
         raise _bad_request("that player has no army rule with options to choose this round")
+    if extra_rule is not None and faction_ability_id not in choices(game, seat):
+        raise _bad_request(f"{extra_rule}'s choice comes after the army rule's own")
     if option is None and rule.required:
         raise _bad_request(f"{rule.name} must have one of its options chosen")
     if option is not None and option not in rule.options:
         raise _bad_request(f"{rule.name} has no option {option!r}")
-    for existing in _round_choices(game, seat):
+    for existing in _round_choices(game, seat, extra_rule):
         if existing.faction_ability_id == faction_ability_id:
             game.rule_choices.remove(existing)
+    if extra_rule is None:
+        # (Extra choices come after it: chosen again, they're made again.)
+        for existing in game.rule_choices[:]:
+            if (
+                existing.seat == seat
+                and existing.battle_round == game.battle_round
+                and existing.faction_ability_id == faction_ability_id
+                and existing.rule is not None
+            ):
+                game.rule_choices.remove(existing)
     if option is None:
+        return
+    if extra_rule is not None:
+        game.rule_choices.append(
+            GameRuleChoice(
+                battle_round=game.battle_round,
+                seat=seat,
+                faction_ability_id=faction_ability_id,
+                option=option,
+                rule=extra_rule,
+            )
+        )
         return
     picked = [option]
     if option == ROLL_TWO:

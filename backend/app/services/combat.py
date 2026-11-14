@@ -18,23 +18,39 @@ _DICE_PATTERN = re.compile(
 )
 
 
+def _replace(rolls: list[int], old: int, new: int) -> None:
+    # The last roll of `old` in the list is now `new` (a changed roll).
+    for i in range(len(rolls) - 1, -1, -1):
+        if rolls[i] == old:
+            rolls[i] = new
+            return
+
+
 def roll_dice(notation: str) -> int:
     # notation is either a flat number or dice notation (D3/D6/2D6/D6+1/...); roll
     # it to a value. Used for both a weapon's damage and its number of attacks.
     return roll_dice_faces(notation)[0]
 
 
-def roll_dice_faces(notation: str) -> tuple[int, list[int]]:
+def roll_dice_faces(notation: str, first: int | None = None) -> tuple[int, list[int]]:
     # As roll_dice, also returning each die rolled (none for a flat number) -
-    # e.g. "D6+2" -> (6, [4]).
+    # e.g. "D6+2" -> (6, [4]). `first`: the first die's value, instead of
+    # rolling it (e.g. a Miracle dice).
     match = _DICE_PATTERN.match(notation)
     if match["flat"] is not None:
         return int(match["flat"]), []
     count = int(match["count"]) if match["count"] else 1
     die = int(match["die"])
     plus = int(match["plus"]) if match["plus"] else 0
-    faces = [dice.randint(1, die) for _ in range(count)]
+    faces = [dice.randint(1, die) for _ in range(count - (first is not None))]
+    if first is not None:
+        faces.insert(0, first)
     return sum(faces) + plus, faces
+
+
+def random_notation(notation: str) -> bool:
+    # Whether dice are rolled for it (D3, 2D6+1...), rather than a flat number.
+    return _DICE_PATTERN.match(notation)["flat"] is None
 
 
 def average_damage(notation: str) -> float:
@@ -71,11 +87,38 @@ def _effective_save(model: Model) -> int:
 
 # The weapon ability that lets a weapon shoot targets it can't see (24.19).
 INDIRECT_FIRE = "Indirect Fire"
+# Devastating Refrain (Exorcist): its [INDIRECT FIRE] attacks set off a
+# destroyed model's Deadly Demise on this (instead of a 6).
+DEVASTATING_REFRAIN = "Devastating Refrain"
+DEVASTATING_REFRAIN_DEMISE = 5
 
 
 def _blast(weapon) -> bool:
     # A [BLAST] weapon (Blast, Blast 2...).
     return any(a.name.startswith("Blast") for a in getattr(weapon, "abilities", []))
+
+
+@dataclass(frozen=True)
+class WeaponBonus:
+    # Something a rule adds to one attacking model's weapons (see
+    # resolve_combat weapon_bonuses): to its melee weapons (`melee_only`), or
+    # its weapons named `names` (or starting with one - a profile, e.g.
+    # "Lance of Illumination – strike"), or all of them. Their Attacks,
+    # Strength and Damage; [DEVASTATING WOUNDS]; and a mortal wound on the
+    # target each time an attack wounds, in addition to its damage
+    # (`mortal_on_wound` - e.g. Rapturous Blows).
+    attacks: int = 0
+    strength: int = 0
+    damage: int = 0
+    melee_only: bool = True
+    names: tuple[str, ...] = ()
+    devastating: bool = False
+    mortal_on_wound: bool = False
+
+    def applies(self, weapon, is_ranged: bool) -> bool:
+        if self.melee_only and is_ranged:
+            return False
+        return not self.names or any(weapon.name.startswith(n) for n in self.names)
 
 
 def hazard_failed(roll: int) -> bool:
@@ -242,7 +285,7 @@ def allocation_groups(unit: Unit, wounds: dict[int, int] | None = None) -> list[
     # wounds left}) is given.
     targets = deque(
         _Target(
-            toughness=m.model.toughness, save=m.model.save, invulnerable=m.model.invulnerable,
+            toughness=m.model.toughness, save=m.save, invulnerable=m.model.invulnerable,
             feel_no_pain=None,
             remaining_wounds=m.wounds if wounds is None else wounds[m.id],
             unit_model_id=m.id, wounds_characteristic=m.wounds,
@@ -328,8 +371,10 @@ class CombatResult:
     fnp_rolls                  : list[int] = field(default_factory=list)
     total_damage               : int       = field(default=0)
     # How many hits were scored (rolled or automatic, and any extra ones -
-    # e.g. Sustained Hits).
+    # e.g. Sustained Hits) - and how many of those with [INDIRECT FIRE]
+    # weapons.
     hits                       : int       = field(default=0)
+    indirect_hits              : int       = field(default=0)
     # How many of those wounded (rolled, or automatically - e.g. Lethal
     # Hits).
     wounds                     : int       = field(default=0)
@@ -346,6 +391,12 @@ class CombatResult:
     # means it explodes. (The explosion's mortal wounds aren't resolved.)
     deadly_demise_rolls: list[int] = field(default_factory=list)
     deadly_demise_explosions: int = field(default=0)
+    # The Miracle dice used in place of rolled dice (Acts of Faith), described
+    # - e.g. "Hit roll (Bolt rifle): Miracle dice 6".
+    acts_of_faith: list[str] = field(default_factory=list)
+    # What players chose or re-rolled as it was made (e.g. Artisan,
+    # Necromechanic, a re-rolled Attacks roll), described.
+    choices: list[str] = field(default_factory=list)
     # The same totals above, broken down per weapon profile (grouped by
     # weapon name) instead of pooled across the whole attacking unit.
     weapon_results: list[WeaponCombatResult] = field(default_factory=list)
@@ -394,7 +445,24 @@ def resolve_combat(
     attack_limits: dict | None = None,
     hazards_rolled: set | None = None,
     precision_models: set | None = None,
+    attacker_miracle=None,
+    defender_miracle=None,
+    weapon_bonuses: dict[int, list[WeaponBonus]] | None = None,
+    decisions=None,
 ) -> CombatResult:
+    # `decisions`: the defending player's choices as its saves are made, in a
+    # game (see app/services/in_game/attack_decisions.py's Decisions) - asked
+    # before a weapon's saving throws are rolled (an Act of Faith), and as one
+    # fails (e.g. Artisan, Necromechanic).
+    # `weapon_bonuses`: what rules add to particular attacking models'
+    # weapons, by unit model id (see WeaponBonus - e.g. Righteous Rage's
+    # Miracle dice discarded).
+    # `attacker_miracle`, `defender_miracle`: an Act of Faith each side's
+    # unit performs in the attack (see
+    # app/seeds/factions/adepta_sororitas/acts_of_faith.py's AttackMiracle):
+    # the first roll of its kind (Hit, Wound or Damage for the attacker, a
+    # Saving throw for the defender) is its Miracle dice - an unmodified roll
+    # of that value, which can't be re-rolled. Marked used once it is.
     # `precision_models`: attacking models (by unit model id) whose melee
     # weapons have [PRECISION] (e.g. after Epic Challenge).
     # `attack_limits`: how many attacks each weapon (by id) makes at most
@@ -533,6 +601,7 @@ def resolve_combat(
     datasheet_abilities += detachment_rule_service.granted_datasheet_abilities(
         attacker_detachment_rules, attacker
     )
+    refrain = any(a.name == DEVASTATING_REFRAIN for a in datasheet_abilities)
     # Code-defined rules by datasheet ability name (e.g. War-Form Mantle's),
     # for abilities a per-model detachment rule gives single models.
     ability_rules = ability_rules or {}
@@ -635,7 +704,7 @@ def resolve_combat(
         _Target(
             toughness=unit_model.model.toughness
             + (1 if model_states[id(unit_model)].get("plus_one_toughness") else 0),
-            save=unit_model.model.save,
+            save=unit_model.save,
             # (With any its rules give it - e.g. Defend the Divine Work's 4+ -
             # so its allocation group knows it.)
             invulnerable=min(
@@ -925,6 +994,9 @@ def resolve_combat(
                     "result": weapon_result,
                     "half_range": weapon_half_range,
                     "indirect": is_indirect,
+                    # Made with an [INDIRECT FIRE] weapon (seen or not) - e.g.
+                    # for Devastating Refrain.
+                    "indirect_weapon": any(a.name == INDIRECT_FIRE for a in weapon.abilities),
                     # -1 to hit: a MONSTER/VEHICLE model shooting while
                     # engaged (other than a close-quarters weapon at the unit
                     # it's engaged with), or any shot at an engaged
@@ -937,7 +1009,18 @@ def resolve_combat(
 
                 # Attacks characteristic: how many attacks this weapon makes,
                 # rolled once per weapon (flat or dice notation, e.g. "2", "D3", "2D6").
-                attack_count = roll_dice(weapon.attacks)
+                rolled_attacks = roll_dice(weapon.attacks)
+                attack_count = rolled_attacks
+                bonuses = [
+                    b
+                    for b in (weapon_bonuses or {}).get(unit_model.id, ())
+                    if b.applies(weapon, is_ranged)
+                ]
+                bonus_d = sum(b.damage for b in bonuses)
+                attack_count += sum(b.attacks for b in bonuses)
+                fired["strength_bonus"] = sum(b.strength for b in bonuses)
+                fired["devastating"] = any(b.devastating for b in bonuses)
+                fired["mortal_on_wound"] = any(b.mortal_on_wound for b in bonuses)
                 if attack_limits is not None and weapon.id in attack_limits:
                     attack_count = min(attack_count, attack_limits[weapon.id])
                     attack_limits[weapon.id] -= attack_count
@@ -958,8 +1041,26 @@ def resolve_combat(
                     pre_weapon_state,
                     pending_attacks,
                 )
+                # A below-average roll for its Attacks re-rolled, if it can
+                # be (e.g. Symphonic Payload) - not when its attacks are
+                # split between targets.
+                if (
+                    pre_weapon_state.get("reroll_attacks")
+                    and random_notation(weapon.attacks)
+                    and rolled_attacks < average_damage(weapon.attacks)
+                    and not (attack_limits is not None and weapon.id in attack_limits)
+                ):
+                    again = roll_dice(weapon.attacks)
+                    result.choices.append(
+                        f"{weapon.name}: Attacks roll of {rolled_attacks} re-rolled: {again}"
+                    )
+                    for _ in range(again - rolled_attacks):
+                        pending_attacks.append({"auto_hit": False})
+                    for _ in range(rolled_attacks - again):
+                        if pending_attacks:
+                            pending_attacks.pop()
                 # Melta: extra damage on every attack this weapon makes.
-                fired["damage_bonus"] = pre_weapon_state.get("melta", 0)
+                fired["damage_bonus"] = pre_weapon_state.get("melta", 0) + bonus_d
                 if pre_weapon_state.get("blast"):
                     # Blast: +1 attack for every five models in the target unit
                     # (counted when targets are declared, before any attacks
@@ -992,6 +1093,19 @@ def resolve_combat(
                 )
 
 
+    def miracle_roll(roll: str, weapon, miracle) -> int | None:
+        # The Miracle dice's value, if it substitutes this roll (see
+        # attacker_miracle) - None to roll the die.
+        if miracle is None or not miracle.applies(roll, weapon):
+            return None
+        from app.seeds.factions.adepta_sororitas.acts_of_faith import ROLL_NAMES
+
+        value = miracle.take()
+        result.acts_of_faith.append(
+            f"{ROLL_NAMES[roll]} ({weapon.name}): Miracle dice {value}"
+        )
+        return value
+
     def target_for(fired: dict) -> _Target:
         # The model an attack is allocated to: in the current allocation group
         # (a CHARACTER's, for a Precision weapon - see _Allocation).
@@ -1004,10 +1118,21 @@ def resolve_combat(
         # destroyed, the rest is lost: damage never spills onto another model.
         weapon = fired["weapon"]
         weapon_result = fired["result"]
-        rolled_damage, damage_faces = roll_dice_faces(weapon.damage)
-        # A damage roll that can be re-rolled is, if it's below average.
+        if attack.get("fixed_damage") is not None:
+            # A set number of mortal wounds (e.g. Rapturous Blows' 1).
+            _suffer(target, attack, fired, attack["fixed_damage"], mortal)
+            return
+        miracle = (
+            miracle_roll("damage", weapon, attacker_miracle)
+            if random_notation(weapon.damage)
+            else None
+        )
+        rolled_damage, damage_faces = roll_dice_faces(weapon.damage, first=miracle)
+        # A damage roll that can be re-rolled is, if it's below average (not
+        # one with a Miracle dice in it).
         if (
             damage_faces
+            and miracle is None
             and attack.get("reroll_damage")
             and rolled_damage < average_damage(weapon.damage)
         ):
@@ -1021,6 +1146,12 @@ def resolve_combat(
         # model's own (e.g. Implacable Resilience).
         if attack.get("minus_one_damage") or target.minus_one_damage:
             damage = max(1, damage - 1)
+        _suffer(target, attack, fired, damage, mortal)
+
+    def _suffer(target: _Target, attack: dict, fired: dict, damage: int, mortal: bool) -> None:
+        # The model suffers `damage`, a point at a time, each negated on a
+        # Feel No Pain - one against mortal wounds too, if they are.
+        weapon_result = fired["result"]
         fnps = [target.feel_no_pain, attack.get("feel_no_pain")]
         if mortal:
             fnps += [target.feel_no_pain_mortal, attack.get("feel_no_pain_mortal")]
@@ -1040,7 +1171,14 @@ def resolve_combat(
                 if target.deadly_demise:
                     demise_roll = dice.randint(1, 6)
                     result.deadly_demise_rolls.append(demise_roll)
-                    if demise_roll == 6:
+                    # (Devastating Refrain: on a 5+, to an [INDIRECT FIRE]
+                    # attack by a unit with it.)
+                    demise_on = (
+                        DEVASTATING_REFRAIN_DEMISE
+                        if fired["indirect_weapon"] and refrain
+                        else 6
+                    )
+                    if demise_roll >= demise_on:
                         result.deadly_demise_explosions += 1
                 result.models_destroyed += 1
                 weapon_result.models_destroyed += 1
@@ -1145,7 +1283,10 @@ def resolve_combat(
                 return roll != 1 and (roll >= critical_hit_on or roll >= effective_skill)
 
             # Hit roll: succeeds (hits) on a roll equal to or greater than skill.
-            hit_roll = dice.randint(1, 6)
+            hit_roll = miracle_roll("hit", weapon, attacker_miracle)
+            miracle_hit = hit_roll is not None
+            if hit_roll is None:
+                hit_roll = dice.randint(1, 6)
             result.attack_rolls.append(hit_roll)
             weapon_result.attack_rolls.append(hit_roll)
             if snap_shots:
@@ -1156,7 +1297,8 @@ def resolve_combat(
             _apply_triggered_effects(
                 abilities, {"step": "hit", "roll": hit_roll, **hit_context}, attack, spawned
             )
-            if not hits(hit_roll) and not fired["indirect"] and (
+            # (A Miracle dice can't be re-rolled.)
+            if not hits(hit_roll) and not fired["indirect"] and not miracle_hit and (
                 attack.get("reroll_failed_hits")
                 or unit_rerolls_failed_hits
                 or (hit_roll == 1 and attack.get("reroll_hit_ones"))
@@ -1178,9 +1320,11 @@ def resolve_combat(
         # this phase, so each wound roll is against the Toughness of the model
         # its attack will be allocated to first.
         result.hits += len(successful_hits)
+        result.indirect_hits += sum(1 for _, f in successful_hits if f["indirect_weapon"])
         if not targets:
             continue  # the defending unit was wiped out by an earlier profile
         wounds: list[tuple[dict, dict]] = []
+        extra_mortals: list[tuple[dict, dict]] = []
         for attack, fired in successful_hits:
             weapon = fired["weapon"]
             abilities = fired["abilities"]
@@ -1188,6 +1332,7 @@ def resolve_combat(
             weapon_result = fired["result"]
             strength = (
                 weapon.strength
+                + fired.get("strength_bonus", 0)
                 + (1 if attack.get("plus_one_strength") else 0)
                 + (2 if attack.get("plus_two_strength") else 0)
             )
@@ -1204,14 +1349,24 @@ def resolve_combat(
                 # A failed wound roll may be re-rolled once (e.g. Twin-linked,
                 # or just a 1), with the wound-step triggers re-checked against
                 # the new roll.
+                # (A Miracle dice can't be re-rolled.)
                 wound_roll = None
+                miracle_wound = False
                 for is_reroll in (False, True):
-                    if is_reroll and not (
-                        attack.get("reroll_failed_wounds")
-                        or (wound_roll == 1 and attack.get("reroll_wound_ones"))
+                    if is_reroll and (
+                        miracle_wound
+                        or not (
+                            attack.get("reroll_failed_wounds")
+                            or (wound_roll == 1 and attack.get("reroll_wound_ones"))
+                        )
                     ):
                         break
-                    wound_roll = dice.randint(1, 6)
+                    wound_roll = (
+                        None if is_reroll else miracle_roll("wound", weapon, attacker_miracle)
+                    )
+                    miracle_wound = wound_roll is not None
+                    if wound_roll is None:
+                        wound_roll = dice.randint(1, 6)
                     if is_reroll:
                         result.wound_rerolls.append(wound_roll)
                         weapon_result.wound_rerolls.append(wound_roll)
@@ -1261,7 +1416,16 @@ def resolve_combat(
                     if wound_passed:
                         break
             if wound_passed:
+                # [DEVASTATING WOUNDS] a rule gives this model's weapon (e.g.
+                # Divine Deliverance): a Critical Wound allows no save.
+                if fired.get("devastating") and not attack.get("auto_pass_wound") and (
+                    wound_roll == 6 or attack.get("critical_wound")
+                ):
+                    attack["no_save"] = True
                 wounds.append((attack, fired))
+                if fired.get("mortal_on_wound"):
+                    # (e.g. Rapturous Blows: 1 mortal wound as well.)
+                    extra_mortals.append(({"no_save": True, "fixed_damage": 1}, fired))
         result.wounds += len(wounds)
 
         # Save rolls (05.03): one for each wound, made together; then resolved
@@ -1270,10 +1434,23 @@ def resolve_combat(
         # Attacks that allow no save (Devastating Wounds) inflict mortal
         # wounds instead, after the normal damage.
         saving = [(a, f) for a, f in wounds if not a.get("no_save")]
-        devastating = [(a, f) for a, f in wounds if a.get("no_save")]
+        devastating = [(a, f) for a, f in wounds if a.get("no_save")] + extra_mortals
+        if decisions is not None and saving and (
+            defender_miracle is None or defender_miracle.used
+        ):
+            # (One weapon's saves at a time: a profile is one weapon's.)
+            chosen = decisions.save_miracle(saving[0][1]["weapon"], len(saving))
+            if chosen is not None:
+                defender_miracle = chosen
         rolled = []
         for attack, fired in saving:
-            save_roll = dice.randint(1, 6)
+            save_roll = miracle_roll("save", fired["weapon"], defender_miracle)
+            if save_roll is None:
+                save_roll = dice.randint(1, 6)
+            elif defender_miracle.auto_success:
+                # (Triptych of the Macharian Crusade: it succeeds, whatever
+                # its value.)
+                attack = {**attack, "miracle_save": True}
             result.save_rolls.append(save_roll)
             fired["result"].save_rolls.append(save_roll)
             _apply_triggered_effects(
@@ -1319,8 +1496,23 @@ def resolve_combat(
                 save_needed = min(save_needed, attack["invulnerable_save"])
             # +1 to the save roll (an unmodified 1 still fails).
             bonus = 1 if attack.get("plus_one_to_save") else 0
-            if save_roll != 1 and save_roll + bonus >= save_needed:
+            if attack.get("miracle_save") or (
+                save_roll != 1 and save_roll + bonus >= save_needed
+            ):
                 continue  # save succeeded - no damage from this attack
+            if decisions is not None:
+                # The defender's choice as it fails: change the roll to an
+                # unmodified 6 (Artisan), or the attack's Damage to 0
+                # (Necromechanic).
+                choice = decisions.failed_save(
+                    target.unit_model_id, weapon, save_roll, passes_on_six=6 + bonus >= save_needed
+                )
+                if choice is not None:
+                    result.choices.append(choice.note)
+                    if choice.save_roll is not None:
+                        _replace(result.save_rolls, save_roll, choice.save_roll)
+                        _replace(fired["result"].save_rolls, save_roll, choice.save_roll)
+                    continue
             _inflict(target, attack, fired, mortal=False)
 
         for attack, fired in devastating:

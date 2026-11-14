@@ -9,6 +9,13 @@ from app.combat_rules.effects import (
 # Code-defined rules for Chaos Knights stratagems, by stratagem name - for the
 # parts a stratagem's own conditions/effects (in stratagems.json) can't say.
 # See app/seeds/stratagems.py, which combines every faction's.
+# How stratagems carry out their game actions (see
+# app/services/in_game/stratagem_actions.py): Claimed for the Dark Gods - the
+# objective marker's secured with a Level of Control of 5.
+ACTIONS = {
+    "Claimed for the Dark Gods": {"level": 5},
+}
+
 RULES = {
     "Storm of Darkness": [
         Rule(

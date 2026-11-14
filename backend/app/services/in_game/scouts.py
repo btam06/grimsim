@@ -44,9 +44,12 @@ def _bad_request(detail: str) -> HTTPException:
     return HTTPException(status_code=400, detail=detail)
 
 
-def _model_distance(unit: Unit, unit_model: UnitModel) -> int:
+def _model_distance(unit: Unit, unit_model: UnitModel, game: Game | None = None) -> int:
     # The model's Scouts distance: from its abilities, its wargear's, and
-    # those of wargear in its unit that reach the bearer's unit.
+    # those of wargear in its unit that reach the bearer's unit - and those
+    # its unit gives it (e.g. Holy Mission; Holy Vanguard, in a `game`).
+    from app.seeds.factions.adepta_sororitas import unit_abilities
+
     names = [a.name for a in unit_model.model.abilities] + [
         a.name
         for other in unit.unit_models
@@ -57,13 +60,14 @@ def _model_distance(unit: Unit, unit_model: UnitModel) -> int:
     # (A one-model unit's wargear is its unit's.)
     if len(unit.unit_models) == 1:
         names += [a.name for gear in unit_model.wargear for a in gear.abilities]
+    names += sorted(unit_abilities.granted_abilities(unit, unit_model, game))
     return max((int(m.group(1)) for n in names if (m := SCOUTS.match(n))), default=0)
 
 
-def distance(unit: Unit) -> int:
+def distance(unit: Unit, game: Game | None = None) -> int:
     # How far the unit can make a Scouts move: every model must have Scouts
     # (the shortest counts). 0 if it can't.
-    return min((_model_distance(unit, m) for m in unit.unit_models), default=0)
+    return min((_model_distance(unit, m, game) for m in unit.unit_models), default=0)
 
 
 ENEMY_CLEARANCE = 8.0
@@ -80,13 +84,13 @@ def _passengers(game: Game, transport: Unit) -> list[Unit]:
 def scout_distance(game: Game, unit: Unit) -> int:
     # How far the unit can make a scout move now: its own Scouts - or, for a
     # DEDICATED TRANSPORT, its passengers' (if every one has it). 0 if none.
-    if distance(unit):
-        return distance(unit)
+    if distance(unit, game):
+        return distance(unit, game)
     keywords = {k.name for m in unit.unit_models for k in m.model.keywords}
     if DEDICATED_TRANSPORT not in keywords:
         return 0
     inside = _passengers(game, unit)
-    distances = [distance(u) for u in inside]
+    distances = [distance(u, game) for u in inside]
     return min(distances) if inside and all(distances) else 0
 
 

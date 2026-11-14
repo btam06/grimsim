@@ -59,6 +59,10 @@ def main() -> None:
     parser.add_argument("--games", type=int, default=2, help="games per pairing, each way round")
     parser.add_argument("--lists", type=int, nargs="+", help="only these lists (ids)")
     parser.add_argument(
+        "--involving", type=int, nargs="+",
+        help="only pairings with one of these lists in (ids) - e.g. lists just added",
+    )
+    parser.add_argument(
         "--secondaries", choices=("tactical", "fixed"), default="tactical",
         help="both players' secondary mode",
     )
@@ -90,6 +94,8 @@ def main() -> None:
     seeds = itertools.count(args.seed if args.seed is not None else random.randrange(2**32))
     made, skipped = [], []
     for attacker, defender in itertools.permutations(lists, 2):
+        if args.involving and not {attacker["id"], defender["id"]} & set(args.involving):
+            continue
         pairing = f"{attacker['name']} (attacking) vs {defender['name']}"
         dispositions = (attacker["disposition_id"], defender["disposition_id"])
         # (A layout fits its dispositions either way round.)
@@ -113,6 +119,8 @@ def main() -> None:
                     ],
                     "attacker_seat": 1,
                     "seed": seed,
+                    # (Marked in the games list as made for machine learning.)
+                    "ml": True,
                 })
             except Refused as e:
                 # (Whatever it is, it'll be the same for every game.)

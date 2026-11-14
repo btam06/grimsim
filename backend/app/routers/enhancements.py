@@ -19,7 +19,6 @@ from app.models import (
     UnitModel,
     WeaponAbility,
     unit_model_enhancements,
-    unit_upgrades,
 )
 from app.schemas import (
     EnhancementDatasheetAbilitySchema,
@@ -93,18 +92,17 @@ async def _load_keywords(session: AsyncSession, ids: list[int], field: str) -> l
 
 
 async def used_in_list(session: AsyncSession, list_id: int, except_unit_id: int | None) -> set[int]:
-    # Enhancements and upgrades already taken by units in a list - each can
-    # only be taken once per list. The unit being edited doesn't count.
+    # Enhancements already carried by models in a list - each can only be
+    # taken once per list. The unit being edited doesn't count. (Upgrades
+    # aren't: any number of units can take the same one - e.g. Snarling
+    # Rivalry on each EXECUTIONER.)
     unit_ids = select(Unit.id).where(Unit.list_id == list_id)
     if except_unit_id is not None:
         unit_ids = unit_ids.where(Unit.id != except_unit_id)
     carried = select(unit_model_enhancements.c.enhancement_id).join(
         UnitModel, UnitModel.id == unit_model_enhancements.c.unit_model_id
     ).where(UnitModel.unit_id.in_(unit_ids))
-    upgraded = select(unit_upgrades.c.enhancement_id).where(unit_upgrades.c.unit_id.in_(unit_ids))
-    return set((await session.execute(carried)).scalars()) | set(
-        (await session.execute(upgraded)).scalars()
-    )
+    return set((await session.execute(carried)).scalars())
 
 
 async def _list_detachments(

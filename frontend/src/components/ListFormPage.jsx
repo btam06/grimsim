@@ -3,6 +3,7 @@ import { createList, createUnit, deleteUnit, listDispositions, updateList } from
 import Field from './Field'
 import Select from './Select'
 import { CopyButton, DeleteButton, EditButton } from './IconButtons'
+import { listPoints } from '../listPoints'
 
 const POINTS_LIMIT_OPTIONS = [
   { id: '2000', name: '2000 points' },
@@ -74,6 +75,7 @@ function ListFormPage({
   wargear,
   factionUnits,
   enhancements,
+  detachmentRules = [],
   onSaved,
   onCancel,
   onUnitsChanged,
@@ -117,11 +119,15 @@ function ListFormPage({
   }
   // Whether one of the unit's models is a CHARACTER (only those can be the
   // Warlord).
+  // A CHARACTER: its models are, or a detachment rule it's selected for
+  // makes it one (e.g. Houndpack Alphas' WAR DOG units).
+  const characterId = keywords.find((k) => k.name === 'CHARACTER')?.id
   const isCharacter = (unit) =>
     unit.unit_models.some((um) =>
-      (models.find((m) => m.id === um.model_id)?.keyword_ids ?? []).some(
-        (id) => keywords.find((k) => k.id === id)?.name === 'CHARACTER'
-      )
+      (models.find((m) => m.id === um.model_id)?.keyword_ids ?? []).includes(characterId)
+    ) ||
+    (unit.selected_rule_ids ?? []).some((id) =>
+      (detachmentRules.find((r) => r.id === id)?.granted_keyword_ids ?? []).includes(characterId)
     )
   const categoryOf = (unit) => {
     const shared = sharedKeywords(unit)
@@ -140,19 +146,9 @@ function ListFormPage({
     return enhancement ? `${enhancement.name} (+${enhancement.points} pts)` : `#${id}`
   }
   // The list's points: its units', plus their enhancements' and upgrades'.
-  const enhancementPoints = (id) => enhancements.find((e) => e.id === id)?.points ?? 0
+  const totalPoints = listPoints(unitsInThisList, enhancements)
   const unitPoints = unitsInThisList.reduce((sum, u) => sum + u.points, 0)
-  const extraPoints = unitsInThisList.reduce(
-    (sum, u) =>
-      sum +
-      (u.upgrade_id !== null ? enhancementPoints(u.upgrade_id) : 0) +
-      u.unit_models.reduce(
-        (s, m) => s + (m.enhancement_id !== null ? enhancementPoints(m.enhancement_id) : 0),
-        0
-      ),
-    0
-  )
-  const totalPoints = unitPoints + extraPoints
+  const extraPoints = totalPoints - unitPoints
   const pointsLimit = Number(form.points_limit)
 
   // What the faction's lists select, if anything (e.g. a Space Marines

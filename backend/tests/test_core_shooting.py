@@ -15,11 +15,13 @@ INDIRECT = ("Indirect Fire", None)
 BLAST = ("Blast", "blast")
 
 
-async def _game(client, session, tmp_path, d_kwargs=None, a_kwargs=None, e_kwargs=None):
+async def _game(
+    client, session, tmp_path, d_kwargs=None, a_kwargs=None, e_kwargs=None, f_kwargs=None
+):
     units = {
         1: [("A", 1, {"weapon_range": 24, **(a_kwargs or {})}),
             ("E", 1, {"weapon_range": 24, **(e_kwargs or {})})],
-        2: [("D", 1, {"weapon_range": 24, **(d_kwargs or {})}), ("F", 1, {"weapon_range": 24})],
+        2: [("D", 1, {"weapon_range": 24, **(d_kwargs or {})}), ("F", 1, {"weapon_range": 24, **(f_kwargs or {})})],
     }
     spots = {"A": (20, 38), "E": (40, 38), "D": (20, 4), "F": (40, 4)}
     game, deployment_ = await _battle(client, session, tmp_path, units=units, spots=spots)
@@ -96,10 +98,10 @@ def test_terrain_areas_without_features_dont_obscure():
 
     area = [(10, 10), (14, 10), (14, 14), (10, 14)]
     sight = object.__new__(shooting.Sight)
-    sight.terrain = shooting._Terrain([], [area], [False], [False], [])
+    sight.terrain = shooting._Terrain([], [area], [False], [])
     viewer, target = Base(12, 4, 32, 32), Base(12, 20, 32, 32)
     assert sight.sees(viewer, target)
-    sight.terrain = shooting._Terrain([], [area], [True], [False], [])
+    sight.terrain = shooting._Terrain([], [area], [True], [])
     assert not sight.sees(viewer, target)
     # Not from within it.
     assert sight.sees(Base(12, 12, 32, 32), target)
@@ -131,3 +133,59 @@ async def test_the_agent_offers_close_quarters_or_other_guns_not_both(
     assert (await _shoot(client, game_id, u["D"], u["A"], both)).status_code == 400
     response = await _shoot(client, game_id, u["D"], u["A"], choices[0]["weapon_ids"])
     assert response.status_code == 200, response.text
+
+
+def test_hidden_in_an_area_with_any_terrain_feature():
+    # 13.09 (as an FAQ has it): a terrain area with a light (obstacle) or
+    # dense (ruin wall) terrain feature - both obscuring - hides; one with
+    # none doesn't.
+    from app.services.in_game.deployment import Base
+
+    area = [(10, 10), (14, 10), (14, 14), (10, 14)]
+    sight = object.__new__(shooting.Sight)
+    inside = Base(12, 12, 32, 32)
+    sight.terrain = shooting._Terrain([], [area], [True], [])
+    assert sight.in_area(inside, featured_only=True)
+    sight.terrain = shooting._Terrain([], [area], [False], [])
+    assert not sight.in_area(inside, featured_only=True)
+    assert sight.in_area(inside)
+
+
+async def test_condemned_units_hidden_models_are_seen_from_further(
+    client: AsyncClient, session, tmp_path
+):
+    # A (INFANTRY) hidden in the Medium ruin area, as above; D 16.5" away
+    # (centre to centre: further than 15" base to base, nearer than 18").
+    # F (ADEPTA SORORITAS INFANTRY FLY, Chorus of Condemnation) condemns it
+    # from within 12".
+    from tests.test_acts_of_faith import _list_detachment
+
+    flying = {"keywords": ("ADEPTA SORORITAS", "INFANTRY", "FLY")}
+    game_id, u = await _game(
+        client, session, tmp_path, a_kwargs={"keywords": ("INFANTRY",)}, f_kwargs=flying
+    )
+    await _list_detachment(session, game_id, "Chorus of Condemnation")
+    await _place(session, u["A"], [(11.5, 10.5)])
+    await _place(session, u["E"], [(40, 30)])
+    await _place(session, u["D"], [(11.5, 27)])
+    await _place(session, u["F"], [(11.5, 21)])
+    game = await _load_game(session, game_id)
+    d_, a_ = (deployment.find_unit(game, u[n]["unit_id"]) for n in "DA")
+    assert not shooting.reach(game, d_, a_).visible
+    state = (await client.get(f"/games/{game_id}/condemnation")).json()
+    [f] = state["units"]
+    assert [t["name"] for t in f["targets"]] == ["A"]
+    response = await client.post(
+        f"/games/{game_id}/condemnation",
+        json={"unit_id": u["F"]["unit_id"], "target_unit_id": u["A"]["unit_id"]},
+    )
+    assert response.status_code == 200, response.text
+    assert [c["name"] for c in response.json()["condemned"]] == ["A"]
+    assert shooting.detection_range(game, a_) == 18
+    assert shooting.reach(game, d_, a_).visible
+    # Once a phase.
+    response = await client.post(
+        f"/games/{game_id}/condemnation",
+        json={"unit_id": u["F"]["unit_id"], "target_unit_id": u["A"]["unit_id"]},
+    )
+    assert response.status_code == 400

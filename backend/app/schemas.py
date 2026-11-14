@@ -196,7 +196,9 @@ class UnitModelOut(BaseModel):
 
 class UnitIn(BaseModel):
     faction_unit_id: int
-    points: int
+    # Only for a datasheet with no points values (see app/services/
+    # unit_points.py): one with them is priced from them, whatever's given.
+    points: int | None = None
     list_id: int | None = None
     unit_models: list[UnitModelIn] = []
     # An upgrade the whole unit takes (from a detachment its list has taken).
@@ -624,8 +626,10 @@ class SimulationOut(BaseModel):
 
 
 class CombatOut(BaseModel):
-    # (hits: how many were scored - rolled, automatic and extra.)
+    # (hits: how many were scored - rolled, automatic and extra; and how many
+    # with [INDIRECT FIRE] weapons.)
     hits: int = 0
+    indirect_hits: int = 0
     visible: bool
     in_range: bool
     in_engagement_range: bool
@@ -647,6 +651,11 @@ class CombatOut(BaseModel):
     hazardous_models_destroyed: int
     deadly_demise_rolls: list[int]
     deadly_demise_explosions: int
+    # The Miracle dice used in place of rolled dice (Acts of Faith), described.
+    acts_of_faith: list[str] = []
+    # What players chose or re-rolled as it was made (e.g. Artisan, a
+    # re-rolled Attacks roll), described.
+    choices: list[str] = []
     weapon_results: list[WeaponCombatResultOut]
     # Each defending model's wounds left afterwards (0: destroyed), and the
     # hazardous wounds each attacking model took - by unit model id.
@@ -756,6 +765,12 @@ class GameIn(BaseModel):
     # Its dice's seed (see app/services/dice.py): the same seed and the same
     # actions give the same rolls. Left out, one's picked at random.
     seed: int | None = Field(default=None, ge=0, lt=2**63)
+    # Made for machine learning (e.g. by scripts/spread_games.py).
+    ml: bool = False
+
+
+class GameMlIn(BaseModel):
+    ml: bool
 
 
 class GameSecondaryOut(BaseModel):
@@ -825,6 +840,13 @@ class GamePlayerOut(BaseModel):
     primary_manual: str | None = None
     cp: int
     vp: int
+    # Acts of Faith (an ADEPTA SORORITAS army): whether the player has the
+    # army rule, their Miracle dice pool (each dice's value), and their units
+    # that can perform an Act of Faith now (with the ability, not yet this
+    # phase, and a dice in the pool).
+    acts_of_faith: bool = False
+    miracle_dice: list[int] = []
+    act_of_faith_unit_ids: list[int] = []
     secondaries: list[GameSecondaryOut]
     scores: list[GameScoreOut]
     stratagem_uses: list[GameStratagemUseOut]
@@ -838,6 +860,26 @@ class FirstTurnRollOut(BaseModel):
     roll: int
 
 
+class DecisionOptionOut(BaseModel):
+    id: str
+    label: str
+
+
+class AttackDecisionOut(BaseModel):
+    # An attack waiting on a player's decision as it's made (see
+    # app/services/in_game/attack_decisions.py): the attack ("shoot",
+    # "overwatch" or "fight") and its units, whose decision it is, what it's
+    # about and the options (answer with one's id - see AttackDecisionIn).
+    kind: str
+    attacking_unit_id: int
+    target_unit_id: int
+    seat: int
+    type: str
+    unit_id: int
+    prompt: str
+    options: list[DecisionOptionOut]
+
+
 class GameOut(BaseModel):
     id: int
     status: str
@@ -849,6 +891,8 @@ class GameOut(BaseModel):
     phase: str | None
     # Its dice's seed - for playing the game again with the same rolls.
     seed: int
+    # Made for machine learning, not to be played by people.
+    ml: bool = False
     players: list[GamePlayerOut]
     # Its terrain (see GET /terrain-layouts/{id}), if one fits the players'
     # dispositions.
@@ -864,6 +908,9 @@ class GameOut(BaseModel):
     first_turn_rolls: list[FirstTurnRollOut] = []
     # Whose turn it is to pile in, at the start of the fight phase.
     piling_in_seat: int | None = None
+    # An attack waiting on a player's decision (nothing else can happen
+    # until they make it - see POST /games/{id}/attack-decision).
+    pending_decision: AttackDecisionOut | None = None
 
 
 class GameStratagemIn(BaseModel):
@@ -1169,6 +1216,23 @@ class UnitIdIn(BaseModel):
     unit_id: int
 
 
+class UnitRollIn(UnitIdIn):
+    # An Act of Faith for the roll: the value of the Miracle dice from the
+    # owner's pool that substitutes one of its dice (None: all rolled).
+    miracle_die: int | None = None
+
+
+class MiracleIn(BaseModel):
+    # An Act of Faith in an attack: the roll a Miracle dice substitutes the
+    # first die of - "hit", "wound" or "damage" for the attacking unit,
+    # "save" for the defending one - the value of that dice in the pool, and
+    # optionally the weapon whose roll it is (by weapon id; otherwise the
+    # first such roll of any weapon).
+    roll: str
+    value: int
+    weapon_id: int | None = None
+
+
 class MovementModelOut(BaseModel):
     unit_model_id: int
     # Its Movement characteristic, in inches.
@@ -1317,18 +1381,34 @@ class ShootIn(BaseModel):
     # A transport's Firing Deck weapons (embarked models' weapons, by weapon
     # id): each fired by the embarked models carrying it, up to its limit.
     firing_deck_weapon_ids: list[int] = []
+    # The attacking unit's Act of Faith (a Hit, Wound or Damage roll) - see
+    # MiracleIn. (The target's, for a Saving throw, is its player's decision
+    # as the attack's made - see AttackDecisionOut.)
+    miracle: MiracleIn | None = None
+    # Miracle dice discarded as the unit's selected to shoot or fight, for
+    # its abilities: {ability name: the dice's value} (e.g. Righteous
+    # Repugnance - see MiracleDicePlayerOut.selection_discards).
+    miracle_discards: dict[str, int] = {}
+
+
+class AttackDecisionIn(BaseModel):
+    seat: int
+    choice: str
 
 
 class ShootOut(BaseModel):
     # What the battlefield gave the calculator, and its result - and the
     # models it destroyed (the target's, or the shooters' own, e.g. to
     # Hazardous), by unit model id: taken off the battlefield.
-    in_cover: bool
-    advanced: bool
-    remained_stationary: bool
-    moved_less_than_3: bool
-    combat: CombatOut
+    # Or, if the attack's waiting on the defender's decision, `pending` (and
+    # no result yet - the game's as it was before the attack).
+    in_cover: bool = False
+    advanced: bool = False
+    remained_stationary: bool = False
+    moved_less_than_3: bool = False
+    combat: CombatOut | None = None
     destroyed_unit_model_ids: list[int] = []
+    pending: AttackDecisionOut | None = None
 
 
 class SightBubbleOut(BaseModel):
@@ -1454,14 +1534,19 @@ class RoundStartRuleOut(BaseModel):
     # It needs the player to decide something (it has options, or its text
     # gives them a choice).
     decision: bool = False
+    # A detachment rule giving an army rule (faction_ability_id) one more
+    # choice (e.g. Paragons of Terror): its name - see RuleChoiceIn.rule.
+    choice_rule: str | None = None
 
 
 class RuleChoiceIn(BaseModel):
     # A player's option for one of their army rules this battle round (None:
-    # none).
+    # none) - or, with `rule`, a detachment rule's extra option for it (e.g.
+    # Paragons of Terror - see RoundStartRuleOut.choice_rule).
     seat: Literal[1, 2]
     faction_ability_id: int
     option: str | None = None
+    rule: str | None = None
 
 
 class RoundStartPlayerOut(BaseModel):
@@ -1567,6 +1652,9 @@ class FightIn(ShootIn):
     # Abilities the unit uses as it fights (e.g. Banner of Macragge's +1 A
     # and S - see FightUnitOut.abilities).
     abilities: list[str] = []
+    # Righteous Rage: the values of the Miracle dice discarded as it's
+    # selected to fight (up to 3 - see GET /games/{id}/miracle-dice).
+    righteous_rage: list[int] = []
 
 
 class SplitCombatOut(BaseModel):
@@ -1580,11 +1668,22 @@ class FightResultOut(BaseModel):
     # The calculator's result, and the models it destroyed (taken off the
     # battlefield) - against the target, and any other targets it split its
     # attacks between (`split_combats`).
-    charged: bool
-    fights_first: bool
-    combat: CombatOut
+    # (Or, as ShootOut, `pending`.)
+    charged: bool = False
+    fights_first: bool = False
+    combat: CombatOut | None = None
     split_combats: list[SplitCombatOut] = []
     destroyed_unit_model_ids: list[int] = []
+    pending: AttackDecisionOut | None = None
+
+
+class AttackDecisionResultOut(BaseModel):
+    # The attack, made with the decision: its result (`shot` - shooting or
+    # Fire Overwatch - or `fight`), or the next decision it waits on (their
+    # `pending`).
+    kind: str
+    shot: ShootOut | None = None
+    fight: FightResultOut | None = None
 
 
 class ReachModelIn(BaseModel):
@@ -1636,6 +1735,35 @@ class FormationGrantOut(BaseModel):
     targets: list["UnitIdNameOut"] = []
 
 
+class FormationSplitOut(BaseModel):
+    # A transport that can split one of its player's units in two (e.g. an
+    # Immolator - see app/services/in_game/unit_splits.py): the units it
+    # could, or the one it did (`unit_id`: the original half, `new_unit_id`:
+    # the new one - one of which must start embarked in it), and which can
+    # use its Cherub ability (if it has one).
+    transport_unit_id: int
+    transport_name: str
+    unit_id: int | None = None
+    new_unit_id: int | None = None
+    cherub_unit_id: int | None = None
+    candidates: list["SplitCandidateOut"] = []
+
+
+class SplitModelOut(BaseModel):
+    unit_model_id: int
+    name: str
+    weapons: list[str] = []
+
+
+class SplitCandidateOut(BaseModel):
+    # A unit a transport could split: its models that can be picked for the
+    # new unit (not its CHARACTER models), and how many to pick.
+    unit_id: int
+    name: str
+    models: list[SplitModelOut] = []
+    sizes: list[int] = []
+
+
 class FormationPlayerOut(BaseModel):
     seat: int
     user_name: str
@@ -1645,6 +1773,7 @@ class FormationPlayerOut(BaseModel):
     reserves_limit: int
     units: list[FormationUnitOut]
     grants: list[FormationGrantOut] = []
+    splits: list[FormationSplitOut] = []
 
 
 class FormationGrantIn(BaseModel):
@@ -1653,6 +1782,24 @@ class FormationGrantIn(BaseModel):
     ability: str
     # The unit given the ability - None: none.
     unit_id: int | None = None
+
+
+class FormationSplitIn(BaseModel):
+    # The transport splits the unit (`cherub_to_new`: the new half, not the
+    # original, can use its Cherub ability).
+    seat: Literal[1, 2]
+    transport_unit_id: int
+    unit_id: int
+    cherub_to_new: bool = False
+    # The models that form the new unit (by default, the second half), and
+    # whether it starts embarked in the transport.
+    unit_model_ids: list[int] | None = None
+    embark: bool = False
+
+
+class FormationUnsplitIn(BaseModel):
+    seat: Literal[1, 2]
+    unit_id: int
 
 
 class FormationsOut(BaseModel):
@@ -1899,7 +2046,8 @@ class ReanimationUnitOut(BaseModel):
     # where to start those still to be set up (none once they are).
     unit_id: int
     name: str
-    roll: int
+    # (None: returned by another rule - e.g. Sacred Healing.)
+    roll: int | None
     healed: int
     returned: int
     to_place: list[ModelPositionOut] = []
@@ -2022,6 +2170,8 @@ class BattleShockTestOut(BaseModel):
     passed: bool | None = None
     # Mortal wounds it suffered for failing (e.g. "Delirium: D3 rolled 2").
     mortal_wounds: str | None = None
+    # The dice it first rolled, if it re-rolled them (e.g. Wretched Thralls).
+    rerolled: list[int] = []
 
 
 class BattleShockUnitOut(BaseModel):
@@ -2041,9 +2191,139 @@ class BattleShockOut(BaseModel):
     insane_bravery: dict[int, str | None] = {}
 
 
+class HagiomnifexUnitOut(BaseModel):
+    # A unit with Hagiomnifex: its ability in play this phase (if one was
+    # selected), whether it can select one now (or why not), and its options.
+    unit_id: int
+    name: str
+    seat: int
+    active: str | None = None
+    reason: str | None = None
+    abilities: list[str] = []
+
+
+class SacredHealingIn(BaseModel):
+    # The unit (led by a Hospitaller), and the value of the Miracle dice to
+    # discard to return up to D3+1 models instead of 1 (None: don't).
+    unit_id: int
+    discard: int | None = None
+
+
+class HagiomnifexIn(BaseModel):
+    unit_id: int
+    ability: str
+
+
+class CondemnationUnitOut(BaseModel):
+    # A unit with Condemnatory Psalms (Chorus of Condemnation): the enemy
+    # units it could condemn now (or why none), and those condemned.
+    unit_id: int
+    name: str
+    reason: str | None = None
+    targets: list[UnitIdNameOut] = []
+
+
+class JudgementOut(BaseModel):
+    # Judged for Execution: the units with it (the enemy units each could
+    # judge now, or why none), and the enemy units judged now.
+    units: list[CondemnationUnitOut] = []
+    judged: list[UnitIdNameOut] = []
+
+
+class CondemnationOut(BaseModel):
+    units: list[CondemnationUnitOut] = []
+    # The enemy units condemned now (+3" detection range).
+    condemned: list[UnitIdNameOut] = []
+
+
+class CondemnIn(BaseModel):
+    unit_id: int
+    target_unit_id: int
+
+
+class ScentingFearOut(BaseModel):
+    # Scenting Fear (see app/seeds/factions/chaos_knights/scenting_fear.py):
+    # the player who can use it now (None: no one), why not if they have it
+    # and can't, the enemy units they could select, and the units selected
+    # with it now (+6" detection range).
+    seat: int | None = None
+    reason: str | None = None
+    targets: list[UnitIdNameOut] = []
+    scented: list[UnitIdNameOut] = []
+
+
+class ScentingFearIn(BaseModel):
+    seat: int
+    target_unit_id: int
+
+
+class SacredHealingUnitOut(BaseModel):
+    # A unit that can use Sacred Healing now, and how many of its models
+    # are destroyed (that it could return).
+    unit_id: int
+    name: str
+    destroyed: int
+
+
+class MiracleOfferOut(BaseModel):
+    # A rule the player can use now if they choose (e.g. Psalm of Righteous
+    # Judgement, for the enemy unit just destroyed).
+    id: int
+    rule: str
+    unit_name: str | None = None
+
+
+class MiracleUseOut(BaseModel):
+    # A rule that discarded or re-rolled Miracle dice this phase.
+    rule: str
+    removed: list[int]
+    added: list[int]
+
+
+class MiracleDicePlayerOut(BaseModel):
+    # An Adepta Sororitas player's Miracle dice now: the pool, and the rules
+    # that discard or re-roll them they can use now - the Manual of Saint
+    # Griselda (or why not, if they have it), the Chaplet of Sacrifice (how
+    # many it can re-roll, or why none), open offers, and the units that can
+    # discard dice for Righteous Rage as they fight (by unit id: at most how
+    # many).
+    seat: int
+    pool: list[int]
+    manual: bool = False
+    manual_reason: str | None = None
+    chaplet: int = 0
+    chaplet_reason: str | None = None
+    offers: list[MiracleOfferOut] = []
+    righteous_rage: dict[int, int] = {}
+    # Its units' abilities that can discard a Miracle dice as they're
+    # selected to shoot or fight now (by unit id), and its units that can use
+    # Sacred Healing now (by unit id: how many destroyed models it could
+    # return).
+    selection_discards: dict[int, list[str]] = {}
+    sacred_healing: list[SacredHealingUnitOut] = []
+    used: list[MiracleUseOut] = []
+
+
+class MiracleDiceIn(BaseModel):
+    # The values of the Miracle dice to discard (the Manual of Saint Griselda)
+    # or re-roll (the Chaplet of Sacrifice).
+    seat: int
+    values: list[int]
+
+
+class MiracleOfferIn(BaseModel):
+    # Takes an offer, discarding the Miracle dice of `value` - or declines it
+    # (`value` None).
+    seat: int
+    offer_id: int
+    value: int | None = None
+
+
 class BattleShockTakeIn(BaseModel):
     # Take the test with Insane Bravery (passed automatically, for its CP)?
     insane_bravery: bool = False
+    # An Act of Faith: the value of the Miracle dice that's its first die.
+    miracle_die: int | None = None
 
 
 class BattleShockRequireIn(BaseModel):

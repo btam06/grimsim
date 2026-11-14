@@ -6,6 +6,7 @@ from app.combat_rules.conditions import (
     ANTI_FLY_2,
     ANTI_FLY_4,
     ANTI_INFANTRY_2,
+    ANTI_PSYKER_2,
     ANTI_INFANTRY_3,
     ANTI_INFANTRY_4,
     ANTI_INFANTRY_5,
@@ -83,6 +84,12 @@ ENTRIES = [
         [PLUS_ONE_STRENGTH],
     ),
     (
+        "+1 Attacks",
+        "Add 1 to this weapon's Attacks characteristic.",
+        [PRE_WEAPON],
+        [ADD_EXTRA_ATTACK],
+    ),
+    (
         "+2 Attacks",
         "Add 2 to this weapon's Attacks characteristic.",
         [PRE_WEAPON],
@@ -98,6 +105,12 @@ ENTRIES = [
         "Anti-Fly 4+",
         "Against a defending unit that contains a FLY model, a wound roll of 4+ is a critical wound.",
         [ANTI_FLY_4],
+        [FORCE_CRITICAL_WOUND],
+    ),
+    (
+        "Anti-Psyker 2+",
+        "Against a defending unit that contains a PSYKER model, a wound roll of 2+ is a critical wound.",
+        [ANTI_PSYKER_2],
         [FORCE_CRITICAL_WOUND],
     ),
     (

@@ -589,3 +589,14 @@ async def test_combat_endpoint_fires_a_selected_enhancement_weapon(
     # Not the attacking unit's.
     request["selected_enhancement_weapon_ids"] = [9999]
     assert (await client.post("/combat", json=request)).status_code == 400
+
+
+async def test_an_upgrade_can_be_taken_by_several_units(client: AsyncClient, army):
+    # (Unlike an enhancement - e.g. Snarling Rivalry on each EXECUTIONER.)
+    for _ in range(2):
+        response = await _unit(
+            client, army["faction_unit"], army["list"], [(army["trooper"], None)],
+            upgrade_id=army["drill"],
+        )
+        assert response.status_code == 201, response.text
+    assert await _available_upgrades(client, army, "trooper") == {"Drill"}

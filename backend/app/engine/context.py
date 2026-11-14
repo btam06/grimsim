@@ -47,6 +47,11 @@ class Live:
 
     def restore(self, snapshot: state.Game) -> None:
         self.game = snapshot
+        # (Units split since put back together, in its catalog - see
+        # app/services/in_game/unit_splits.py.)
+        from app.services.in_game import unit_splits
+
+        unit_splits.sync(snapshot, self.catalog)
         if _current.get() is self:
             dice.bind(snapshot)
             state.playing(snapshot)
@@ -113,6 +118,12 @@ def begin_request(changes: bool) -> Request:
     _request.set(request)
     bind(None)
     return request
+
+
+def changing() -> bool:
+    # Whether the request being handled (if any) is one that changes things.
+    request = _request.get()
+    return request is not None and request.changes
 
 
 def track(live: Live) -> None:

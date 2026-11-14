@@ -144,3 +144,24 @@ def test_a_model_as_a_policy(tmp_path):
     assert 0 <= policy(decision, random.Random(0)) < 5
     sampled = ModelPolicy(str(tmp_path / "model.pt"), greedy=False)
     assert {sampled(decision, random.Random(i)) for i in range(30)} <= set(range(5))
+
+
+def test_diagnose_rows_make_evaluates_result():
+    from ml.diagnose import result
+
+    def row(seed, seat, vp, end="terminated", side_seat=None):
+        return {"seed": seed, "save": "s.json", "end": end, "policy_seat": seat,
+                "final_vp": {"1": vp[0], "2": vp[1]}, "steps": 10, "seconds": 2.0,
+                **({"seat": side_seat} if side_seat else {})}
+
+    rows = [
+        row(0, 1, (50, 40), side_seat=1), row(0, 1, (50, 40), side_seat=2),  # won
+        row(1, 2, (50, 40), side_seat=1), row(1, 2, (50, 40), side_seat=2),  # lost
+        row(2, 1, (30, 30), side_seat=1), row(2, 1, (30, 30), side_seat=2),  # drawn
+        row(3, 2, (10, 20), end="truncated"),  # unfinished: one row
+    ]
+    summary = result(rows)
+    assert [g.seed for g in summary.games] == [0, 1, 2, 3]
+    assert [g.outcome for g in summary.games] == ["win", "loss", "draw", "unfinished"]
+    assert summary.win_rate == 0.5
+    assert summary.vp_difference == (10 - 10 + 0 + 10) / 4

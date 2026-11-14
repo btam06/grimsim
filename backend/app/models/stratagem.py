@@ -180,6 +180,12 @@ STRATAGEM_GAME_ACTIONS = (
     "counteroffensive",
     "heroic_intervention",
     "command_reroll",
+    # Adepta Sororitas (see app/seeds/factions/adepta_sororitas/miracle_rules.py).
+    "divine_intervention",
+    # Used on a unit within range of an objective marker its player controls:
+    # that one's secured (e.g. Claimed for the Dark Gods - see
+    # app/services/in_game/stratagem_actions.py).
+    "claim_objective",
 )
 # Those whose target is one of the player's units.
 UNIT_TARGET_ACTIONS = (
@@ -196,6 +202,9 @@ UNIT_TARGET_ACTIONS = (
     "counteroffensive",
     "heroic_intervention",
     "command_reroll",
+    # Adepta Sororitas (see app/seeds/factions/adepta_sororitas/miracle_rules.py).
+    "divine_intervention",
+    "claim_objective",
 )
 # Those that also target something else, picked from the unit's choices (an
 # objective, a transport, an enemy unit, a model, a mode - see
@@ -209,6 +218,9 @@ CHOICE_TARGET_ACTIONS = (
     "epic_challenge",
     "heroic_intervention",
     "command_reroll",
+    # Adepta Sororitas (see app/seeds/factions/adepta_sororitas/miracle_rules.py).
+    "divine_intervention",
+    "claim_objective",
 )
 
 

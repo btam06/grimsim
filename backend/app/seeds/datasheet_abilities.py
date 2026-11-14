@@ -306,6 +306,8 @@ COMBINED = (
     "ALWAYS_ACTIVE_OPTIONS",
     "CONDITIONAL_LONE_OPERATIVE",
     "WARGEAR_WOUNDS",
+    "WARGEAR_CHARACTERISTICS",
+    "FIGHTS_ON_DEATH",
     "SECURES_OBJECTIVES",
     "PSYKER_LEVELS",
     "PSYCHIC_ABILITIES",
@@ -329,6 +331,7 @@ COMBINED = (
     "TURN_END_RESERVES",
     "BATTLE_SHOCK_AURAS",
     "AFTER_SHOOTING_BATTLE_SHOCK",
+    "AFTER_SHOOTING_INDIRECT_ONLY",
     "ELIGIBLE_AFTER",
     "CANNOT_BE_WARLORD",
     "DESPERATE_ESCAPE_REROLLS",
@@ -360,6 +363,8 @@ def _combine() -> dict:
                 "ALWAYS_ACTIVE_OPTIONS": {},
                 "CONDITIONAL_LONE_OPERATIVE": {},
                 "WARGEAR_WOUNDS": {},
+                "WARGEAR_CHARACTERISTICS": {},
+                "FIGHTS_ON_DEATH": {},
                 "SECURES_OBJECTIVES": {},
                 "PSYKER_LEVELS": {},
                 "PSYCHIC_ABILITIES": {},
@@ -383,6 +388,7 @@ def _combine() -> dict:
                 "TURN_END_RESERVES": {},
                 "BATTLE_SHOCK_AURAS": {},
                 "AFTER_SHOOTING_BATTLE_SHOCK": {},
+                "AFTER_SHOOTING_INDIRECT_ONLY": set(),
                 "ELIGIBLE_AFTER": {},
                 "CANNOT_BE_WARLORD": set(),
                 "DESPERATE_ESCAPE_REROLLS": set(),
@@ -408,6 +414,8 @@ def _combine() -> dict:
                     ("ALWAYS_ACTIVE_OPTIONS", {}),
                     ("CONDITIONAL_LONE_OPERATIVE", {}),
                     ("WARGEAR_WOUNDS", {}),
+                    ("WARGEAR_CHARACTERISTICS", {}),
+                    ("FIGHTS_ON_DEATH", {}),
                     ("SECURES_OBJECTIVES", {}),
                     ("PSYKER_LEVELS", {}),
                     ("PSYCHIC_ABILITIES", {}),
@@ -431,6 +439,7 @@ def _combine() -> dict:
                     ("TURN_END_RESERVES", {}),
                     ("BATTLE_SHOCK_AURAS", {}),
                     ("AFTER_SHOOTING_BATTLE_SHOCK", {}),
+                    ("AFTER_SHOOTING_INDIRECT_ONLY", set()),
                     ("ELIGIBLE_AFTER", {}),
                     ("CANNOT_BE_WARLORD", set()),
                     ("DESPERATE_ESCAPE_REROLLS", set()),
@@ -491,6 +500,12 @@ def _combine() -> dict:
             # Storm Shield: +1), by wargear name.
             "WARGEAR_WOUNDS": {
                 k: v for source in sources for k, v in source["WARGEAR_WOUNDS"].items()
+            },
+            "WARGEAR_CHARACTERISTICS": {
+                k: v for source in sources for k, v in source["WARGEAR_CHARACTERISTICS"].items()
+            },
+            "FIGHTS_ON_DEATH": {
+                k: v for source in sources for k, v in source["FIGHTS_ON_DEATH"].items()
             },
             # Abilities that secure the objectives their unit is controlling
             # at the end of one of their player's phases: {name: phase}.
@@ -585,6 +600,9 @@ def _combine() -> dict:
             },
             "AFTER_SHOOTING_BATTLE_SHOCK": {
                 k: v for source in sources for k, v in source["AFTER_SHOOTING_BATTLE_SHOCK"].items()
+            },
+            "AFTER_SHOOTING_INDIRECT_ONLY": {
+                n for source in sources for n in source["AFTER_SHOOTING_INDIRECT_ONLY"]
             },
             "ELIGIBLE_AFTER": {
                 k: v for source in sources for k, v in source["ELIGIBLE_AFTER"].items()

@@ -8,6 +8,7 @@ from app.db import get_session
 from app.models import (
     ArmyList,
     Detachment,
+    DetachmentRule,
     Faction,
     FactionUnit,
     ListDisposition,
@@ -21,6 +22,7 @@ from app.models import (
 from app.schemas import ArmyListIn, ArmyListOut, ListEligibleOut
 from app.seeds.factions import SUBFACTIONS
 from app.services.list_building import allies as list_building
+from app.services.list_building import enhancements as enhancement_rules
 from app.services.list_building import warlord as warlord_rules
 
 router = APIRouter(prefix="/lists", tags=["lists"])
@@ -36,8 +38,17 @@ def _to_out(army_list: ArmyList) -> ArmyListOut:
         user_id=army_list.owner.id if army_list.owner else None,
         warlord_unit_id=army_list.warlord_unit_id,
         subfaction=army_list.subfaction,
-        disposition_id=army_list.disposition_id,
+        disposition_id=army_list.disposition_id
+        if army_list.disposition_id is not None
+        else _only_disposition(army_list.detachments),
     )
+
+
+def _only_disposition(detachments) -> int | None:
+    # The one disposition the list's detachments offer, if they offer just one
+    # (e.g. Houndpack Lance: Reconnaissance) - it plays with that.
+    offered = {d.id for detachment in detachments for d in detachment.dispositions}
+    return next(iter(offered)) if len(offered) == 1 else None
 
 
 async def _build_owner(session: AsyncSession, user_id: int | None) -> User | None:
@@ -81,7 +92,10 @@ async def _build_detachments(
 def _build_disposition(
     detachments: list[Detachment], disposition_id: int | None
 ) -> ListDisposition | None:
-    # The list's disposition: one its detachments offer.
+    # The list's disposition: one its detachments offer (the only one, if they
+    # offer just one and none's given).
+    if disposition_id is None:
+        disposition_id = _only_disposition(detachments)
     if disposition_id is None:
         return None
     offered = {d.id for detachment in detachments for d in detachment.dispositions}
@@ -93,9 +107,14 @@ def _build_disposition(
 
 
 async def _build_warlord(
-    session: AsyncSession, list_id: int | None, unit_id: int | None
+    session: AsyncSession,
+    list_id: int | None,
+    unit_id: int | None,
+    detachments: list[Detachment] = (),
 ) -> ListWarlord | None:
-    # The list's Warlord: one of its units, a CHARACTER.
+    # The list's Warlord: one of its units, a CHARACTER - its models' own
+    # keyword, or one its list's detachment rules give it (e.g. Houndpack
+    # Alphas: the WAR DOG units selected for it).
     if unit_id is None:
         return None
     unit = (
@@ -111,7 +130,22 @@ async def _build_warlord(
     ).scalar_one_or_none()
     if unit is None or list_id is None or unit.list_id != list_id:
         raise HTTPException(status_code=400, detail="the Warlord must be a unit in this list")
-    if not any(k.name == "CHARACTER" for m in unit.unit_models for k in m.model.keywords):
+    keyword_sets = [{k.name for k in m.model.keywords} for m in unit.unit_models]
+    rules = (
+        (
+            await session.execute(
+                select(DetachmentRule).where(
+                    DetachmentRule.detachment_id.in_([d.id for d in detachments])
+                )
+            )
+        )
+        .scalars()
+        .all()
+        if detachments
+        else []
+    )
+    granted = enhancement_rules.rule_granted_keywords(rules, keyword_sets, unit.selected_rule_ids)
+    if not any("CHARACTER" in own | extra for own, extra in zip(keyword_sets, granted)):
         raise HTTPException(status_code=400, detail="the Warlord must be a CHARACTER")
     return ListWarlord(unit_id=unit.id)
 
@@ -161,7 +195,10 @@ async def _build_subfaction(
 async def list_lists(session: AsyncSession = Depends(get_session)):
     result = await session.execute(
         select(ArmyList)
-        .options(selectinload(ArmyList.detachments), selectinload(ArmyList.owner))
+        .options(
+                selectinload(ArmyList.detachments).selectinload(Detachment.dispositions),
+                selectinload(ArmyList.owner),
+            )
         .order_by(ArmyList.id)
     )
     return [_to_out(army_list) for army_list in result.scalars().all()]
@@ -237,7 +274,10 @@ async def update_list(
     army_list = (
         await session.execute(
             select(ArmyList)
-            .options(selectinload(ArmyList.detachments), selectinload(ArmyList.owner))
+            .options(
+                selectinload(ArmyList.detachments).selectinload(Detachment.dispositions),
+                selectinload(ArmyList.owner),
+            )
             .where(ArmyList.id == list_id)
         )
     ).scalar_one_or_none()
@@ -251,7 +291,7 @@ async def update_list(
     army_list.faction_id = payload.faction_id
     army_list.detachments = detachments
     army_list.owner = await _build_owner(session, payload.user_id)
-    warlord = await _build_warlord(session, list_id, payload.warlord_unit_id)
+    warlord = await _build_warlord(session, list_id, payload.warlord_unit_id, detachments)
     reason = await warlord_rules.warlord_reason(
         session, list_id, payload.warlord_unit_id, chosen_only=True
     )
@@ -275,7 +315,7 @@ async def update_list(
         await session.flush()
         army_list.subfaction_link = subfaction
     disposition = _build_disposition(detachments, payload.disposition_id)
-    if army_list.disposition_id != payload.disposition_id:
+    if army_list.disposition_id != (disposition.disposition_id if disposition else None):
         army_list.disposition_link = None
         await session.flush()
         army_list.disposition_link = disposition

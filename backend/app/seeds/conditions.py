@@ -6,6 +6,7 @@ from app.combat_rules.conditions import (
     ANTI_FLY_2,
     ANTI_FLY_4,
     ANTI_INFANTRY_2,
+    ANTI_PSYKER_2,
     ANTI_INFANTRY_3,
     ANTI_INFANTRY_4,
     ANTI_INFANTRY_5,
@@ -63,6 +64,11 @@ CORE_ENTRIES = [
     (CRITICAL_HIT, "Critical Hit", "The hit roll for this attack was a natural 6."),
     (CRITICAL_WOUND, "Critical Wound", "The wound roll for this attack was a natural 6."),
     (ALWAYS, "Always", "Always applies, regardless of step or roll."),
+    (
+        ANTI_PSYKER_2,
+        "Anti-Psyker 2+",
+        "The wound roll was a 2+ against a defending unit that contains a PSYKER model.",
+    ),
     (
         ANTI_INFANTRY_2,
         "Anti-Infantry 2+",

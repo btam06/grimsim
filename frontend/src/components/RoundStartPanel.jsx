@@ -33,7 +33,9 @@ function RoundStartPanel({ game, onError }) {
   }, [game.id, game.battle_round])
 
   // Picks (or clears, '') a player's option for one of their army rules.
-  const choose = async (seat, abilityId, option) => {
+  // (`rule`: a detachment rule's extra choice for the army rule - e.g.
+  // Paragons of Terror.)
+  const choose = async (seat, abilityId, option, rule = null) => {
     onError(null)
     try {
       setRoundStart(
@@ -41,6 +43,7 @@ function RoundStartPanel({ game, onError }) {
           seat,
           faction_ability_id: abilityId,
           option: option || null,
+          rule,
         })
       )
     } catch (err) {
@@ -83,7 +86,12 @@ function RoundStartPanel({ game, onError }) {
                     ]}
                     choices={{ [rule.faction_ability_id]: rule.chosen ?? '' }}
                     onChange={(choices) =>
-                      choose(player.seat, rule.faction_ability_id, choices[rule.faction_ability_id])
+                      choose(
+                        player.seat,
+                        rule.faction_ability_id,
+                        choices[rule.faction_ability_id],
+                        rule.choice_rule ?? null
+                      )
                     }
                   />
                 )}

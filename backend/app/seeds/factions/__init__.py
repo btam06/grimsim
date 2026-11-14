@@ -298,6 +298,24 @@ END_OF_COMMAND_CP: dict[str, dict] = {
         getattr(faction, "detachment_rules", None), "END_OF_COMMAND_CP", {}
     ).items()
 }
+
+
+def _detachment_configs(name: str) -> dict:
+    # Every faction's detachment_rules.py `name` dict, combined.
+    return {
+        key: config
+        for faction in FACTIONS
+        for key, config in getattr(getattr(faction, "detachment_rules", None), name, {}).items()
+    }
+
+
+# Chaos Knights' (see chaos_knights/detachment_rules.py): extra round-start
+# choices (Paragons of Terror), Objective Control bonuses and a free
+# stratagem (Tyrannical Court), and Battle-shock re-rolls (Wretched Thralls).
+EXTRA_ROUND_CHOICES: dict[str, dict] = _detachment_configs("EXTRA_ROUND_CHOICES")
+OC_BONUSES: dict[str, dict] = _detachment_configs("OC_BONUSES")
+FREE_STRATAGEMS: dict[str, dict] = _detachment_configs("FREE_STRATAGEMS")
+BATTLE_SHOCK_REROLLS: dict[str, dict] = _detachment_configs("BATTLE_SHOCK_REROLLS")
 ELIGIBLE_AFTER: dict[str, dict[str, tuple[str, ...]]] = {
     option_name: eligible
     for faction in FACTIONS

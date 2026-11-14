@@ -193,6 +193,9 @@ export const listGames = () => request('/games')
 export const getGame = (id) => request(`/games/${id}`)
 export const createGame = (payload) =>
   request('/games', { method: 'POST', body: JSON.stringify(payload) })
+// Marks a game as made for machine learning (or not).
+export const setGameMl = (id, ml) =>
+  request(`/games/${id}/ml`, { method: 'PUT', body: JSON.stringify({ ml }) })
 export const deleteGame = (id) => request(`/games/${id}`, { method: 'DELETE' })
 export const startGame = (id) => request(`/games/${id}/start`, { method: 'POST' })
 export const advanceGame = (id) => request(`/games/${id}/advance`, { method: 'POST' })
@@ -296,11 +299,35 @@ export const getTurnRecord = (id) => request(`/games/${id}/turn-record`)
 export const getBattleShock = (id) => request(`/games/${id}/battle-shock`)
 export const requireBattleShockTest = (id, payload) =>
   request(`/games/${id}/battle-shock/test`, { method: 'POST', body: JSON.stringify(payload) })
-export const takeBattleShockTest = (id, testId, insaneBravery) =>
+export const takeBattleShockTest = (id, testId, insaneBravery, miracleDie = null) =>
   request(`/games/${id}/battle-shock/${testId}/take`, {
     method: 'POST',
-    body: JSON.stringify({ insane_bravery: insaneBravery }),
+    body: JSON.stringify({ insane_bravery: insaneBravery, miracle_die: miracleDie }),
   })
+export const getHagiomnifex = (id) => request(`/games/${id}/hagiomnifex`)
+export const selectHagiomnifexAbility = (id, payload) =>
+  request(`/games/${id}/hagiomnifex`, { method: 'POST', body: JSON.stringify(payload) })
+// An attack waiting on a player's decision as it's made (e.g. the defender's
+// Act of Faith for a save): making it makes the attack again with it.
+export const decideAttack = (id, payload) =>
+  request(`/games/${id}/attack-decision`, { method: 'POST', body: JSON.stringify(payload) })
+export const getJudgement = (id) => request(`/games/${id}/judged-for-execution`)
+export const judgeForExecution = (id, payload) =>
+  request(`/games/${id}/judged-for-execution`, { method: 'POST', body: JSON.stringify(payload) })
+export const sacredHealing = (id, payload) =>
+  request(`/games/${id}/sacred-healing`, { method: 'POST', body: JSON.stringify(payload) })
+export const getScentingFear = (id) => request(`/games/${id}/scenting-fear`)
+export const selectScentingFear = (id, payload) =>
+  request(`/games/${id}/scenting-fear`, { method: 'POST', body: JSON.stringify(payload) })
+export const getCondemnation = (id) => request(`/games/${id}/condemnation`)
+export const condemnUnit = (id, payload) =>
+  request(`/games/${id}/condemnation`, { method: 'POST', body: JSON.stringify(payload) })
+export const getMiracleDice = (id) => request(`/games/${id}/miracle-dice`)
+const miracleAction = (path) => (id, payload) =>
+  request(`/games/${id}/miracle-dice/${path}`, { method: 'POST', body: JSON.stringify(payload) })
+export const discardForManual = miracleAction('manual')
+export const rerollWithChaplet = miracleAction('chaplet')
+export const resolvePsalm = miracleAction('psalm')
 export const getCommand = (id) => request(`/games/${id}/command`)
 export const selectCommandObjective = (id, payload) =>
   request(`/games/${id}/command/objective`, { method: 'POST', body: JSON.stringify(payload) })
@@ -314,6 +341,11 @@ export const getReach = (id, payload) =>
 export const getFormations = (id) => request(`/games/${id}/formations`)
 export const grantFormationAbility = (id, payload) =>
   request(`/games/${id}/formations/grant`, { method: 'POST', body: JSON.stringify(payload) })
+// A transport (e.g. an Immolator) splits a unit in two, or it's put back.
+export const splitUnit = (id, payload) =>
+  request(`/games/${id}/formations/split`, { method: 'POST', body: JSON.stringify(payload) })
+export const unsplitUnit = (id, payload) =>
+  request(`/games/${id}/formations/unsplit`, { method: 'POST', body: JSON.stringify(payload) })
 export const setFormation = (id, payload) =>
   request(`/games/${id}/formations`, { method: 'POST', body: JSON.stringify(payload) })
 export const declareFormations = (id, payload) =>

@@ -57,6 +57,13 @@ print(evaluate(ModelPolicy("ml/runs/first/model.pt"), "saves/1/setup.json",
 
 `ModelPolicy` can also be an opponent, in `--opponent` or `GameEnv(opponent=...)`.
 
+While a run trains, `ml.watch` plays each kept checkpoint against the scripted player as it appears. It writes `ml/data/diagnose-<run>-<update>.jsonl`, which the app's ML page shows, and appends a summary line to `ml/data/<run>-eval.log` and TensorBoard. The games are played once and serve both. It stops after the run's last checkpoint once `ml.ppo` has exited. Start it outside your editor, so an editor restart doesn't kill it:
+
+```bash
+setsid nohup env PYTHONPATH=backend:. ml/.venv/bin/python -m ml.watch ml/runs/<run> \
+    $(cat ml/data/spread.txt) --games 100 --seed 20000 --processes 2 > ml/data/<run>-watch.out 2>&1 &
+```
+
 ## How it works
 
 - **What the model sees** (`backend/app/engine/features.py`): game-wide numbers, one row per unit (yours first), and one row per legal action, each pointing at the units it involves. Attack options include their expected damage.

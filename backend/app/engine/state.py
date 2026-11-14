@@ -255,6 +255,9 @@ class Game(State):
     # rolls it's made so far (see app/services/dice.py).
     rng_seed: int = field(default_factory=dice.new_seed)
     rng_rolls: int = 0
+    # Made for machine learning (e.g. by scripts/spread_games.py), not to be
+    # played by people - the games list marks it.
+    ml: bool = False
     # The last id given to one of its records (see next_id).
     record_ids: int = 0
 
@@ -319,6 +322,12 @@ class Game(State):
     # Other abilities used, where how often they can be counts - e.g. My Will
     # Be Done, once a battle round (see app/services/in_game/game.py).
     ability_uses: list['GameAbilityUse'] = field(default_factory=list)
+    # Units split in two as battle formations were declared (see
+    # app/services/in_game/unit_splits.py).
+    unit_splits: list['GameUnitSplit'] = field(default_factory=list)
+    # An attack waiting on a player's decision, if one is (see
+    # GamePendingAttack).
+    pending_attack: 'GamePendingAttack | None' = None
     # Resurrection Orbs used: declared during a phase, resolved at its end
     # (see app/seeds/factions/necrons/reanimation.py).
     resurrections: list['GameResurrection'] = field(default_factory=list)
@@ -390,6 +399,28 @@ class Game(State):
     rule_choices: list['GameRuleChoice'] = field(default_factory=list)
     # Which units have shot in shooting phases, and at what.
     unit_shots: list['GameUnitShot'] = field(default_factory=list)
+    # Miracle dice gained and Acts of Faith performed (the Adepta Sororitas'
+    # army rule - see app/seeds/factions/adepta_sororitas/acts_of_faith.py).
+    miracle_gains: list['GameMiracleGain'] = field(default_factory=list)
+    acts_of_faith: list['GameActOfFaith'] = field(default_factory=list)
+    # Rules that discard or re-roll Miracle dice (e.g. Chaplet of
+    # Sacrifice), offers to (Psalm of Righteous Judgement), and Divine
+    # Interventions.
+    miracle_uses: list['GameMiracleUse'] = field(default_factory=list)
+    miracle_offers: list['GameMiracleOffer'] = field(default_factory=list)
+    divine_interventions: list['GameDivineIntervention'] = field(default_factory=list)
+    # Units condemned (Condemnatory Psalms - see
+    # app/seeds/factions/adepta_sororitas/condemnation.py).
+    condemnations: list['GameCondemnation'] = field(default_factory=list)
+    # Enemy units selected with Scenting Fear (see
+    # app/seeds/factions/chaos_knights/scenting_fear.py).
+    scented: list['GameScentingFear'] = field(default_factory=list)
+    # Hagiomnifex abilities selected (see
+    # app/seeds/factions/adepta_sororitas/hagiomnifex.py).
+    hagiomnifex_uses: list['GameHagiomnifexUse'] = field(default_factory=list)
+    # Units Judged for Execution (see
+    # app/seeds/factions/adepta_sororitas/unit_abilities.py).
+    judgements: list['GameJudgement'] = field(default_factory=list)
 
     @property
     def layout(self) -> "TerrainLayout | None":
@@ -409,6 +440,9 @@ class GamePlayer(State):
     disposition_id: int | None = None
     primary_mission_id: int | None = None
     cp: int = 0
+    # Its Miracle dice pool: each die's value (see
+    # app/seeds/factions/adepta_sororitas/acts_of_faith.py).
+    miracle_dice: list[int] = field(default_factory=list)
 
     user: User | None = None
     army_list: ArmyList | None = None
@@ -666,6 +700,9 @@ class GameRuleChoice(State):
     seat: int = None  # type: ignore[assignment]
     faction_ability_id: int = None  # type: ignore[assignment]
     option: str = None  # type: ignore[assignment]
+    # A detachment rule's extra choice for the ability (e.g. Paragons of
+    # Terror: one more Dread ability) - None for the ability's own.
+    rule: str | None = None
 
 
 @dataclass(eq=False, kw_only=True)
@@ -683,6 +720,10 @@ class GameSecuredObjective(State):
     game_id: int = None  # type: ignore[assignment]
     objective_id: int = None  # type: ignore[assignment]
     seat: int = None  # type: ignore[assignment]
+    # Its holder's Level of Control over it, at least (e.g. Claimed for the
+    # Dark Gods: 5) - their opponent needs more than that, and than the
+    # holder's OC, to break it. None: just the holder's OC.
+    level: int | None = None
 
 
 @dataclass(eq=False, kw_only=True)
@@ -954,6 +995,46 @@ class GameAbilityUse(State):
     ability: str = None  # type: ignore[assignment]
     battle_round: int = None  # type: ignore[assignment]
     turn_seat: int = None  # type: ignore[assignment]
+    # (For an ability used once a phase, e.g. Artisan.)
+    phase: str | None = None
+
+
+@dataclass(eq=False, kw_only=True)
+class GameUnitSplit(State):
+    # A unit split in two at the start of the Declare Battle Formations step
+    # (e.g. by an Immolator): its models `unit_model_ids` (and `points` of its
+    # points) form a new unit, `new_unit_id`, in the game's catalog. One of
+    # the two must start embarked in `transport_unit_id`. Only one can use
+    # its Cherub ability: `cherub_unit_id`'s.
+    id: int = field(default_factory=next_id)
+    game_id: int = None  # type: ignore[assignment]
+    seat: int = None  # type: ignore[assignment]
+    unit_id: int = None  # type: ignore[assignment]
+    new_unit_id: int = None  # type: ignore[assignment]
+    transport_unit_id: int = None  # type: ignore[assignment]
+    unit_model_ids: list = field(default_factory=list)
+    points: int = 0
+    cherub_unit_id: int | None = None
+
+
+@dataclass(eq=False, kw_only=True)
+class GamePendingAttack(State):
+    # An attack waiting on a player's decision as it's made (e.g. the
+    # defender's Act of Faith for a saving throw - see
+    # app/services/in_game/attack_decisions.py): the game is as it was before
+    # the attack; once they decide, it's made again from the start - with
+    # the same dice (its rolls start again at `rng_rolls`) and the decisions
+    # made so far, `answers` - up to the next decision, or the end.
+    id: int = field(default_factory=next_id)
+    game_id: int = None  # type: ignore[assignment]
+    # "shoot", "overwatch" or "fight", and its request (as JSON).
+    kind: str = None  # type: ignore[assignment]
+    payload: dict = field(default_factory=dict)
+    rng_rolls: int = 0
+    answers: list = field(default_factory=list)
+    # The decision waited on: its seat, type, prompt and options (see
+    # attack_decisions.Decisions).
+    decision: dict = field(default_factory=dict)
 
 
 @dataclass(eq=False, kw_only=True)
@@ -976,6 +1057,10 @@ class GameUnitEffect(State):
     # Its own melee weapons' Weapon Skill worsened by this much (e.g.
     # Data-spike).
     melee_skill: int = 0
+    # It can't have the Benefit of Cover (e.g. Purge and Cleanse).
+    no_cover: bool = False
+    # If it only lasts until the end of a phase (of turn `until_turn`): which.
+    phase: str | None = None
     # When it started, and the last turn it lasts (see
     # app/services/in_game/unit_effects.py turn_index).
     battle_round: int = None  # type: ignore[assignment]
@@ -1066,9 +1151,136 @@ class GameBattleShockTest(State):
     second_die: int | None = None
     insane_bravery: bool = False
     passed: bool | None = None
+    # The dice it was first rolled with, if it was re-rolled (e.g. Wretched
+    # Thralls: a failed test, for a DAMNED unit).
+    rerolled: list[int] = field(default_factory=list)
     # Mortal wounds it suffered for failing (e.g. Delirium), if any (its own
     # table: see GameBattleShockWounds).
     wounds: GameBattleShockWounds | None = None
+
+
+@dataclass(eq=False, kw_only=True)
+class GameMiracleGain(State):
+    # A Miracle dice a player gained: when, why (the start of a turn, or a
+    # unit of theirs destroyed - `unit_id`), and its value.
+    id: int = field(default_factory=next_id)
+    seat: int = None  # type: ignore[assignment]
+    battle_round: int = None  # type: ignore[assignment]
+    turn_seat: int | None = None
+    reason: str = None  # type: ignore[assignment]
+    unit_id: int | None = None
+    value: int = None  # type: ignore[assignment]
+
+
+@dataclass(eq=False, kw_only=True)
+class GameActOfFaith(State):
+    # A unit performed an Act of Faith: when (once a phase), the roll a
+    # Miracle dice substituted a die of, and that dice's value.
+    id: int = field(default_factory=next_id)
+    seat: int = None  # type: ignore[assignment]
+    unit_id: int = None  # type: ignore[assignment]
+    battle_round: int = None  # type: ignore[assignment]
+    turn_seat: int | None = None
+    phase: str | None = None
+    roll: str = None  # type: ignore[assignment]
+    value: int = None  # type: ignore[assignment]
+
+
+@dataclass(eq=False, kw_only=True)
+class GameMiracleUse(State):
+    # A rule that discarded or re-rolled Miracle dice (see
+    # app/seeds/factions/adepta_sororitas/miracle_rules.py): which (`rule`),
+    # whose, when, the unit whose rule it is, and the dice it took from the
+    # pool and put into it.
+    id: int = field(default_factory=next_id)
+    seat: int = None  # type: ignore[assignment]
+    rule: str = None  # type: ignore[assignment]
+    unit_id: int | None = None
+    battle_round: int = None  # type: ignore[assignment]
+    turn_seat: int | None = None
+    phase: str | None = None
+    removed: list[int] = field(default_factory=list)
+    added: list[int] = field(default_factory=list)
+
+
+@dataclass(eq=False, kw_only=True)
+class GameMiracleOffer(State):
+    # A rule its player can use now, if they choose (e.g. Psalm of Righteous
+    # Judgement, an enemy unit just destroyed): until it's taken or declined
+    # (`resolved`), or the phase ends.
+    id: int = field(default_factory=next_id)
+    seat: int = None  # type: ignore[assignment]
+    rule: str = None  # type: ignore[assignment]
+    # What set it off (e.g. the enemy unit destroyed).
+    unit_id: int | None = None
+    battle_round: int = None  # type: ignore[assignment]
+    turn_seat: int | None = None
+    phase: str | None = None
+    resolved: bool = False
+
+
+@dataclass(eq=False, kw_only=True)
+class GameJudgement(State):
+    # A unit used Judged for Execution on an enemy unit (`target_unit_id`):
+    # in its player's turn `battle_round`/`turn_seat`.
+    id: int = field(default_factory=next_id)
+    seat: int = None  # type: ignore[assignment]
+    unit_id: int = None  # type: ignore[assignment]
+    target_unit_id: int = None  # type: ignore[assignment]
+    battle_round: int = None  # type: ignore[assignment]
+    turn_seat: int | None = None
+
+
+@dataclass(eq=False, kw_only=True)
+class GameHagiomnifexUse(State):
+    # A unit's Hagiomnifex used at the start of a phase: the ability selected.
+    id: int = field(default_factory=next_id)
+    seat: int = None  # type: ignore[assignment]
+    unit_id: int = None  # type: ignore[assignment]
+    ability: str = None  # type: ignore[assignment]
+    battle_round: int = None  # type: ignore[assignment]
+    turn_seat: int | None = None
+    phase: str | None = None
+
+
+@dataclass(eq=False, kw_only=True)
+class GameCondemnation(State):
+    # A unit used Condemnatory Psalms on an enemy unit (`target_unit_id`).
+    id: int = field(default_factory=next_id)
+    seat: int = None  # type: ignore[assignment]
+    unit_id: int = None  # type: ignore[assignment]
+    target_unit_id: int = None  # type: ignore[assignment]
+    battle_round: int = None  # type: ignore[assignment]
+    turn_seat: int | None = None
+    phase: str | None = None
+
+
+@dataclass(eq=False, kw_only=True)
+class GameScentingFear(State):
+    # The player selected an enemy unit with Scenting Fear.
+    id: int = field(default_factory=next_id)
+    seat: int = None  # type: ignore[assignment]
+    target_unit_id: int = None  # type: ignore[assignment]
+    battle_round: int = None  # type: ignore[assignment]
+    turn_seat: int | None = None
+    phase: str | None = None
+
+
+@dataclass(eq=False, kw_only=True)
+class GameDivineIntervention(State):
+    # Divine Intervention on a CHARACTER model just destroyed: the Miracle
+    # dice discarded, and at the end of the phase its D3 and where it was set
+    # up (`returned`).
+    id: int = field(default_factory=next_id)
+    seat: int = None  # type: ignore[assignment]
+    unit_id: int = None  # type: ignore[assignment]
+    unit_model_id: int = None  # type: ignore[assignment]
+    battle_round: int = None  # type: ignore[assignment]
+    turn_seat: int | None = None
+    phase: str | None = None
+    discarded: list[int] = field(default_factory=list)
+    roll: int | None = None
+    returned: bool = False
 
 
 @dataclass(eq=False, kw_only=True)
@@ -1089,6 +1301,10 @@ class GameModelDestroyed(State):
     unit_model_id: int = None  # type: ignore[assignment]
     destroyed_by_unit_id: int | None = None
     unit_destroyed: bool = False
+    # Where it was when it was destroyed (e.g. for Divine Intervention).
+    x: float | None = None
+    y: float | None = None
+    rotation: float = 0
     # Its unit was destroyed by a unit within range of an objective then (its
     # own table: see GameKillOnObjective).
     on_objective: GameKillOnObjective | None = None

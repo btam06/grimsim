@@ -625,10 +625,15 @@ async def _prepared(
     attacker_wounds: dict[int, int] | None = None,
     firing_deck: list[tuple[int, int, int]] | None = None,
     attacker_extra_rules: list[Rule] | None = None,
+    defender_extra_rules: list[Rule] | None = None,
     defender_model_rules: dict[int, list[Rule]] | None = None,
     attack_limits: dict | None = None,
     hazards_rolled: set | None = None,
     precision_models: set | None = None,
+    attacker_miracle=None,
+    defender_miracle=None,
+    weapon_bonuses=None,
+    decisions=None,
 ) -> tuple:
     # Everything an attack needs to be resolved, once: a function that
     # resolves it (rolling its dice afresh each time), and whether the target
@@ -734,7 +739,9 @@ async def _prepared(
         + list(attacker_extra_rules or []),
         defender_rules=defender_option_rules
         + _datasheet_rules(defender, defender_detachment_rules)
-        + _stratagem_rules(defender_stratagems, "defender"),
+        + _stratagem_rules(defender_stratagems, "defender")
+        # (Rules only a game knows apply - e.g. Hagiomnifex's.)
+        + list(defender_extra_rules or []),
         attacker_options=attacker_options,
         attacker_extra_keywords=attacker_extra_keywords,
         defender_extra_keywords=defender_extra_keywords,
@@ -756,6 +763,10 @@ async def _prepared(
         attack_limits=attack_limits,
         hazards_rolled=hazards_rolled,
         precision_models=precision_models,
+        attacker_miracle=attacker_miracle,
+        defender_miracle=defender_miracle,
+        weapon_bonuses=weapon_bonuses,
+        decisions=decisions,
     )
     return resolve, visible, in_range
 
@@ -768,10 +779,15 @@ async def calculate(
     attacker_wounds: dict[int, int] | None = None,
     firing_deck: list[tuple[int, int, int]] | None = None,
     attacker_extra_rules: list[Rule] | None = None,
+    defender_extra_rules: list[Rule] | None = None,
     defender_model_rules: dict[int, list[Rule]] | None = None,
     attack_limits: dict | None = None,
     hazards_rolled: set | None = None,
     precision_models: set | None = None,
+    attacker_miracle=None,
+    defender_miracle=None,
+    weapon_bonuses=None,
+    decisions=None,
 ) -> CombatOut:
     # Resolves an attack (see app/services/combat.py). See _prepared for
     # what the arguments are.
@@ -783,10 +799,15 @@ async def calculate(
         attacker_wounds=attacker_wounds,
         firing_deck=firing_deck,
         attacker_extra_rules=attacker_extra_rules,
+        defender_extra_rules=defender_extra_rules,
         defender_model_rules=defender_model_rules,
         attack_limits=attack_limits,
         hazards_rolled=hazards_rolled,
         precision_models=precision_models,
+        attacker_miracle=attacker_miracle,
+        defender_miracle=defender_miracle,
+        weapon_bonuses=weapon_bonuses,
+        decisions=decisions,
     )
     result = resolve()
     return CombatOut(
@@ -806,12 +827,15 @@ async def calculate(
         total_damage=result.total_damage,
         models_destroyed=result.models_destroyed,
         hits=result.hits,
+        indirect_hits=result.indirect_hits,
         defending_models_remaining=result.defending_models_remaining,
         hazardous_rolls=result.hazardous_rolls,
         hazardous_wounds=result.hazardous_wounds,
         hazardous_models_destroyed=result.hazardous_models_destroyed,
         deadly_demise_rolls=result.deadly_demise_rolls,
         deadly_demise_explosions=result.deadly_demise_explosions,
+        acts_of_faith=result.acts_of_faith,
+        choices=result.choices,
         weapon_results=[
             WeaponCombatResultOut(
                 name=wr.name,

@@ -98,9 +98,14 @@ def unit_models(unit: Unit) -> list[UnitModel]:
 
 
 def is_infiltrator(unit: Unit) -> bool:
-    # Every model in it has Infiltrators.
+    # Every model in it has Infiltrators (its own, or from its unit - e.g.
+    # Holy Mission).
+    from app.seeds.factions.adepta_sororitas import unit_abilities
+
     return all(
-        any(a.name == INFILTRATORS for a in m.model.abilities) for m in unit.unit_models
+        any(a.name == INFILTRATORS for a in m.model.abilities)
+        or INFILTRATORS in unit_abilities.granted_abilities(unit, m)
+        for m in unit.unit_models
     )
 
 

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { requireBattleShockTest, takeBattleShockTest } from '../api'
 import CardTextAccordion from './CardTextAccordion'
 import Select from './Select'
+import { MiracleDiePicker } from './MiracleDice'
 
 // Battle-shock (see app/services/in_game/battle_shock.py): the tests waiting
 // to be taken - each player rolls their own units' 2D6 against the unit's
@@ -25,6 +26,8 @@ function BattleShockPanel({ game, battleShock, deployment, onChange, onError }) 
   const [reason, setReason] = useState('')
   const [modifier, setModifier] = useState('0')
   const [busy, setBusy] = useState(false)
+  // Acts of Faith chosen for pending tests: {test id: Miracle dice value}.
+  const [miracles, setMiracles] = useState({})
 
   if (!battleShock) return null
   const { pending, taken, battle_shocked: shocked } = battleShock
@@ -60,12 +63,23 @@ function BattleShockPanel({ game, battleShock, deployment, onChange, onError }) 
                 <li key={test.id}>
                   <strong>{nameOf(test.seat)}</strong>: {testLine(test)}
                   <div className="inline-controls">
+                    <MiracleDiePicker
+                      game={game}
+                      unitId={test.unit_id}
+                      roll="battle_shock"
+                      value={miracles[test.id] ?? null}
+                      onChange={(v) => setMiracles((m) => ({ ...m, [test.id]: v }))}
+                    />
                     <button
                       type="button"
                       disabled={busy}
-                      onClick={() => run(() => takeBattleShockTest(game.id, test.id, false))}
+                      onClick={() =>
+                        run(() =>
+                          takeBattleShockTest(game.id, test.id, false, miracles[test.id] ?? null)
+                        )
+                      }
                     >
-                      Roll 2D6
+                      {miracles[test.id] != null ? `Roll ${miracles[test.id]} + D6` : 'Roll 2D6'}
                     </button>
                     <button
                       type="button"
@@ -96,6 +110,9 @@ function BattleShockPanel({ game, battleShock, deployment, onChange, onError }) 
               <strong className={test.passed ? 'deployment-ready' : 'battle-shock-failed'}>
                 {test.passed ? 'Passed' : 'Failed: Battle-shocked'}
               </strong>
+              {test.rerolled?.length > 0 && (
+                <span className="hint"> · re-rolled {test.rerolled.join(' + ')}</span>
+              )}
               {test.mortal_wounds && <span className="hint"> · {test.mortal_wounds}</span>}
             </li>
           ))}

@@ -1,1 +1,1 @@
-from . import abilities, conditions, datasheet_abilities, info, stratagem_rules
+from . import abilities, conditions, datasheet_abilities, detachment_rules, info, stratagem_rules

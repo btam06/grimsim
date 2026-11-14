@@ -123,3 +123,36 @@ async def test_delete_detachment_in_use_returns_400(client: AsyncClient, faction
 
     response = await client.delete(f"/detachments/{detachment_id}")
     assert response.status_code == 400
+
+
+async def test_a_lists_only_disposition_is_its_own(client: AsyncClient, faction_id: int):
+    # A list whose detachments offer just one disposition plays with it (e.g.
+    # Houndpack Lance: Reconnaissance) - even if none's chosen.
+    recon = (await client.post("/dispositions", json={"name": "Reconnaissance"})).json()["id"]
+    other = (await client.post("/dispositions", json={"name": "Other"})).json()["id"]
+    one = (
+        await client.post(
+            "/detachments",
+            json={"name": "Houndpack Lance", "faction_id": faction_id, "dp": 2,
+                  "disposition_ids": [recon]},
+        )
+    ).json()["id"]
+    two = (
+        await client.post(
+            "/detachments",
+            json={"name": "Two", "faction_id": faction_id, "dp": 1,
+                  "disposition_ids": [recon, other]},
+        )
+    ).json()["id"]
+    payload = {"name": "Pack", "points_limit": 2000, "faction_id": faction_id,
+               "detachment_ids": [one]}
+    created = await client.post("/lists", json=payload)
+    assert created.status_code == 201, created.text
+    assert created.json()["disposition_id"] == recon
+    listed = next(x for x in (await client.get("/lists")).json() if x["id"] == created.json()["id"])
+    assert listed["disposition_id"] == recon
+    # Offering two, it's chosen.
+    response = await client.put(
+        f"/lists/{created.json()['id']}", json={**payload, "detachment_ids": [two]}
+    )
+    assert response.json()["disposition_id"] is None

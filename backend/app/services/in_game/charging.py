@@ -186,14 +186,23 @@ def _check_unit(game: Game, unit: Unit, declaring: bool = False) -> None:
         raise _bad_request(f"it can't charge: {reason}")
 
 
-def roll_charge(game: Game, unit: Unit) -> GameUnitCharge:
+def roll_charge(game: Game, unit: Unit, miracle_die: int | None = None) -> GameUnitCharge:
     # Rolls the unit's charge (2D6) - once a phase: if it's already rolled,
     # that roll stands. (Rolling is declaring it: it must be unengaged, with
-    # an enemy unit within 12".)
+    # an enemy unit within 12".) `miracle_die`: an Act of Faith - that
+    # Miracle dice is the first die, and only the second is rolled.
+    from app.seeds.factions.adepta_sororitas import acts_of_faith
+
     _check_unit(game, unit, declaring=unit_charge(game, unit) is None)
     if (charge := unit_charge(game, unit)) is not None:
+        if miracle_die is not None:
+            raise _bad_request("that unit has already rolled its charge")
         return charge
-    first, second = (dice.randint(1, 6) for _ in range(CHARGE_DICE))
+    if miracle_die is not None:
+        first = acts_of_faith.perform(game, unit, acts_of_faith.CHARGE, miracle_die)
+        second = dice.randint(1, 6)
+    else:
+        first, second = (dice.randint(1, 6) for _ in range(CHARGE_DICE))
     charge = GameUnitCharge(
         unit_id=unit.id,
         battle_round=game.battle_round,
@@ -219,6 +228,14 @@ def _rerolled(game: Game, unit: Unit) -> bool:
     )
 
 
+def miracle_rolled(game: Game, unit: Unit) -> bool:
+    # Whether a Miracle dice is one of the unit's charge dice this phase (an
+    # Act of Faith): the roll can't be re-rolled.
+    from app.seeds.factions.adepta_sororitas import acts_of_faith
+
+    return acts_of_faith.substituted(game, unit, acts_of_faith.CHARGE)
+
+
 def can_reroll(game: Game, unit: Unit) -> bool:
     # Whether the unit can re-roll its charge roll now: an ability lets it,
     # it's rolled but not charged, and it hasn't re-rolled already.
@@ -230,6 +247,7 @@ def can_reroll(game: Game, unit: Unit) -> bool:
         and not charge.completed
         and bool(_abilities(unit) & datasheet_abilities.CHARGE_REROLLS)
         and not _rerolled(game, unit)
+        and not miracle_rolled(game, unit)
     )
 
 

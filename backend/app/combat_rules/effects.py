@@ -77,6 +77,7 @@ PLUS_ONE_TO_SAVE = "plus_one_to_save"
 REROLL_DAMAGE = "reroll_damage"
 ADD_NINE_ATTACKS = "add_nine_attacks"
 ADD_FOUR_ATTACKS = "add_four_attacks"
+REROLL_ATTACKS = "reroll_attacks"
 
 
 def auto_pass_wound(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
@@ -228,6 +229,13 @@ def reroll_damage(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None
     # This attack's damage roll can be re-rolled - it is, if it came up below
     # its average (e.g. "can re-roll damage rolls").
     state["reroll_damage"] = True
+
+
+def reroll_attacks(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # The weapon's roll for its Attacks characteristic can be re-rolled - it
+    # is, if it came up below its average (e.g. Symphonic Payload). Checked
+    # pre-weapon (see app/services/combat.py).
+    state["reroll_attacks"] = True
 
 
 def plus_one_to_save(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
@@ -512,6 +520,7 @@ EFFECTS = {
     REROLL_DAMAGE: reroll_damage,
     ADD_NINE_ATTACKS: add_nine_attacks,
     ADD_FOUR_ATTACKS: add_four_attacks,
+    REROLL_ATTACKS: reroll_attacks,
 }
 
 

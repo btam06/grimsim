@@ -113,8 +113,10 @@ class UnitEffect:
     # ADEPTUS ASTARTES), have this much better AP.
     ranged_ap: int = 0
     by_keyword: str | None = None
+    # It can't have the Benefit of Cover (e.g. Purge and Cleanse).
+    no_cover: bool = False
     # How long: until the end of the affected unit's next turn ("their next
-    # turn"), or of this one ("this turn").
+    # turn"), of this one ("this turn"), or of this phase ("this phase").
     lasts: str = "their next turn"
 
 

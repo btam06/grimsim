@@ -194,10 +194,17 @@ def choices(game: Game, player: GamePlayer, stratagem: Stratagem, unit: Unit) ->
     if action == COMMAND_REROLL:
         found = []
         move = movement.unit_move(game, unit)
-        if move is not None and move.advance_roll is not None and not move.completed:
+        if (
+            move is not None
+            and move.advance_roll is not None
+            and not move.completed
+            and not movement.miracle_rolled(game, unit, "advance")
+        ):
             found.append(Choice(ADVANCE_ROLL, f"Advance roll ({move.advance_roll})"))
         charge = charging.unit_charge(game, unit)
-        if charge is not None and not charge.completed:
+        if charge is not None and not charge.completed and not charging.miracle_rolled(
+            game, unit
+        ):
             found.append(Choice(CHARGE_ROLL, f"Charge roll ({charge.roll})"))
         return found
     return []

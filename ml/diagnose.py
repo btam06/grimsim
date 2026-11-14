@@ -5,6 +5,7 @@ import collections
 import json
 import multiprocessing as mp
 import random
+import time
 from pathlib import Path
 
 # How each army list plays, to see why some win more: games played (as
@@ -58,11 +59,18 @@ def _play(job) -> list[dict]:
     save = saves[(game_seed // 2) % len(saves)]
     env = GameEnv(save, seat=seat, opponent=opponent, max_steps=max_steps, seed=game_seed)
     rng = random.Random(game_seed)
+    started = time.time()
     try:
         _, info = env.reset()
         while info["done"] is None:
             _, _, _, _, info = env.step(policy(env.decision, rng))
-        played = {"policy": policy_spec, "opponent": opponent_spec}
+        # (What app.engine.evaluate counts, so result() can rebuild its
+        # Result from these rows: the same seed plays the same games.)
+        played = {
+            "policy": policy_spec, "opponent": opponent_spec, "policy_seat": seat,
+            "final_vp": {str(s): v for s, v in info["vp"].items()}, "steps": info["steps"],
+            "seconds": time.time() - started,
+        }
         if info["done"] != "terminated":
             return [{"seed": game_seed, "save": save, "end": info["done"], **played}]
         return [
@@ -72,6 +80,48 @@ def _play(job) -> list[dict]:
         ]
     finally:
         env.close()
+
+
+def result(rows: list[dict]):
+    # app.engine.evaluate's Result for these games (rows from _play).
+    from app.engine.evaluate import GameResult, Result
+
+    games = {}
+    for r in rows:
+        seat, vp = r["policy_seat"], r["final_vp"]
+        games[(r["seed"], r["save"])] = GameResult(
+            seed=r["seed"], save=r["save"], seat=seat, vp=vp[str(seat)],
+            opponent_vp=vp[str(3 - seat)], steps=r["steps"], end=r["end"], seconds=r["seconds"],
+        )
+    return Result(sorted(games.values(), key=lambda g: g.seed))
+
+
+def play(policy: str, opponent: str, saves: list[str], games: int, seed: int = 0,
+         max_steps: int = 5000, processes: int = 1, out: Path | None = None) -> list[dict]:
+    # Games seed..seed+games-1, their rows written to `out` as they finish.
+    jobs = [(policy, opponent, saves, seed + i, max_steps) for i in range(games)]
+    rows = []
+    file = None
+    if out is not None:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        file = open(out, "w")
+    try:
+        if processes > 1:
+            with mp.get_context("spawn").Pool(processes) as pool:
+                for game in pool.imap_unordered(_play, jobs):
+                    rows += game
+                    if file:
+                        _write(file, game)
+        else:
+            for job in jobs:
+                game = _play(job)
+                rows += game
+                if file:
+                    _write(file, game)
+    finally:
+        if file:
+            file.close()
+    return rows
 
 
 def _sides(game) -> dict[int, dict]:
@@ -222,20 +272,8 @@ def main(argv: list[str] | None = None) -> None:
     if not args.report:
         if not args.saves:
             parser.error("saves are needed to play")
-        jobs = [
-            (args.policy, args.opponent, args.saves, args.seed + i, args.max_steps)
-            for i in range(args.games)
-        ]
-        out.parent.mkdir(parents=True, exist_ok=True)
-        with open(out, "w") as file:
-            if args.processes > 1:
-                with mp.get_context("spawn").Pool(args.processes) as pool:
-                    results = pool.imap_unordered(_play, jobs)
-                    for rows in results:
-                        _write(file, rows)
-            else:
-                for job in jobs:
-                    _write(file, _play(job))
+        play(args.policy, args.opponent, args.saves, args.games, args.seed,
+             args.max_steps, args.processes, out)
     rows = [json.loads(line) for line in open(out)]
     print(report(rows, _names()))
 

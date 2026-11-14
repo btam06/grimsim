@@ -78,6 +78,7 @@ from app.models.terrain import (
     TerrainObjectiveArea,
 )
 from app.models.unit_model import UnitModel
+from app.models.unit_points import PointsSource, UnitPointCost, UnitWargearCost
 from app.models.user import User
 from app.models.wargear import Wargear, WargearScope
 from app.models.wargear_ability import WargearAbility
@@ -118,6 +119,9 @@ __all__ = [
     "TerrainObjectiveArea",
     "UnitRuleSelection",
     "UnitModel",
+    "UnitPointCost",
+    "UnitWargearCost",
+    "PointsSource",
     "Detachment",
     "DetachmentRule",
     "DetachmentRuleKeywordOption",

@@ -43,7 +43,34 @@ def model_oc(game: Game, unit_model: UnitModel, shocked: set[int] | None = None)
     from app.services.in_game.casualties import damaged_profile
 
     profile = damaged_profile(game, unit_model)
-    return max(0, (unit_model.model.oc or 0) - (profile[1] if profile else 0))
+    oc = (unit_model.model.oc or 0) - (profile[1] if profile else 0)
+    return max(0, oc + _oc_bonus(game, unit_model))
+
+
+def _oc_bonus(game: Game, unit_model: UnitModel) -> int:
+    # What its army's detachment rules improve its OC by (e.g. Tyrannical
+    # Court: CHAOS KNIGHTS CHARACTER models, by 2).
+    from app.seeds import factions as faction_seeds
+    from app.services.list_building import enhancements as enhancement_rules
+
+    configs = faction_seeds.OC_BONUSES
+    rules = [
+        (p, configs[r.name])
+        for p in game.players
+        for d in p.army_list.detachments
+        for r in d.rules
+        if r.name in configs
+    ]
+    if not rules:
+        return 0
+    unit = deployment.find_unit(game, unit_model.unit_id)
+    seat = deployment.owner(game, unit).seat
+    keywords = enhancement_rules.model_keywords(unit, unit_model)
+    return sum(
+        config["bonus"]
+        for player, config in rules
+        if player.seat == seat and set(config["keywords"]) <= keywords
+    )
 
 
 @dataclass
@@ -134,11 +161,15 @@ def secured_by(game: Game, objective_id: int) -> int | None:
     )
 
 
-def secure(game: Game, objective_id: int, seat: int) -> None:
-    # The player secures the objective (in place of anyone else).
+def secure(game: Game, objective_id: int, seat: int, level: int | None = None) -> None:
+    # The player secures the objective (in place of anyone else) - with a
+    # Level of Control of at least `level`, if given (e.g. Claimed for the
+    # Dark Gods: 5).
     for existing in [s for s in game.secured_objectives if s.objective_id == objective_id]:
         game.secured_objectives.remove(existing)
-    game.secured_objectives.append(GameSecuredObjective(objective_id=objective_id, seat=seat))
+    game.secured_objectives.append(
+        GameSecuredObjective(objective_id=objective_id, seat=seat, level=level)
+    )
 
 
 def refresh_secured(game: Game) -> None:
@@ -149,8 +180,8 @@ def refresh_secured(game: Game) -> None:
     by_id = {c.objective.id: c for c in control(game, live=True)}
     for record in list(game.secured_objectives):
         current = by_id.get(record.objective_id)
-        if current is None or _opponent_oc(current.oc, record.seat) > current.oc.get(
-            record.seat, 0
+        if current is None or _opponent_oc(current.oc, record.seat) > max(
+            current.oc.get(record.seat, 0), record.level or 0
         ):
             game.secured_objectives.remove(record)
 

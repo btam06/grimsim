@@ -1,3 +1,6 @@
+import { useEffect, useState } from 'react'
+import { MiracleDiePicker } from './MiracleDice'
+
 // Moving units in the movement phase (see app/services/in_game/movement.py, which
 // decides what each unit can do and whether a move is allowed). The player
 // picks a unit, ticks Advance if it's advancing (its D6 is rolled then, and
@@ -24,6 +27,7 @@ function unitStatus(unit) {
 }
 
 function MovementPanel({
+  game,
   player,
   movement,
   draft,
@@ -41,6 +45,9 @@ function MovementPanel({
   const check = draft.check
   const kinds = selected?.allowed_kinds ?? []
   const options = draft.options ?? {}
+  // An Act of Faith for its Advance roll: a Miracle dice's value, or null.
+  const [miracleDie, setMiracleDie] = useState(null)
+  useEffect(() => setMiracleDie(null), [selected?.unit_id])
 
   return (
     <div className="deployment-panel">
@@ -92,15 +99,26 @@ function MovementPanel({
                 type="checkbox"
                 checked={draft.kind === 'advance' || Boolean(selected.advance_roll)}
                 disabled={Boolean(selected.advance_roll)}
-                onChange={(e) => onToggleAdvance(selected, e.target.checked)}
+                onChange={(e) => onToggleAdvance(selected, e.target.checked, miracleDie)}
               />
               Advance
               <span className="hint">
                 {selected.advance_roll
                   ? ` (rolled ${selected.advance_roll}: M + ${selected.advance_roll}" - now Advancing)`
-                  : ' (rolls a D6)'}
+                  : miracleDie !== null
+                    ? ` (uses the Miracle dice: ${miracleDie})`
+                    : ' (rolls a D6)'}
               </span>
             </label>
+          )}
+          {!kinds.includes('fall_back') && !selected.advance_roll && (
+            <MiracleDiePicker
+              game={game}
+              unitId={selected.unit_id}
+              roll="advance"
+              value={miracleDie}
+              onChange={setMiracleDie}
+            />
           )}
           {selected.can_fly && (
             <label className="radio-option">

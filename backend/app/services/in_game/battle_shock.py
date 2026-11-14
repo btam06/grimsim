@@ -54,7 +54,11 @@ def _bad_request(detail: str) -> HTTPException:
 # --- strength ---
 
 
-def starting_strength(unit: Unit) -> int:
+def starting_strength(unit: Unit, game: Game | None = None) -> int:
+    # (A unit whose model was set up again by Divine Intervention is a unit
+    # of that one model.)
+    if game is not None and (returned := _returned_model(game, unit)) is not None:
+        return returned.wounds
     models = unit.unit_models
     if len(models) == 1:
         return models[0].wounds
@@ -64,24 +68,30 @@ def starting_strength(unit: Unit) -> int:
 def current_strength(game: Game, unit: Unit) -> int:
     # Models on the battlefield - or, for a unit of one model, its wounds
     # left (0 if it's destroyed).
-    if len(unit.unit_models) == 1:
+    if len(unit.unit_models) == 1 or _returned_model(game, unit) is not None:
         return sum(casualties.wounds_remaining(game, unit).values())
     return len(deployment.models_on_battlefield(game, unit))
 
 
+def _returned_model(game: Game, unit: Unit):
+    from app.seeds.factions.adepta_sororitas import miracle_rules
+
+    return miracle_rules.returned_model(game, unit)
+
+
 def below_half_strength(game: Game, unit: Unit) -> bool:
     # At half its starting strength or below (for the Battle-shock step).
-    return 2 * current_strength(game, unit) <= starting_strength(unit)
+    return 2 * current_strength(game, unit) <= starting_strength(unit, game)
 
 
 def below_starting_strength(game: Game, unit: Unit) -> bool:
-    return current_strength(game, unit) < starting_strength(unit)
+    return current_strength(game, unit) < starting_strength(unit, game)
 
 
 def below_half_strength_strict(game: Game, unit: Unit) -> bool:
     # Below Half-strength, for rules that use the term: less than half its
     # starting strength.
-    return 2 * current_strength(game, unit) < starting_strength(unit)
+    return 2 * current_strength(game, unit) < starting_strength(unit, game)
 
 
 def leadership(unit: Unit) -> int:
@@ -194,12 +204,12 @@ def _has_ability(unit: Unit, name: str) -> bool:
     return any(a.name == name for m in unit.unit_models for a in m.model.abilities)
 
 
-def _test_if_able(game: Game, unit: Unit, reason: str) -> None:
+def _test_if_able(game: Game, unit: Unit, reason: str, modifier: int = 0) -> None:
     # The unit must take a test - unless it already has one to take, or is
     # Battle-shocked.
     if any(t.unit_id == unit.id for t in pending(game)) or is_battle_shocked(game, unit):
         return
-    require(game, unit, reason)
+    require(game, unit, reason, modifier)
 
 
 def start_of_fight(game: Game) -> None:
@@ -223,6 +233,11 @@ def start_of_fight(game: Game) -> None:
                 gap(a, b) <= ENGAGEMENT_RANGE + 1e-6 for a in near for b in _unit_bases(game, enemy)
             ):
                 _test_if_able(game, enemy, VOICES_IN_THE_CODE)
+    # Righteous Denunciation: enemy units within 6" of a model with it, at -1.
+    from app.seeds.factions.adepta_sororitas import unit_abilities
+
+    for enemy, modifier in unit_abilities.denunciation_tests(game):
+        _test_if_able(game, enemy, unit_abilities.RIGHTEOUS_DENUNCIATION, modifier)
 
 
 def unit_about_to_be_destroyed(game: Game, unit_model, destroyed_by: Unit | None) -> None:
@@ -278,14 +293,52 @@ def insane_bravery_reason(game: Game, seat: int, stratagem: Stratagem | None) ->
     return None
 
 
+def rerolls_failed(game: Game, unit) -> bool:
+    # Whether the unit re-rolls a failed Battle-shock test: its army's
+    # detachment rules let its units with certain keywords re-roll Leadership
+    # rolls (e.g. Wretched Thralls: DAMNED units) - a failed one's always
+    # worth re-rolling.
+    from app.seeds import factions as faction_seeds
+    from app.services.list_building import enhancements as enhancement_rules
+
+    configs = faction_seeds.BATTLE_SHOCK_REROLLS
+    player = deployment.owner(game, unit)
+    models = deployment.models_on_battlefield(game, unit) or list(unit.unit_models)
+    for detachment in player.army_list.detachments:
+        for rule in detachment.rules:
+            config = configs.get(rule.name)
+            if config is not None and models and all(
+                set(config["keywords"]) <= enhancement_rules.model_keywords(unit, m)
+                for m in models
+            ):
+                return True
+    return False
+
+
 def take(
-    game: Game, test: GameBattleShockTest, insane_bravery: Stratagem | None = None
+    game: Game,
+    test: GameBattleShockTest,
+    insane_bravery: Stratagem | None = None,
+    miracle_die: int | None = None,
 ) -> GameBattleShockTest:
     # Takes a pending test: passed automatically with Insane Bravery (if
-    # given, and its CP spent), otherwise rolled.
+    # given, and its CP spent), otherwise rolled - with `miracle_die` (an Act
+    # of Faith) as its first die, if given, and only the second rolled.
+    from app.seeds.factions.adepta_sororitas import acts_of_faith
+
     if test.passed is not None:
         raise _bad_request("that Battle-shock test has already been taken")
     unit = deployment.find_unit(game, test.unit_id)
+    if insane_bravery is not None and miracle_die is not None:
+        raise _bad_request("a test passed with Insane Bravery isn't rolled")
+    from app.seeds.factions.adepta_sororitas import hagiomnifex
+
+    if insane_bravery is None and hagiomnifex.auto_pass_battle_shock(game, unit):
+        # Sermon of Intolerance: it succeeds, unrolled.
+        if miracle_die is not None:
+            raise _bad_request("a test that automatically succeeds isn't rolled")
+        test.passed = True
+        return test
     if insane_bravery is not None:
         player = deployment.owner(game, unit)
         if reason := insane_bravery_reason(game, player.seat, insane_bravery):
@@ -308,8 +361,19 @@ def take(
 
     # Enemy auras that worsen it (e.g. Neurostatic Interference).
     test.modifier += aura_modifier(game, unit)
-    test.first_die, test.second_die = (dice.randint(1, 6) for _ in range(DICE))
+    if miracle_die is not None:
+        test.first_die = acts_of_faith.perform(
+            game, unit, acts_of_faith.BATTLE_SHOCK, miracle_die
+        )
+        test.second_die = dice.randint(1, 6)
+    else:
+        test.first_die, test.second_die = (dice.randint(1, 6) for _ in range(DICE))
     test.passed = test.first_die + test.second_die + test.modifier >= needed(game, unit)
+    if not test.passed and miracle_die is None and rerolls_failed(game, unit):
+        # (e.g. Wretched Thralls: a failed test's re-rolled.)
+        test.rerolled = [test.first_die, test.second_die]
+        test.first_die, test.second_die = (dice.randint(1, 6) for _ in range(DICE))
+        test.passed = test.first_die + test.second_die + test.modifier >= needed(game, unit)
     if not test.passed and dread.delirium(game, unit):
         roll = dice.randint(1, DELIRIUM_DICE)
         test.wounds = GameBattleShockWounds(source="Delirium", roll=roll)
@@ -363,13 +427,18 @@ def aura_modifier(game: Game, unit: Unit) -> int:
     return worst
 
 
-def after_shooting(game: Game, unit: Unit, target: Unit, hits: int) -> None:
-    # The unit has shot `target` in its Shooting phase, scoring `hits`: its
-    # abilities that make a unit it hit take a Battle-shock test (e.g. Dread
-    # Snipers) do.
+def after_shooting(
+    game: Game, unit: Unit, target: Unit, hits: int, indirect_hits: int = 0
+) -> None:
+    # The unit has shot `target` in its Shooting phase, scoring `hits` (of
+    # them `indirect_hits` with [INDIRECT FIRE] weapons): its abilities that
+    # make a unit it hit take a Battle-shock test (e.g. Dread Snipers) do -
+    # those in AFTER_SHOOTING_INDIRECT_ONLY only if an [INDIRECT FIRE]
+    # weapon hit it (e.g. Devastating Refrain).
     from app.seeds import datasheet_abilities
 
     config = datasheet_abilities.AFTER_SHOOTING_BATTLE_SHOCK
+    indirect_only = datasheet_abilities.AFTER_SHOOTING_INDIRECT_ONLY
     if game.phase != "shooting" or deployment.owner(game, unit).seat != game.turn_seat:
         return
     if hits <= 0 or not deployment.models_on_battlefield(game, target):
@@ -378,5 +447,7 @@ def after_shooting(game: Game, unit: Unit, target: Unit, hits: int) -> None:
         return
     names = {a.name for m in deployment.models_on_battlefield(game, unit) for a in m.model.abilities}
     for name in sorted(names & set(config)):
+        if name in indirect_only and indirect_hits <= 0:
+            continue
         require(game, target, name, config[name])
         return

@@ -74,10 +74,15 @@ def _lose(game: Game, unit_model, wounds: int, destroyed_by: Unit | None = None)
     record.wounds_lost = min(unit_model.wounds, record.wounds_lost + wounds)
     if record.wounds_lost >= unit_model.wounds:
         record.destroyed = True
+        unit = deployment.find_unit(game, unit_model.unit_id)
         if unit_model.id in deployment.positions(game):
-            unit = deployment.find_unit(game, unit_model.unit_id)
             if not duty_in_death.lingers(game, unit, unit_model, destroyed_by):
                 _remove(game, unit, unit_model, destroyed_by)
+        # The last of an ADEPTA SORORITAS unit: a Miracle dice (Acts of
+        # Faith). (Imported here: it imports this module.)
+        from app.seeds.factions.adepta_sororitas import acts_of_faith
+
+        acts_of_faith.model_destroyed(game, unit, unit_model)
 
 
 def _remove(game: Game, unit: Unit, unit_model, destroyed_by: Unit | None) -> None:
@@ -108,7 +113,7 @@ def _remove(game: Game, unit: Unit, unit_model, destroyed_by: Unit | None) -> No
         deployment.base_at(unit_model, position.x, position.y, position.rotation),
     )
     game.model_positions.remove(position)
-    turn_record.record_destruction(game, unit_model, destroyed_by, controlled)
+    turn_record.record_destruction(game, unit_model, destroyed_by, controlled, position)
 
 
 def remove_from_battlefield(game: Game, unit_model_id: int, destroyed_by_id: int | None) -> None:

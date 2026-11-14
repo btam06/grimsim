@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react'
 import {
+  condemnUnit,
   fireOverwatch,
+  getCondemnation,
+  getScentingFear,
+  selectScentingFear,
   getActions,
   getOverwatchTargets,
   getShootingTargets,
@@ -9,6 +13,11 @@ import {
 } from '../api'
 import AllocationOrder from './AllocationOrder'
 import CombatResults from './CombatResults'
+import {
+  ATTACK_ROLLS,
+  AttackMiraclePicker,
+  SelectionDiscards,
+} from './MiracleDice'
 import { onePerProfile, otherProfile } from '../weaponProfiles'
 
 // Shooting in the shooting phase (see app/services/in_game/shooting.py, which decides
@@ -58,6 +67,11 @@ function ShootingPanel({ game, player, shooting, overwatch, focus, onFocus, onSh
     targets.find((t) => t.unit_id === focus.targetId && (t.visible || t.indirect)) ?? null
   // The defending player's allocation order for the target (05.03).
   const [order, setOrder] = useState([])
+  // Acts of Faith in the attack: the shooting unit's and the target's
+  // (MiracleIn, or null).
+  const [miracle, setMiracle] = useState(null)
+  // Miracle dice discarded as it's selected (e.g. Righteous Repugnance).
+  const [discards, setDiscards] = useState({})
   const key = (w) => `${w.firing_deck ? 'd' : w.enhancement ? 'e' : 'w'}${w.id}`
 
   // The selected unit's possible targets.
@@ -108,8 +122,76 @@ function ShootingPanel({ game, player, shooting, overwatch, focus, onFocus, onSh
   }
   const unitActions = selected ? (actions?.options[selected.unit_id] ?? []) : []
 
+  // Condemnatory Psalms (Chorus of Condemnation): the units that have it, and
+  // the enemy units condemned (+3" detection range).
+  const [condemnation, setCondemnation] = useState(null)
+  useEffect(() => {
+    if (overwatch || !shooting) {
+      setCondemnation(null)
+      return
+    }
+    let cancelled = false
+    getCondemnation(game.id)
+      .then((c) => !cancelled && setCondemnation(c))
+      .catch((err) => onError(err.message))
+    return () => {
+      cancelled = true
+    }
+  }, [game.id, shooting, overwatch])
+  // Scenting Fear (Hunting Warpack): once a battle round, an enemy unit near
+  // one of the army's WAR DOGs gets +6" detection range.
+  const [scenting, setScenting] = useState(null)
+  useEffect(() => {
+    if (overwatch || !shooting) {
+      setScenting(null)
+      return
+    }
+    let cancelled = false
+    getScentingFear(game.id)
+      .then((s) => !cancelled && setScenting(s))
+      .catch((err) => onError(err.message))
+    return () => {
+      cancelled = true
+    }
+  }, [game.id, shooting, overwatch])
+  const scentedIds = new Set((scenting?.scented ?? []).map((s) => s.unit_id))
+  const scent = async (target) => {
+    setBusy(true)
+    onError(null)
+    try {
+      setScenting(
+        await selectScentingFear(game.id, { seat: scenting.seat, target_unit_id: target.unit_id })
+      )
+      if (selected) setTargets(await loadTargets(game.id, selected.unit_id))
+    } catch (err) {
+      onError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const psalms = condemnation?.units.find((u) => u.unit_id === selected?.unit_id) ?? null
+  const condemnedIds = new Set((condemnation?.condemned ?? []).map((c) => c.unit_id))
+  const condemn = async (target) => {
+    setBusy(true)
+    onError(null)
+    try {
+      setCondemnation(
+        await condemnUnit(game.id, { unit_id: selected.unit_id, target_unit_id: target.unit_id })
+      )
+      // What its units can see now.
+      const reloaded = await loadTargets(game.id, selected.unit_id)
+      setTargets(reloaded)
+    } catch (err) {
+      onError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   // Picking a target picks every weapon that can reach it.
   useEffect(() => {
+    setMiracle(null)
+    setDiscards({})
     setWeaponKeys(
       new Set(onePerProfile((target?.weapons ?? []).filter((w) => w.in_range)).map(key))
     )
@@ -128,8 +210,11 @@ function ShootingPanel({ game, player, shooting, overwatch, focus, onFocus, onSh
         // Its embarked models' weapons (a TRANSPORT with Firing Deck).
         firing_deck_weapon_ids: chosen.filter((w) => w.firing_deck).map((w) => w.id),
         allocation_order: order,
+        miracle,
+        miracle_discards: discards,
       })
-      setOutcome({ unit: selected.name, target: target.name, ...result })
+      // (Waiting on the defender's decision: see AttackDecisionPanel.)
+      setOutcome(result.pending ? null : { unit: selected.name, target: target.name, ...result })
       onShot()
     } catch (err) {
       onError(err.message)
@@ -223,12 +308,60 @@ function ShootingPanel({ game, player, shooting, overwatch, focus, onFocus, onSh
                         : ' · not visible')}
                   {t.visible && !t.weapons.some((w) => w.in_range) && ' · out of range'}
                   {t.in_cover && ' · in cover'}
+                  {condemnedIds.has(t.unit_id) && ' · condemned (+3" detection range)'}
+                  {scentedIds.has(t.unit_id) && ' · Scenting Fear (+6" detection range)'}
                 </span>
               </label>
             ))}
           </div>
           {targets.length === 0 && <p className="hint">No enemy units on the battlefield.</p>}
         </>
+      )}
+
+      {scenting?.seat != null && (
+        <div className="miracle-picker">
+          <span>
+            Scenting Fear{' '}
+            <span className="hint">
+              (once a battle round: a visible enemy unit within 12" of one of your WAR DOG units
+              has +6" detection range until the end of the phase)
+            </span>
+          </span>
+          {scenting.reason ? (
+            <p className="hint">Can't: {scenting.reason}.</p>
+          ) : (
+            <div className="inline-controls">
+              {scenting.targets.map((t) => (
+                <button key={t.unit_id} type="button" disabled={busy} onClick={() => scent(t)}>
+                  Scent {t.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {psalms && (
+        <div className="miracle-picker">
+          <span>
+            Condemnatory Psalms{' '}
+            <span className="hint">
+              (select a visible enemy unit within 12": it's condemned - +3" detection range -
+              until the end of the phase)
+            </span>
+          </span>
+          {psalms.reason ? (
+            <p className="hint">Can't: {psalms.reason}.</p>
+          ) : (
+            <div className="inline-controls">
+              {psalms.targets.map((t) => (
+                <button key={t.unit_id} type="button" disabled={busy} onClick={() => condemn(t)}>
+                  Condemn {t.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       {selected?.can_shoot && target && (
@@ -267,6 +400,24 @@ function ShootingPanel({ game, player, shooting, overwatch, focus, onFocus, onSh
             defender={`${game.players.find((p) => p.seat !== player?.seat)?.user_name} (${target.name})`}
             order={order}
             onChange={setOrder}
+          />
+          <SelectionDiscards
+            game={game}
+            unitId={selected.unit_id}
+            value={discards}
+            onChange={setDiscards}
+            onError={onError}
+          />
+          <AttackMiraclePicker
+            game={game}
+            unitId={selected.unit_id}
+            who={selected.name}
+            rolls={ATTACK_ROLLS}
+            weapons={target.weapons.filter(
+              (w) => weaponKeys.has(key(w)) && !w.enhancement && !w.firing_deck
+            )}
+            value={miracle}
+            onChange={setMiracle}
           />
           <div className="inline-controls">
             <button type="button" disabled={busy || weaponKeys.size === 0} onClick={fire}>

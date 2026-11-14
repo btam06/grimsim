@@ -13,6 +13,7 @@ import ListsPanel from './components/ListsPanel'
 import MlPanel from './components/MlPanel'
 import { PrimaryMissions, SecondaryMissions } from './components/MissionsPanel'
 import ModelsPanel from './components/ModelsPanel'
+import OptionsPanel from './components/OptionsPanel'
 import StratagemsPanel from './components/StratagemsPanel'
 import UnitsPanel from './components/UnitsPanel'
 import UsersPanel from './components/UsersPanel'
@@ -43,6 +44,7 @@ const TAB_GROUPS = {
     'Weapon Abilities',
     'Wargear Abilities',
     'Faction Abilities',
+    'Options',
   ],
   Calculator: ['Calculator'],
   ML: ['Checkpoints'],
@@ -103,6 +105,7 @@ function App() {
       {tab === 'Calculator' && <CalculatorPanel />}
       {tab === 'Games' && <GamesPanel />}
       {tab === 'Checkpoints' && <MlPanel />}
+      {tab === 'Options' && <OptionsPanel />}
       {tab === 'Users' && <UsersPanel />}
       {tab === 'Secondary Missions' && <SecondaryMissions />}
       {tab === 'Primary Missions' && <PrimaryMissions />}

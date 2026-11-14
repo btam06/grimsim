@@ -12,6 +12,7 @@ from app.services.in_game import (
     deployment,
     embarked,
     fighting,
+    mission_state,
     objectives,
     selected_objectives,
 )
@@ -41,6 +42,10 @@ from app.services.list_building import enhancements as enhancement_rules
 #   player's `transport_keywords` TRANSPORTs it's wholly within 3" of, with
 #   room for it.
 #
+# - "claim_objective" (e.g. Claimed for the Dark Gods): used on a unit on the
+#   battlefield within range of an objective marker its player controls -
+#   that one's secured, with a Level of Control of at least `level`.
+#
 # The objective or transport is picked from the unit's choices. The core
 # stratagems' game actions are in app/services/in_game/core_stratagems.py.
 
@@ -48,11 +53,16 @@ SECURE_ON_DESTRUCTION = "secure_on_destruction"
 LONGER_CONSOLIDATION = "longer_consolidation"
 EXTRA_SELECTED_OBJECTIVE = "extra_selected_objective"
 REACTIVE_EMBARK = "reactive_embark"
+# Adepta Sororitas: see app/seeds/factions/adepta_sororitas/miracle_rules.py.
+DIVINE_INTERVENTION = "divine_intervention"
+CLAIM_OBJECTIVE = "claim_objective"
 ACTIONS = (
+    CLAIM_OBJECTIVE,
     SECURE_ON_DESTRUCTION,
     LONGER_CONSOLIDATION,
     EXTRA_SELECTED_OBJECTIVE,
     REACTIVE_EMBARK,
+    DIVINE_INTERVENTION,
     *core_stratagems.ACTIONS,
 )
 
@@ -103,6 +113,8 @@ def choices(game: Game, player: GamePlayer, stratagem: Stratagem, unit: Unit) ->
     action = stratagem.game_action
     if action in core_stratagems.ACTIONS:
         return core_stratagems.choices(game, player, stratagem, unit)
+    if action == DIVINE_INTERVENTION:
+        return _miracle_rules().divine_choices(game, player)
     if action == SECURE_ON_DESTRUCTION:
         record = _just_destroyed(game, unit)
         if record is None:
@@ -112,6 +124,13 @@ def choices(game: Game, player: GamePlayer, stratagem: Stratagem, unit: Unit) ->
             Choice(o.id, selected_objectives.label(game, o))
             for o in objectives.objectives(game)
             if o.id in ids
+        ]
+    if action == CLAIM_OBJECTIVE:
+        within = {o.id for o in mission_state.unit_objectives(game, unit)}
+        return [
+            Choice(c.objective.id, selected_objectives.label(game, c.objective))
+            for c in objectives.controlled_by(game, player.seat)
+            if c.objective.id in within
         ]
     if action == EXTRA_SELECTED_OBJECTIVE:
         name = config.get("selection")
@@ -145,6 +164,8 @@ def target_reason(
     action = stratagem.game_action
     if action in core_stratagems.ACTIONS:
         return core_stratagems.target_reason(game, player, stratagem, unit)
+    if action == DIVINE_INTERVENTION:
+        return _miracle_rules().divine_reason(game, player, unit)
     if action == SECURE_ON_DESTRUCTION:
         if _just_destroyed(game, unit) is None:
             return "it wasn't just destroyed"
@@ -162,6 +183,10 @@ def target_reason(
             for enemy in charging.enemy_units(game, unit)
         ):
             return f'it is within {clear:g}" of an enemy unit'
+        return None
+    if action == CLAIM_OBJECTIVE:
+        if not choices(game, player, stratagem, unit):
+            return "it isn't within range of an objective marker they control"
         return None
     if action == EXTRA_SELECTED_OBJECTIVE:
         if config.get("selection") not in selected_objectives.configs(game, player.seat):
@@ -199,14 +224,29 @@ def carry_out(
         return
     if action == LONGER_CONSOLIDATION:
         return
+    if action == DIVINE_INTERVENTION:
+        from app.engine.state import GameStratagemOutcome
+
+        text = _miracle_rules().divine_intervention(game, player, unit, choice_id)
+        if use is not None:
+            use.outcome_link = GameStratagemOutcome(text=text, choice_id=choice_id)
+        return
     if choice_id not in {c.id for c in choices(game, player, stratagem, unit)}:
         raise ValueError(f"{stratagem.name} needs one of its choices for that unit")
     if action == SECURE_ON_DESTRUCTION:
         objectives.secure(game, choice_id, player.seat)
+    elif action == CLAIM_OBJECTIVE:
+        objectives.secure(game, choice_id, player.seat, level=config.get("level"))
     elif action == EXTRA_SELECTED_OBJECTIVE:
         selected_objectives.add_extra(game, player.seat, config["selection"], choice_id)
     elif action == REACTIVE_EMBARK:
         embarked.embark_now(game, unit, deployment.find_unit(game, choice_id))
+
+
+def _miracle_rules():
+    from app.seeds.factions.adepta_sororitas import miracle_rules
+
+    return miracle_rules
 
 
 def consolidation(game: Game, unit: Unit) -> tuple[float, str | None]:

@@ -118,6 +118,11 @@ import ShootingPanel from './ShootingPanel'
 import TurnRecord from './TurnRecord'
 import ScoreHistory from './ScoreHistory'
 import Select from './Select'
+import { MiracleDicePool } from './MiracleDice'
+import MiracleDicePanel from './MiracleDicePanel'
+import HagiomnifexPanel from './HagiomnifexPanel'
+import JudgedPanel from './JudgedPanel'
+import AttackDecisionPanel from './AttackDecisionPanel'
 import { PHASES } from './StratagemsPanel'
 
 const BATTLE_ROUNDS = 5
@@ -193,6 +198,8 @@ const UNIT_TARGET_ACTIONS = [
   'counteroffensive',
   'heroic_intervention',
   'command_reroll',
+  // Adepta Sororitas (see app/seeds/factions/adepta_sororitas/miracle_rules.py).
+  'divine_intervention',
 ]
 const CHOICE_LABELS = {
   secure_on_destruction: 'objective',
@@ -203,6 +210,7 @@ const CHOICE_LABELS = {
   epic_challenge: 'CHARACTER model',
   heroic_intervention: 'mode',
   command_reroll: 'roll',
+  divine_intervention: 'Miracle dice to discard',
 }
 
 function PlayerCard({ game, player, onAction }) {
@@ -286,6 +294,12 @@ function PlayerCard({ game, player, onAction }) {
       </p>
       <p className="game-totals">
         <strong>{player.cp}</strong> CP · <strong>{player.vp}</strong> VP
+        {player.acts_of_faith && (
+          <>
+            {' · '}
+            <MiracleDicePool player={player} />
+          </>
+        )}
       </p>
 
       <h4>Primary</h4>
@@ -1531,7 +1545,8 @@ function GameView({ gameId, onBack }) {
 
   // Ticking Advance rolls the unit's D6 (the backend keeps it for the
   // phase), and from then on it Advances: it can't be unticked.
-  const toggleAdvance = async (unit, on) => {
+  // `miracleDie`: an Act of Faith - that Miracle dice instead of the D6.
+  const toggleAdvance = async (unit, on, miracleDie = null) => {
     if (!on) {
       if (!unit.advance_roll) chooseKind('normal')
       return
@@ -1539,7 +1554,11 @@ function GameView({ gameId, onBack }) {
     if (!unit.advance_roll) {
       setError(null)
       try {
-        setMovement(await rollAdvance(game.id, { unit_id: unit.unit_id }))
+        setMovement(
+          await rollAdvance(game.id, { unit_id: unit.unit_id, miracle_die: miracleDie })
+        )
+        // The game again: the Miracle dice is spent.
+        if (miracleDie !== null) setGame(await getGame(game.id))
       } catch (err) {
         setError(err.message)
         return
@@ -1645,12 +1664,17 @@ function GameView({ gameId, onBack }) {
     })
   }
 
-  const rollUnitCharge = async (unit, reroll = false) => {
+  // `miracleDie`: an Act of Faith - that Miracle dice is one of its dice.
+  const rollUnitCharge = async (unit, reroll = false, miracleDie = null) => {
     setError(null)
     try {
       const roll = reroll ? rerollCharge : rollCharge
-      const result = await roll(game.id, { unit_id: unit.unit_id })
+      const payload = { unit_id: unit.unit_id }
+      if (!reroll) payload.miracle_die = miracleDie
+      const result = await roll(game.id, payload)
       setCharge(result)
+      // The game again: the Miracle dice is spent.
+      if (miracleDie !== null) setGame(await getGame(game.id))
       startCharge(result.units.find((u) => u.unit_id === unit.unit_id))
     } catch (err) {
       setError(err.message)
@@ -1732,6 +1756,11 @@ function GameView({ gameId, onBack }) {
         <FormationsPanel
           game={game}
           onDeclared={(seat) => act(() => declareFormations(game.id, { seat }))}
+          onChanged={() =>
+            getGame(game.id)
+              .then(setGame)
+              .catch((err) => setError(err.message))
+          }
           onError={setError}
         />
       )}
@@ -1906,6 +1935,39 @@ function GameView({ gameId, onBack }) {
             onError={setError}
           />
         )}
+      {game.status === 'in_progress' && (
+        <JudgedPanel
+          game={game}
+          onChange={() =>
+            getGame(game.id)
+              .then(setGame)
+              .catch((err) => setError(err.message))
+          }
+          onError={setError}
+        />
+      )}
+      {game.status === 'in_progress' && (
+        <HagiomnifexPanel
+          game={game}
+          onChange={() =>
+            getGame(game.id)
+              .then(setGame)
+              .catch((err) => setError(err.message))
+          }
+          onError={setError}
+        />
+      )}
+      {game.status === 'in_progress' && (
+        <MiracleDicePanel
+          game={game}
+          onChange={() =>
+            getGame(game.id)
+              .then(setGame)
+              .catch((err) => setError(err.message))
+          }
+          onError={setError}
+        />
+      )}
       <PsychicPanel
         game={game}
         psychic={psychic}
@@ -2024,6 +2086,21 @@ function GameView({ gameId, onBack }) {
           }}
         />
       )}
+      {game.status === 'in_progress' && (
+        <AttackDecisionPanel
+          game={game}
+          onChange={() => {
+            // The game again: the attack made (destroyed models off the
+            // battlefield), or its next decision.
+            setShots((n) => n + 1)
+            setFights((n) => n + 1)
+            getGame(game.id)
+              .then(setGame)
+              .catch((err) => setError(err.message))
+          }}
+          onError={setError}
+        />
+      )}
       {overwatching && (
         <ShootingPanel
           game={game}
@@ -2044,6 +2121,7 @@ function GameView({ gameId, onBack }) {
       )}
       {moving && !endOfMovement && (
         <MovementPanel
+          game={game}
           player={turnPlayer}
           movement={movement}
           draft={draft}
