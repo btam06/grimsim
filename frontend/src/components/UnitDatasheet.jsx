@@ -4,8 +4,9 @@ import CardTextAccordion from './CardTextAccordion'
 // A unit's datasheet as it's been built - each kind of model in it with its
 // profile, the weapons and wargear those models are equipped with (and any
 // weapons their enhancements give them), their abilities and keywords - plus
-// any enhancement or upgrade the unit has. Collapsed under a "Datasheet" label.
-function UnitDatasheet({ unit, data }) {
+// any enhancement or upgrade the unit has.
+// `showBases: false` leaves out the models' bases (shown elsewhere).
+export function DatasheetContent({ unit, data, showBases = true }) {
   if (!unit) return null
   const {
     models,
@@ -30,7 +31,6 @@ function UnitDatasheet({ unit, data }) {
   const upgrade = enhancements.find((e) => e.id === unit.upgrade_id)
 
   return (
-    <CardTextAccordion label="Datasheet" className="datasheet-accordion">
       <div className="datasheet">
         {[...counts.entries()].map(([modelId, count]) => {
           const model = models.find((m) => m.id === modelId)
@@ -90,18 +90,28 @@ function UnitDatasheet({ unit, data }) {
               </table>
               <p>
                 {[
-                  model.invulnerable &&
-                    `Invulnerable save ${model.invulnerable}+` +
-                      (model.invulnerable_ranged_only ? ' (ranged attacks only)' : ''),
+                  model.invulnerable && (
+                    <span className="datasheet-invuln">
+                      Invulnerable save {model.invulnerable}+
+                      {model.invulnerable_ranged_only && ' (ranged attacks only)'}
+                    </span>
+                  ),
                   model.feel_no_pain && `Feel No Pain ${model.feel_no_pain}+`,
                   model.feel_no_pain_mortal &&
                     `Feel No Pain ${model.feel_no_pain_mortal}+ vs mortal wounds`,
-                  model.base_size_id !== null && `Base: ${nameOf(baseSizes, model.base_size_id)}`,
+                  showBases &&
+                    model.base_size_id !== null &&
+                    `Base: ${nameOf(baseSizes, model.base_size_id)}`,
                   model.is_leader && 'Leader',
                   model.is_support && 'Support',
                 ]
                   .filter(Boolean)
-                  .join(' · ')}
+                  .map((part, i) => (
+                    <span key={i}>
+                      {i > 0 && ' · '}
+                      {part}
+                    </span>
+                  ))}
               </p>
               {[
                 ['Ranged weapons', ranged, 'BS'],
@@ -214,6 +224,15 @@ function UnitDatasheet({ unit, data }) {
           </section>
         )}
       </div>
+  )
+}
+
+// The datasheet, collapsed under a "Datasheet" label.
+function UnitDatasheet({ unit, data }) {
+  if (!unit) return null
+  return (
+    <CardTextAccordion label="Datasheet" className="datasheet-accordion">
+      <DatasheetContent unit={unit} data={data} />
     </CardTextAccordion>
   )
 }

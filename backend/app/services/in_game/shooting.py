@@ -715,10 +715,11 @@ LONE_OPERATIVE_RANGE = 12.0
 
 
 def leading(unit: Unit) -> bool:
-    # Whether a CHARACTER is leading the unit: it has CHARACTER models and
-    # others.
-    characters = ["CHARACTER" in {k.name for k in m.model.keywords} for m in unit.unit_models]
-    return any(characters) and not all(characters)
+    # Whether a model in it is leading it: an attached leader or support
+    # unit's (see app/services/list_building/enhancements.py is_leading).
+    from app.services.list_building import enhancements
+
+    return any(enhancements.is_leading(unit, m) for m in unit.unit_models)
 
 
 def lone_operative(game: Game, unit: Unit) -> bool:

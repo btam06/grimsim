@@ -1,6 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.migrations import (
+    attached_leaders,
     core_rule_texts,
     core_stratagems,
     hellfire_rounds_conditions,
@@ -28,6 +29,7 @@ MIGRATIONS = [
     kit_counts,
     core_rule_texts,
     core_stratagems,
+    attached_leaders,
 ]
 
 

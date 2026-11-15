@@ -142,12 +142,14 @@ async def test_authority_of_the_inquisition(client: AsyncClient, session, tmp_pa
     inquisitor.keywords = [character]
     inquisitor.abilities = []
     session.add(inquisitor)
-    unit = (
-        await session.execute(
-            select(Unit).options(selectinload(Unit.unit_models)).where(Unit.id == a["unit_id"])
+    # (A leader unit of its own, attached to A.)
+    unit = await session.get(Unit, a["unit_id"])
+    session.add(
+        Unit(
+            faction_unit_id=unit.faction_unit_id, points=0, list_id=unit.list_id,
+            attached_to_id=unit.id, unit_models=[UnitModel(model=inquisitor)],
         )
-    ).scalar_one()
-    unit.unit_models.append(UnitModel(model=inquisitor))
+    )
     await session.commit()
 
     response = await _set(client, game_id, 1, a, "embarked", t)

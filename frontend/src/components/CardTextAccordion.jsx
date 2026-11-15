@@ -5,8 +5,16 @@ import AccordionDetails from '@mui/material/AccordionDetails'
 import AccordionSummary from '@mui/material/AccordionSummary'
 
 // A card's rules text (or any other content, as children), collapsed until
-// opened.
-function CardTextAccordion({ text, label = 'Card text', children, className = '' }) {
+// opened. Pass `expanded` and `onChange(open)` to control it (e.g. one open
+// at a time); otherwise it opens and closes itself.
+function CardTextAccordion({
+  text,
+  label = 'Card text',
+  children,
+  className = '',
+  expanded,
+  onChange,
+}) {
   if (!text && !children) return null
   return (
     <Accordion
@@ -14,6 +22,8 @@ function CardTextAccordion({ text, label = 'Card text', children, className = ''
       disableGutters
       elevation={0}
       square
+      {...(expanded === undefined ? {} : { expanded })}
+      onChange={onChange && ((_, open) => onChange(open))}
     >
       <AccordionSummary expandIcon={<FontAwesomeIcon icon={faChevronDown} />}>
         {label}

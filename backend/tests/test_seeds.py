@@ -1429,3 +1429,48 @@ async def test_wargear_seeded_before_gets_its_new_abilities(session, monkeypatch
     )
     shield = (await session.execute(query)).scalar_one()
     assert [a.name for a in shield.abilities] == ["Dispersion Shield"]
+
+
+async def test_seed_links_leaders_to_the_datasheets_they_lead(session, monkeypatch, tmp_path):
+    # A datasheet's `leads` become its bodyguard links; links added by hand stay.
+    import json
+    import shutil
+    from pathlib import Path
+
+    from sqlalchemy import select
+
+    from app.models import FactionUnit, LeaderBodyguard
+    from app.seeds import data_files, run_all
+
+    data = tmp_path / "data"
+    shutil.copytree(Path(__file__).parent / "fixtures" / "data", data)
+    monkeypatch.setattr(data_files, "DATA_DIR", data)
+    sheets_file = data / "factions" / "adeptus_mechanicus" / "datasheets.json"
+    sheets = json.loads(sheets_file.read_text())
+    sheets["datasheets"][0]["leads"] = ["Test Walker", "Not A Datasheet"]
+    sheets_file.write_text(json.dumps(sheets))
+    await run_all(session)
+
+    squad = (
+        await session.execute(select(FactionUnit).where(FactionUnit.name == "Test Squad"))
+    ).scalars().first()
+    ids = {
+        u.name: u.id
+        for u in (
+            await session.execute(
+                select(FactionUnit).where(FactionUnit.faction_id == squad.faction_id)
+            )
+        ).scalars()
+    }
+    links = set((await session.execute(
+        select(LeaderBodyguard.leader_id, LeaderBodyguard.bodyguard_id)
+    )).all())
+    assert (ids["Test Squad"], ids["Test Walker"]) in links
+
+    session.add(LeaderBodyguard(leader_id=ids["Test Walker"], bodyguard_id=ids["Test Squad"]))
+    await session.commit()
+    await run_all(session)
+    links = set((await session.execute(
+        select(LeaderBodyguard.leader_id, LeaderBodyguard.bodyguard_id)
+    )).all())
+    assert (ids["Test Walker"], ids["Test Squad"]) in links

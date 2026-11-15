@@ -8,7 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base
 
 # A datasheet's points, from the Munitorum Field Manual (see
-# app/services/munitorum.py, and app/services/unit_points.py for how a unit
+# app/services/import/, and app/services/unit_points.py for how a unit
 # in a list is priced from them). A datasheet with none is priced by hand.
 
 

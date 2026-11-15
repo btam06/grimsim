@@ -203,6 +203,63 @@ model is equipped with: ...") with `"default": true`; they're pre-selected when
 the model is added to a unit, and the flag is filled in on an existing weapon
 that doesn't have it yet.
 
+### Unit composition and wargear options
+
+A datasheet's `composition` is its "UNIT COMPOSITION": how many of each of
+its models a unit has (`min`/`max`, by model name) and what each is
+`equipped` with ("Every model is equipped with: ..."). Leave `equipped` out
+for a model's default weapons. Its `wargear_options` are its "WARGEAR
+OPTIONS". In each one, a `model`'s `replace` items can be swapped for one of
+the `with` choices. With no `replace`, the choice is added instead. At most
+`max` models in the unit can take an option ("1 Skitarii Ranger's...", or
+`per` for "for every 5 models in this unit, ..."). Leave both out when any
+model can take it. A model taking an option must still have its `requires`
+items afterwards, as in "* That model's galvanic rifle cannot be replaced".
+A model can take each option once, and any number of different options.
+
+Items are named by weapon name without the profile ("Plasma caliver" covers
+both "Plasma caliver – standard" and "– supercharge"), or by wargear name.
+Each item must be one of that model's `weapons` or `wargear`. A choice can be
+several items (`["Bolt pistol", "Chainsword"]`). Repeat a name for several of
+the same weapon.
+
+List building enforces both: the unit form only offers the datasheet's models
+and options, and the API refuses anything else. A datasheet with no
+`composition` is free-form: any of its models and any of their weapons. The
+one exception is a CHARACTER on its own whose every weapon is a `default` and
+who has no wargear: there's nothing to decide, so its unit is that model as
+equipped, added automatically.
+
+```json
+{
+  "name": "Skitarii Rangers",
+  "models": [...],
+  "composition": [
+    {"model": "Skitarii Ranger Alpha", "min": 1, "max": 1,
+     "equipped": ["Galvanic rifle", "Close combat weapon"]},
+    {"model": "Skitarii Ranger", "min": 9, "max": 9,
+     "equipped": ["Galvanic rifle", "Close combat weapon"]}
+  ],
+  "wargear_options": [
+    {"model": "Skitarii Ranger Alpha", "with": ["Alpha combat weapon"]},
+    {"model": "Skitarii Ranger Alpha", "replace": "Galvanic rifle", "with": ["Mechanicus pistol"]},
+    {"model": "Skitarii Ranger", "replace": "Galvanic rifle", "with": ["Arc rifle"], "max": 1},
+    {"model": "Skitarii Ranger", "with": ["Enhanced data-tether", "Omnispex"],
+     "requires": "Galvanic rifle", "max": 1}
+  ]
+}
+```
+
+A leader or support datasheet's `leads` are the datasheets it can be attached
+to, by name ("This model can be attached to the following units: ...").
+They're linked in every faction that has both, an allied copy too. Links are
+only added; ones made in the app stay.
+
+```json
+{"name": "Skitarii Marshal", "models": [...],
+ "leads": ["Hastarii Exterminators", "Hastarii Fusiliers", "Skitarii Rangers", "Skitarii Vanguard"]}
+```
+
 ## `stratagems.json`
 
 Core stratagems (`"core": true`, usable by any army) and detachment

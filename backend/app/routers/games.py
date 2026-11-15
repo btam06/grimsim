@@ -175,6 +175,7 @@ from app.schemas import (
     UnitMoveIn,
 )
 from app.routers.stratagems import _to_out as stratagem_to_out
+from app.services.list_building import enhancements as enhancement_rules
 from app.services import combat as combat_service
 from app.services.in_game import attack_decisions
 from app.services.in_game import unit_splits as unit_splits_service
@@ -1868,71 +1869,74 @@ async def _fight(
         game, unit, payload.miracle, acts_of_faith.ATTACK_ROLLS
     )
     results, destroyed = [], []
-    for defender, firing, limits in attacks:
-        defender_wounds = casualties_service.wounds_remaining(game, defender)
-        if not defender_wounds:
-            # Destroyed by its earlier attacks (e.g. Deadly Demise).
-            continue
-        attacker_wounds = casualties_service.wounds_remaining(game, unit)
-        decisions.defender = defender
-        order = (
-            payload.allocation_order
-            if defender.id == target.id
-            else payload.allocation_orders.get(defender.id, [])
-        )
-        combat = await calculate_combat(
-            session,
-            CombatIn(
-                game_id=game.id,
-                attacking_unit_id=unit.id,
-                defending_unit_id=defender.id,
-                # On its Damaged profile, it's -1 to hit.
-                attacker_damaged=casualties_service.damaged(game, unit),
-                selected_weapon_ids=[w for w in chosen if isinstance(w, int)],
-                selected_enhancement_weapon_ids=[w[1] for w in chosen if isinstance(w, tuple)],
-                in_engagement_range=True,
-                charged=charged,
-                attacker_positions=_attacker_positions(game, unit, defender),
-                defender_positions=_defender_positions(game, defender),
-                defender_battle_shocked=battle_shock_service.is_battle_shocked(game, defender),
-                # The options each side chose for its army rules this round
-                # (e.g. its Doctrina Imperative) and its abilities in its
-                # Command phase.
-                attacker_rule_options=_rule_options(game, unit, defender),
-                defender_rule_options=_rule_options(game, defender),
-                defender_visible=True,
-                defender_in_range=True,
-                allocation_order=order,
-            ),
-            firing=firing,
-            defender_wounds=defender_wounds,
-            attacker_wounds=attacker_wounds,
-            defender_model_rules=_model_rules(game, defender),
-            attack_limits=limits,
-            hazards_rolled=hazards_rolled,
-            # Epic Challenge: its CHARACTER model's melee weapons have
-            # [PRECISION].
-            precision_models=core_stratagems_service.precision_models(game, unit),
-            # (And what's being done to it - e.g. Data-spike's worse WS.)
-            attacker_extra_rules=ability_rules
-            + unit_effects_service.own_attack_rules(game, unit)
-            + hagiomnifex.attack_rules(game, unit)
-            + unit_abilities.attack_rules(game, unit, defender),
-            defender_extra_rules=hagiomnifex.defence_rules(game, defender),
-            attacker_miracle=attacker_miracle,
-            decisions=decisions,
-            # Righteous Rage, Through Suffering, Strength, Divine Deliverance...
-            weapon_bonuses=unit_abilities.weapon_bonuses(game, unit, attacker_wounds),
-        )
-        destroyed += casualties_service.apply_attack(
-            game,
-            unit,
-            defender,
-            defender_wounds,
-            combat.defender_wounds_remaining,
-            combat.attacker_damage,
-        )
-        results.append((defender, combat))
+    # (What its attacks destroy keeps giving what it gave - e.g. an
+    # enhancement's bearer - until it's made all of them: Core Rules 19.04.)
+    with enhancement_rules.lasting(destroyed):
+        for defender, firing, limits in attacks:
+            defender_wounds = casualties_service.wounds_remaining(game, defender)
+            if not defender_wounds:
+                # Destroyed by its earlier attacks (e.g. Deadly Demise).
+                continue
+            attacker_wounds = casualties_service.wounds_remaining(game, unit)
+            decisions.defender = defender
+            order = (
+                payload.allocation_order
+                if defender.id == target.id
+                else payload.allocation_orders.get(defender.id, [])
+            )
+            combat = await calculate_combat(
+                session,
+                CombatIn(
+                    game_id=game.id,
+                    attacking_unit_id=unit.id,
+                    defending_unit_id=defender.id,
+                    # On its Damaged profile, it's -1 to hit.
+                    attacker_damaged=casualties_service.damaged(game, unit),
+                    selected_weapon_ids=[w for w in chosen if isinstance(w, int)],
+                    selected_enhancement_weapon_ids=[w[1] for w in chosen if isinstance(w, tuple)],
+                    in_engagement_range=True,
+                    charged=charged,
+                    attacker_positions=_attacker_positions(game, unit, defender),
+                    defender_positions=_defender_positions(game, defender),
+                    defender_battle_shocked=battle_shock_service.is_battle_shocked(game, defender),
+                    # The options each side chose for its army rules this round
+                    # (e.g. its Doctrina Imperative) and its abilities in its
+                    # Command phase.
+                    attacker_rule_options=_rule_options(game, unit, defender),
+                    defender_rule_options=_rule_options(game, defender),
+                    defender_visible=True,
+                    defender_in_range=True,
+                    allocation_order=order,
+                ),
+                firing=firing,
+                defender_wounds=defender_wounds,
+                attacker_wounds=attacker_wounds,
+                defender_model_rules=_model_rules(game, defender),
+                attack_limits=limits,
+                hazards_rolled=hazards_rolled,
+                # Epic Challenge: its CHARACTER model's melee weapons have
+                # [PRECISION].
+                precision_models=core_stratagems_service.precision_models(game, unit),
+                # (And what's being done to it - e.g. Data-spike's worse WS.)
+                attacker_extra_rules=ability_rules
+                + unit_effects_service.own_attack_rules(game, unit)
+                + hagiomnifex.attack_rules(game, unit)
+                + unit_abilities.attack_rules(game, unit, defender),
+                defender_extra_rules=hagiomnifex.defence_rules(game, defender),
+                attacker_miracle=attacker_miracle,
+                decisions=decisions,
+                # Righteous Rage, Through Suffering, Strength, Divine Deliverance...
+                weapon_bonuses=unit_abilities.weapon_bonuses(game, unit, attacker_wounds),
+            )
+            destroyed += casualties_service.apply_attack(
+                game,
+                unit,
+                defender,
+                defender_wounds,
+                combat.defender_wounds_remaining,
+                combat.attacker_damage,
+            )
+            results.append((defender, combat))
     acts_of_faith.spend(game, attacker_miracle)
     decisions.spend()
     main = results[0][1]

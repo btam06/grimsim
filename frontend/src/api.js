@@ -2,9 +2,10 @@ import { begin, end } from './loading'
 
 const BASE = '/api'
 
-async function request(path, options) {
-  // (Counted while in flight, for the loading skull.)
-  begin()
+async function request(path, options, { quiet = false } = {}) {
+  // (Counted while in flight, for the loading skull - unless it's `quiet`: a
+  // background check, like a unit's price as it's built.)
+  if (!quiet) begin()
   try {
     const response = await fetch(`${BASE}${path}`, {
       headers: { 'Content-Type': 'application/json' },
@@ -17,7 +18,7 @@ async function request(path, options) {
     if (response.status === 204) return null
     return await response.json()
   } finally {
-    end()
+    if (!quiet) end()
   }
 }
 
@@ -27,6 +28,7 @@ export const createFaction = (payload) =>
 export const deleteFaction = (id) => request(`/factions/${id}`, { method: 'DELETE' })
 
 export const listFactionUnits = () => request('/faction-units')
+export const getLoadout = (factionUnitId) => request(`/faction-units/${factionUnitId}/loadout`)
 export const createFactionUnit = (payload) =>
   request('/faction-units', { method: 'POST', body: JSON.stringify(payload) })
 export const deleteFactionUnit = (id) => request(`/faction-units/${id}`, { method: 'DELETE' })
@@ -142,6 +144,14 @@ export const createUnit = (payload) =>
   request('/units', { method: 'POST', body: JSON.stringify(payload) })
 export const updateUnit = (id, payload) =>
   request(`/units/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
+// What a unit would cost as given, without saving it (unitId: the one being
+// edited, if any).
+export const priceUnit = (payload, unitId) =>
+  request(
+    `/units/price${unitId ? `?unit_id=${unitId}` : ''}`,
+    { method: 'POST', body: JSON.stringify(payload) },
+    { quiet: true }
+  )
 export const deleteUnit = (id) => request(`/units/${id}`, { method: 'DELETE' })
 
 export const runCombat = (payload) =>

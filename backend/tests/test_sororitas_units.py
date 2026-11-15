@@ -2,7 +2,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.models import DatasheetAbility, Keyword, Model, UnitModel
+from app.models import DatasheetAbility, Keyword, Model, Unit, UnitModel
 from app.routers.games import _load_game
 from app.seeds import datasheet_abilities as ability_seeds
 from app.seeds.factions.adepta_sororitas import unit_abilities
@@ -201,7 +201,7 @@ async def test_righteous_denunciation_at_the_start_of_the_fight_phase(
 
 async def _hospitaller(session, d):
     # D's first model becomes a Hospitaller (a CHARACTER with Sacred
-    # Healing), leading the other two.
+    # Healing), in a leader unit of its own attached to the other two.
     unit_model = await session.get(UnitModel, d["models"][0]["unit_model_id"])
     old = (
         await session.execute(
@@ -221,7 +221,15 @@ async def _hospitaller(session, d):
     healer.abilities = [DatasheetAbility(name=unit_abilities.SACRED_HEALING)]
     session.add(healer)
     await session.flush()
+    unit = await session.get(Unit, unit_model.unit_id)
+    leader = Unit(
+        faction_unit_id=unit.faction_unit_id, points=0, list_id=unit.list_id,
+        attached_to_id=unit.id,
+    )
+    session.add(leader)
+    await session.flush()
     unit_model.model_id = healer.id
+    unit_model.unit_id = leader.id
     await session.commit()
 
 

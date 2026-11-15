@@ -15,8 +15,8 @@
 #   "WARGEAR OPTIONS" ("per <item>" lines: on top, per item taken)
 #   "LEADER" / "SUPPORT" / "BODYGUARD UNITS UPDATED" (not points: ignored)
 #
-# Fetching needs only the standard library. Run as a script to fetch, parse
-# and upsert every faction (see `main`).
+# Fetching needs only the standard library. Importing what's fetched is
+# unit_points.py (next to this).
 
 from __future__ import annotations
 

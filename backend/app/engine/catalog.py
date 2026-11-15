@@ -145,6 +145,13 @@ class Catalog:
                             row[attr] = {
                                 "to": target, "one": None if value is None else list(_key(value))
                             }
+                    elif isinstance(value, list) and value and all(
+                        isinstance(v, Mirror) for v in value
+                    ):
+                        # (Rows a mirror's been given beyond its relationships -
+                        # e.g. an attached unit's leaders' upgrades: see
+                        # app/engine/loader.py.)
+                        row[attr] = {"to": type(value[0]).__name__, "many": [list(_key(v)) for v in value]}
                     elif isinstance(value, datetime):
                         row[attr] = {"datetime": value.isoformat()}
                     else:
@@ -167,7 +174,7 @@ class Catalog:
             for row in rows:
                 obj = mirror.__new__(mirror)
                 for attr, value in row.items():
-                    if attr in rels:
+                    if attr in rels or (isinstance(value, dict) and "to" in value):
                         pending.append((obj, attr, value))
                     elif isinstance(value, dict) and "datetime" in value:
                         obj.__dict__[attr] = datetime.fromisoformat(value["datetime"])

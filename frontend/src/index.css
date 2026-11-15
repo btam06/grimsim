@@ -171,6 +171,63 @@ section form input[type='radio'] {
   opacity: 0.7;
 }
 
+/* Leader and support units attached to a list unit, under it. */
+.unit-slot {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+
+.unit-slot__loadout {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.unit-slot > .card-accordion.MuiAccordion-root {
+  margin: 0;
+}
+
+section ul li .icon-button {
+  margin: 0.35rem 0 0;
+  padding: 0.1rem 0.4rem;
+}
+
+/* A pick-one group shown as boxes (ChoiceBoxes). */
+.choice-boxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+section ul li .choice-box,
+.choice-box {
+  margin: 0;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid #8886;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.choice-box:hover {
+  border-color: #888c;
+}
+
+.choice-box--chosen,
+.choice-box--chosen:hover {
+  border-color: #3b82f6;
+  background: #3b82f622;
+  font-weight: 600;
+}
+
+.attached-units {
+  margin: 0.3rem 0 0.3rem 0.5rem;
+  padding-left: 0.5rem;
+  border-left: 2px solid #8884;
+}
+
 .die-face {
   font-size: 2em;
   line-height: 1;
@@ -337,6 +394,31 @@ section form textarea {
   color: CanvasText;
 }
 
+.app-dialog--wide {
+  width: min(48rem, calc(100vw - 2rem));
+  max-width: none;
+  max-height: calc(100vh - 2rem);
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+
+.datasheet-attached {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #8884;
+}
+
+.datasheet-attached h3 {
+  margin: 0 0 0.5rem;
+}
+
+.dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
 .app-dialog::backdrop {
   background: rgba(0, 0, 0, 0.5);
 }
@@ -398,6 +480,10 @@ section .app-dialog form {
 }
 
 /* A unit's datasheet in the calculator (inside a collapsed accordion). */
+.datasheet-invuln {
+  font-size: 0.85em;
+}
+
 .datasheet h4 {
   margin: 0.5rem 0 0.3rem;
 }

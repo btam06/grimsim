@@ -134,17 +134,100 @@ def unit_unavailable_reason(
 # --- what they grant in combat ---
 
 
+def _led_from(unit_model) -> int | None:
+    # The leader or support unit a model in a game's attached unit came from
+    # (None: the unit's own model) - see app/engine/loader.py attach_leaders.
+    return unit_model.__dict__.get("led_from")
+
+
+def _marked(unit: Unit) -> bool:
+    # Whether its models say where they came from (a game's, loaded since
+    # leaders became units of their own; an older autosave's don't).
+    return all("led_from" in m.__dict__ for m in unit.unit_models)
+
+
+# Models destroyed by the attacks being made, which still count until the
+# attacking unit has made them all (see lasting).
+_lasting: ContextVar[list[int] | None] = ContextVar(
+    "lasting", default=None
+)
+
+
+@contextmanager
+def lasting(destroyed: list[int]):
+    # While a unit makes its attacks: the models in `destroyed` (the unit
+    # model ids they've destroyed so far - added to as they are) still give
+    # what they gave, e.g. an enhancement's bearer to its unit - "if that last
+    # model was destroyed as the result of an attack, the ability it was
+    # conferring upon the attached unit applies until the attacking unit has
+    # resolved all of its attacks" (Core Rules 19.04).
+    token = _lasting.set(destroyed)
+    try:
+        yield
+    finally:
+        _lasting.reset(token)
+
+
+def _destroyed() -> set[int] | None:
+    # The bound game's destroyed models' unit model ids (None: no game) -
+    # those destroyed by the attacks being made aside (see lasting).
+    from app.engine import context
+
+    live = context.current()
+    if live is None:
+        return None
+    still = set(_lasting.get() or ())
+    return {d.unit_model_id for d in live.game.model_damage if d.destroyed} - still
+
+
+def _any_alive(models: list) -> bool:
+    destroyed = _destroyed()
+    return any(destroyed is None or m.id not in destroyed for m in models)
+
+
 def is_leading(unit: Unit, unit_model: UnitModel) -> bool:
-    # Whether a model is leading its unit: it's a CHARACTER in a unit that has
-    # at least one non-CHARACTER model (the same approximation of leader
-    # attachment the combat conditions use).
-    return "CHARACTER" in _keyword_names(unit_model.model) and any(
-        "CHARACTER" not in _keyword_names(other.model) for other in unit.unit_models
-    )
+    # Whether a model is leading a unit: its leader or support unit is
+    # attached to a bodyguard unit - in a game, it started the battle in an
+    # attached unit, and is leading even once its bodyguard unit's destroyed
+    # (Core Rules 19.04: "leader/support units continue to benefit from their
+    # own 'while this model is leading a unit' abilities even after their
+    # bodyguard unit is destroyed"). In a game the two are one unit (see
+    # app/engine/loader.py merge): it came from an attached unit. In a list,
+    # its unit is attached to one.
+    from app.engine.catalog import Mirror
+
+    if unit.unit_models and _marked(unit):
+        return _led_from(unit_model) is not None
+    if isinstance(unit, Mirror):
+        # (An older game's: leaders as models in their units - a CHARACTER
+        # in a unit with others.)
+        return "CHARACTER" in _keyword_names(unit_model.model) and any(
+            "CHARACTER" not in _keyword_names(other.model) for other in unit.unit_models
+        )
+    return getattr(unit, "attached_to_id", None) is not None
+
+
+def _upgrades_reaching(unit: Unit) -> list:
+    # The upgrades that apply to the (attached) unit (Core Rules 19.04): its
+    # own, until the last of its own models is destroyed, and each attached
+    # leader or support unit's, until the last of that unit's models is.
+    if not _marked(unit):
+        return [unit.upgrade] if unit.upgrade is not None else []
+    found = []
+    if unit.upgrade is not None and _any_alive(
+        [m for m in unit.unit_models if _led_from(m) is None]
+    ):
+        found.append(unit.upgrade)
+    for upgrade, leader_id in zip(
+        unit.__dict__.get("attached_upgrades", []), unit.__dict__.get("attached_upgrade_units", [])
+    ):
+        if _any_alive([m for m in unit.unit_models if _led_from(m) == leader_id]):
+            found.append(upgrade)
+    return found
 
 
 def _grants_reaching(unit: Unit, unit_model: UnitModel | None, grants_of) -> list:
-    # The grants from the unit's enhancements and upgrade that apply to
+    # The grants from the unit's enhancements and upgrades that apply to
     # `unit_model` (or, if None, to the unit as a whole - bearer grants count
     # for the unit the bearer is in).
     reaching = []
@@ -157,10 +240,11 @@ def _grants_reaching(unit: Unit, unit_model: UnitModel | None, grants_of) -> lis
                 reaching.append(grant)
             elif grant.scope == "led_unit" and is_leading(unit, carrier):
                 reaching.append(grant)
-            elif grant.scope == "bearers_unit":
+            elif grant.scope == "bearers_unit" and _any_alive([carrier]):
+                # (A specific model's: until it's destroyed - Core Rules 19.04.)
                 reaching.append(grant)
-    if unit.upgrade is not None:
-        reaching += [g for g in grants_of(unit.upgrade) if g.scope == "unit"]
+    for upgrade in _upgrades_reaching(unit):
+        reaching += [g for g in grants_of(upgrade) if g.scope == "unit"]
     return reaching
 
 

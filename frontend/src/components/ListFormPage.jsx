@@ -1,8 +1,19 @@
 import { useEffect, useState } from 'react'
-import { createList, createUnit, deleteUnit, listDispositions, updateList } from '../api'
+import {
+  createList,
+  createUnit,
+  deleteUnit,
+  listBaseSizes,
+  listDatasheetAbilities,
+  listDispositions,
+  listFactionAbilities,
+  listWeaponAbilities,
+  updateList,
+} from '../api'
+import DatasheetDialog from './DatasheetDialog'
 import Field from './Field'
 import Select from './Select'
-import { CopyButton, DeleteButton, EditButton } from './IconButtons'
+import { CopyButton, DatasheetButton, DeleteButton, EditButton } from './IconButtons'
 import { listPoints } from '../listPoints'
 
 const POINTS_LIMIT_OPTIONS = [
@@ -85,6 +96,23 @@ function ListFormPage({
   const [form, setForm] = useState(editingList ? formFromList(editingList) : buildEmptyForm())
   const [error, setError] = useState(null)
   const [dispositions, setDispositions] = useState([])
+  // The unit whose datasheet is open, and what's needed to show it (the
+  // abilities and base sizes are fetched the first time one is opened).
+  const [datasheetUnit, setDatasheetUnit] = useState(null)
+  const [datasheetLookups, setDatasheetLookups] = useState(null)
+  useEffect(() => {
+    if (!datasheetUnit || datasheetLookups) return
+    Promise.all([
+      listWeaponAbilities(),
+      listDatasheetAbilities(),
+      listFactionAbilities(),
+      listBaseSizes(),
+    ])
+      .then(([weaponAbilities, datasheetAbilities, factionAbilities, baseSizes]) =>
+        setDatasheetLookups({ weaponAbilities, datasheetAbilities, factionAbilities, baseSizes })
+      )
+      .catch((err) => setError(err.message))
+  }, [datasheetUnit, datasheetLookups])
   useEffect(() => {
     listDispositions()
       .then(setDispositions)
@@ -134,17 +162,71 @@ function ListFormPage({
     return UNIT_CATEGORIES.find((c) => shared.has(c.keyword))?.label ?? 'Other'
   }
   // Only categories with units in them, in UNIT_CATEGORIES order, then Other.
+  // Leader and support units attached to another of the list's units are
+  // shown under it, not in their own category.
+  const attachedTo = (unit) => unitsInThisList.filter((u) => u.attached_to_id === unit.id)
+  const shownOnTheirOwn = unitsInThisList.filter(
+    (u) => u.attached_to_id === null || !unitsInThisList.some((t) => t.id === u.attached_to_id)
+  )
   const unitGroups = [...UNIT_CATEGORIES.map((c) => c.label), 'Other']
-    .map((label) => ({ label, units: unitsInThisList.filter((u) => categoryOf(u) === label) }))
+    .map((label) => ({ label, units: shownOnTheirOwn.filter((u) => categoryOf(u) === label) }))
     .filter((group) => group.units.length > 0)
   const modelName = (id) => models.find((m) => m.id === id)?.name ?? `#${id}`
   const weaponName = (id) => weapons.find((w) => w.id === id)?.name ?? `#${id}`
   const wargearName = (id) => wargear.find((g) => g.id === id)?.name ?? `#${id}`
   const factionUnitName = (id) => factionUnits.find((fu) => fu.id === id)?.name ?? `#${id}`
+  // The open unit's datasheet shows its attached leaders' too, and its
+  // bases by its points: each kind of model's, named by the model when they
+  // differ.
+  const datasheetAttached = datasheetUnit ? attachedTo(datasheetUnit) : []
+  const datasheetBases = (() => {
+    if (!datasheetUnit || !datasheetLookups) return ''
+    const byModel = new Map()
+    const unitModels = [datasheetUnit, ...datasheetAttached].flatMap((u) => u.unit_models)
+    unitModels.forEach((um) => {
+      const model = models.find((m) => m.id === um.model_id)
+      const base = datasheetLookups.baseSizes.find((b) => b.id === model?.base_size_id)
+      if (base) byModel.set(model.name, base.name)
+    })
+    const bases = [...new Set(byModel.values())]
+    if (bases.length <= 1) return bases.length ? `${bases[0]} base` : ''
+    return [...byModel].map(([model, base]) => `${base} base (${model})`).join(', ')
+  })()
   const enhancementLabel = (id) => {
     const enhancement = enhancements.find((e) => e.id === id)
     return enhancement ? `${enhancement.name} (+${enhancement.points} pts)` : `#${id}`
   }
+  // A unit's entry: its models, then the leader and support units attached
+  // to it (each its own entry, under it).
+  const renderUnit = (u) => (
+    <li key={u.id}>
+      {factionUnitName(u.faction_unit_id)}
+      <DatasheetButton onClick={() => setDatasheetUnit(u)} /> — {u.points}pts
+      {u.upgrade_id !== null && ` — Upgrade: ${enhancementLabel(u.upgrade_id)}`}
+      {u.unit_models.length > 0 && (
+        <ul>
+          {u.unit_models.map((m) => (
+            <li key={m.id}>
+              {modelName(m.model_id)}
+              {m.weapon_ids.length > 0 && ` — Weapons: ${m.weapon_ids.map(weaponName).join(', ')}`}
+              {m.wargear_ids.length > 0 &&
+                ` — Wargear: ${m.wargear_ids.map(wargearName).join(', ')}`}
+              {m.enhancement_id !== null && ` — Enhancement: ${enhancementLabel(m.enhancement_id)}`}
+            </li>
+          ))}
+        </ul>
+      )}
+      <EditButton onClick={() => onEditUnit(u)} />
+      <CopyButton onClick={() => handleCopyUnit(u)} />
+      <DeleteButton onClick={() => handleDeleteUnit(u.id)} />
+      {attachedTo(u).length > 0 && (
+        <div className="attached-units">
+          <span className="hint">Attached:</span>
+          <ul>{attachedTo(u).map(renderUnit)}</ul>
+        </div>
+      )}
+    </li>
+  )
   // The list's points: its units', plus their enhancements' and upgrades'.
   const totalPoints = listPoints(unitsInThisList, enhancements)
   const unitPoints = unitsInThisList.reduce((sum, u) => sum + u.points, 0)
@@ -200,7 +282,6 @@ function ListFormPage({
     try {
       await createUnit({
         faction_unit_id: unit.faction_unit_id,
-        points: unit.points,
         list_id: unit.list_id,
         unit_models: unit.unit_models.map((m) => ({
           model_id: m.model_id,
@@ -347,36 +428,25 @@ function ListFormPage({
           {unitGroups.map((group) => (
             <div key={group.label}>
               <h4>{group.label}</h4>
-              <ul>
-                {group.units.map((u) => (
-                  <li key={u.id}>
-                    {factionUnitName(u.faction_unit_id)} — {u.points}pts
-                    {u.upgrade_id !== null && ` — Upgrade: ${enhancementLabel(u.upgrade_id)}`}
-                    {u.unit_models.length > 0 && (
-                      <ul>
-                        {u.unit_models.map((m) => (
-                          <li key={m.id}>
-                            {modelName(m.model_id)}
-                            {m.weapon_ids.length > 0 &&
-                              ` — Weapons: ${m.weapon_ids.map(weaponName).join(', ')}`}
-                            {m.wargear_ids.length > 0 &&
-                              ` — Wargear: ${m.wargear_ids.map(wargearName).join(', ')}`}
-                            {m.enhancement_id !== null &&
-                              ` — Enhancement: ${enhancementLabel(m.enhancement_id)}`}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                    <EditButton onClick={() => onEditUnit(u)} />
-                    <CopyButton onClick={() => handleCopyUnit(u)} />
-                    <DeleteButton onClick={() => handleDeleteUnit(u.id)} />
-                  </li>
-                ))}
-              </ul>
+              <ul>{group.units.map(renderUnit)}</ul>
             </div>
           ))}
         </>
       )}
+      <DatasheetDialog
+        unit={datasheetUnit && datasheetLookups ? datasheetUnit : null}
+        title={
+          datasheetUnit &&
+          `${factionUnitName(datasheetUnit.faction_unit_id)} — ${datasheetUnit.points}pts` +
+            (datasheetBases ? ` · ${datasheetBases}` : '')
+        }
+        data={{ models, weapons, wargear, keywords, enhancements, ...datasheetLookups }}
+        attached={datasheetAttached.map((a) => ({
+          unit: a,
+          title: `${factionUnitName(a.faction_unit_id)} — ${a.points}pts (attached)`,
+        }))}
+        onClose={() => setDatasheetUnit(null)}
+      />
     </section>
   )
 }

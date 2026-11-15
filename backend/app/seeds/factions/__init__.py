@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -5,6 +7,7 @@ from sqlalchemy.orm import selectinload
 from app.combat_rules import Rule
 from app.models import (
     BaseSize,
+    DatasheetLoadout,
     DatasheetAbility,
     Detachment,
     DetachmentRule,
@@ -15,6 +18,7 @@ from app.models import (
     FactionAbility,
     FactionUnit,
     Keyword,
+    LeaderBodyguard,
     Model,
     Wargear,
     WargearAbility,
@@ -953,5 +957,85 @@ async def seed_datasheets(session: AsyncSession) -> None:
                 )
                 changed = True
 
+    if changed:
+        await session.commit()
+
+
+def loadout_of(datasheet: datasheet_data.Datasheet) -> tuple[list, list]:
+    # A datasheet's (composition, options) as stored (DatasheetLoadout).
+    # Without a composition in the data, a CHARACTER on its own whose every
+    # weapon is a default and who has no wargear has no decisions to make: a
+    # unit of just it, as equipped.
+    composition = [
+        {"model": c.model, "min": c.min, "max": c.max,
+         "equipped": None if c.equipped is None else list(c.equipped)}
+        for c in datasheet.composition
+    ]
+    if not composition and len(datasheet.models) == 1:
+        model = datasheet.models[0]
+        if (
+            "CHARACTER" in model.keywords and model.weapons and not model.wargear
+            and all(w.default for w in model.weapons)
+        ):
+            composition = [{"model": model.name, "min": 1, "max": 1, "equipped": None}]
+    options = [
+        {"model": o.model, "with": [list(c) for c in o.with_], "replace": list(o.replace),
+         "requires": list(o.requires), "max": o.max, "per": o.per}
+        for o in datasheet.wargear_options
+    ]
+    return composition, options
+
+
+async def seed_loadouts(session: AsyncSession) -> None:
+    # Each seeded datasheet's models, composition and wargear options
+    # (DatasheetLoadout), replaced from the data each time: they're rules, not
+    # anything edited here; and the bodyguards leaders can lead (`leads`).
+    # Runs after seed_datasheets.
+    faction_ids = await _faction_ids_by_name(session)
+    units = {
+        (u.faction_id, u.name): u.id
+        for u in (await session.execute(select(FactionUnit))).scalars()
+    }
+    stored = {
+        row.faction_unit_id: row
+        for row in (await session.execute(select(DatasheetLoadout))).scalars()
+    }
+    changed = False
+    leads: dict[str, set[str]] = defaultdict(set)
+    for faction in FACTIONS:
+        faction_id = faction_ids.get(faction.info.FACTION_NAME)
+        if faction_id is None:
+            continue
+        for datasheet in datasheet_data.load(faction_slug(faction)):
+            unit_id = units.get((faction_id, datasheet.name))
+            if unit_id is None:
+                continue
+            composition, options = loadout_of(datasheet)
+            models = [m.name for m in datasheet.models]
+            row = stored.get(unit_id)
+            if row is None:
+                session.add(DatasheetLoadout(
+                    faction_unit_id=unit_id, models=models, composition=composition,
+                    options=options,
+                ))
+                changed = True
+            elif (row.models, row.composition, row.options) != (models, composition, options):
+                row.models, row.composition, row.options = models, composition, options
+                changed = True
+            leads[datasheet.name] |= set(datasheet.leads)
+
+    # The datasheets each leader or support datasheet can lead: in every
+    # faction with both (an allied copy of a datasheet too). Links are only
+    # added - ones made by hand (PUT /faction-units/{id}/bodyguards) stay.
+    linked = set((await session.execute(
+        select(LeaderBodyguard.leader_id, LeaderBodyguard.bodyguard_id)
+    )).all())
+    for (faction_id, name), leader_id in units.items():
+        for bodyguard in sorted(leads.get(name, ())):
+            bodyguard_id = units.get((faction_id, bodyguard))
+            if bodyguard_id is not None and (leader_id, bodyguard_id) not in linked:
+                session.add(LeaderBodyguard(leader_id=leader_id, bodyguard_id=bodyguard_id))
+                linked.add((leader_id, bodyguard_id))
+                changed = True
     if changed:
         await session.commit()

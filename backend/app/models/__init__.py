@@ -50,7 +50,7 @@ from app.models.enhancement import (
 )
 from app.models.faction import Faction
 from app.models.faction_ability import FactionAbility
-from app.models.faction_unit import FactionUnit
+from app.models.faction_unit import DatasheetLoadout, FactionUnit, LeaderBodyguard
 from app.models.keyword import Keyword
 from app.models.mission import PrimaryMission, SecondaryMission
 from app.models.model import Model, ModelMortalFeelNoPain, ModelRangedOnlyInvulnerable
@@ -90,6 +90,8 @@ __all__ = [
     "Faction",
     "FactionAbility",
     "FactionUnit",
+    "DatasheetLoadout",
+    "LeaderBodyguard",
     "Weapon",
     "WeaponDefault",
     "Wargear",

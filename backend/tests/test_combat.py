@@ -4547,11 +4547,15 @@ def _enhanced_attack(monkeypatch, enhancement=None, upgrade=None, with_trooper=T
     trooper_gun.id = 2
     hero = _unit_model(_model(keywords=[_keyword("CHARACTER")]), [hero_gun])
     hero.enhancement = enhancement
+    # (As a game has an attached unit: the hero from its own leader unit -
+    # see app/engine/loader.py merge - the trooper the bodyguard's. On its
+    # own, the hero's never been attached.)
+    hero.__dict__["led_from"] = 99 if with_trooper else None
     unit_models = [hero]
     if with_trooper:
-        unit_models.append(
-            _unit_model(_model(keywords=[_keyword("INFANTRY")]), [trooper_gun])
-        )
+        trooper = _unit_model(_model(keywords=[_keyword("INFANTRY")]), [trooper_gun])
+        trooper.__dict__["led_from"] = None
+        unit_models.append(trooper)
     attacker = _unit(unit_models)
     attacker.upgrade = upgrade
     defender = _unit([_unit_model(_model(toughness=1, wounds=10, save=7), [])])
@@ -4651,7 +4655,7 @@ async def test_combat_endpoint_applies_enhancement_granted_stealth(
             },
         )
     ).json()["id"]
-    leader = await _create_model(client, faction_id, keyword_ids=[character])
+    leader = await _create_model(client, faction_id, keyword_ids=[character], is_leader=True)
     trooper = await _create_model(client, faction_id, toughness=1, wounds=5, save=7)
     defender_fu = await _create_faction_unit(client, faction_id, "Defenders")
     defender = await client.post(
@@ -4660,13 +4664,28 @@ async def test_combat_endpoint_applies_enhancement_granted_stealth(
             "faction_unit_id": defender_fu,
             "points": 100,
             "list_id": list_id,
-            "unit_models": [
-                {"model_id": leader, "enhancement_id": relic.json()["id"]},
-                {"model_id": trooper},
-            ],
+            "unit_models": [{"model_id": trooper}],
         },
     )
     assert defender.status_code == 201, defender.text
+    # Its leader: a unit of its own, attached to it.
+    leader_fu = (
+        await client.post(
+            "/faction-units",
+            json={"name": "Hero", "faction_id": faction_id, "bodyguard_ids": [defender_fu]},
+        )
+    ).json()["id"]
+    hero = await client.post(
+        "/units",
+        json={
+            "faction_unit_id": leader_fu,
+            "points": 50,
+            "list_id": list_id,
+            "attached_to_id": defender.json()["id"],
+            "unit_models": [{"model_id": leader, "enhancement_id": relic.json()["id"]}],
+        },
+    )
+    assert hero.status_code == 201, hero.text
 
     ignores_cover = next(
         a["id"]

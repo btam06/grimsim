@@ -3,12 +3,13 @@ import random
 import statistics
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db import get_session
-from app.engine import context
+from app.engine import context, loader
+from app.engine.catalog import Catalog
 from app.combat_rules import Rule, RuleOption
 from app.combat_rules.conditions import WITHIN_12_OF_TARGET
 from app.combat_rules.positions import ALWAYS_ASKED, POSITION_CONDITIONS, POSITIONS
@@ -58,7 +59,9 @@ router = APIRouter(prefix="/combat", tags=["combat"])
 
 async def _load_unit(session: AsyncSession, unit_id: int) -> Unit | None:
     # From the game's catalog, while a game's played (see
-    # app/engine/context.py); otherwise (the calculator) from the database.
+    # app/engine/context.py); otherwise (the calculator) from the database,
+    # with the leader and support units attached to it, as one unit - as a
+    # game plays it (a copy: see app/engine/loader.py merge).
     if context.current() is not None:
         return context.catalog().get("Unit", unit_id)
     weapons_loader = selectinload(Unit.unit_models).selectinload(UnitModel.weapons)
@@ -133,9 +136,26 @@ async def _load_unit(session: AsyncSession, unit_id: int) -> Unit | None:
             .selectinload(Model.keywords),
             *enhancement_loaders,
         )
-        .where(Unit.id == unit_id)
+        .where(or_(Unit.id == unit_id, Unit.attached_to_id == unit_id))
+        .order_by(Unit.id)
     )
-    return result.scalar_one_or_none()
+    units = result.scalars().all()
+    unit = next((u for u in units if u.id == unit_id), None)
+    if unit is None:
+        return None
+    catalog = Catalog()
+    mirrors = [catalog.add(u) for u in units]
+    target = next(m for m in mirrors if m.id == unit_id)
+    loader.mark_own(target)
+    army_list = target.__dict__.get("army_list")
+    attached = [m for m in mirrors if m is not target]
+    for mirror in attached:
+        loader.merge(target, mirror, army_list)
+    if army_list is not None and attached:
+        army_list.__dict__["units"] = [
+            u for u in army_list.units if not any(u is m for m in attached)
+        ]
+    return target
 
 
 def _option_owner(option_name: str):

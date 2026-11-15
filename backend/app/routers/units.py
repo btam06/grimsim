@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -8,6 +8,7 @@ from app.models import (
     ArmyList,
     Enhancement,
     FactionUnit,
+    LeaderBodyguard,
     ListWarlord,
     Model,
     Unit,
@@ -17,10 +18,13 @@ from app.models import (
     Weapon,
 )
 from app.routers.enhancements import used_in_list
-from app.schemas import SelectableRuleOut, UnitIn, UnitModelIn, UnitModelOut, UnitOut
+from app.schemas import (
+    SelectableRuleOut, UnitIn, UnitModelIn, UnitModelOut, UnitOut, UnitPriceOut,
+)
 from app.services.list_building import allies as list_building
 from app.services import unit_points
 from app.services.list_building import enhancements as enhancement_rules
+from app.services.list_building import loadouts
 
 router = APIRouter(prefix="/units", tags=["units"])
 
@@ -44,6 +48,7 @@ def _to_out(unit: Unit) -> UnitOut:
         unit_models=[_unit_model_to_out(um) for um in unit.unit_models],
         upgrade_id=unit.upgrade.id if unit.upgrade else None,
         selected_rule_ids=unit.selected_rule_ids,
+        attached_to_id=unit.attached_to_id,
     )
 
 
@@ -283,6 +288,93 @@ async def _list_context(
     return context
 
 
+def _kind(models: list[Model]) -> str | None:
+    # "leader" or "support" for a leader or support unit (every model a
+    # Leader or Support model), else None.
+    if not models or not all(m.is_leader or m.is_support for m in models):
+        return None
+    return "leader" if any(m.is_leader for m in models) else "support"
+
+
+async def _check_attachment(
+    session: AsyncSession, payload: UnitIn, models: list[Model], unit_id: int | None
+) -> int | None:
+    # The bodyguard unit it's attached to, checked (Core Rules 19.01): one
+    # in its list, of a datasheet it can lead, not itself a leader, support
+    # or attached unit, with no other unit of its kind (leader or support)
+    # attached to it.
+    if payload.attached_to_id is None:
+        return None
+    if payload.list_id is None:
+        raise HTTPException(status_code=400, detail="only a unit in a list can be attached")
+    kind = _kind(models)
+    if kind is None:
+        raise HTTPException(
+            status_code=400, detail="only a leader or support unit can be attached to a unit"
+        )
+    if unit_id is not None and await session.scalar(
+        select(Unit.id).where(Unit.attached_to_id == unit_id).limit(1)
+    ):
+        raise HTTPException(status_code=400, detail="a unit with units attached to it can't be attached")
+    target = (
+        await session.execute(
+            select(Unit)
+            .options(selectinload(Unit.unit_models).selectinload(UnitModel.model))
+            .where(Unit.id == payload.attached_to_id)
+        )
+    ).scalar_one_or_none()
+    if target is None or target.list_id != payload.list_id or target.id == unit_id:
+        raise HTTPException(status_code=400, detail="attached_to_id must be another unit in its list")
+    if target.attached_to_id is not None or _kind([um.model for um in target.unit_models]):
+        raise HTTPException(
+            status_code=400, detail="a leader or support unit can't be a bodyguard unit"
+        )
+    if not await session.get(LeaderBodyguard, (payload.faction_unit_id, target.faction_unit_id)):
+        raise HTTPException(status_code=400, detail="this datasheet can't lead that unit")
+    others = (
+        await session.execute(
+            select(Unit)
+            .options(selectinload(Unit.unit_models).selectinload(UnitModel.model))
+            .where(Unit.attached_to_id == target.id, Unit.id != (unit_id or 0))
+        )
+    ).scalars().all()
+    if any(_kind([um.model for um in other.unit_models]) == kind for other in others):
+        raise HTTPException(
+            status_code=400, detail=f"that unit already has a {kind} unit attached"
+        )
+    return target.id
+
+
+async def _check_loadout(
+    session: AsyncSession, payload: UnitIn, unit_models: list[UnitModel], models: list[Model]
+) -> None:
+    # The unit must be one its datasheet allows (its composition and wargear
+    # options, from the data), when the data says.
+    loadout = await loadouts.loadout_for(session, payload.faction_unit_id)
+    if loadout is None:
+        return
+    reason = loadouts.check(
+        loadout, [(m, um.weapons, um.wargear) for um, m in zip(unit_models, models)]
+    )
+    if reason:
+        raise HTTPException(status_code=400, detail=reason)
+
+
+async def _auto_models(session: AsyncSession, payload: UnitIn) -> None:
+    # A datasheet with nothing to decide (one model, as equipped) gets its
+    # model when none are given.
+    if payload.unit_models:
+        return
+    loadout = await loadouts.loadout_for(session, payload.faction_unit_id)
+    if loadout is None or not loadout.auto:
+        return
+    part = loadout.parts[0]
+    weapon_ids, wargear_ids = loadouts.ids_for(part.model, part.equipped)
+    payload.unit_models = [
+        UnitModelIn(model_id=part.model.id, weapon_ids=weapon_ids, wargear_ids=wargear_ids)
+    ]
+
+
 async def _price(
     session: AsyncSession,
     payload: UnitIn,
@@ -291,7 +383,9 @@ async def _price(
     unit_id: int | None,
 ) -> int:
     # The unit's points: from its datasheet's costs (the Munitorum Field
-    # Manual's - see app/services/unit_points.py), else as given.
+    # Manual's - see app/services/unit_points.py). A datasheet the manual
+    # hasn't got: as given (by the API - list building doesn't ask), else
+    # what the unit had, else 0.
     copy = await unit_points.copy_number(
         session, payload.list_id, payload.faction_unit_id, unit_id
     )
@@ -300,11 +394,11 @@ async def _price(
     )
     if points is not None:
         return points
-    if payload.points is None:
-        raise HTTPException(
-            status_code=400, detail="this datasheet has no points values: give its points"
-        )
-    return payload.points
+    if payload.points is not None:
+        return payload.points
+    if unit_id is not None:
+        return await session.scalar(select(Unit.points).where(Unit.id == unit_id)) or 0
+    return 0
 
 
 def _check_list_building(
@@ -357,6 +451,23 @@ async def selectable_rules(
     ]
 
 
+@router.post("/price", response_model=UnitPriceOut)
+async def price_unit(
+    payload: UnitIn,
+    unit_id: int | None = Query(None),
+    session: AsyncSession = Depends(get_session),
+):
+    # What the unit would cost as given (for the unit form, as it's built):
+    # priced as saving it would, without checking anything else. `unit_id`:
+    # the unit being edited.
+    if not payload.unit_models:
+        return UnitPriceOut(points=0)
+    if await session.get(FactionUnit, payload.faction_unit_id) is None:
+        raise HTTPException(status_code=400, detail="invalid faction_unit_id")
+    unit_models, models = await _build_unit_models(session, payload.unit_models)
+    return UnitPriceOut(points=await _price(session, payload, unit_models, models, unit_id))
+
+
 @router.get("", response_model=list[UnitOut])
 async def list_units(session: AsyncSession = Depends(get_session)):
     result = await session.execute(
@@ -382,8 +493,11 @@ async def create_unit(payload: UnitIn, session: AsyncSession = Depends(get_sessi
 
     context = await _list_context(session, payload.list_id, None)
 
+    await _auto_models(session, payload)
     unit_models, models = await _build_unit_models(session, payload.unit_models)
+    await _check_loadout(session, payload, unit_models, models)
     points = await _price(session, payload, unit_models, models, None)
+    attached_to_id = await _check_attachment(session, payload, models, None)
     _check_list_building(context, faction_unit, points, models)
     selected = await _check_rule_selections(session, payload, models, None)
     upgrade = await _apply_enhancements(
@@ -393,6 +507,7 @@ async def create_unit(payload: UnitIn, session: AsyncSession = Depends(get_sessi
         faction_unit_id=payload.faction_unit_id,
         points=points,
         list_id=payload.list_id,
+        attached_to_id=attached_to_id,
         unit_models=unit_models,
         upgrade=upgrade,
     )
@@ -424,8 +539,11 @@ async def update_unit(
 
     context = await _list_context(session, payload.list_id, unit_id)
 
+    await _auto_models(session, payload)
     new_unit_models, models = await _build_unit_models(session, payload.unit_models)
+    await _check_loadout(session, payload, new_unit_models, models)
     points = await _price(session, payload, new_unit_models, models, unit_id)
+    attached_to_id = await _check_attachment(session, payload, models, unit_id)
     _check_list_building(context, faction_unit, points, models)
     selected = await _check_rule_selections(session, payload, models, unit_id)
     upgrade = await _apply_enhancements(
@@ -435,7 +553,13 @@ async def update_unit(
     before = (unit.list_id, unit.faction_unit_id)
     unit.faction_unit_id = payload.faction_unit_id
     unit.points = points
+    if unit.list_id != payload.list_id:
+        # (Moved to another list: what was attached to it stays behind.)
+        await session.execute(
+            update(Unit).where(Unit.attached_to_id == unit_id).values(attached_to_id=None)
+        )
     unit.list_id = payload.list_id
+    unit.attached_to_id = attached_to_id
     unit.unit_models = new_unit_models
     unit.upgrade = upgrade
     unit.selected_rule_ids = selected
@@ -474,6 +598,10 @@ async def delete_unit(unit_id: int, session: AsyncSession = Depends(get_session)
     # No longer any list's Warlord.
     await session.execute(delete(ListWarlord).where(ListWarlord.unit_id == unit_id))
     group = (unit.list_id, unit.faction_unit_id)
+    # What was attached to it is a unit on its own again.
+    await session.execute(
+        update(Unit).where(Unit.attached_to_id == unit_id).values(attached_to_id=None)
+    )
     await session.delete(unit)
     await session.flush()
     # (Later units of its datasheet in its list move up a copy - maybe below

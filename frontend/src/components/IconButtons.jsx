@@ -1,5 +1,5 @@
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faCopy, faPencil, faXmark } from '@fortawesome/free-solid-svg-icons'
+import { faCopy, faFileLines, faPencil, faXmark } from '@fortawesome/free-solid-svg-icons'
 
 // Icon-only action buttons used across list items. The label is kept as the
 // button's tooltip and accessible name, so it still reads as "Edit" etc.
@@ -23,6 +23,14 @@ export function EditButton({ onClick }) {
 
 export function CopyButton({ onClick }) {
   return <IconButton icon={faCopy} label="Copy" variant="copy" onClick={onClick} />
+}
+
+export function RemoveButton({ onClick, label = 'Remove' }) {
+  return <IconButton icon={faXmark} label={label} variant="delete" onClick={onClick} />
+}
+
+export function DatasheetButton({ onClick }) {
+  return <IconButton icon={faFileLines} label="Datasheet" variant="datasheet" onClick={onClick} />
 }
 
 export function DeleteButton({ onClick }) {

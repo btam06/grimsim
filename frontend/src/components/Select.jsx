@@ -1,7 +1,12 @@
 import ReactSelect from 'react-select'
 
 function Select({ options, value, onChange, placeholder, isDisabled }) {
-  const selectOptions = options.map((o) => ({ value: String(o.id), label: o.name }))
+  // (An option with `disabled` is shown but can't be picked.)
+  const selectOptions = options.map((o) => ({
+    value: String(o.id),
+    label: o.name,
+    isDisabled: Boolean(o.disabled),
+  }))
   const selected = selectOptions.find((o) => o.value === value) ?? null
 
   return (

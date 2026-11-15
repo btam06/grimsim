@@ -22,12 +22,67 @@ class FactionOut(FactionIn):
 class FactionUnitIn(BaseModel):
     name: str
     faction_id: int
+    # For a leader or support datasheet: the bodyguard datasheets it can lead
+    # (Core Rules 19.01).
+    bodyguard_ids: list[int] = []
 
 
 class FactionUnitOut(FactionUnitIn):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+
+
+class LoadoutItemsOut(BaseModel):
+    weapon_ids: list[int] = []
+    wargear_ids: list[int] = []
+
+
+class LoadoutPartOut(LoadoutItemsOut):
+    # How many of a model a unit has, and what each starts with.
+    model_id: int
+    min: int
+    max: int
+
+
+class LoadoutChoiceOut(LoadoutItemsOut):
+    name: str
+
+
+class LoadoutOptionOut(BaseModel):
+    # A wargear option (see app/services/list_building/loadouts.py): the
+    # model's `replace` items are swapped for one of the `choices` (no
+    # `replace`: added); at most `limit` models in a unit of `limit_per`
+    # models can take it (limit None: any); `requires` must stay.
+    index: int
+    model_id: int
+    label: str
+    replace: LoadoutItemsOut
+    requires: LoadoutItemsOut
+    choices: list[LoadoutChoiceOut]
+    max: int | None
+    per: int | None
+
+
+class LoadoutVariantOut(LoadoutItemsOut):
+    # One way a model can be equipped (its options taken: `options`).
+    model_id: int
+    name: str
+    options: list[int]
+
+
+class LoadoutOut(BaseModel):
+    # What a datasheet's units can be made of. model_ids: its models (empty:
+    # not known - any of its faction's). composition empty: any number of
+    # them, any of their weapons. auto: nothing to decide - the unit is its
+    # one model, as composed.
+    model_ids: list[int]
+    composition: list[LoadoutPartOut]
+    options: list[LoadoutOptionOut]
+    # Every way each composed model can be equipped, its sergeant's first
+    # (the composition's models with at most 1 a unit, then in order).
+    variants: list[LoadoutVariantOut] = []
+    auto: bool
 
 
 class FactionAbilityIn(BaseModel):
@@ -186,6 +241,11 @@ class UnitModelIn(BaseModel):
     enhancement_id: int | None = None
 
 
+class UnitPriceOut(BaseModel):
+    # A unit's points as it would be saved (POST /units/price).
+    points: int
+
+
 class UnitModelOut(BaseModel):
     id: int
     model_id: int
@@ -196,8 +256,9 @@ class UnitModelOut(BaseModel):
 
 class UnitIn(BaseModel):
     faction_unit_id: int
-    # Only for a datasheet with no points values (see app/services/
-    # unit_points.py): one with them is priced from them, whatever's given.
+    # Worked out from the Munitorum Field Manual (see app/services/
+    # unit_points.py), whatever's given; only used for a datasheet it hasn't
+    # got (list building doesn't send it).
     points: int | None = None
     list_id: int | None = None
     unit_models: list[UnitModelIn] = []
@@ -205,6 +266,8 @@ class UnitIn(BaseModel):
     upgrade_id: int | None = None
     # Detachment rules with a selection limit this unit is selected for.
     selected_rule_ids: list[int] = []
+    # For a leader or support unit: the bodyguard unit in its list it leads.
+    attached_to_id: int | None = None
 
 
 class SelectableRuleOut(BaseModel):
@@ -225,6 +288,7 @@ class UnitOut(BaseModel):
     unit_models: list[UnitModelOut]
     upgrade_id: int | None
     selected_rule_ids: list[int] = []
+    attached_to_id: int | None = None
 
 
 EnhancementScope = Literal["bearer", "led_unit", "bearers_unit", "unit"]

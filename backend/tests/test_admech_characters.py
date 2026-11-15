@@ -174,16 +174,23 @@ async def test_enginseer_lone_operative_unless_leading(client: AsyncClient, sess
 
 
 def test_leading_a_unit():
+    # A unit is led while it has a model from an attached leader unit (see
+    # app/engine/loader.py merge) - even once its own are gone; in a list, a
+    # leader unit is leading while it's attached.
     from types import SimpleNamespace
 
-    def model(*keywords):
-        kws = [SimpleNamespace(name=k) for k in keywords]
-        return SimpleNamespace(model=SimpleNamespace(keywords=kws))
+    def model(keyword, led_from=None):
+        kws = [SimpleNamespace(name=keyword)]
+        return SimpleNamespace(model=SimpleNamespace(keywords=kws), led_from=led_from, id=id(kws))
 
     unit = lambda *models: SimpleNamespace(unit_models=list(models))  # noqa: E731
-    assert shooting.leading(unit(model("CHARACTER"), model("INFANTRY")))
-    assert not shooting.leading(unit(model("CHARACTER")))
-    assert not shooting.leading(unit(model("INFANTRY"), model("INFANTRY")))
+    assert shooting.leading(unit(model("CHARACTER", led_from=7), model("INFANTRY")))
+    assert shooting.leading(unit(model("CHARACTER", led_from=7)))
+    assert not shooting.leading(unit(model("CHARACTER"), model("INFANTRY")))
+    listed = lambda attached_to_id: SimpleNamespace(  # noqa: E731
+        unit_models=[SimpleNamespace(model=None)], attached_to_id=attached_to_id
+    )
+    assert shooting.leading(listed(3)) and not shooting.leading(listed(None))
 
 
 async def test_enhanced_data_tether(client: AsyncClient, session, tmp_path, monkeypatch):

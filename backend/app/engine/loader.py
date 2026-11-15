@@ -139,7 +139,7 @@ async def load(
         for unit in army_list.units:
             if not is_loaded(unit, "army_list") or unit.army_list is not army_list:
                 set_committed_value(unit, "army_list", army_list)
-        catalog.add(army_list)
+        attach_leaders(catalog, catalog.add(army_list))
     detachment_ids = [d.id for army_list in lists for d in army_list.detachments]
     for rule in await rows(
         select(DetachmentRule)
@@ -183,6 +183,67 @@ async def load(
     if layout is not None:
         catalog.add(layout)
     return catalog
+
+
+def attach_leaders(catalog: Catalog, army_list) -> None:
+    # Each leader or support unit attached to a bodyguard unit (Unit.
+    # attached_to_id) and that unit as one, as the game plays them - an
+    # attached unit "is a single unit for all rules purposes" (Core Rules
+    # 19.01) - see merge. The attached units leave the list (and the
+    # catalog). Only the game's copies change.
+    units = {u.id: u for u in army_list.units}
+    for unit in army_list.units:
+        mark_own(unit)
+    merged = []
+    for unit in army_list.units:
+        target = units.get(unit.__dict__.get("attached_to_id"))
+        if target is None or target is unit:
+            continue
+        merge(target, unit, army_list)
+        merged.append(unit)
+    if merged:
+        army_list.__dict__["units"] = [u for u in army_list.units if u not in merged]
+        table = catalog.rows.get("Unit", {})
+        for unit in merged:
+            table.pop((unit.id,), None)
+
+
+def mark_own(unit) -> None:
+    # Its models as its own (`led_from` None - see merge).
+    for unit_model in unit.unit_models:
+        unit_model.__dict__.setdefault("led_from", None)
+
+
+def merge(target, unit, army_list=None) -> None:
+    # A leader or support unit's mirror merged into its bodyguard unit's: the
+    # bodyguard unit (its id, its label) with the attached unit's models,
+    # points and detachment rule selections too, and the list's Warlord there
+    # if it was the attached unit. Each model is marked with the unit it came
+    # from - `led_from`: the attached unit's id (the bodyguard's own: None) -
+    # and the bodyguard unit given the attached unit's upgrade
+    # (`attached_upgrades`, with `attached_upgrade_units` its unit's id), for
+    # what applies while they last (Core Rules 19.04 - see
+    # app/services/list_building/enhancements.py).
+    for unit_model in unit.unit_models:
+        unit_model.__dict__["unit_id"] = target.id
+        unit_model.__dict__["led_from"] = unit.id
+        if "unit" in unit_model.__dict__:
+            unit_model.__dict__["unit"] = target
+    upgrade = unit.__dict__.get("upgrade")
+    if upgrade is not None:
+        target.__dict__["attached_upgrades"] = [*target.__dict__.get("attached_upgrades", []), upgrade]
+        target.__dict__["attached_upgrade_units"] = [
+            *target.__dict__.get("attached_upgrade_units", []), unit.id
+        ]
+    target.__dict__["unit_models"] = [*target.unit_models, *unit.unit_models]
+    target.__dict__["points"] = target.points + unit.points
+    if "rule_selection_links" in unit.__dict__:
+        target.__dict__["rule_selection_links"] = [
+            *target.__dict__.get("rule_selection_links", []), *unit.rule_selection_links
+        ]
+    warlord = army_list.__dict__.get("warlord_link") if army_list is not None else None
+    if warlord is not None and warlord.unit_id == unit.id:
+        warlord.__dict__["unit_id"] = target.id
 
 
 async def reload(session: AsyncSession, live) -> None:

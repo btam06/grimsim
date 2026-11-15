@@ -1,3 +1,4 @@
+import importlib
 import json
 
 from httpx import AsyncClient
@@ -5,8 +6,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import PointsSource, UnitPointCost, UnitWargearCost
-from app.services import munitorum, unit_points
-from app.services.munitorum import FactionPage, UnitCost, UnitEntry, WargearCost
+from app.services import unit_points as pricing
+
+# (`import` is a keyword: the package can't be named in an import statement.)
+munitorum = importlib.import_module("app.services.import.munitorum")
+unit_points = importlib.import_module("app.services.import.unit_points")
+FactionPage, UnitCost, UnitEntry, WargearCost = (
+    munitorum.FactionPage, munitorum.UnitCost, munitorum.UnitEntry, munitorum.WargearCost
+)
 
 
 # --- parsing a page ------------------------------------------------------------
@@ -96,12 +103,12 @@ def _cost(from_copy, models, points, composition=None):
 def test_unit_cost_by_size_and_requisition_threshold():
     costs = [_cost(1, 5, 95), _cost(1, 10, 190), _cost(3, 5, 105), _cost(3, 10, 200)]
     five, seven = ["Marine"] * 5, ["Marine"] * 7
-    assert unit_points.unit_cost(costs, 1, five) == 95
+    assert pricing.unit_cost(costs, 1, five) == 95
     # Between two sizes: the larger one's.
-    assert unit_points.unit_cost(costs, 2, seven) == 190
-    assert unit_points.unit_cost(costs, 3, five) == 105
-    assert unit_points.unit_cost(costs, 5, seven) == 200
-    assert unit_points.unit_cost([], 1, five) is None
+    assert pricing.unit_cost(costs, 2, seven) == 190
+    assert pricing.unit_cost(costs, 3, five) == 105
+    assert pricing.unit_cost(costs, 5, seven) == 200
+    assert pricing.unit_cost([], 1, five) is None
 
 
 def test_unit_cost_by_named_composition():
@@ -111,15 +118,26 @@ def test_unit_cost_by_named_composition():
         _cost(1, 6, 170, [[6, "Wolf Guard Headtakers"]]),
     ]
     with_wolves = ["Wolf Guard Headtaker"] * 3 + ["Hunting Wolf"] * 3
-    assert unit_points.unit_cost(costs, 1, with_wolves) == 115
-    assert unit_points.unit_cost(costs, 1, ["Wolf Guard Headtaker"] * 6) == 170
-    assert unit_points.unit_cost(costs, 1, ["Wolf Guard Headtaker"] * 4) == 170
+    assert pricing.unit_cost(costs, 1, with_wolves) == 115
+    assert pricing.unit_cost(costs, 1, ["Wolf Guard Headtaker"] * 6) == 170
+    assert pricing.unit_cost(costs, 1, ["Wolf Guard Headtaker"] * 4) == 170
 
 
 def test_wargear_cost_per_item():
     wargear = [UnitWargearCost(name="Despoiler gatling cannon", points=25)]
     items = ["Knight Despoiler", "Despoiler gatling cannon", "Despoiler gatling cannon", "Meltagun"]
-    assert unit_points.wargear_cost(wargear, items) == 50
+    assert pricing.wargear_cost(wargear, items) == 50
+
+
+def test_a_weapons_profiles_are_priced_once_per_model():
+    from types import SimpleNamespace as NS
+
+    costs = [_cost(1, 5, 200)]
+    wargear = [UnitWargearCost(name="Cyclone Missile Launcher", points=10)]
+    cyclone = [NS(name="Cyclone Missile Launcher - Frag"), NS(name="Cyclone Missile Launcher - Krak")]
+    models = [NS(name="Terminator", is_leader=False, is_support=False)] * 5
+    unit_models = [NS(weapons=cyclone if i < 1 else [], wargear=[]) for i in range(5)]
+    assert pricing.price(costs, wargear, 1, unit_models, models) == 210
 
 
 # --- importing and the API ----------------------------------------------------------
@@ -213,13 +231,17 @@ async def test_units_are_priced_from_imported_costs(
     assert len(rows) == 4
 
 
-async def test_datasheet_without_costs_needs_its_points(client: AsyncClient, faction_id: int):
+async def test_datasheet_without_costs_keeps_its_points(client: AsyncClient, faction_id: int):
     _, _, faction_unit_id, list_id = await _setup(client, faction_id)
     body = {"faction_unit_id": faction_unit_id, "list_id": list_id, "unit_models": []}
-    assert (await client.post("/units", json=body)).status_code == 400
+    # (Not given: 0 - and kept as it is when the unit's edited.)
+    first = await client.post("/units", json=body)
+    assert first.status_code == 201 and first.json()["points"] == 0
     response = await client.post("/units", json={**body, "points": 120})
     assert response.status_code == 201
     assert response.json()["points"] == 120
+    edited = await client.put(f"/units/{response.json()['id']}", json=body)
+    assert edited.json()["points"] == 120
 
 
 async def test_attached_leaders_are_priced_from_their_own_datasheets(
@@ -239,8 +261,8 @@ async def test_attached_leaders_are_priced_from_their_own_datasheets(
         "faction_unit_id": faction_unit_id, "list_id": list_id,
         "unit_models": [{"model_id": marine_id}] * 5 + [{"model_id": captain_id}],
     }
-    # The Captain's datasheet has no costs yet: priced by hand.
-    assert (await client.post("/units", json=body)).status_code == 400
+    # The Captain's datasheet has no costs yet: the unit can't be priced.
+    assert (await client.post("/units", json=body)).json()["points"] == 0
 
     captain = UnitEntry("CAPTAIN", [UnitCost(1, 1, 75)])
     await unit_points.import_pages(session, [_manual(squad, captain)])
@@ -248,3 +270,42 @@ async def test_attached_leaders_are_priced_from_their_own_datasheets(
     assert response.status_code == 201, response.text
     # 5 Marines (not 6: the 10-model size) and the Captain.
     assert response.json()["points"] == 80 + 75
+
+
+
+async def test_import_reports_priced_wargear_no_model_has(
+    client: AsyncClient, session: AsyncSession, faction_id: int
+):
+    model_id, weapon_id, faction_unit_id, list_id = await _setup(client, faction_id)
+    entry = UnitEntry(
+        "TACTICAL SQUAD", [UnitCost(1, 5, 80)],
+        [WargearCost("Meltaguns", 5), WargearCost("Melta-gun (twin)", 10)],
+    )
+    report = await unit_points.import_pages(session, [_manual(entry)])
+    unfound = [u for u in report.unfound_wargear if u[1] == "Tactical Squad"]
+    assert unfound == [("Test Faction", "Tactical Squad", "Melta-gun (twin)", "Meltagun")]
+    assert any("Melta-gun (twin)" in line for line in report.lines())
+
+
+async def test_price_preview_prices_the_unit_as_saving_would(
+    client: AsyncClient, session: AsyncSession, faction_id: int
+):
+    model_id, weapon_id, faction_unit_id, list_id = await _setup(client, faction_id)
+    entry = UnitEntry("TACTICAL SQUAD", [UnitCost(1, 5, 80), UnitCost(1, 10, 160)],
+                      [WargearCost("Meltagun", 5)])
+    await unit_points.import_pages(session, [_manual(entry)])
+
+    def payload(n, melta=0):
+        models = [{"model_id": model_id, "weapon_ids": [weapon_id] if i < melta else []} for i in range(n)]
+        return {"faction_unit_id": faction_unit_id, "list_id": list_id, "unit_models": models}
+
+    async def price(body):
+        response = await client.post("/units/price", json=body)
+        assert response.status_code == 200, response.text
+        return response.json()["points"]
+
+    assert await price(payload(0)) == 0
+    assert await price(payload(5, melta=2)) == 90
+    assert await price(payload(6)) == 160
+    # (Nothing saved.)
+    assert (await client.get("/units")).json() == []

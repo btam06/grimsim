@@ -22,6 +22,12 @@ class Unit(Base):
     faction_unit_id: Mapped[int] = mapped_column(ForeignKey("faction_units.id"))
     points: Mapped[int] = mapped_column(Integer)
     list_id: Mapped[int | None] = mapped_column(ForeignKey("lists.id"), nullable=True)
+    # The bodyguard unit this (leader or support) unit leads, in its list (Core
+    # Rules 19.01) - an attached unit for the battle: a game plays the two as
+    # one (see app/engine/loader.py attach_leaders).
+    attached_to_id: Mapped[int | None] = mapped_column(
+        ForeignKey("units.id", ondelete="SET NULL"), nullable=True
+    )
 
     faction_unit: Mapped["FactionUnit"] = relationship(back_populates="units")
     army_list: Mapped["ArmyList | None"] = relationship(back_populates="units")

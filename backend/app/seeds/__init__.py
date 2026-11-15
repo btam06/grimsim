@@ -69,6 +69,7 @@ SEED_FUNCS = [
     factions.seed_enhancements,
     factions.seed_detachment_rules,
     factions.seed_datasheets,
+    factions.seed_loadouts,
     stratagems.seed,
 ]
 

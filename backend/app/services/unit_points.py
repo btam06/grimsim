@@ -1,12 +1,5 @@
-# Datasheets' points from the Munitorum Field Manual (app/services/
-# munitorum.py), and a unit's points from them.
-#
-# Importing: each of our datasheets is matched to a manual entry by name -
-# on its own faction's page first, then on any page (e.g. Adeptus Mechanicus
-# units in an Imperial Knights list, or Deathwatch Terminators on the
-# Deathwatch page), then nearly (a typo in ours, on its own faction's page
-# only) - and its costs replaced by that entry's. A datasheet with no match
-# keeps whatever it had, and is reported.
+# A unit's points from its datasheet's costs - the Munitorum Field Manual's,
+# imported by app/services/import/unit_points.py.
 #
 # Pricing (the manual's Muster Armies rules): a unit's cost is its starting
 # strength's - the smallest listed size it fits in (a unit between two sizes
@@ -15,47 +8,22 @@
 # e.g. the 3rd and on pay "Your 3rd+ Units Cost"), plus each wargear item
 # with a cost, per item. Enhancements and upgrades are added on top
 # elsewhere, as before.
-#
-#     docker compose exec backend python -m app.services.unit_points --dry-run
-#     docker compose exec backend python -m app.services.unit_points [--reprice]
-#
-# (--reprice: also re-price every unit already in a list; without it, only
-# units added or edited from now on are priced from the manual.)
 
 from __future__ import annotations
 
-import argparse
-import asyncio
-import difflib
-import json
 import re
 from collections import defaultdict
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models import (
-    ArmyList,
-    Faction,
-    FactionUnit,
-    PointsSource,
-    Unit,
-    UnitModel,
-    UnitPointCost,
-    UnitWargearCost,
-)
-from app.services import munitorum
-from app.services.munitorum import FactionPage, UnitEntry
-
-# How close a name must be to count as a typo of a manual entry's.
-NEAR = 0.9
+from app.models import ArmyList, FactionUnit, Unit, UnitModel, UnitPointCost, UnitWargearCost
 
 
 def norm(name: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", munitorum.clean(name).lower())
+    # A name to compare by: lowercase letters and digits only.
+    return re.sub(r"[^a-z0-9]", "", name.lower())
 
 
 def _singular(name: str) -> str:
@@ -66,139 +34,6 @@ def _singular(name: str) -> str:
         if key.endswith(plural):
             return key[: -len(plural)] + single
     return key
-
-
-# --- importing ---------------------------------------------------------------
-
-
-@dataclass
-class Match:
-    page: FactionPage
-    entry: UnitEntry
-    how: str  # "exact", "other page" or "near"
-
-
-@dataclass
-class ImportReport:
-    updated: list[tuple[str, str, str]] = field(default_factory=list)  # faction, ours, how
-    unmatched: list[tuple[str, str]] = field(default_factory=list)
-    conflicts: list[str] = field(default_factory=list)
-    unparsed: list[str] = field(default_factory=list)
-
-    def lines(self) -> list[str]:
-        out = [f"{len(self.updated)} datasheets priced from the manual"]
-        out += [f"  {f}: {ours} ({how})" for f, ours, how in self.updated if how != "exact"]
-        if self.unmatched:
-            out.append(f"{len(self.unmatched)} datasheets not in the manual (points left as they were):")
-            out += [f"  {f}: {ours}" for f, ours in self.unmatched]
-        if self.conflicts:
-            out.append("Matched on more than one page with different costs (first page used):")
-            out += [f"  {c}" for c in self.conflicts]
-        if self.unparsed:
-            out.append("Manual lines not understood:")
-            out += [f"  {u}" for u in self.unparsed]
-        return out
-
-
-def _costs_key(entry: UnitEntry):
-    return (
-        sorted((c.from_copy, c.models, c.points) for c in entry.costs),
-        sorted((w.name, w.points) for w in entry.wargear),
-    )
-
-
-def match_entries(
-    pages: list[FactionPage], ours: list[tuple[str, str]]
-) -> tuple[dict[tuple[str, str], Match], ImportReport]:
-    # Each of our (faction name, datasheet name)s' manual entry.
-    report = ImportReport(unparsed=[u for p in pages for u in p.unparsed])
-    by_page = {norm(p.title): p for p in pages}
-    everywhere: dict[str, list[tuple[FactionPage, UnitEntry]]] = defaultdict(list)
-    for page in pages:
-        for entry in page.units:
-            if entry.costs:
-                everywhere[norm(entry.name)].append((page, entry))
-
-    found: dict[tuple[str, str], Match] = {}
-    for faction, name in ours:
-        key = norm(name)
-        own = by_page.get(norm(faction))
-        own_entries = {norm(e.name): e for e in own.units if e.costs} if own else {}
-        if key in own_entries:
-            found[(faction, name)] = Match(own, own_entries[key], "exact")
-        elif everywhere.get(key):
-            hits = everywhere[key]
-            page, entry = hits[0]
-            if len({json.dumps(_costs_key(e)) for _, e in hits}) > 1:
-                report.conflicts.append(
-                    f"{faction}: {name} - on " + ", ".join(p.slug for p, _ in hits)
-                )
-            found[(faction, name)] = Match(page, entry, f"from {page.slug}")
-        else:
-            near = difflib.get_close_matches(key, list(own_entries), n=1, cutoff=NEAR)
-            if near:
-                entry = own_entries[near[0]]
-                found[(faction, name)] = Match(own, entry, f"near: {entry.name}")
-            else:
-                report.unmatched.append((faction, name))
-    return found, report
-
-
-async def import_pages(
-    session: AsyncSession, pages: list[FactionPage], commit: bool = True
-) -> ImportReport:
-    # Replaces each matched datasheet's costs with its manual entry's (all of
-    # them, in one commit - or none, flushed only, to look before leaping).
-    rows = (
-        await session.execute(
-            select(FactionUnit.id, Faction.name, FactionUnit.name).join(
-                Faction, Faction.id == FactionUnit.faction_id
-            )
-        )
-    ).all()
-    ids = {(f, n): i for i, f, n in rows}
-    found, report = match_entries(pages, list(ids))
-    now = datetime.now(timezone.utc)
-    for (faction, name), match in sorted(found.items()):
-        unit_id = ids[(faction, name)]
-        await session.execute(delete(UnitPointCost).where(UnitPointCost.faction_unit_id == unit_id))
-        await session.execute(
-            delete(UnitWargearCost).where(UnitWargearCost.faction_unit_id == unit_id)
-        )
-        seen = set()
-        for cost in match.entry.costs:
-            if (cost.from_copy, cost.models, cost.points) in seen:
-                continue
-            seen.add((cost.from_copy, cost.models, cost.points))
-            session.add(
-                UnitPointCost(
-                    faction_unit_id=unit_id, from_copy=cost.from_copy, models=cost.models,
-                    points=cost.points,
-                    composition=[list(p) for p in cost.composition] if cost.composition else None,
-                )
-            )
-        names = set()
-        for gear in match.entry.wargear:
-            if gear.name.lower() not in names:
-                names.add(gear.name.lower())
-                session.add(
-                    UnitWargearCost(faction_unit_id=unit_id, name=gear.name, points=gear.points)
-                )
-        await session.merge(
-            PointsSource(
-                faction_unit_id=unit_id, page=match.page.slug, version=match.page.version,
-                matched_name=match.entry.name, imported_at=now,
-            )
-        )
-        report.updated.append((faction, name, match.how))
-    if commit:
-        await session.commit()
-    else:
-        await session.flush()
-    return report
-
-
-# --- pricing -----------------------------------------------------------------
 
 
 def _fits(cost: UnitPointCost, counts: dict[str, int]) -> bool:
@@ -249,8 +84,18 @@ def attached(models: list) -> list[int]:
     return [] if len(found) == len(models) else found
 
 
+def item_name(name: str) -> str:
+    # A weapon's name without its profile ("Cyclone Missile Launcher - Krak",
+    # "Plasma caliver – standard": "Cyclone Missile Launcher", "Plasma
+    # caliver"), as the manual prices it and datasheets' options name it.
+    return re.split(r"\s+[-–—]\s+", name, maxsplit=1)[0].strip()
+
+
 def _items(unit_model: UnitModel, model) -> list[str]:
-    return [model.name, *(w.name for w in unit_model.weapons), *(g.name for g in unit_model.wargear)]
+    # The costable things a model has, each once (a weapon's profiles are one
+    # weapon).
+    names = [model.name, *(w.name for w in unit_model.weapons), *(g.name for g in unit_model.wargear)]
+    return list(dict.fromkeys(item_name(n) for n in names))
 
 
 def price(
@@ -385,73 +230,3 @@ async def reprice(
             changed.append((unit, unit.points, new))
             unit.points = new
     return changed
-
-
-# --- the script --------------------------------------------------------------
-
-
-async def _main(args) -> None:
-    from app.db import async_session, engine
-    from app.models import Base
-
-    if args.from_file:
-        with open(args.from_file) as file:
-            pages = [_page_from_json(p) for p in json.load(file)]
-    else:
-        pages = munitorum.fetch_all(only=args.only or None)
-    if args.save:
-        with open(args.save, "w") as file:
-            json.dump([p.to_json() for p in pages], file, indent=1)
-    print(f"{len(pages)} manual pages ({', '.join(sorted({p.version or '?' for p in pages}))})")
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    async with async_session() as session:
-        # (A dry run does it all, and rolls it back.)
-        report = await import_pages(session, pages, commit=not args.dry_run)
-        print("\n".join(report.lines()))
-        changed = await reprice(session, None)
-        verb = "now cost" if args.reprice and not args.dry_run else "would cost"
-        print(f"{len(changed)} units {verb} differently{'' if args.reprice else ' with --reprice'}:")
-        for unit, old, new in changed:
-            print(f"  {unit.army_list.name if unit.army_list else 'no list'}: {unit.label} {old} -> {new}")
-        if args.reprice and not args.dry_run:
-            await session.commit()
-        else:
-            await session.rollback()
-    await engine.dispose()
-
-
-def _page_from_json(data: dict) -> FactionPage:
-    return FactionPage(
-        slug=data["slug"], title=data["title"], version=data.get("version"),
-        units=[
-            UnitEntry(
-                name=u["name"],
-                costs=[
-                    munitorum.UnitCost(
-                        c["from_copy"], c["models"], c["points"],
-                        [tuple(p) for p in c["composition"]] if c.get("composition") else None,
-                    )
-                    for c in u["costs"]
-                ],
-                wargear=[munitorum.WargearCost(w["name"], w["points"]) for w in u["wargear"]],
-            )
-            for u in data["units"]
-        ],
-        unparsed=data.get("unparsed", []),
-    )
-
-
-def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Import points from the Munitorum Field Manual.")
-    parser.add_argument("--only", nargs="*", help="just these pages (e.g. chaos-knights)")
-    parser.add_argument("--dry-run", action="store_true", help="match and report; change nothing")
-    parser.add_argument("--reprice", action="store_true", help="re-price units already in lists")
-    parser.add_argument("--save", help="also write the parsed pages here, as JSON")
-    parser.add_argument("--from-file", help="parsed pages (from --save) instead of fetching")
-    asyncio.run(_main(parser.parse_args(argv)))
-
-
-if __name__ == "__main__":
-    main()
