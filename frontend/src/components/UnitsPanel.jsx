@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   deleteUnit,
+  listFactions,
   listFactionUnits,
   listModels,
   listUnits,
@@ -16,6 +17,7 @@ function UnitsPanel() {
   const [weapons, setWeapons] = useState([])
   const [wargear, setWargear] = useState([])
   const [factionUnits, setFactionUnits] = useState([])
+  const [factions, setFactions] = useState([])
   const [error, setError] = useState(null)
   const [view, setView] = useState('list')
   const [editingUnit, setEditingUnit] = useState(null)
@@ -28,6 +30,7 @@ function UnitsPanel() {
     listWeapons().then(setWeapons).catch((err) => setError(err.message))
     listWargear().then(setWargear).catch((err) => setError(err.message))
     listFactionUnits().then(setFactionUnits).catch((err) => setError(err.message))
+    listFactions().then(setFactions).catch((err) => setError(err.message))
   }, [])
 
   const goToList = () => {
@@ -56,6 +59,7 @@ function UnitsPanel() {
         weapons={weapons}
         wargear={wargear}
         factionUnits={factionUnits}
+        factions={factions}
         onSaved={goToList}
         onCancel={goToList}
       />

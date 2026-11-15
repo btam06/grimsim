@@ -1,13 +1,19 @@
 import ReactSelect from 'react-select'
 
+const toOption = (o) => ({
+  value: String(o.id),
+  label: o.name,
+  isDisabled: Boolean(o.disabled),
+})
+
 function Select({ options, value, onChange, placeholder, isDisabled }) {
-  // (An option with `disabled` is shown but can't be picked.)
-  const selectOptions = options.map((o) => ({
-    value: String(o.id),
-    label: o.name,
-    isDisabled: Boolean(o.disabled),
-  }))
-  const selected = selectOptions.find((o) => o.value === value) ?? null
+  // (An option with `disabled` is shown but can't be picked. Options can be
+  // grouped: { label, options: [...] } shows its options under a heading.)
+  const selectOptions = options.map((o) =>
+    o.options ? { label: o.label, options: o.options.map(toOption) } : toOption(o)
+  )
+  const selected =
+    selectOptions.flatMap((o) => o.options ?? [o]).find((o) => o.value === value) ?? null
 
   return (
     <ReactSelect

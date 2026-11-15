@@ -421,6 +421,93 @@ ENTRIES = [
         [],
         [],
     ),
+    # (Rules text only: not modelled in the calculator or games.)
+    (
+        "Bomb Rack",
+        "At the end of your opponent's Fight phase, select one visible enemy unit (excluding "
+        "Lone Operative units) within 24\" of this unit, and roll six D6 for that unit: for "
+        "each 4+, that unit suffers 1 mortal wound.",
+        [],
+        [],
+    ),
+    (
+        "Strafing Run",
+        "Each time this model makes a ranged attack that targets an enemy unit (excluding "
+        "units that can FLY), add 1 to the Hit roll.",
+        [],
+        [],
+    ),
+    (
+        "Aerial Deployment",
+        "In your first Movement phase, this unit can make an ingress move.",
+        [],
+        [],
+    ),
+    (
+        "Broad-spectrum Targeting Augurs",
+        "Each time a model in this unit makes an attack with an eradication caster that "
+        "targets a unit (excluding MONSTER and VEHICLE units), that attack has the [SUSTAINED"
+        " HITS 1] ability.",
+        [],
+        [],
+    ),
+    (
+        "Sentinel Directives",
+        "Each time you target this unit with the Fire Overwatch Stratagem, hits are scored on"
+        " unmodified Hit rolls of 5+ when resolving that Stratagem.",
+        [],
+        [],
+    ),
+    (
+        "Searing Conflagration",
+        "Each time a model in this unit makes an attack with a phosphor torch that targets an"
+        " enemy unit within range of an objective marker, re-roll a Wound roll of 1. If this "
+        "unit is also within 6\" of one or more friendly ADEPTUS MECHANICUS BATTLELINE units,"
+        " each time such an attack targets such a unit, you can re-roll the Wound roll "
+        "instead.",
+        [],
+        [],
+    ),
+    (
+        "Line-breakers",
+        "Each time this unit ends a Charge move, select one enemy unit within Engagement "
+        "Range of it and roll one D6 for each model in this unit that is within Engagement "
+        "Range of that enemy unit, adding 2 to the result if this unit started its Charge "
+        "move within 6\" of one or more friendly ADEPTUS MECHANICUS BATTLELINE units. For "
+        "each 4+, that enemy unit suffers 1 mortal wound.",
+        [],
+        [],
+    ),
+    (
+        "Network Override",
+        "While this unit contains one or more TECH-PRIEST models, this unit is eligible to "
+        "perform an Action in a turn in which it Advanced, and eligible to shoot in a turn in"
+        " which it started an Action.",
+        [],
+        [],
+    ),
+    (
+        "Focused Hunters",
+        "At the start of the battle, select one unit from your opponent's army. Until the end"
+        " of the battle, each time a model in this unit makes an attack that targets that "
+        "unit, you can re-roll the Hit roll.",
+        [],
+        [],
+    ),
+    (
+        "Seekers of Divine Arcana",
+        "While this model is leading a unit, add 1 to the Objective Control characteristic of"
+        " models in that unit.",
+        [],
+        [],
+    ),
+    (
+        "Cogitative Instincts",
+        "Enemy units that are set up on the battlefield as Reinforcements cannot be set up "
+        "within 12\" horizontally of this model.",
+        [],
+        [],
+    ),
 ]
 
 # How the calculator handles abilities above, where that needs saying:
@@ -859,8 +946,13 @@ ROLL_BONUSES = {
 }
 
 # In a game: abilities that gain their player 1CP on a D6 roll of at least
-# this, each time a Stratagem targets their unit - Broad Spectrum Data-tether.
-STRATAGEM_TARGET_CP = {"Broad Spectrum Data-tether": 5, "Enhanced data-tether": 5}
+# this, each time a Stratagem targets their unit - Broad Spectrum Data-tether
+# (and the wargear Enhanced data-tether and Command uplink).
+STRATAGEM_TARGET_CP = {
+    "Broad Spectrum Data-tether": 5,
+    "Enhanced data-tether": 5,
+    "Command uplink": 5,
+}
 
 # In a game: abilities that rally a friendly Battle-shocked unit (see
 # app/services/in_game/rally.py) - Servo-skull Uplink.

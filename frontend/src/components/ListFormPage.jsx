@@ -3,11 +3,7 @@ import {
   createList,
   createUnit,
   deleteUnit,
-  listBaseSizes,
-  listDatasheetAbilities,
   listDispositions,
-  listFactionAbilities,
-  listWeaponAbilities,
   updateList,
 } from '../api'
 import DatasheetDialog from './DatasheetDialog'
@@ -96,23 +92,8 @@ function ListFormPage({
   const [form, setForm] = useState(editingList ? formFromList(editingList) : buildEmptyForm())
   const [error, setError] = useState(null)
   const [dispositions, setDispositions] = useState([])
-  // The unit whose datasheet is open, and what's needed to show it (the
-  // abilities and base sizes are fetched the first time one is opened).
+  // The unit whose datasheet is open.
   const [datasheetUnit, setDatasheetUnit] = useState(null)
-  const [datasheetLookups, setDatasheetLookups] = useState(null)
-  useEffect(() => {
-    if (!datasheetUnit || datasheetLookups) return
-    Promise.all([
-      listWeaponAbilities(),
-      listDatasheetAbilities(),
-      listFactionAbilities(),
-      listBaseSizes(),
-    ])
-      .then(([weaponAbilities, datasheetAbilities, factionAbilities, baseSizes]) =>
-        setDatasheetLookups({ weaponAbilities, datasheetAbilities, factionAbilities, baseSizes })
-      )
-      .catch((err) => setError(err.message))
-  }, [datasheetUnit, datasheetLookups])
   useEffect(() => {
     listDispositions()
       .then(setDispositions)
@@ -175,23 +156,8 @@ function ListFormPage({
   const weaponName = (id) => weapons.find((w) => w.id === id)?.name ?? `#${id}`
   const wargearName = (id) => wargear.find((g) => g.id === id)?.name ?? `#${id}`
   const factionUnitName = (id) => factionUnits.find((fu) => fu.id === id)?.name ?? `#${id}`
-  // The open unit's datasheet shows its attached leaders' too, and its
-  // bases by its points: each kind of model's, named by the model when they
-  // differ.
+  // The open unit's datasheet shows its attached leaders' too.
   const datasheetAttached = datasheetUnit ? attachedTo(datasheetUnit) : []
-  const datasheetBases = (() => {
-    if (!datasheetUnit || !datasheetLookups) return ''
-    const byModel = new Map()
-    const unitModels = [datasheetUnit, ...datasheetAttached].flatMap((u) => u.unit_models)
-    unitModels.forEach((um) => {
-      const model = models.find((m) => m.id === um.model_id)
-      const base = datasheetLookups.baseSizes.find((b) => b.id === model?.base_size_id)
-      if (base) byModel.set(model.name, base.name)
-    })
-    const bases = [...new Set(byModel.values())]
-    if (bases.length <= 1) return bases.length ? `${bases[0]} base` : ''
-    return [...byModel].map(([model, base]) => `${base} base (${model})`).join(', ')
-  })()
   const enhancementLabel = (id) => {
     const enhancement = enhancements.find((e) => e.id === id)
     return enhancement ? `${enhancement.name} (+${enhancement.points} pts)` : `#${id}`
@@ -200,8 +166,8 @@ function ListFormPage({
   // to it (each its own entry, under it).
   const renderUnit = (u) => (
     <li key={u.id}>
-      {factionUnitName(u.faction_unit_id)}
-      <DatasheetButton onClick={() => setDatasheetUnit(u)} /> — {u.points}pts
+      <DatasheetButton onClick={() => setDatasheetUnit(u)} />
+      {factionUnitName(u.faction_unit_id)} — {u.points}pts
       {u.upgrade_id !== null && ` — Upgrade: ${enhancementLabel(u.upgrade_id)}`}
       {u.unit_models.length > 0 && (
         <ul>
@@ -434,13 +400,12 @@ function ListFormPage({
         </>
       )}
       <DatasheetDialog
-        unit={datasheetUnit && datasheetLookups ? datasheetUnit : null}
+        unit={datasheetUnit}
         title={
           datasheetUnit &&
-          `${factionUnitName(datasheetUnit.faction_unit_id)} — ${datasheetUnit.points}pts` +
-            (datasheetBases ? ` · ${datasheetBases}` : '')
+          `${factionUnitName(datasheetUnit.faction_unit_id)} — ${datasheetUnit.points}pts`
         }
-        data={{ models, weapons, wargear, keywords, enhancements, ...datasheetLookups }}
+        data={{ models, weapons, wargear, enhancements }}
         attached={datasheetAttached.map((a) => ({
           unit: a,
           title: `${factionUnitName(a.faction_unit_id)} — ${a.points}pts (attached)`,

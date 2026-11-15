@@ -57,6 +57,14 @@ ENTRIES = [
         [],
     ),
     (
+        # As Enhanced data-tether, on an Archaeopter.
+        "Command uplink",
+        "Each time you select the bearer's unit as the target of a Stratagem, roll one D6: on "
+        "a 5+, you gain 1CP.",
+        [],
+        [],
+    ),
+    (
         # A pre-battle move (e.g. an Orbital Comms Array - see
         # app/services/in_game/scouts.py).
         "Scouts 6\"",

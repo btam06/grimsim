@@ -174,8 +174,15 @@ section form input[type='radio'] {
 /* Leader and support units attached to a list unit, under it. */
 .unit-slot {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: 0.4rem;
+}
+
+.unit-slot__enhancement {
+  flex: 1 1 100%;
+  display: flex;
+  max-width: 24rem;
 }
 
 .unit-slot__loadout {
@@ -410,6 +417,30 @@ section form textarea {
 
 .datasheet-attached h3 {
   margin: 0 0 0.5rem;
+}
+
+.field-with-action {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.4rem;
+  flex: 1 1 100%;
+}
+
+.field-with-action > .input-field {
+  flex: 1 1 auto;
+}
+
+.field-with-action > .icon-button {
+  margin-bottom: 0.5rem;
+}
+
+/* A unit's datasheet button, before its name. */
+section ul li > .icon-button--datasheet:first-child {
+  margin: 0 0.35rem 0 0;
+}
+
+.list-entry__actions .icon-button:first-child {
+  margin-left: 0;
 }
 
 .dialog-header {

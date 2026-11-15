@@ -12,8 +12,9 @@ import {
 } from '../api'
 import CardTextAccordion from './CardTextAccordion'
 import ChoiceBoxes from './ChoiceBoxes'
+import DatasheetDialog from './DatasheetDialog'
 import Field from './Field'
-import { RemoveButton } from './IconButtons'
+import { DatasheetButton, RemoveButton } from './IconButtons'
 import MultiSelect from './MultiSelect'
 import Select from './Select'
 import {
@@ -57,6 +58,8 @@ function UnitFormPage({
   weapons,
   wargear,
   factionUnits,
+  factions = [],
+  listFactionId = null,
   onSaved,
   onCancel,
 }) {
@@ -95,6 +98,21 @@ function UnitFormPage({
   }, [listId])
   const bodyguardIds = factionUnits.find((f) => String(f.id) === factionUnitId)?.bodyguard_ids ?? []
   const factionUnitName = (id) => factionUnits.find((f) => f.id === id)?.name ?? `#${id}`
+  // The faction units, under a heading per faction when there's more than
+  // one (allies, e.g. Imperial Agents): the list's own faction first, then
+  // the rest by name.
+  const factionUnitGroups = (() => {
+    const ids = [...new Set(factionUnits.map((fu) => fu.faction_id))]
+    if (ids.length <= 1) return factionUnits
+    const name = (id) => factions.find((f) => f.id === id)?.name ?? `Faction #${id}`
+    ids.sort((a, b) =>
+      a === listFactionId ? -1 : b === listFactionId ? 1 : name(a).localeCompare(name(b))
+    )
+    return ids.map((id) => ({
+      label: name(id),
+      options: factionUnits.filter((fu) => fu.faction_id === id),
+    }))
+  })()
   const bodyguardOptions = listUnitsInList.filter(
     (u) =>
       bodyguardIds.includes(u.faction_unit_id) &&
@@ -188,6 +206,39 @@ function UnitFormPage({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listId, slot.model_id, unitId, selectedRuleKey])
+
+  // The enhancements each kind of model in the unit can carry, so a model
+  // already in it can take, change or drop one.
+  const [modelEnhancements, setModelEnhancements] = useState({})
+  const unitModelKey = [...new Set(slots.map((s) => s.model_id))].sort().join(',')
+  useEffect(() => {
+    if (!listId || !unitModelKey) {
+      setModelEnhancements({})
+      return
+    }
+    let cancelled = false
+    const ids = unitModelKey.split(',')
+    Promise.all(ids.map((id) => listAvailableEnhancements(listId, id, unitId, selectedRuleIds)))
+      .then((found) => {
+        if (!cancelled) setModelEnhancements(Object.fromEntries(ids.map((id, i) => [id, found[i]])))
+      })
+      .catch((err) => setError(err.message))
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listId, unitModelKey, unitId, selectedRuleKey])
+  // A model's enhancement choices: what it can carry, less what the unit's
+  // other models carry (each only once).
+  const enhancementChoices = (index) => {
+    const s = slots[index]
+    const taken = new Set(slots.filter((_, i) => i !== index).map((o) => o.enhancement_id))
+    return (modelEnhancements[s.model_id] ?? [])
+      .filter((e) => !taken.has(String(e.id)))
+      .map((e) => ({ id: String(e.id), name: `${e.name} (+${e.points} pts)` }))
+  }
+  const setSlotEnhancement = (index, enhancement_id) =>
+    setSlots(slots.map((s, i) => (i === index ? { ...s, enhancement_id } : s)))
 
   // Upgrades depend on every model in the unit, so re-check them as models
   // are added or removed, dropping the chosen one if it no longer applies.
@@ -372,6 +423,18 @@ function UnitFormPage({
     0
   )
   const upgradePoints = upgrades.find((u) => String(u.id) === upgradeId)?.points ?? 0
+  // The unit's datasheet as it's being built (in a modal).
+  const [showDatasheet, setShowDatasheet] = useState(false)
+  const datasheetUnit = {
+    faction_unit_id: Number(factionUnitId),
+    unit_models: slots.map((s) => ({
+      model_id: Number(s.model_id),
+      weapon_ids: s.weapon_ids,
+      wargear_ids: s.wargear_ids,
+      enhancement_id: s.enhancement_id ? Number(s.enhancement_id) : null,
+    })),
+    upgrade_id: upgradeId ? Number(upgradeId) : null,
+  }
   const extraPoints = enhancementPoints + upgradePoints
 
   const handleSubmit = async (e) => {
@@ -399,14 +462,17 @@ function UnitFormPage({
       <h2>{editingUnit ? `Edit Unit #${editingUnit.id}` : 'Add Unit'}</h2>
       {error && <p className="error">{error}</p>}
       <form onSubmit={handleSubmit}>
-        <Field label="Faction Unit">
-          <Select
-            options={factionUnits}
-            value={factionUnitId}
-            onChange={setFactionUnitId}
-            placeholder="Select faction unit"
-          />
-        </Field>
+        <div className="field-with-action">
+          <Field label="Faction Unit">
+            <Select
+              options={factionUnitGroups}
+              value={factionUnitId}
+              onChange={setFactionUnitId}
+              placeholder="Select faction unit"
+            />
+          </Field>
+          {factionUnitId && <DatasheetButton onClick={() => setShowDatasheet(true)} />}
+        </div>
         {/* Worked out by the server from the Munitorum Field Manual as it's
             saved - not editable. */}
         <Field label="Points">
@@ -508,6 +574,25 @@ function UnitFormPage({
                     <span className="unit-slot__loadout">{description}</span>
                   )}
                   {!loadout.auto && <RemoveButton onClick={() => removeSlot(i)} />}
+                  {(enhancementChoices(i).length > 0 || s.enhancement_id) && (
+                    <div className="unit-slot__enhancement">
+                      <Field label="Enhancement">
+                        <Select
+                          options={[
+                            { id: '', name: 'None' },
+                            ...enhancementChoices(i),
+                            // (One it has that it no longer could take.)
+                            ...(s.enhancement_id &&
+                            !enhancementChoices(i).some((e) => e.id === s.enhancement_id)
+                              ? [{ id: s.enhancement_id, name: enhancementLabel(s.enhancement_id) }]
+                              : []),
+                          ]}
+                          value={s.enhancement_id}
+                          onChange={(id) => setSlotEnhancement(i, id)}
+                        />
+                      </Field>
+                    </div>
+                  )}
                 </li>
               )
             })}
@@ -606,6 +691,13 @@ function UnitFormPage({
           Cancel
         </button>
       </form>
+      <DatasheetDialog
+        unit={showDatasheet && factionUnitId ? datasheetUnit : null}
+        title={`${factionUnitName(Number(factionUnitId))} — ${(points ?? 0) + extraPoints}pts`}
+        data={{ models, weapons, wargear, enhancements }}
+        empty="No models added yet."
+        onClose={() => setShowDatasheet(false)}
+      />
     </section>
   )
 }

@@ -115,6 +115,8 @@ function ListsPanel() {
         weapons={weapons}
         wargear={wargear}
         factionUnits={eligibleFactionUnitsForList}
+        factions={factions}
+        listFactionId={editingList?.faction_id ?? null}
         onSaved={goBackToListForm}
         onCancel={goBackToListForm}
       />
