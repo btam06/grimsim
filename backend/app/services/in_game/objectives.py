@@ -44,7 +44,126 @@ def model_oc(game: Game, unit_model: UnitModel, shocked: set[int] | None = None)
 
     profile = damaged_profile(game, unit_model)
     oc = (unit_model.model.oc or 0) - (profile[1] if profile else 0)
-    return max(0, oc + _oc_bonus(game, unit_model))
+    oc = max(0, oc + _oc_bonus(game, unit_model) + _leading_oc(game, unit_model) + _aura_oc(game, unit_model))
+    return _chittering(game, unit_model, oc)
+
+
+def _bases_of(game: Game, unit: Unit) -> list:
+    placed = deployment.positions(game)
+    return [
+        deployment.base_at(m, placed[m.id].x, placed[m.id].y, placed[m.id].rotation)
+        for m in deployment.models_on_battlefield(game, unit)
+        if m.id in placed
+    ]
+
+
+def _models_with(game: Game, seat: int, names) -> list:
+    # (unit, unit model) on the battlefield for the player's models with one
+    # of the abilities.
+    player = next(p for p in game.players if p.seat == seat)
+    return [
+        (u, m)
+        for u in deployment.deployable_units(player)
+        for m in deployment.models_on_battlefield(game, u)
+        if any(a.name in names for a in m.model.abilities)
+    ]
+
+
+def _aura_oc(game: Game, unit_model: UnitModel) -> int:
+    # What friendly OC auras add (datasheet_abilities OC_AURAS - e.g. Carrier
+    # Wave: +1 for NECRONS units within 6"), each ability once.
+    from app.services.in_game.deployment import TOLERANCE, gap
+
+    config = datasheet_abilities_seeds().OC_AURAS
+    if not config:
+        return 0
+    unit = deployment.find_unit(game, unit_model.unit_id)
+    seat = deployment.owner(game, unit).seat
+    sources = _models_with(game, seat, config)
+    if not sources:
+        return 0
+    keywords = {k.name for m in unit.unit_models for k in m.model.keywords}
+    mine = _bases_of(game, unit)
+    placed = deployment.positions(game)
+    total = 0
+    for name, how in config.items():
+        if not set(how["keywords"]) <= keywords:
+            continue
+        for _, m in sources:
+            if not any(a.name == name for a in m.model.abilities) or m.id not in placed:
+                continue
+            p = placed[m.id]
+            base = deployment.base_at(m, p.x, p.y, p.rotation)
+            if any(gap(base, b) <= how["range"] + TOLERANCE for b in mine):
+                total += how["bonus"]
+                break
+    return total
+
+
+CHITTERING_SWARM = "Chittering swarm"
+
+
+def _chittering(game: Game, unit_model: UnitModel, oc: int) -> int:
+    # Chittering swarm: an enemy unit engaged with a unit with it has -1 OC
+    # (to at least 1); and a unit with it, within 6" of a friendly CRYPTEK
+    # model, has OC 1.
+    from app.services.in_game.deployment import TOLERANCE, gap
+    from app.services.in_game.movement import ENGAGEMENT_RANGE
+
+    unit = deployment.find_unit(game, unit_model.unit_id)
+    seat = deployment.owner(game, unit).seat
+    if any(a.name == CHITTERING_SWARM for a in unit_model.model.abilities):
+        crypteks = [
+            b
+            for u in deployment.deployable_units(next(p for p in game.players if p.seat == seat))
+            if u.id != unit.id and any(k.name == "CRYPTEK" for m in u.unit_models for k in m.model.keywords)
+            for b in _bases_of(game, u)
+        ]
+        if any(gap(a, b) <= 6.0 + TOLERANCE for a in _bases_of(game, unit) for b in crypteks):
+            return 1
+        return oc
+    if oc <= 1:
+        return oc
+    swarms = [
+        u
+        for p in game.players
+        if p.seat != seat
+        for u, _ in _models_with(game, p.seat, {CHITTERING_SWARM})
+    ]
+    mine = _bases_of(game, unit)
+    for swarm in swarms:
+        if any(gap(a, b) <= ENGAGEMENT_RANGE + TOLERANCE for a in mine for b in _bases_of(game, swarm)):
+            return max(1, oc - 1)
+    return oc
+
+
+def datasheet_abilities_seeds():
+    from app.seeds import datasheet_abilities
+
+    return datasheet_abilities
+
+
+def _leading_oc(game: Game, unit_model: UnitModel) -> int:
+    # What a model on the battlefield leading its unit improves its OC by
+    # (datasheet_abilities LEADING_OC - e.g. Unflinching Determination: +1).
+    from app.seeds import datasheet_abilities
+    from app.services.list_building import enhancements as enhancement_rules
+
+    config = datasheet_abilities.LEADING_OC
+    if not config:
+        return 0
+    unit = deployment.find_unit(game, unit_model.unit_id)
+    # (Cheaply, first: nothing in the unit has one.)
+    if not any(a.name in config for m in unit.unit_models for a in m.model.abilities):
+        return 0
+    names = {
+        a.name
+        for m in deployment.models_on_battlefield(game, unit)
+        if enhancement_rules.is_leading(unit, m)
+        for a in m.model.abilities
+        if a.name in config
+    }
+    return sum(config[n] for n in names)
 
 
 def _oc_bonus(game: Game, unit_model: UnitModel) -> int:
@@ -210,13 +329,20 @@ def secure_at_end_of(game: Game, phase: str) -> None:
     # secure those they're controlling.
     from app.seeds import datasheet_abilities as datasheet_ability_seeds
 
+    from app.services.list_building import enhancements as enhancement_rules
+
     timings = datasheet_ability_seeds.SECURES_OBJECTIVES
+    # (Some only while their model's leading the unit - e.g. Ancient Collector.)
+    leading_only = datasheet_ability_seeds.LEADING_ONLY
     player = next(p for p in game.players if p.seat == game.turn_seat)
     securing = [
         unit
         for unit in deployment.deployable_units(player)
         if any(
-            timings.get(a.name) == phase for m in unit.unit_models for a in m.model.abilities
+            timings.get(a.name) == phase
+            and (a.name not in leading_only or enhancement_rules.is_leading(unit, m))
+            for m in deployment.models_on_battlefield(game, unit)
+            for a in m.model.abilities
         )
     ]
     if not securing:

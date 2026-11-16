@@ -22,6 +22,9 @@ ANTI_VEHICLE_2 = "anti_vehicle_2"
 ANTI_VEHICLE_3 = "anti_vehicle_3"
 ANTI_VEHICLE_4 = "anti_vehicle_4"
 ANTI_MONSTER_4 = "anti_monster_4"
+ANTI_CHARACTER_4 = "anti_character_4"
+ANTI_MONSTER_2 = "anti_monster_2"
+ANTI_TITANIC_4 = "anti_titanic_4"
 ANTI_FLY_2 = "anti_fly_2"
 ANTI_FLY_4 = "anti_fly_4"
 ANTI_WALKER_2 = "anti_walker_2"
@@ -47,6 +50,27 @@ TARGET_MODEL_CHARACTER = "target_model_character"
 TARGET_MODEL_VEHICLE = "target_model_vehicle"
 STRENGTH_EXCEEDS_TOUGHNESS = "strength_exceeds_toughness"
 ANTI_INFANTRY_5 = "anti_infantry_5"
+ANTI_PSYKER_4 = "anti_psyker_4"
+ANTI_CHAOS_2 = "anti_chaos_2"
+TARGET_CANT_FLY = "target_cant_fly"
+MELEE_WEAPON = "melee_weapon"
+RANGED_WEAPON = "ranged_weapon"
+ATTACKER_STATIONARY = "attacker_stationary"
+TARGET_WITHIN_12 = "target_within_12"
+TARGET_IS_CLOSEST = "target_is_closest"
+TARGET_TITANIC_OR_TOWERING = "target_titanic_or_towering"
+TARGET_FORTIFICATION = "target_fortification"
+TARGET_VEHICLE = "target_vehicle"
+NOT_PISTOL = "not_pistol"
+# The calculator's Positioning (and, in a game, measured): the target is the
+# closest eligible target.
+TARGETING_CLOSEST_ELIGIBLE = "targeting_closest_eligible"
+# The attacking model is on its Damaged: 1-N Wounds Remaining profile
+# (DAMAGED_4 ... DAMAGED_10 - the brackets datasheets use).
+DAMAGED_BRACKETS = (4, 5, 6, 7, 8, 9, 10)
+DAMAGED_4, DAMAGED_5, DAMAGED_6, DAMAGED_7, DAMAGED_8, DAMAGED_9, DAMAGED_10 = (
+    f"damaged_{n}" for n in DAMAGED_BRACKETS
+)
 DEFENDER_BELOW_STARTING_STRENGTH = "defender_below_starting_strength"
 DEFENDER_BELOW_HALF_STRENGTH = "defender_below_half_strength"
 DEFENDER_BATTLE_SHOCKED = "defender_battle_shocked"
@@ -147,6 +171,25 @@ def anti_infantry_4(context: dict) -> bool:
     )
 
 
+def anti_psyker_4(context: dict) -> bool:
+    # As anti_psyker_2, for a wound roll of 4+ (e.g. "Anti-Psyker 4+").
+    return (
+        context.get("step") == "wound"
+        and context.get("roll", 0) >= 4
+        and "PSYKER" in context.get("defender_keywords", set())
+    )
+
+
+def anti_chaos_2(context: dict) -> bool:
+    # As anti_psyker_2, against a unit that contains a CHAOS model (e.g.
+    # "Anti-Chaos 2+").
+    return (
+        context.get("step") == "wound"
+        and context.get("roll", 0) >= 2
+        and "CHAOS" in context.get("defender_keywords", set())
+    )
+
+
 def anti_infantry_5(context: dict) -> bool:
     # As anti_infantry_4, for a wound roll of 5+ (e.g. "Anti-Infantry 5+").
     return (
@@ -184,6 +227,29 @@ def anti_vehicle_4(context: dict) -> bool:
         and context.get("roll", 0) >= 4
         and "VEHICLE" in context.get("defender_keywords", set())
     )
+
+
+def anti_character_4(context: dict) -> bool:
+    # True at the wound step if the wound roll was a 4+ against a defending
+    # unit that contains a CHARACTER model (e.g. for "Anti-Character 4+").
+    return (
+        context.get("step") == "wound"
+        and context.get("roll", 0) >= 4
+        and "CHARACTER" in context.get("defender_keywords", set())
+    )
+
+
+def _anti(keyword: str, roll: int):
+    # True at the wound step if the wound roll was `roll`+ against a
+    # defending unit that contains a `keyword` model (e.g. "Anti-Titanic 4+").
+    def check(context: dict) -> bool:
+        return (
+            context.get("step") == "wound"
+            and context.get("roll", 0) >= roll
+            and keyword in context.get("defender_keywords", set())
+        )
+
+    return check
 
 
 def anti_monster_4(context: dict) -> bool:
@@ -255,6 +321,69 @@ def attacker_is_battleline(context: dict) -> bool:
 
 
 
+
+
+def _damaged(bracket: int):
+    # At every step: the attacking model is on its Damaged: 1-`bracket`
+    # Wounds Remaining profile (see combat._damaged_bracket - a model without
+    # one never is).
+    def check(context: dict) -> bool:
+        return context.get("attacker_damaged_bracket") == bracket
+
+    return check
+
+
+def ranged_weapon(context: dict) -> bool:
+    # At every step: the attack is made with a ranged weapon (RANGED_ATTACK is
+    # only its pre-hit check).
+    return bool(context.get("is_ranged", False))
+
+
+def attacker_stationary(context: dict) -> bool:
+    # At every step: the attacking unit Remained Stationary this turn.
+    return REMAINED_STATIONARY in context.get("attacker_positions", set())
+
+
+def target_within_12(context: dict) -> bool:
+    # At every step: the target is within 12" of the attacking unit.
+    return WITHIN_12_OF_TARGET in context.get("attacker_positions", set())
+
+
+def target_is_closest(context: dict) -> bool:
+    # At every step: the target is the closest eligible target.
+    return TARGETING_CLOSEST_ELIGIBLE in context.get("attacker_positions", set())
+
+
+def target_titanic_or_towering(context: dict) -> bool:
+    # At every step: the defending unit has a TITANIC or TOWERING model.
+    return bool({"TITANIC", "TOWERING"} & context.get("defender_keywords", set()))
+
+
+def not_pistol(context: dict) -> bool:
+    # At every step: the attack isn't made with a [PISTOL] weapon.
+    return "Pistol" not in context.get("weapon_ability_names", set())
+
+
+def target_vehicle(context: dict) -> bool:
+    # At every step: the defending unit has a VEHICLE model.
+    return "VEHICLE" in context.get("defender_keywords", set())
+
+
+def target_fortification(context: dict) -> bool:
+    # At every step: the defending unit has a FORTIFICATION model.
+    return "FORTIFICATION" in context.get("defender_keywords", set())
+
+
+def melee_weapon(context: dict) -> bool:
+    # At every step: the attack is made with a melee weapon (MELEE_ATTACK is
+    # only its pre-hit check) - e.g. with CRITICAL_HIT, a melee [SUSTAINED
+    # HITS].
+    return not context.get("is_ranged", True)
+
+
+def target_cant_fly(context: dict) -> bool:
+    # At every step: the defending unit has no FLY model - e.g. Strafing Run.
+    return "FLY" not in context.get("defender_keywords", set())
 
 
 def target_not_monster_or_vehicle(context: dict) -> bool:
@@ -526,6 +655,9 @@ CORE_CONDITIONS = {
     ANTI_VEHICLE_3: anti_vehicle_3,
     ANTI_VEHICLE_4: anti_vehicle_4,
     ANTI_MONSTER_4: anti_monster_4,
+    ANTI_CHARACTER_4: anti_character_4,
+    ANTI_MONSTER_2: _anti("MONSTER", 2),
+    ANTI_TITANIC_4: _anti("TITANIC", 4),
     WITHIN_HALF_RANGE: within_half_range,
     MOVED_LESS_THAN_3: moved_less_than_3,
     TARGET_MONSTER_OR_VEHICLE: target_monster_or_vehicle,
@@ -554,6 +686,19 @@ CORE_CONDITIONS = {
     TARGET_MODEL_VEHICLE: target_model_vehicle,
     STRENGTH_EXCEEDS_TOUGHNESS: strength_exceeds_toughness,
     ANTI_INFANTRY_5: anti_infantry_5,
+    ANTI_PSYKER_4: anti_psyker_4,
+    TARGET_CANT_FLY: target_cant_fly,
+    MELEE_WEAPON: melee_weapon,
+    RANGED_WEAPON: ranged_weapon,
+    ATTACKER_STATIONARY: attacker_stationary,
+    TARGET_WITHIN_12: target_within_12,
+    TARGET_IS_CLOSEST: target_is_closest,
+    TARGET_TITANIC_OR_TOWERING: target_titanic_or_towering,
+    TARGET_FORTIFICATION: target_fortification,
+    TARGET_VEHICLE: target_vehicle,
+    NOT_PISTOL: not_pistol,
+    **{f"damaged_{n}": _damaged(n) for n in DAMAGED_BRACKETS},
+    ANTI_CHAOS_2: anti_chaos_2,
     DEFENDER_BELOW_STARTING_STRENGTH: defender_below_starting_strength,
     DEFENDER_BELOW_HALF_STRENGTH: defender_below_half_strength,
     DEFENDER_BATTLE_SHOCKED: defender_battle_shocked,

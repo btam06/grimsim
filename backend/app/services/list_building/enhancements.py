@@ -33,6 +33,11 @@ from app.seeds import factions as faction_seeds
 # two can't disagree.
 
 
+
+# Keywords of models whose datasheets can't be given Enhancements (C'tan
+# Shard: the Transcendent C'tan).
+NO_ENHANCEMENTS = {"TRANSCENDENT C'TAN"}
+
 def _keyword_names(model: Model) -> set[str]:
     return {k.name for k in model.keywords}
 
@@ -94,6 +99,10 @@ def model_unavailable_reason(
         return "can only be carried by a CHARACTER"
     if "EPIC HERO" in names:
         return "can't be carried by an EPIC HERO"
+    # (Nor by a model whose datasheet says it can't - e.g. the Transcendent
+    # C'tan's C'tan Shard - by its keyword, as keywords are what's loaded.)
+    if names & NO_ENHANCEMENTS:
+        return "can't be given Enhancements"
     return (
         _detachment_reason(enhancement, detachment_ids)
         or _keyword_reason(enhancement, names, "a model")

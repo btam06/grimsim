@@ -32,7 +32,8 @@ def available(game: Game, unit: Unit) -> list[str]:
         a.name for m in deployment.models_on_battlefield(game, unit) for a in m.model.abilities
     }
     found = []
-    for name in sorted(names & set(config)):
+    # (An option of a datasheet ability, by that ability's name.)
+    for name in sorted(n for n, a in config.items() if (a.ability or n) in names):
         ability = config[name]
         used = [
             u
@@ -59,6 +60,10 @@ def use(game: Game, unit: Unit, names: list[str]) -> list[Rule]:
     # The unit uses these abilities as it fights: their rules for its attacks.
     rules: list[Rule] = []
     usable = available(game, unit)
+    groups = [_config()[n].group for n in dict.fromkeys(names) if n in _config()]
+    for group in {g for g in groups if g is not None}:
+        if groups.count(group) > 1:
+            raise _bad_request(f"only one {group} option can be used at a time")
     for name in dict.fromkeys(names):
         if name not in usable:
             raise _bad_request(f"it can't use {name} now")

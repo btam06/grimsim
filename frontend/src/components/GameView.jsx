@@ -14,6 +14,9 @@ import {
   getPhaseStart,
   applyPhaseStart,
   finishPhaseStart,
+  getPhaseEnd,
+  finishPhaseEnd,
+  activateAbility,
   getPsychic,
   castPsychic,
   placeTeleportHomer,
@@ -110,7 +113,7 @@ import ReservesPanel from './ReservesPanel'
 import EmbarkedPanel from './EmbarkedPanel'
 import EmergencyPanel from './EmergencyPanel'
 import TeleportHomerPanel from './TeleportHomerPanel'
-import PhaseStartPanel from './PhaseStartPanel'
+import PhaseStepPanel from './PhaseStepPanel'
 import PsychicPanel from './PsychicPanel'
 import RoundStartPanel from './RoundStartPanel'
 import ScoringPanel from './ScoringPanel'
@@ -122,6 +125,9 @@ import { MiracleDicePool } from './MiracleDice'
 import MiracleDicePanel from './MiracleDicePanel'
 import HagiomnifexPanel from './HagiomnifexPanel'
 import JudgedPanel from './JudgedPanel'
+import QuarryPanel from './QuarryPanel'
+import AbilitiesPanel from './AbilitiesPanel'
+import RelicsPanel from './RelicsPanel'
 import AttackDecisionPanel from './AttackDecisionPanel'
 import { PHASES } from './StratagemsPanel'
 
@@ -956,6 +962,26 @@ function GameView({ gameId, onBack }) {
       cancelled = true
     }
   }, [game])
+  // ... and the end step of the phase (see GET /games/{id}/phase-end).
+  const [phaseEnd, setPhaseEnd] = useState(null)
+  useEffect(() => {
+    if (!game || game.status !== 'in_progress') {
+      setPhaseEnd(null)
+      return
+    }
+    let cancelled = false
+    getPhaseEnd(game.id)
+      .then((p) => !cancelled && setPhaseEnd(p))
+      .catch((err) => setError(err.message))
+    return () => {
+      cancelled = true
+    }
+  }, [game])
+  const activateInStep = (a, payload) =>
+    act(async () => {
+      await activateAbility(game.id, { unit_id: a.unit_id, ability: a.ability, ...payload })
+      return getGame(game.id)
+    })
   const [homers, setHomers] = useState(null)
   const [homerPlacing, setHomerPlacing] = useState(null)
   useEffect(() => {
@@ -1947,6 +1973,39 @@ function GameView({ gameId, onBack }) {
         />
       )}
       {game.status === 'in_progress' && (
+        <RelicsPanel
+          game={game}
+          onChange={() =>
+            getGame(game.id)
+              .then(setGame)
+              .catch((err) => setError(err.message))
+          }
+          onError={setError}
+        />
+      )}
+      {game.status === 'in_progress' && (
+        <AbilitiesPanel
+          game={game}
+          onChange={() =>
+            getGame(game.id)
+              .then(setGame)
+              .catch((err) => setError(err.message))
+          }
+          onError={setError}
+        />
+      )}
+      {game.status === 'in_progress' && (
+        <QuarryPanel
+          game={game}
+          onChange={() =>
+            getGame(game.id)
+              .then(setGame)
+              .catch((err) => setError(err.message))
+          }
+          onError={setError}
+        />
+      )}
+      {game.status === 'in_progress' && (
         <HagiomnifexPanel
           game={game}
           onChange={() =>
@@ -1983,13 +2042,22 @@ function GameView({ gameId, onBack }) {
           }
         }}
       />
-      <PhaseStartPanel
+      <PhaseStepPanel
         game={game}
-        phaseStart={phaseStart}
+        step="start"
+        state={phaseStart}
         onUse={(seat, a) =>
           act(() => applyPhaseStart(game.id, { seat, unit_id: a.unit_id, ability: a.ability }))
         }
+        onActivate={activateInStep}
         onDone={(seat) => act(() => finishPhaseStart(game.id, { seat }))}
+      />
+      <PhaseStepPanel
+        game={game}
+        step="end"
+        state={phaseEnd}
+        onActivate={activateInStep}
+        onDone={(seat) => act(() => finishPhaseEnd(game.id, { seat }))}
       />
       <TeleportHomerPanel
         game={game}

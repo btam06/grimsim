@@ -67,8 +67,16 @@ function ShootingStartPanel({ game, refreshKey, onUsed, onError }) {
       ))}
       {results.map((r, i) => (
         <p key={i} className="hint">
-          {r.ability} on {r.target}: rolled {r.roll}
-          {r.wounds ? ` — ${r.wounds} mortal wounds` : ' — no effect'}
+          {r.roll === 0 ? (
+            // (One that makes the target take a Battle-shock test - e.g. Holy
+            // Judgement: it's shown with the test.)
+            `${r.ability} on ${r.target}: it must take a Battle-shock test`
+          ) : (
+            <>
+              {r.ability} on {r.target}: rolled {r.roll}
+              {r.wounds ? ` — ${r.wounds} mortal wounds` : ' — no effect'}
+            </>
+          )}
         </p>
       ))}
     </div>

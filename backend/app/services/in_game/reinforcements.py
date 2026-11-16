@@ -51,6 +51,9 @@ from app.services.in_game.deployment import TOLERANCE, Base, Placement, gap
 FIRST_ROUND = 2
 LAST_ROUND = 3
 ENEMY_DISTANCE = 8.0
+# Eternity Gate: arriving wholly within this of the Monolith, unengaged.
+GATE_RANGE = 6.0
+GATE_ENGAGEMENT = 2.0
 EDGE_DISTANCE = 6.0
 DEEP_STRIKE = "Deep Strike"
 RAPID_INGRESS = "Rapid Ingress"
@@ -106,8 +109,63 @@ def rapid_ingress_discount(unit: Unit) -> int:
 
 
 def ingress_move(unit: Unit) -> bool:
-    # Whether an enhancement lets the unit arrive in the first battle round.
-    return any(a.get("first_round") for a in _arrivals(unit))
+    # Whether an enhancement - or an ability (e.g. Aerial Deployment) - lets
+    # the unit arrive in the first battle round.
+    from app.seeds import datasheet_abilities
+
+    config = datasheet_abilities.FIRST_ROUND_INGRESS
+    return any(a.get("first_round") for a in _arrivals(unit)) or any(
+        a.name in config for m in unit.unit_models for a in m.model.abilities
+    )
+
+
+def _denial(game: Game, unit: Unit, how) -> float:
+    # A REINFORCEMENT_DENIAL entry's reach now: inches, or {"range", and
+    # "on_controlled_objective": only while its unit's within range of an
+    # objective its player controls - e.g. Obelisk Node Control} (0: none).
+    if not isinstance(how, dict):
+        return how
+    if how.get("on_controlled_objective"):
+        from app.services.in_game import objectives
+
+        if not any(objectives.unit_controls(game, unit, c) for c in objectives.control(game)):
+            return 0
+    return how["range"]
+
+
+def round_bonus(unit: Unit) -> int:
+    # How many battle rounds later than it is the unit sets up from Reserves
+    # as (datasheet_abilities RESERVE_ROUND_BONUS - e.g. Bestial Raiders: 1).
+    from app.seeds import datasheet_abilities
+
+    config = datasheet_abilities.RESERVE_ROUND_BONUS
+    return max((config[a.name] for m in unit.unit_models for a in m.model.abilities if a.name in config), default=0)
+
+
+def _denied(game: Game, seat: int) -> list[tuple[Base, float]]:
+    # The enemy models (on the battlefield) that reinforcements can't be set
+    # up near, and how near: those with an ability in REINFORCEMENT_DENIAL
+    # (e.g. Cogitative Instincts: 12", horizontally).
+    from app.seeds import datasheet_abilities
+
+    config = datasheet_abilities.REINFORCEMENT_DENIAL
+    if not config:
+        return []
+    placed = deployment.positions(game)
+    found = []
+    for player in game.players:
+        if player.seat == seat:
+            continue
+        for unit in deployment.deployable_units(player):
+            for m in unit.unit_models:
+                reach = max(
+                    (_denial(game, unit, config[a.name]) for a in m.model.abilities if a.name in config),
+                    default=0,
+                )
+                if reach and m.id in placed:
+                    p = placed[m.id]
+                    found.append((deployment.base_at(m, p.x, p.y, p.rotation), reach))
+    return found
 
 
 def movement_ended(game: Game) -> bool:
@@ -325,19 +383,51 @@ def check_arrival(
     side = "attacker" if seat == game.attacker_seat else "defender"
     enemy_side = "defender" if side == "attacker" else "attacker"
     enemy_zone = layout.deployment.zone(enemy_side) if layout and layout.deployment else None
+    denied = _denied(game, seat)
+    # Through an Eternity Gate: wholly within 6" of the Monolith, unengaged
+    # (instead of 8" away and by an edge) - even in the enemy deployment zone.
+    from app.services.in_game import activations
+    from app.services.in_game.regions import base_wholly_within_of
+
+    gate = activations.gate_traveller(game, unit)
+    gate_bases = (
+        [
+            deployment.base_at(m, p.x, p.y, p.rotation)
+            for m in deployment.models_on_battlefield(game, gate)
+            if (p := deployment.positions(game).get(m.id)) is not None
+        ]
+        if gate is not None
+        else []
+    )
+    if gate is not None:
+        for model in models:
+            base = bases[model.id]
+            found = []
+            if not base_wholly_within_of(base, gate_bases, GATE_RANGE):
+                found.append(f'isn\'t wholly within {GATE_RANGE:g}" of the Eternity Gate')
+            if any(gap(base, e) <= GATE_ENGAGEMENT + TOLERANCE for e in enemies):
+                found.append("would be within Engagement Range of an enemy model")
+            if any(gap(base, b) < reach - TOLERANCE for b, reach in denied):
+                found.append("is within range of an enemy model that stops reinforcements")
+            problems[model.id] = found + problems[model.id]
+        return deployment.summarise(models, problems)
     for model in models:
         base = bases[model.id]
         found = []
         if any(gap(base, e) < ENEMY_DISTANCE - TOLERANCE for e in enemies):
             found.append('is within 8" of an enemy model')
+        if any(gap(base, b) < reach - TOLERANCE for b, reach in denied):
+            reach = max(r for b, r in denied if gap(base, b) < r - TOLERANCE)
+            found.append(f'is within {reach:g}" of an enemy model that stops reinforcements')
         if homer:
             found += teleport_homer.homer_problems(game, unit, base)
         elif not deep_strike:
             if not near_an_edge(base):
                 found.append('isn\'t wholly within 6" of a battlefield edge')
             elif (
-                # (Or earlier, by an ingress move.)
-                game.battle_round <= FIRST_ROUND
+                # (Or earlier, by an ingress move - and a unit that sets up as
+                # if it were a battle round later, e.g. Bestial Raiders.)
+                game.battle_round + round_bonus(unit) <= FIRST_ROUND
                 and enemy_zone
                 and deployment.distance_to_polygon(base, enemy_zone) <= TOLERANCE
             ):

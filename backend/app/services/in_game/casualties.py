@@ -83,6 +83,26 @@ def _lose(game: Game, unit_model, wounds: int, destroyed_by: Unit | None = None)
         from app.seeds.factions.adepta_sororitas import acts_of_faith
 
         acts_of_faith.model_destroyed(game, unit, unit_model)
+        _dies_with(game, unit, unit_model, destroyed_by)
+
+
+# Triarchal Menhirs (The Silent King): if its CHARACTER model (Szarekh) is
+# destroyed, the unit's remaining models with the ability are too.
+DIES_WITH_CHARACTER = "Triarchal Menhirs"
+
+
+def _dies_with(game: Game, unit: Unit, unit_model, destroyed_by: Unit | None) -> None:
+    keywords = {k.name for k in unit_model.model.keywords}
+    names = {a.name for a in unit_model.model.abilities}
+    if DIES_WITH_CHARACTER not in names or "CHARACTER" not in keywords:
+        return
+    lost = damage(game)
+    for other in unit.unit_models:
+        if other.id == unit_model.id or (other.id in lost and lost[other.id].destroyed):
+            continue
+        if any(a.name == DIES_WITH_CHARACTER for a in other.model.abilities):
+            left = other.wounds - (lost[other.id].wounds_lost if other.id in lost else 0)
+            _lose(game, other, left, destroyed_by)
 
 
 def _remove(game: Game, unit: Unit, unit_model, destroyed_by: Unit | None) -> None:

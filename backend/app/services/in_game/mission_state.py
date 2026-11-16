@@ -212,6 +212,10 @@ def after_move(game: Game, unit: Unit, kind: str | None = None) -> None:
     # removed.
     # (Imported here: actions imports this module.)
     from app.seeds.factions.space_marines import teleport_homer
+    from app.services.in_game import activations
+
+    # (Gravitic Pulse: a FLY unit it hit rolls for mortal wounds.)
+    activations.after_move(game, unit)
     from app.services.in_game import actions
 
     if kind not in actions.MOVES_KEEPING_ACTIONS:

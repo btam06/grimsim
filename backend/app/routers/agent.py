@@ -18,6 +18,7 @@ from app.models.stratagem import UNIT_TARGET_ACTIONS
 from app.routers import agent_sororitas as sororitas
 from app.routers import games as g
 from app.schemas import (
+    ActivationIn,
     AttackDecisionIn,
     FormationSplitIn,
     ScentingFearIn,
@@ -27,6 +28,7 @@ from app.schemas import (
     MiracleDiceIn,
     MiracleOfferIn,
     SacredHealingIn,
+    FieryConvictionIn,
     ResurrectionIn,
     FormationGrantIn,
     PhaseStartIn,
@@ -621,7 +623,39 @@ def _round_choice_seat(game: Game) -> int | None:
         for rule in battle_round.player_rules(game, player, game.battle_round):
             if rule.required and rule.faction_ability_id not in chosen:
                 return player.seat
+    # (Or an ability used then that selects something - e.g. Triarch
+    # Abilities.)
+    from app.services.in_game import activations
+
+    for a in activations.available(game):
+        if a.how.get("phases") == "round_start" and a.how.get("required") and a.reason is None:
+            return deployment.owner(game, a.unit).seat
     return None
+
+
+def _activation_actions(game: Game, seat: int, when: str) -> list[Action]:
+    # The player's activated abilities for the start or end of the phase (or
+    # the start of the round) they could use now - one action for each
+    # target or option (see app/services/in_game/activations.py).
+    from app.services.in_game import activations
+
+    found = []
+    for a in activations.available(game, seat):
+        timing = "round_start" if a.how.get("phases") == "round_start" else a.how.get("when")
+        if timing != when or a.reason is not None:
+            continue
+        base = {"unit_id": a.unit.id, "ability": a.ability}
+        if a.targets:
+            for t in a.targets:
+                found.append(Action("activate", seat, f"{a.unit.label}: {a.ability} on {t.label}",
+                                    {**base, "target_unit_id": t.id}))
+        elif a.options:
+            for o in a.options:
+                found.append(Action("activate", seat, f"{a.unit.label}: {a.ability} - {o}",
+                                    {**base, "option": o}))
+        else:
+            found.append(Action("activate", seat, f"{a.unit.label}: {a.ability}", base))
+    return found
 
 
 # --- the legal actions ---
@@ -739,6 +773,8 @@ async def _legal_actions(session: AsyncSession, game: Game, waiting: dict) -> li
                            f"{available.ability}: {available.unit.label}",
                            {"seat": seat, "unit_id": available.unit.id,
                             "ability": available.ability}))
+        for action in _activation_actions(game, seat, "start"):
+            add(action)
         add(Action("finish_phase_start", seat, "Done with abilities for the start of the phase",
                    {"seat": seat}))
         return found
@@ -747,6 +783,8 @@ async def _legal_actions(session: AsyncSession, game: Game, waiting: dict) -> li
     # Reserves at the end of the turn (e.g. Tunnelling Horrors).
     if waiting.get("reason") == END_OF_PHASE:
         seat = waiting["seat"]
+        for action in _activation_actions(game, seat, "end"):
+            add(action)
         for ru in (await g.get_resurrection(gid, session)).units:
             if not ru.declared and ru.seat == seat:
                 add(Action("resurrect", seat, f"{ru.name} resurrects at the end of the phase",
@@ -810,6 +848,9 @@ async def _legal_actions(session: AsyncSession, game: Game, waiting: dict) -> li
             add(Action("advance", waiting["seat"], "Next phase / end of phase"))
 
     if game.phase == "start_of_round":
+        for player in game.players:
+            for action in _activation_actions(game, player.seat, "round_start"):
+                add(action)
         for player in (await g.round_start(gid, session)).players:
             for rule in player.rules:
                 if not rule.options or rule.faction_ability_id is None:
@@ -1377,6 +1418,9 @@ async def _apply(session: AsyncSession, gid: int, a: AgentActionIn):
         return await g.finish_teleport_homers(gid, TeleportHomerIn(seat=seat), session)
     if t == "phase_start_ability":
         return await g.use_phase_start(gid, PhaseStartIn(**p), session)
+    if t == "activate":
+        await g.use_activation(gid, ActivationIn(**p), session)
+        return await g._commit_and_reload(session, gid)
     if t in ("end_phase", "finish_phase_end"):
         # Declarations for the end of the phase (see phase_end.py): once
         # they're all made, the phase ends.
@@ -1461,9 +1505,18 @@ async def _apply(session: AsyncSession, gid: int, a: AgentActionIn):
         return await g.resolve_psalm(
             gid, MiracleOfferIn(seat=seat, offer_id=p["offer_id"], value=p.get("value")), session
         )
+    if t == "fiery_conviction":
+        return await g.fiery_conviction(
+            gid, FieryConvictionIn(unit_id=p["unit_id"], discard=p.get("discard")), session
+        )
     if t == "sacred_healing":
         return await g.sacred_healing(
-            gid, SacredHealingIn(unit_id=p["unit_id"], discard=p.get("discard")), session
+            gid,
+            SacredHealingIn(
+                unit_id=p["unit_id"], discard=p.get("discard"),
+                ability=p.get("ability", "Sacred Healing"),
+            ),
+            session,
         )
     if t == "split_unit":
         return await g.split_unit(gid, FormationSplitIn(**p), session)

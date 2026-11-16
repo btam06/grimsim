@@ -117,12 +117,15 @@ async def test_artisan_changes_a_failed_save_to_a_6(
         client, session, tmp_path, monkeypatch, admech_saves.ARTISAN
     )
     response = await shoot()
+    # The three saving throws are rolled, then offered: any one of them.
     pending = response.json()["pending"]
-    assert [o["id"] for o in pending["options"]] == ["artisan", "decline"]
+    assert (pending["type"], pending["roll"], pending["seat"]) == ("reroll_dice", "save", 2)
+    assert [d["value"] for d in pending["dice"]] == [1, 1, 1]
+    assert [o["id"] for o in pending["options"]] == ["six:0", "six:1", "six:2", "carry_on"]
     # Nothing else happens while it waits.
     response = await client.post(f"/games/{game_id}/advance")
     assert response.status_code == 409
-    response = await decide("artisan")
+    response = await decide("six:1")
     shot = response.json()["shot"]
     # (Once a phase.)
     assert shot["pending"] is None

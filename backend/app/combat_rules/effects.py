@@ -21,7 +21,7 @@ ADD_EXTRA_HIT = "add_extra_hit"
 IGNORE_COVER = "ignore_cover"
 NO_SAVE = "no_save"
 FORCE_CRITICAL_WOUND = "force_critical_wound"
-ADD_EXTRA_ATTACK = "add_extra_attack"
+ADD_ATTACKS_1 = "add_attacks_1"
 HAZARDOUS = "hazardous"
 PLUS_ONE_TO_HIT = "plus_one_to_hit"
 REROLL_FAILED_HITS = "reroll_failed_hits"
@@ -37,13 +37,17 @@ INVULNERABLE_4 = "invulnerable_4"
 WORSE_MELEE_SKILL = "worse_melee_skill"
 RANGED_INVULNERABLE_4 = "ranged_invulnerable_4"
 CANNOT_ATTACK = "cannot_attack"
-ADD_SIX_ATTACKS = "add_six_attacks"
+ADD_ATTACKS_6 = "add_attacks_6"
+ADD_ATTACKS_5 = "add_attacks_5"
+SUCCESSFUL_HITS_CRITICAL = "successful_hits_critical"
+REROLL_ONE_FAILED_HIT = "reroll_one_failed_hit"
+REROLL_ONE_HIT_OR_WOUND = "reroll_one_hit_or_wound"
 MINUS_ONE_TO_WOUND = "minus_one_to_wound"
 PLUS_ONE_TO_WOUND = "plus_one_to_wound"
 FEEL_NO_PAIN_5 = "feel_no_pain_5"
 FEEL_NO_PAIN_4 = "feel_no_pain_4"
-ADD_THREE_ATTACKS = "add_three_attacks"
-ADD_TWO_ATTACKS = "add_two_attacks"
+ADD_ATTACKS_3 = "add_attacks_3"
+ADD_ATTACKS_2 = "add_attacks_2"
 REROLL_HIT_ONES = "reroll_hit_ones"
 REROLL_WOUND_ONES = "reroll_wound_ones"
 RANGED_SKILL_3 = "ranged_skill_3"
@@ -52,6 +56,11 @@ PLUS_ONE_DAMAGE = "plus_one_damage"
 WORSEN_AP = "worsen_ap"
 FEEL_NO_PAIN_6 = "feel_no_pain_6"
 FEEL_NO_PAIN_MORTAL_5 = "feel_no_pain_mortal_5"
+FEEL_NO_PAIN_MORTAL_4 = "feel_no_pain_mortal_4"
+FEEL_NO_PAIN_PSYCHIC_4 = "feel_no_pain_psychic_4"
+INVULNERABLE_2 = "invulnerable_2"
+SAVE_2 = "save_2"
+HALVE_ATTACKS = "halve_attacks"
 TORRENT = "torrent"
 MELTA_2 = "melta_2"
 MELTA_6 = "melta_6"
@@ -75,8 +84,8 @@ IGNORE_HIT_PENALTIES = "ignore_hit_penalties"
 IGNORE_WOUND_PENALTIES = "ignore_wound_penalties"
 PLUS_ONE_TO_SAVE = "plus_one_to_save"
 REROLL_DAMAGE = "reroll_damage"
-ADD_NINE_ATTACKS = "add_nine_attacks"
-ADD_FOUR_ATTACKS = "add_four_attacks"
+ADD_ATTACKS_9 = "add_attacks_9"
+ADD_ATTACKS_4 = "add_attacks_4"
 REROLL_ATTACKS = "reroll_attacks"
 
 
@@ -109,7 +118,7 @@ def no_save(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
     state["no_save"] = True
 
 
-def add_extra_attack(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+def add_attacks_1(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
     # Queues one additional attack onto the chain for this weapon - unlike
     # add_extra_hit, this is a fresh attack that still needs its own hit roll.
     pending.append({"auto_hit": False})
@@ -211,14 +220,14 @@ def cannot_attack(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None
     state["cannot_attack"] = True
 
 
-def add_four_attacks(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+def add_attacks_4(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
     # Queues four additional attacks for this weapon, each with its own hit
     # roll (e.g. [RAPID FIRE 4]).
     for _ in range(4):
         pending.append({"auto_hit": False})
 
 
-def add_nine_attacks(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+def add_attacks_9(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
     # Queues nine additional attacks for this weapon, each with its own hit
     # roll (e.g. [RAPID FIRE 9]).
     for _ in range(9):
@@ -244,7 +253,33 @@ def plus_one_to_save(state: dict[str, Any], pending: deque[dict[str, Any]]) -> N
     state["plus_one_to_save"] = True
 
 
-def add_six_attacks(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+def reroll_one_failed_hit(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # One failed Hit roll among the unit's attacks can be re-rolled (e.g.
+    # Seething Hatred) - set on the unit-wide state (see app/services/combat.py).
+    state["reroll_one_failed_hit"] = True
+
+
+def reroll_one_hit_or_wound(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # One failed Hit roll or one failed Wound roll among the unit's attacks
+    # can be re-rolled (e.g. Seething Hatred) - in a game, its player's asked
+    # as one fails; in the calculator, the first that fails is.
+    state["reroll_one_hit_or_wound"] = True
+
+
+def successful_hits_critical(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # Every successful Hit roll for this attack scores a Critical Hit (e.g.
+    # Flesh Hunger) - see app/services/combat.py.
+    state["successful_hits_critical"] = True
+
+
+def add_attacks_5(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # Queues five additional attacks for this weapon, each with its own hit
+    # roll (e.g. Rapid Fire 5 within half range).
+    for _ in range(5):
+        pending.append({"auto_hit": False})
+
+
+def add_attacks_6(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
     # Queues six additional attacks for this weapon, each with its own hit
     # roll (e.g. "+6 A").
     for _ in range(6):
@@ -274,14 +309,14 @@ def feel_no_pain_4(state: dict[str, Any], pending: deque[dict[str, Any]]) -> Non
     state["feel_no_pain"] = min(state.get("feel_no_pain", 7), 4)
 
 
-def add_three_attacks(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+def add_attacks_3(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
     # Queues three additional attacks for this weapon, each with its own hit
     # roll (e.g. Rapid Fire 3 within half range).
     for _ in range(3):
         pending.append({"auto_hit": False})
 
 
-def add_two_attacks(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+def add_attacks_2(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
     # Queues two additional attacks for this weapon, each with its own hit
     # roll (e.g. Rapid Fire 2 within half range).
     for _ in range(2):
@@ -330,6 +365,35 @@ def feel_no_pain_mortal_5(state: dict[str, Any], pending: deque[dict[str, Any]])
     # Feel No Pain 5+ against mortal wounds only (a better one is kept) - e.g.
     # Benevolence of the Omnissiah.
     state["feel_no_pain_mortal"] = min(state.get("feel_no_pain_mortal", 7), 5)
+
+
+def feel_no_pain_mortal_4(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # As feel_no_pain_mortal_5, but 4+ - e.g. a Null Rod.
+    state["feel_no_pain_mortal"] = min(state.get("feel_no_pain_mortal", 7), 4)
+
+
+def feel_no_pain_psychic_4(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # Feel No Pain 4+ against Psychic Attacks only (a better one is kept) -
+    # e.g. a Null Rod.
+    state["feel_no_pain_psychic"] = min(state.get("feel_no_pain_psychic", 7), 4)
+
+
+def invulnerable_2(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # A 2+ invulnerable save (a better one is kept) - e.g. The Emperor's Grace.
+    state["invulnerable_save"] = min(state.get("invulnerable_save", 7), 2)
+
+
+def save_2(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # A Save characteristic of 2+ (a better one is kept) - e.g. Stanchion of
+    # Holy Martyrs.
+    state["save_characteristic"] = min(state.get("save_characteristic", 7), 2)
+
+
+def halve_attacks(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
+    # The weapon's Attacks characteristic is halved (rounding up) - checked
+    # once per weapon (pre_weapon), e.g. the Triumph of Saint Katherine's
+    # Damaged profile.
+    state["halve_attacks"] = True
 
 
 def torrent(state: dict[str, Any], pending: deque[dict[str, Any]]) -> None:
@@ -464,7 +528,7 @@ EFFECTS = {
     IGNORE_COVER: ignore_cover,
     NO_SAVE: no_save,
     FORCE_CRITICAL_WOUND: force_critical_wound,
-    ADD_EXTRA_ATTACK: add_extra_attack,
+    ADD_ATTACKS_1: add_attacks_1,
     HAZARDOUS: hazardous,
     PLUS_ONE_TO_HIT: plus_one_to_hit,
     REROLL_FAILED_HITS: reroll_failed_hits,
@@ -480,13 +544,17 @@ EFFECTS = {
     WORSE_MELEE_SKILL: worse_melee_skill,
     RANGED_INVULNERABLE_4: ranged_invulnerable_4,
     CANNOT_ATTACK: cannot_attack,
-    ADD_SIX_ATTACKS: add_six_attacks,
+    ADD_ATTACKS_6: add_attacks_6,
+    ADD_ATTACKS_5: add_attacks_5,
+    SUCCESSFUL_HITS_CRITICAL: successful_hits_critical,
+    REROLL_ONE_FAILED_HIT: reroll_one_failed_hit,
+    REROLL_ONE_HIT_OR_WOUND: reroll_one_hit_or_wound,
     MINUS_ONE_TO_WOUND: minus_one_to_wound,
     PLUS_ONE_TO_WOUND: plus_one_to_wound,
     FEEL_NO_PAIN_5: feel_no_pain_5,
     FEEL_NO_PAIN_4: feel_no_pain_4,
-    ADD_THREE_ATTACKS: add_three_attacks,
-    ADD_TWO_ATTACKS: add_two_attacks,
+    ADD_ATTACKS_3: add_attacks_3,
+    ADD_ATTACKS_2: add_attacks_2,
     REROLL_HIT_ONES: reroll_hit_ones,
     REROLL_WOUND_ONES: reroll_wound_ones,
     RANGED_SKILL_3: ranged_skill_3,
@@ -495,6 +563,11 @@ EFFECTS = {
     WORSEN_AP: worsen_ap,
     FEEL_NO_PAIN_6: feel_no_pain_6,
     FEEL_NO_PAIN_MORTAL_5: feel_no_pain_mortal_5,
+    FEEL_NO_PAIN_MORTAL_4: feel_no_pain_mortal_4,
+    FEEL_NO_PAIN_PSYCHIC_4: feel_no_pain_psychic_4,
+    INVULNERABLE_2: invulnerable_2,
+    SAVE_2: save_2,
+    HALVE_ATTACKS: halve_attacks,
     TORRENT: torrent,
     MELTA_2: melta_2,
     MELTA_6: melta_6,
@@ -518,8 +591,8 @@ EFFECTS = {
     IGNORE_WOUND_PENALTIES: ignore_wound_penalties,
     PLUS_ONE_TO_SAVE: plus_one_to_save,
     REROLL_DAMAGE: reroll_damage,
-    ADD_NINE_ATTACKS: add_nine_attacks,
-    ADD_FOUR_ATTACKS: add_four_attacks,
+    ADD_ATTACKS_9: add_attacks_9,
+    ADD_ATTACKS_4: add_attacks_4,
     REROLL_ATTACKS: reroll_attacks,
 }
 
@@ -533,6 +606,10 @@ OWN_UNIT_EFFECTS = {
     FEEL_NO_PAIN_5,
     FEEL_NO_PAIN_6,
     FEEL_NO_PAIN_MORTAL_5,
+    FEEL_NO_PAIN_MORTAL_4,
+    FEEL_NO_PAIN_PSYCHIC_4,
+    INVULNERABLE_2,
+    SAVE_2,
     INVULNERABLE_4,
     INVULNERABLE_5,
 }

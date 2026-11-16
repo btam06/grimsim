@@ -41,6 +41,9 @@ def apply(
     melee_skill: int = 0,
     no_cover: bool = False,
     phase: str | None = None,
+    hit: int = 0,
+    while_source: bool = False,
+    crit_5_against: bool = False,
 ) -> GameUnitEffect:
     for old in [e for e in game.unit_effects if e.unit_id == unit.id and e.source == source]:
         game.unit_effects.remove(old)
@@ -55,6 +58,9 @@ def apply(
         by_keyword=by_keyword,
         melee_skill=melee_skill,
         no_cover=no_cover,
+        hit=hit,
+        while_source=while_source,
+        crit_5_against=crit_5_against,
         phase=phase,
         battle_round=game.battle_round,
         turn_seat=game.turn_seat,
@@ -74,7 +80,15 @@ def active(game: Game, unit: Unit) -> list[GameUnitEffect]:
         if e.unit_id == unit.id
         and now <= e.until_turn
         and (e.phase is None or (now == e.until_turn and game.phase == e.phase))
+        and (not e.while_source or _source_present(game, e))
     ]
+
+
+def _source_present(game: Game, effect: GameUnitEffect) -> bool:
+    if effect.source_unit_id is None:
+        return True
+    source = deployment.find_unit(game, effect.source_unit_id)
+    return bool(deployment.models_on_battlefield(game, source))
 
 
 def no_cover(game: Game, unit: Unit) -> bool:
@@ -101,7 +115,7 @@ def attack_rules(game: Game, attacker: Unit, target: Unit) -> list:
     # (Shattered Defences).
     from app.combat_rules import Rule
     from app.combat_rules.conditions import RANGED_ATTACK
-    from app.combat_rules.effects import IGNORE_COVER, IMPROVE_AP
+    from app.combat_rules.effects import CRITICAL_HIT_5, IGNORE_COVER, IMPROVE_AP
 
     keywords = {k.name for m in attacker.unit_models for k in m.model.keywords}
     seat = deployment.owner(game, attacker).seat
@@ -123,6 +137,11 @@ def attack_rules(game: Game, attacker: Unit, target: Unit) -> list:
         Rule(conditions=(RANGED_ATTACK,), effects=(IGNORE_COVER,))
         for e in effects
         if e.no_cover
+    ][:1] + [
+        # (Critical Hits on 5+ against it - it stood firm.)
+        Rule(conditions=(RANGED_ATTACK,), effects=(CRITICAL_HIT_5,))
+        for e in effects
+        if getattr(e, "crit_5_against", False)
     ][:1]
 
 
@@ -130,17 +149,35 @@ def own_attack_rules(game: Game, unit: Unit) -> list:
     # Rules for the unit's own attacks from its effects - e.g. its melee
     # weapons' Weapon Skill worsened (Data-spike).
     from app.combat_rules import Rule
-    from app.combat_rules.conditions import MELEE_ATTACK
-    from app.combat_rules.effects import WORSE_MELEE_SKILL
+    from app.combat_rules.conditions import ALWAYS, MELEE_ATTACK
+    from app.combat_rules.effects import MINUS_ONE_TO_HIT, WORSE_MELEE_SKILL
 
+    effects = active(game, unit)
     return [
         Rule(conditions=(MELEE_ATTACK,), effects=(WORSE_MELEE_SKILL,))
-        for e in active(game, unit)
+        for e in effects
         if e.melee_skill
+    ][:1] + [
+        # (-1 to its Hit rolls - e.g. suppressed; it doesn't stack.)
+        Rule(conditions=(ALWAYS,), effects=(MINUS_ONE_TO_HIT,))
+        for e in effects
+        if e.hit < 0
     ][:1]
 
 
-def after_shooting(game: Game, unit: Unit, target: Unit, hits: int) -> list[GameUnitEffect]:
+def _until(game: Game, lasts: str) -> int:
+    if lasts == "their next turn":
+        return until_their_next_turn(game)
+    if lasts == "my next turn":
+        # (Until the start of its player's next turn: the end of the turn
+        # before - the next one, turns alternating.)
+        return turn_index(game) + 1
+    return turn_index(game)
+
+
+def after_shooting(
+    game: Game, unit: Unit, target: Unit, hits: int, weapon_hits: dict[str, int] | None = None
+) -> list[GameUnitEffect]:
     # The unit has shot `target` in its Shooting phase, scoring `hits`: its
     # abilities that do something to an enemy unit it hit (e.g. Electro-shock)
     # do - until the end of that unit's next turn (or this one).
@@ -162,7 +199,12 @@ def after_shooting(game: Game, unit: Unit, target: Unit, hits: int) -> list[Game
             continue
         if effect.required_keywords and not keywords & set(effect.required_keywords):
             continue
-        until = until_their_next_turn(game) if effect.lasts == "their next turn" else turn_index(game)
+        # (Only if that weapon hit it - e.g. Searing Flames.)
+        if effect.weapon is not None and not any(
+            n.lower().startswith(effect.weapon.lower()) and h > 0 for n, h in (weapon_hits or {}).items()
+        ):
+            continue
+        until = _until(game, effect.lasts)
         found.append(
             apply(
                 game, target, name, until,
@@ -170,6 +212,8 @@ def after_shooting(game: Game, unit: Unit, target: Unit, hits: int) -> list[Game
                 source_unit=unit, ranged_ap=effect.ranged_ap, by_keyword=effect.by_keyword,
                 no_cover=effect.no_cover,
                 phase=game.phase if effect.lasts == "this phase" else None,
+                hit=effect.hit,
+                while_source=effect.while_source,
             )
         )
     return found
@@ -193,6 +237,8 @@ def describe(effect: GameUnitEffect) -> str:
         parts.append(f"melee Weapon Skill worsened by {effect.melee_skill}")
     if effect.no_cover:
         parts.append("it can't have the Benefit of Cover")
+    if effect.hit:
+        parts.append(f"{effect.hit:+d} to its Hit rolls")
     if effect.ranged_ap:
         parts.append(
             f"+{effect.ranged_ap} AP for ranged attacks against it"

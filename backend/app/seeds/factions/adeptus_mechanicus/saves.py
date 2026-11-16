@@ -7,9 +7,10 @@ from app.services.in_game import casualties, deployment, selected_objectives
 from app.services.in_game.deployment import TOLERANCE, gap
 from app.services.list_building import enhancements as enhancement_rules
 
-# Adeptus Mechanicus enhancements the defending player can use as a saving
-# throw is made for one of their units, in a game (asked as it fails - see
-# app/services/in_game/attack_decisions.py):
+# Adeptus Mechanicus enhancements the defending player can use on a saving
+# throw made for one of their units, in a game (see
+# app/services/in_game/attack_decisions.py - Artisan's offered once a
+# weapon's saving throws are rolled, Necromechanic as one fails):
 #
 # - Artisan (Explorator Maniple): while the bearer is leading a unit within
 #   range of its player's Acquisition objective marker, once per phase, the

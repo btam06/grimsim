@@ -1059,6 +1059,13 @@ class GameUnitEffect(State):
     melee_skill: int = 0
     # It can't have the Benefit of Cover (e.g. Purge and Cleanse).
     no_cover: bool = False
+    # Added to its own models' Hit rolls (e.g. -1: suppressed).
+    hit: int = 0
+    # Ranged attacks that target it score Critical Hits on unmodified 5+
+    # (Atavistic Instigation: it stood firm).
+    crit_5_against: bool = False
+    # Only while the unit it's from (source_unit_id) is on the battlefield.
+    while_source: bool = False
     # If it only lasts until the end of a phase (of turn `until_turn`): which.
     phase: str | None = None
     # When it started, and the last turn it lasts (see

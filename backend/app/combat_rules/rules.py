@@ -50,6 +50,16 @@ class RuleOption:
     # units with a model within it of the model with the ability, rather than
     # to every unit it reaches in the list (see app/services/in_game/auras.py).
     aura_range: float | None = None
+    # In a game: an aura reaches only friendly units with every one of
+    # `aura_keywords` (e.g. BATTLELINE - Mechanical Augmentation), and none of
+    # `aura_excluded` (e.g. MONSTER - Phaeron of the Stars).
+    aura_keywords: tuple[str, ...] = ()
+    aura_excluded: tuple[str, ...] = ()
+    # In a game: what it adds to the Move characteristic of the units it
+    # applies to (e.g. Relentless March: 2), and whether they can re-roll
+    # Charge rolls (Phaeron of the Blades).
+    move: int = 0
+    charge_rerolls: bool = False
     # In a game: the aura reaches only models wholly within its range - each
     # such model gets it, not the whole unit (e.g. Emanatus Force Field).
     wholly_within: bool = False
@@ -94,6 +104,12 @@ class PhaseStartAbility:
     phases: tuple[str, ...]
     rules: tuple[Rule, ...]
     once_per_battle: bool = True
+    # Usable at the start of its owner's own phases too (e.g. The Emperor's
+    # Grace: "at the start of any phase"), not only their opponent's.
+    either_player: bool = False
+    # Its rules are for the model with the ability only, not its whole unit
+    # (e.g. The Emperor's Grace: "this model has a 2+ invulnerable save").
+    model_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -115,8 +131,18 @@ class UnitEffect:
     by_keyword: str | None = None
     # It can't have the Benefit of Cover (e.g. Purge and Cleanse).
     no_cover: bool = False
+    # What's added to its own models' Hit rolls (e.g. Storm of Bolts'
+    # suppressed: -1).
+    hit: int = 0
+    # Only while the unit it's from has a model on the battlefield (e.g.
+    # Storm of Bolts: "while this model is on the battlefield").
+    while_source: bool = False
+    # Only if an attack with this weapon hit it (e.g. Searing Flames: an
+    # Acheron flame cannon) - by name, any of its profiles.
+    weapon: str | None = None
     # How long: until the end of the affected unit's next turn ("their next
-    # turn"), of this one ("this turn"), or of this phase ("this phase").
+    # turn"), of this one ("this turn"), of this phase ("this phase"), or
+    # until the start of its player's next turn ("my next turn").
     lasts: str = "their next turn"
 
 
@@ -142,3 +168,8 @@ class FightAbility:
     # Once a battle for each model in the unit with this wargear (e.g.
     # Plasmacyte) - none: it can't be used.
     uses_wargear: str | None = None
+    # The datasheet ability it's one option of, if it isn't one itself (e.g.
+    # Embodied Prophecy: Sustained Hits, of Embodied Prophecy) - and the
+    # options only one of which can be used as the unit fights.
+    ability: str | None = None
+    group: str | None = None

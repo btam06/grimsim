@@ -96,6 +96,77 @@ CORE_ENTRIES = [
         [],
     ),
     (
+        "Damaged: 1-7 Wounds Remaining",
+        "While this model has 1-7 wounds remaining, subtract 4 from this model's Objective "
+        "Control characteristic and each time this model makes an attack, subtract 1 from the "
+        "Hit roll.",
+        [],
+        [],
+    ),
+    (
+        "Damaged: 1-8 Wounds Remaining",
+        "While this model has 1-8 wounds remaining, subtract 4 from this model's Objective "
+        "Control characteristic and each time this model makes an attack, subtract 1 from the "
+        "Hit roll.",
+        [],
+        [],
+    ),
+    (
+        "Damaged: 1-9 Wounds Remaining",
+        "While this model has 1-9 wounds remaining, subtract 5 from this model's Objective "
+        "Control characteristic and each time this model makes an attack, subtract 1 from the "
+        "Hit roll.",
+        [],
+        [],
+    ),
+    (
+        "Deadly Demise 2D6",
+        "Each time a model in this unit is destroyed, after the units embarked within it (if "
+        "any) have made their emergency disembark moves, roll one D6. On a 6, that model "
+        "suffers a deadly demise; each unit within 6\" of that model suffers 2D6 mortal "
+        "wounds.",
+        [ALWAYS],
+        [DEADLY_DEMISE],
+    ),
+    (
+        "Deadly Demise D6+3",
+        "Each time a model in this unit is destroyed, after the units embarked within it (if "
+        "any) have made their emergency disembark moves, roll one D6. On a 6, that model "
+        "suffers a deadly demise; each unit within 6\" of that model suffers D6+3 mortal "
+        "wounds.",
+        [ALWAYS],
+        [DEADLY_DEMISE],
+    ),
+    (
+        "Scouts 8\"",
+        "In the Resolve Pre-battle Abilities step, if every model in a unit has this ability: "
+        "if it's in strategic reserves, you can set it up anywhere wholly within your "
+        "deployment zone; if it's wholly within your deployment zone, it can make a scout move "
+        "of up to 8\", ending more than 8\" horizontally from all enemy units; if it's "
+        "embarked within a DEDICATED TRANSPORT wholly within your deployment zone, and every "
+        "model embarked within it has Scouts, that DEDICATED TRANSPORT can make a scout move.",
+        [],
+        [],
+    ),
+    (
+        "Hover",
+        "Each time this unit takes to the skies (21.03), do not subtract 2\" from the maximum "
+        "distance.",
+        [],
+        [],
+    ),
+    (
+        "Super-heavy Walker",
+        "Each time a unit with this ability makes a normal, advance or fall-back move: models "
+        "in that unit can move through models (including MONSTER/VEHICLE models, but excluding "
+        "TITANIC models) and can move horizontally through sections of terrain features that "
+        "are 4\" or less in height; before moving that unit, you can select for all models in "
+        "that unit to have the MOBILE keyword until that move ends. If you do, when that move "
+        "ends, roll one D6: on a 1, that unit is battle-shocked.",
+        [],
+        [],
+    ),
+    (
         "Damaged: 1-10 Wounds Remaining",
         "While this model has 1-10 wounds remaining, subtract 5 from this model's Objective "
         "Control characteristic and each time this model makes an attack, subtract 1 from the "
@@ -217,12 +288,25 @@ DAMAGED_PROFILES = {
     "Damaged: 1-4 Wounds Remaining": (4, 0),
     "Damaged: 1-5 Wounds Remaining": (5, 3),
     "Damaged: 1-10 Wounds Remaining": (10, 5),
+    "Damaged: 1-7 Wounds Remaining": (7, 4),
+    "Damaged: 1-8 Wounds Remaining": (8, 4),
+    "Damaged: 1-9 Wounds Remaining": (9, 5),
+    # (Szarekh's: its weapons' Attacks halved too; the Tesseract Vault's: one
+    # C'tan Power instead of -1 to hit - see the Necron RULES.)
+    "Damaged: 1-6 Wounds Remaining (Szarekh)": (6, 0),
+    "Damaged: 1-8 Wounds Remaining (Tesseract Vault)": (8, 4),
+    # (The Triumph of Saint Katherine's: its weapons' Attacks halved instead
+    # of -1 to hit - see the Adepta Sororitas RULES.)
+    "Damaged: 1-6 Wounds Remaining": (6, 0),
 }
 
 CORE_RULES = {
     "Damaged: 1-4 Wounds Remaining": [_DAMAGED_RULE],
     "Damaged: 1-5 Wounds Remaining": [_DAMAGED_RULE],
     "Damaged: 1-10 Wounds Remaining": [_DAMAGED_RULE],
+    "Damaged: 1-7 Wounds Remaining": [_DAMAGED_RULE],
+    "Damaged: 1-8 Wounds Remaining": [_DAMAGED_RULE],
+    "Damaged: 1-9 Wounds Remaining": [_DAMAGED_RULE],
     "Stealth": [
         Rule(
             conditions=(RANGED_ATTACK,),
@@ -341,6 +425,30 @@ COMBINED = (
     "REPAIRS",
     "PSYCHIC_ROLLS",
     "TRANSPORT_AS_BODYGUARD",
+    "LEADING_OC",
+    "FIRST_ROUND_INGRESS",
+    "SNAP_SHOTS_ON",
+    "UNIT_REQUIRES",
+    "ACTION_SHOOTS",
+    "REINFORCEMENT_DENIAL",
+    "END_OF_PHASE_MORTALS",
+    "CHARGE_MODEL_MORTALS",
+    "QUARRIES",
+    "AURA_RANGE_GROWTH",
+    "COMMAND_START_CP",
+    "FIGHT_START_BATTLE_SHOCK",
+    "LEADING_ONLY",
+    "AFTER_SHOOTING_TARGET_KEYWORDS",
+    "OC_AURAS",
+    "LEADERSHIP_AURAS",
+    "END_OF_PHASE_EACH_ENEMY",
+    "RESERVE_ROUND_BONUS",
+    "LEADING_BATTLE_SHOCK_REROLLS",
+    "ENEMY_AURAS",
+    "FIGHT_START_BATTLE_SHOCK_AURAS",
+    "ACTIVATIONS",
+    "REACTIVE_SHOTS",
+    "COMMAND_END_HEALS",
 )
 _combined: dict | None = None
 
@@ -398,6 +506,30 @@ def _combine() -> dict:
                 "REPAIRS": {},
                 "PSYCHIC_ROLLS": {},
                 "TRANSPORT_AS_BODYGUARD": set(),
+                "LEADING_OC": {},
+                "FIRST_ROUND_INGRESS": set(),
+                "SNAP_SHOTS_ON": {},
+                "UNIT_REQUIRES": {},
+                "ACTION_SHOOTS": set(),
+                "REINFORCEMENT_DENIAL": {},
+                "END_OF_PHASE_MORTALS": {},
+                "CHARGE_MODEL_MORTALS": {},
+                "QUARRIES": {},
+                "COMMAND_END_HEALS": set(),
+                "REACTIVE_SHOTS": {},
+                "ACTIVATIONS": {},
+                "FIGHT_START_BATTLE_SHOCK_AURAS": {},
+                "ENEMY_AURAS": {},
+                "LEADING_BATTLE_SHOCK_REROLLS": set(),
+                "AFTER_SHOOTING_TARGET_KEYWORDS": {},
+                "OC_AURAS": {},
+                "LEADERSHIP_AURAS": {},
+                "END_OF_PHASE_EACH_ENEMY": {},
+                "RESERVE_ROUND_BONUS": {},
+                "AURA_RANGE_GROWTH": {},
+                "COMMAND_START_CP": {},
+                "FIGHT_START_BATTLE_SHOCK": set(),
+                "LEADING_ONLY": set(),
             }
         ] + [
             {
@@ -449,6 +581,30 @@ def _combine() -> dict:
                     ("REPAIRS", {}),
                     ("PSYCHIC_ROLLS", {}),
                     ("TRANSPORT_AS_BODYGUARD", set()),
+                    ("LEADING_OC", {}),
+                    ("FIRST_ROUND_INGRESS", set()),
+                    ("SNAP_SHOTS_ON", {}),
+                    ("UNIT_REQUIRES", {}),
+                    ("ACTION_SHOOTS", set()),
+                    ("REINFORCEMENT_DENIAL", {}),
+                    ("END_OF_PHASE_MORTALS", {}),
+                    ("CHARGE_MODEL_MORTALS", {}),
+                    ("QUARRIES", {}),
+                    ("COMMAND_END_HEALS", set()),
+                    ("REACTIVE_SHOTS", {}),
+                    ("ACTIVATIONS", {}),
+                    ("FIGHT_START_BATTLE_SHOCK_AURAS", {}),
+                    ("ENEMY_AURAS", {}),
+                    ("LEADING_BATTLE_SHOCK_REROLLS", set()),
+                    ("AFTER_SHOOTING_TARGET_KEYWORDS", {}),
+                    ("OC_AURAS", {}),
+                    ("LEADERSHIP_AURAS", {}),
+                    ("END_OF_PHASE_EACH_ENEMY", {}),
+                    ("RESERVE_ROUND_BONUS", {}),
+                    ("AURA_RANGE_GROWTH", {}),
+                    ("COMMAND_START_CP", {}),
+                    ("FIGHT_START_BATTLE_SHOCK", set()),
+                    ("LEADING_ONLY", set()),
                 )
             }
             for faction in FACTIONS
@@ -632,6 +788,96 @@ def _combine() -> dict:
             "TRANSPORT_AS_BODYGUARD": {
                 n for source in sources for n in source["TRANSPORT_AS_BODYGUARD"]
             },
+            # Abilities that add to the OC of the models in the unit their
+            # model's leading (see app/services/in_game/objectives.py):
+            # {ability name: n} - e.g. Unflinching Determination: +1.
+            "LEADING_OC": {k: v for source in sources for k, v in source["LEADING_OC"].items()},
+            # Abilities that let their unit make an ingress move in its first
+            # Movement phase (see app/services/in_game/reinforcements.py).
+            "FIRST_ROUND_INGRESS": {n for source in sources for n in source["FIRST_ROUND_INGRESS"]},
+            # What a unit Firing Overwatch hits on, unmodified (see
+            # app/services/combat.py): {ability name: n} - Sentinel Directives: 5.
+            "SNAP_SHOTS_ON": {
+                k: v for source in sources for k, v in source["SNAP_SHOTS_ON"].items()
+            },
+            # Abilities that only work while their unit contains a model with a
+            # keyword: {ability name: keyword} - Network Override, TECH-PRIEST.
+            "UNIT_REQUIRES": {
+                k: v for source in sources for k, v in source["UNIT_REQUIRES"].items()
+            },
+            # Abilities that let their unit shoot in a turn it started an
+            # action (see app/services/in_game/actions.py).
+            "ACTION_SHOOTS": {n for source in sources for n in source["ACTION_SHOOTS"]},
+            # Enemy units set up as Reinforcements can't be within this of the
+            # model, horizontally (see reinforcements.py): {ability name: inches}.
+            "REINFORCEMENT_DENIAL": {
+                k: v for source in sources for k, v in source["REINFORCEMENT_DENIAL"].items()
+            },
+            # Mortal wounds rolled for at the end of a phase (see
+            # app/services/in_game/phase_end.py) - e.g. Bomb Rack.
+            "END_OF_PHASE_MORTALS": {
+                k: v for source in sources for k, v in source["END_OF_PHASE_MORTALS"].items()
+            },
+            # A D6 per charging model engaged with an enemy unit, for mortal
+            # wounds (see charging.py) - e.g. Line-breakers.
+            "CHARGE_MODEL_MORTALS": {
+                k: v for source in sources for k, v in source["CHARGE_MODEL_MORTALS"].items()
+            },
+            # Abilities whose unit selects an enemy unit as its quarry (see
+            # app/services/in_game/quarry.py) - e.g. Focused Hunters.
+            "QUARRIES": {k: v for source in sources for k, v in source["QUARRIES"].items()},
+            # Abilities that grow an aura's range (see app/services/in_game/auras.py).
+            "AURA_RANGE_GROWTH": {
+                k: v for source in sources for k, v in source["AURA_RANGE_GROWTH"].items()
+            },
+            # CP gained at the start of their player's Command phase (see battle_round.py).
+            "COMMAND_START_CP": {
+                k: v for source in sources for k, v in source["COMMAND_START_CP"].items()
+            },
+            # Enemy units engaged with it take a Battle-shock test at the start of the Fight phase.
+            "FIGHT_START_BATTLE_SHOCK": {n for source in sources for n in source["FIGHT_START_BATTLE_SHOCK"]},
+            # Abilities that work only while their model is leading a unit.
+            "LEADING_ONLY": {n for source in sources for n in source["LEADING_ONLY"]},
+            # The keywords the unit an AFTER_SHOOTING_BATTLE_SHOCK ability makes test must have.
+            "AFTER_SHOOTING_TARGET_KEYWORDS": {
+                k: v for source in sources for k, v in source["AFTER_SHOOTING_TARGET_KEYWORDS"].items()
+            },
+            # Auras that change friendly units' OC (see objectives.py): {ability: {range, keywords, bonus}}.
+            "OC_AURAS": {
+                k: v for source in sources for k, v in source["OC_AURAS"].items()
+            },
+            # Auras that improve friendly units' Leadership (see battle_shock.py): {ability: {range, keywords, bonus}}.
+            "LEADERSHIP_AURAS": {
+                k: v for source in sources for k, v in source["LEADERSHIP_AURAS"].items()
+            },
+            # Mortal wounds for each enemy unit near the model at the end of a phase (see phase_end.py).
+            "END_OF_PHASE_EACH_ENEMY": {
+                k: v for source in sources for k, v in source["END_OF_PHASE_EACH_ENEMY"].items()
+            },
+            # Reserves set up as if the battle round were this much later (see reinforcements.py).
+            "RESERVE_ROUND_BONUS": {
+                k: v for source in sources for k, v in source["RESERVE_ROUND_BONUS"].items()
+            },
+            # Abilities whose model, while leading, lets its unit re-roll Leadership tests (see battle_shock.py).
+            "LEADING_BATTLE_SHOCK_REROLLS": {n for source in sources for n in source["LEADING_BATTLE_SHOCK_REROLLS"]},
+            # Auras that change enemy units' attacks (see app/services/in_game/auras.py enemy_rules).
+            "ENEMY_AURAS": {
+                k: v for source in sources for k, v in source["ENEMY_AURAS"].items()
+            },
+            # Auras whose friendly units in range make enemies engaged with them take a Battle-shock test at the start of the Fight phase.
+            "FIGHT_START_BATTLE_SHOCK_AURAS": {
+                k: v for source in sources for k, v in source["FIGHT_START_BATTLE_SHOCK_AURAS"].items()
+            },
+            # Abilities their player activates (see app/services/in_game/activations.py).
+            "ACTIVATIONS": {
+                k: v for source in sources for k, v in source["ACTIVATIONS"].items()
+            },
+            # Shots taken in the opponent's turn (see app/services/in_game/reactive_shots.py).
+            "REACTIVE_SHOTS": {
+                k: v for source in sources for k, v in source["REACTIVE_SHOTS"].items()
+            },
+            # Of the COMMAND_HEALS, those healed at the end of the Command phase, not its start (e.g. Repair Auto-simulacra).
+            "COMMAND_END_HEALS": {n for source in sources for n in source["COMMAND_END_HEALS"]},
             # {option name: ability name}. Option names are unique across every
             # ability (and every faction ability's options).
             "OPTION_OWNERS": {

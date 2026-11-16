@@ -644,6 +644,8 @@ class CombatIn(BaseModel):
 
 class WeaponCombatResultOut(BaseModel):
     name: str
+    # How many hits it scored.
+    hits: int = 0
     damage: str
     attack_rolls: list[int]
     attack_rerolls: list[int]
@@ -942,6 +944,24 @@ class AttackDecisionOut(BaseModel):
     unit_id: int
     prompt: str
     options: list[DecisionOptionOut]
+    # A weapon's Hit, Wound or saving throws rolled together, for a choice
+    # to re-roll or change one ("reroll_dice" - its options' ids are
+    # "<source>:<the dice's index>"): which ("hit", "wound", "save") and the
+    # dice.
+    roll: str | None = None
+    dice: list["DecisionDieOut"] = []
+
+
+class DecisionDieOut(BaseModel):
+    value: int
+    passed: bool
+    # (Re-rolled already - so it can't be again - or never re-rollable, e.g.
+    # a Miracle dice.)
+    rerolled: bool
+    rerollable: bool
+
+
+AttackDecisionOut.model_rebuild()
 
 
 class GameOut(BaseModel):
@@ -1455,6 +1475,11 @@ class ShootIn(BaseModel):
     miracle_discards: dict[str, int] = {}
 
 
+class ReactiveShotIn(ShootIn):
+    # A reactive shot (e.g. Hyperspace Hunters): the ability it's for.
+    ability: str
+
+
 class AttackDecisionIn(BaseModel):
     seat: int
     choice: str
@@ -1936,6 +1961,9 @@ class PhaseStartOut(BaseModel):
     phase: str | None
     abilities: list[PhaseStartAbilityOut]
     used: list[PhaseStartAbilityOut] = []
+    # Activated abilities for the start of the phase its players could use
+    # (see app/services/in_game/activations.py "when").
+    activations: list["ActivationOut"] = []
 
 
 class PhaseStartIn(BaseModel):
@@ -2268,9 +2296,12 @@ class HagiomnifexUnitOut(BaseModel):
 
 class SacredHealingIn(BaseModel):
     # The unit (led by a Hospitaller), and the value of the Miracle dice to
-    # discard to return up to D3+1 models instead of 1 (None: don't).
+    # discard to return up to D3+1 models instead of 1 (None: don't). Or
+    # another ability that returns models (`ability` - e.g. Salvationist
+    # Medikit, Healing Tears: no discard).
     unit_id: int
     discard: int | None = None
+    ability: str = "Sacred Healing"
 
 
 class HagiomnifexIn(BaseModel):
@@ -2292,6 +2323,93 @@ class JudgementOut(BaseModel):
     # judge now, or why none), and the enemy units judged now.
     units: list[CondemnationUnitOut] = []
     judged: list[UnitIdNameOut] = []
+
+
+class QuarryUnitOut(BaseModel):
+    # A unit with an ability that selects a quarry (e.g. Virtue of
+    # Intolerance, Focused Hunters): its quarry (if it has one), and the
+    # enemy units it could select now (or why none).
+    unit_id: int
+    name: str
+    ability: str
+    hint: str = ""
+    quarry: UnitIdNameOut | None = None
+    reason: str | None = None
+    targets: list[UnitIdNameOut] = []
+
+
+class QuarryOut(BaseModel):
+    units: list[QuarryUnitOut] = []
+
+
+class ActivationOut(BaseModel):
+    # A unit's activated ability (see app/services/in_game/activations.py):
+    # what it could target now, its options (if it's a choice), or why it
+    # can't be used now.
+    unit_id: int
+    name: str
+    seat: int
+    ability: str
+    description: str = ""
+    reason: str | None = None
+    targets: list[UnitIdNameOut] = []
+    options: list[str] = []
+    # "start" / "end": used in the phase's start or end step (see
+    # PhaseStartOut, PhaseEndOut); "round_start": at the start of the round.
+    when: str | None = None
+
+
+class PhaseEndOut(BaseModel):
+    # The end step of the phase (see app/services/in_game/phase_end.py): the
+    # player it's waiting on (None: it isn't open, or they're all done), and
+    # the activated abilities for the end of the phase its players can use.
+    seat: int | None
+    phase: str | None
+    open: bool
+    activations: list[ActivationOut] = []
+
+
+PhaseStartOut.model_rebuild()
+
+
+class ReactiveShotOut(BaseModel):
+    # A reactive shot a unit could take now (see
+    # app/services/in_game/reactive_shots.py) - and at which enemy units.
+    unit_id: int
+    name: str
+    seat: int
+    ability: str
+    targets: list[UnitIdNameOut] = []
+
+
+class ActivationIn(BaseModel):
+    unit_id: int
+    ability: str
+    target_unit_id: int | None = None
+    option: str | None = None
+
+
+class ActivationResultOut(BaseModel):
+    note: str = ""
+    activations: list[ActivationOut] = []
+
+
+class RelicsUnitOut(BaseModel):
+    # A unit with Relics of the Matriarchs: the relics it chose this battle
+    # round, how many it can choose (two - one while Damaged), whether it can
+    # now (or why not), and every relic.
+    unit_id: int
+    name: str
+    chosen: list[str] = []
+    allowed: int
+    reason: str | None = None
+    options: list[str] = []
+    descriptions: dict[str, str] = {}
+
+
+class RelicsIn(BaseModel):
+    unit_id: int
+    options: list[str] = []
 
 
 class CondemnationOut(BaseModel):
@@ -2321,12 +2439,24 @@ class ScentingFearIn(BaseModel):
     target_unit_id: int
 
 
+class FieryConvictionIn(BaseModel):
+    # The unit (with Junith Eruita), and the value of the Miracle dice to
+    # discard for 1CP (None: a Leadership test instead).
+    unit_id: int
+    discard: int | None = None
+
+
 class SacredHealingUnitOut(BaseModel):
-    # A unit that can use Sacred Healing now, and how many of its models
-    # are destroyed (that it could return).
+    # A unit that can use Sacred Healing (or another `ability` that returns
+    # models) now, how many of its models are destroyed (that it could
+    # return), how many it returns (`count` - a dice expression), and how
+    # many discarding a Miracle dice (`discard_count`, if it can).
     unit_id: int
     name: str
     destroyed: int
+    ability: str = "Sacred Healing"
+    count: str = "1"
+    discard_count: str | None = "D3+1"
 
 
 class MiracleOfferOut(BaseModel):
@@ -2365,6 +2495,8 @@ class MiracleDicePlayerOut(BaseModel):
     # return).
     selection_discards: dict[int, list[str]] = {}
     sacred_healing: list[SacredHealingUnitOut] = []
+    # Units that can use Fiery Conviction now (by id: their names).
+    fiery_conviction: dict[int, str] = {}
     used: list[MiracleUseOut] = []
 
 

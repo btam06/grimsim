@@ -142,6 +142,11 @@ def cant_charge_reason(game: Game, unit: Unit) -> str | None:
         return reason
     if shoot_scoot.no_charge(game, unit):
         return "it moved after shooting this turn"
+    # (It came through an Eternity Gate this turn.)
+    from app.services.in_game import activations
+
+    if activations.gate_traveller(game, unit) is not None:
+        return "it arrived through an Eternity Gate this turn"
     status = move_status(game, unit)
     if status.advanced and not command_phase.eligible_after(game, unit, "advanced", "charge"):
         return "it Advanced this turn"
@@ -176,6 +181,10 @@ def _check_unit(game: Game, unit: Unit, declaring: bool = False) -> None:
         raise _bad_request("only the player whose turn it is can charge with their units")
     if _charges_over(game) and not heroic:
         raise _bad_request("the player whose turn it is has finished charging")
+    from app.services.in_game import phase_end, phase_start
+
+    if not heroic and (reason := phase_start.blocks(game) or phase_end.blocks(game)) is not None:
+        raise _bad_request(reason)
     if not deployment.is_deployed(unit, deployment.positions(game)):
         raise _bad_request("that unit isn't on the battlefield")
     charge = unit_charge(game, unit)
@@ -216,7 +225,10 @@ def roll_charge(game: Game, unit: Unit, miracle_die: int | None = None) -> GameU
 
 
 def _abilities(unit: Unit) -> set[str]:
-    return {a.name for m in unit.unit_models for a in m.model.abilities}
+    # Its models' abilities, and their wargear's (e.g. a sacred banner).
+    return {a.name for m in unit.unit_models for a in m.model.abilities} | {
+        a.name for m in unit.unit_models for g in m.wargear for a in g.abilities
+    }
 
 
 def _rerolled(game: Game, unit: Unit) -> bool:
@@ -245,10 +257,17 @@ def can_reroll(game: Game, unit: Unit) -> bool:
     return (
         charge is not None
         and not charge.completed
-        and bool(_abilities(unit) & datasheet_abilities.CHARGE_REROLLS)
+        and (bool(_abilities(unit) & datasheet_abilities.CHARGE_REROLLS) or _aura_rerolls(game, unit))
         and not _rerolled(game, unit)
         and not miracle_rolled(game, unit)
     )
+
+
+def _aura_rerolls(game: Game, unit: Unit) -> bool:
+    # (An aura reaching it lets it - e.g. Phaeron of the Blades.)
+    from app.services.in_game import auras
+
+    return auras.charge_rerolls(game, unit)
 
 
 def reroll_charge(game: Game, unit: Unit) -> GameUnitCharge:
@@ -292,14 +311,65 @@ def _charge_mortals(game: Game, unit: Unit) -> None:
                 casualties.mortal_wounds(game, target, roll_dice(wounds), destroyed_by=unit)
 
 
-def _after_charge(game: Game, unit: Unit) -> None:
+def _started_near(game: Game, unit: Unit) -> set[str]:
+    # Before a charge move: the unit's CHARGE_MODEL_MORTALS abilities whose
+    # bonus it'll get - it's starting the move near the friendly units they
+    # name (e.g. Line-breakers: within 6" of an ADEPTUS MECHANICUS BATTLELINE
+    # unit).
+    from app.seeds import datasheet_abilities
+    from app.services.in_game import regions
+
+    config = datasheet_abilities.CHARGE_MODEL_MORTALS
+    return {
+        name
+        for name in _abilities(unit) & set(config)
+        if config[name].get("near") and regions.near_friendly(game, unit, *config[name]["near"])
+    }
+
+
+def _charge_model_mortals(game: Game, unit: Unit, started_near: set[str]) -> None:
+    # Abilities that, as the unit ends a Charge move, roll a D6 for each of
+    # its models engaged with one enemy unit (the one most of them are) - e.g.
+    # Line-breakers: 1 mortal wound per 4+, +2 to each if it started near a
+    # friendly BATTLELINE unit.
+    from app.seeds import datasheet_abilities
+    from app.services.in_game import casualties
+
+    config = datasheet_abilities.CHARGE_MODEL_MORTALS
+    for name in sorted(_abilities(unit) & set(config)):
+        how = config[name]
+        bases = _bases(game, unit)
+        ours = [
+            bases[m.id]
+            for m in deployment.models_on_battlefield(game, unit)
+            if any(a.name == name for a in m.model.abilities) and m.id in bases
+        ]
+        engaged = []
+        for enemy in enemy_units(game, unit):
+            theirs = list(_bases(game, enemy).values())
+            count = sum(
+                1 for b in ours if theirs and _nearest(b, theirs) <= ENGAGEMENT_RANGE + TOLERANCE
+            )
+            if count:
+                engaged.append((count, -enemy.id, enemy))
+        if not engaged:
+            continue
+        count, _, target = max(engaged, key=lambda e: (e[0], e[1]))
+        bonus = how.get("bonus", 0) if name in started_near else 0
+        wounds = sum(1 for _ in range(count) if dice.randint(1, 6) + bonus >= how["on"])
+        if wounds:
+            casualties.mortal_wounds(game, target, wounds, destroyed_by=unit)
+
+
+def _after_charge(game: Game, unit: Unit, started_near: set[str] = frozenset()) -> None:
     # The unit ended a charge move: abilities that inflict mortal wounds then
-    # (e.g. Crimson Harvest), and that make the enemy units engaged with it
-    # take a Battle-shock test.
+    # (e.g. Crimson Harvest, Line-breakers), and that make the enemy units
+    # engaged with it take a Battle-shock test.
     from app.seeds import datasheet_abilities
     from app.services.in_game import battle_shock
 
     _charge_mortals(game, unit)
+    _charge_model_mortals(game, unit, started_near)
     config = datasheet_abilities.AFTER_CHARGE_BATTLE_SHOCK
     rules = [(name, config[name]) for name in _abilities(unit) if name in config]
     if not rules:
@@ -340,6 +410,11 @@ def charge_roll(game: Game, unit: Unit) -> int | None:
     if charge is None:
         return None
     roll = max(0, charge.roll + charge_bonus(game, unit))
+    # (Halved - Gravitic Pulse - rounding up.)
+    from app.services.in_game import activations
+
+    if activations.halved(game, unit):
+        roll = (roll + 1) // 2
     if _heroic(game, unit) == core_stratagems.INTO_THE_FRAY:
         roll = min(roll, core_stratagems.FRAY_MAX_ROLL)
     return roll
@@ -480,6 +555,7 @@ def make_charge(
     result = check_charge(game, unit, targets, placement, take_to_skies)
     if not result.valid:
         raise _bad_request("can't charge like that: " + "; ".join(result.problems))
+    started_near = _started_near(game, unit)
     placed = deployment.positions(game)
     for unit_model_id, (x, y, rotation) in placement.items():
         position = placed[unit_model_id]
@@ -489,4 +565,4 @@ def make_charge(
     charge.extra_targets = [GameChargeTarget(unit_id=t.id) for t in targets[1:]]
     charge.completed = True
     mission_state.after_move(game, unit)
-    _after_charge(game, unit)
+    _after_charge(game, unit, started_near)

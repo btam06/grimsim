@@ -812,9 +812,87 @@ def _weapon_allowed(engaged: _Engaged, unit_model: UnitModel, weapon) -> bool:
             return True
         return close_quarters(weapon) and engaged.with_each_other
     if engaged.target_engaged:
+        # (Engaged only with FORTIFICATIONS from the shooter's army, it can be
+        # shot - at -1 to hit, unless with a Pistol: see fortification_rules.)
+        if only_fortifications(engaged.game, engaged.target, engaged.unit):
+            return True
         return _big(engaged.target) and not _blast(weapon)
     return True
 
+
+def only_fortifications(game: Game, target: Unit, shooter: Unit) -> bool:
+    # Whether the target is within Engagement Range only of FORTIFICATIONS
+    # from the shooter's army (and of at least one) - Fortification.
+    seat = deployment.owner(game, shooter).seat
+    engaged = [u for u in enemy_units(game, target) if engaged_with(game, target, u)]
+    return bool(engaged) and all(
+        deployment.owner(game, u).seat == seat
+        and any(k.name == "FORTIFICATION" for m in u.unit_models for k in m.model.keywords)
+        for u in engaged
+    )
+
+
+def fortification_rules(game: Game, shooter: Unit, target: Unit) -> list:
+    # Ranged attacks at a target engaged only with the shooter's army's
+    # FORTIFICATIONS: -1 to hit, unless made with a Pistol.
+    from app.combat_rules import Rule
+    from app.combat_rules.conditions import NOT_PISTOL, RANGED_ATTACK
+    from app.combat_rules.effects import MINUS_ONE_TO_HIT
+
+    if not movement.in_engagement_range(game, target) or not only_fortifications(game, target, shooter):
+        return []
+    return [Rule(conditions=(RANGED_ATTACK, NOT_PISTOL), effects=(MINUS_ONE_TO_HIT,))]
+
+
+def ancient_cover(game: Game, shooter: Unit, target: Unit) -> bool:
+    # Ancient Cover: the target isn't fully visible to every model in the
+    # shooting unit because of one of its army's FORTIFICATIONS with the
+    # ability - here, a straight line from a shooting model to one of its
+    # models crosses that FORTIFICATION's base.
+    seat = deployment.owner(game, target).seat
+    player = next(p for p in game.players if p.seat == seat)
+    blockers = [
+        b
+        for u in deployment.deployable_units(player)
+        for m in deployment.models_on_battlefield(game, u)
+        if any(a.name == ANCIENT_COVER for a in m.model.abilities)
+        for b in [_model_base(game, m)]
+    ]
+    if not blockers:
+        return False
+    shooters = [_model_base(game, m) for m in deployment.models_on_battlefield(game, shooter)]
+    targets = [_model_base(game, m) for m in deployment.models_on_battlefield(game, target)]
+    return any(
+        _crosses(a, b, blocker) for a in shooters for b in targets for blocker in blockers
+    )
+
+
+ANCIENT_COVER = "Ancient Cover"
+
+
+def _model_base(game: Game, unit_model: UnitModel):
+    p = deployment.positions(game)[unit_model.id]
+    return deployment.base_at(unit_model, p.x, p.y, p.rotation)
+
+
+def _crosses(a, b, blocker) -> bool:
+    # Whether the segment between two bases' centres passes through the
+    # blocker's base (as a circle of its largest radius).
+    import math
+
+    ax, ay, bx, by, cx, cy = a.x, a.y, b.x, b.y, blocker.x, blocker.y
+    radius = max(blocker.semi_axes)
+    dx, dy = bx - ax, by - ay
+    length = dx * dx + dy * dy
+    if length == 0:
+        return False
+    t = max(0.0, min(1.0, ((cx - ax) * dx + (cy - ay) * dy) / length))
+    return math.dist((ax + t * dx, ay + t * dy), (cx, cy)) < radius
+
+
+# Powers of the C'tan (the Tesseract Vault): its C'tan Powers weapons.
+POWERS_OF_THE_CTAN = "Powers of the C'tan"
+CTAN_POWERS = {"Antimatter Meteor", "Cosmic Fire", "Time's Arrow"}
 
 ONE_SHOT = "One Shot"
 
@@ -1159,9 +1237,9 @@ def cant_shoot_reason(game: Game, unit: Unit, assault: set | None = None) -> str
         return "units can only shoot in the shooting phase"
     if deployment.owner(game, unit).seat != game.turn_seat:
         return "only the player whose turn it is can shoot with their units"
-    from app.services.in_game import phase_start
+    from app.services.in_game import phase_end, phase_start
 
-    if (reason := phase_start.blocks(game)) is not None:
+    if (reason := phase_start.blocks(game) or phase_end.blocks(game)) is not None:
         return reason
     if not deployment.is_deployed(unit, deployment.positions(game)):
         return "it isn't on the battlefield"
@@ -1222,6 +1300,16 @@ def check_shot(
                 "a model fires either its [CLOSE-QUARTERS] weapons or its other ranged "
                 "weapons, not both"
             )
+    # Powers of the C'tan: up to two of those weapons (one while Damaged).
+    for unit_model in deployment.models_on_battlefield(game, unit):
+        if not any(a.name.startswith(POWERS_OF_THE_CTAN) for a in unit_model.model.abilities):
+            continue
+        powers = {w.name for w in unit_model.weapons if w.id in weapon_ids and w.name in CTAN_POWERS}
+        from app.services.in_game import casualties
+
+        most = 1 if casualties.damaged_profile(game, unit_model) is not None else 2
+        if len(powers) > most:
+            raise _bad_request(f"it can select at most {most} C'tan Powers weapon{'s' if most > 1 else ''}")
     if any(w.unusable for w in result.weapons if w.id in weapon_ids):
         raise _bad_request("it Advanced: it can only shoot Assault weapons")
     usable = {w.id for w in result.weapons if w.in_range}

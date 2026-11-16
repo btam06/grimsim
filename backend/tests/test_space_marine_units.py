@@ -172,8 +172,8 @@ def test_shield_dome_protects_its_bearer(monkeypatch):
 
 def test_the_impulsors_weapon_and_wargear_abilities():
     weapons = {entry[0]: entry for entry in weapon_ability_seeds.ENTRIES}
-    assert weapons["Rapid Fire 4"][3] == ["add_four_attacks"]
-    assert weapons["Rapid Fire 6"][3] == ["add_six_attacks"]
+    assert weapons["Rapid Fire 4"][3] == ["add_attacks_4"]
+    assert weapons["Rapid Fire 6"][3] == ["add_attacks_6"]
     assert weapons["Blast 2"][3] == ["blast_2"]
     wargear = {entry[0] for entry in wargear_ability_seeds.ENTRIES}
     assert {"5+ Invulnerable Save", 'Scouts 6"'} <= wargear

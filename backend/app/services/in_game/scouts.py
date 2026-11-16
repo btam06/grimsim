@@ -61,7 +61,16 @@ def _model_distance(unit: Unit, unit_model: UnitModel, game: Game | None = None)
     if len(unit.unit_models) == 1:
         names += [a.name for gear in unit_model.wargear for a in gear.abilities]
     names += sorted(unit_abilities.granted_abilities(unit, unit_model, game))
+    # Vanguard Protocols: Scouts 8" for a model attached to a CANOPTEK
+    # MACROCYTES unit.
+    if VANGUARD_PROTOCOLS in names and any(
+        k.name == "MACROCYTES" for m in unit.unit_models if m is not unit_model for k in m.model.keywords
+    ):
+        names.append('Scouts 8"')
     return max((int(m.group(1)) for n in names if (m := SCOUTS.match(n))), default=0)
+
+
+VANGUARD_PROTOCOLS = "Vanguard Protocols"
 
 
 def distance(unit: Unit, game: Game | None = None) -> int:

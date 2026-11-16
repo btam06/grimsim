@@ -3,15 +3,20 @@ from app.combat_rules.conditions import (
     ALWAYS,
     ATTACKER_LED_BY_CHARACTER,
     CRITICAL_HIT,
+    DEFENDER_IN_RANGE_OF_OBJECTIVE,
     PRE_WEAPON,
+    RANGED_ATTACK,
+    TARGET_CANT_FLY,
     TARGET_HAS_CHARACTER,
     TARGET_MONSTER_OR_VEHICLE,
+    TARGET_NOT_MONSTER_OR_VEHICLE,
     TARGET_LED_BY_CHARACTER,
     TARGET_MODEL_VEHICLE,
 )
 from app.combat_rules.effects import (
-    ADD_THREE_ATTACKS,
-    ADD_TWO_ATTACKS,
+    ADD_EXTRA_HIT,
+    ADD_ATTACKS_3,
+    ADD_ATTACKS_2,
     ASSAULT,
     AUTO_PASS_WOUND,
     FEEL_NO_PAIN_4,
@@ -33,10 +38,12 @@ from app.seeds.factions.adeptus_mechanicus.conditions import (
     ATTACKER_OR_TARGET_ON_ACQUISITION,
     CONQUEROR_IMPERATIVE_ACTIVE,
     DEFENDER_ON_ACQUISITION,
+    ERADICATION_CASTER_WEAPON,
     KASTELAN_MELEE_WEAPON,
     KASTELAN_RANGED_WEAPON,
     NEUTRON_FUSIL_WEAPON,
     OMNISSIAN_AXE_WEAPON,
+    PHOSPHOR_TORCH_WEAPON,
     ARQUEBUS_VS_MONSTER_OR_VEHICLE,
     PROTECTOR_IMPERATIVE_ACTIVE,
     RADIUM_JEZZAIL_VS_INFANTRY,
@@ -421,7 +428,6 @@ ENTRIES = [
         [],
         [],
     ),
-    # (Rules text only: not modelled in the calculator or games.)
     (
         "Bomb Rack",
         "At the end of your opponent's Fight phase, select one visible enemy unit (excluding "
@@ -529,6 +535,36 @@ CALCULATOR_NOTES = {
         "next turn: -2\" Move, and -2 to its Advance and Charge rolls."
     ),
     "Scuttling Walker": "Descriptive only: moving through models and terrain isn't modelled.",
+    "Bomb Rack": (
+        "Descriptive only in the calculator; in a game, at the end of the opponent's Fight "
+        "phase it rolls six D6 against the closest visible enemy unit (not a Lone Operative) "
+        "within 24\": 1 mortal wound per 4+."
+    ),
+    "Aerial Deployment": (
+        "Descriptive only in the calculator; in a game, it can arrive from Strategic Reserves "
+        "in the first battle round."
+    ),
+    "Sentinel Directives": (
+        "Descriptive only in the calculator; in a game, Firing Overwatch it hits on unmodified "
+        "5+."
+    ),
+    "Line-breakers": (
+        "Descriptive only in the calculator; in a game, as it ends a Charge move it rolls a D6 "
+        "for each model engaged with the enemy unit most of them are (+2 if it started within "
+        "6\" of a friendly ADEPTUS MECHANICUS BATTLELINE unit): 1 mortal wound per 4+."
+    ),
+    "Network Override": (
+        "Descriptive only in the calculator; in a game, while it has a TECH-PRIEST model it can "
+        "start an action after Advancing, and shoot after starting one."
+    ),
+    "Focused Hunters": (
+        "Descriptive only in the calculator; in a game, it selects a quarry in the first "
+        "battle round, and re-rolls the Hit roll against it."
+    ),
+    "Cogitative Instincts": (
+        "Descriptive only in the calculator; in a game, enemy units can't be set up as "
+        "Reinforcements within 12\" of it."
+    ),
     "Servo-skull Uplink": (
         "Descriptive only in the calculator; in a game, once per battle it rallies a friendly "
         "Battle-shocked SKITARII unit within 6\"."
@@ -611,6 +647,49 @@ CALCULATOR_NOTES = {
 
 # Code-defined rules for abilities above, by name.
 RULES = {
+    "Strafing Run": [
+        Rule(
+            conditions=(RANGED_ATTACK, TARGET_CANT_FLY),
+            effects=(PLUS_ONE_TO_HIT,),
+            description="+1 to hit with ranged attacks against units that can't FLY.",
+        ),
+    ],
+    "Broad-spectrum Targeting Augurs": [
+        Rule(
+            conditions=(
+                ERADICATION_CASTER_WEAPON,
+                CRITICAL_HIT,
+                TARGET_NOT_MONSTER_OR_VEHICLE,
+            ),
+            effects=(ADD_EXTRA_HIT,),
+            description=(
+                "Eradication casters have [SUSTAINED HITS 1] against units other than "
+                "MONSTERS and VEHICLES."
+            ),
+        ),
+    ],
+    "Searing Conflagration": [
+        Rule(
+            conditions=(PHOSPHOR_TORCH_WEAPON, DEFENDER_IN_RANGE_OF_OBJECTIVE),
+            effects=(REROLL_WOUND_ONES,),
+            description=(
+                "Phosphor torches re-roll Wound rolls of 1 against units within range of an "
+                "objective marker."
+            ),
+        ),
+        Rule(
+            conditions=(
+                PHOSPHOR_TORCH_WEAPON,
+                DEFENDER_IN_RANGE_OF_OBJECTIVE,
+                ATTACKER_NEAR_ADMECH_BATTLELINE,
+            ),
+            effects=(REROLL_FAILED_WOUNDS,),
+            description=(
+                "...and re-roll the Wound roll, while this unit is within 6\" of a friendly "
+                "ADEPTUS MECHANICUS BATTLELINE unit."
+            ),
+        ),
+    ],
     "Achillan Eye": [
         Rule(
             conditions=(RADIUM_JEZZAIL_VS_INFANTRY,),
@@ -645,7 +724,7 @@ RULES = {
     "Vengeance for the Omnissiah": [
         Rule(
             conditions=(PRE_WEAPON, OMNISSIAN_AXE_WEAPON, VENGEANCE_ACTIVE),
-            effects=(ADD_THREE_ATTACKS,),
+            effects=(ADD_ATTACKS_3,),
             description=(
                 "The Omnissian axe has 6 Attacks once a friendly ADEPTUS MECHANICUS VEHICLE "
                 "model was destroyed within 12\" (ticked under Positioning)."
@@ -869,11 +948,11 @@ OPTIONS = {
     },
     "Battle Protocols": {
         "Protector Protocol": RuleOption(
-            rules=(Rule(conditions=(KASTELAN_RANGED_WEAPON,), effects=(ADD_TWO_ATTACKS,)),),
+            rules=(Rule(conditions=(KASTELAN_RANGED_WEAPON,), effects=(ADD_ATTACKS_2,)),),
             description="+2 Attacks on KASTELAN ROBOT models' ranged weapons.",
         ),
         "Conqueror Protocol": RuleOption(
-            rules=(Rule(conditions=(KASTELAN_MELEE_WEAPON,), effects=(ADD_TWO_ATTACKS,)),),
+            rules=(Rule(conditions=(KASTELAN_MELEE_WEAPON,), effects=(ADD_ATTACKS_2,)),),
             description="+2 Attacks on KASTELAN ROBOT models' melee weapons.",
         ),
         "Aegis Protocol": RuleOption(
@@ -1054,3 +1133,51 @@ CANNOT_BE_WARLORD = {"Sydonian Sentinel"}
 # the enemy unit it hit take a Battle-shock test - with this modifier (see
 # app/services/in_game/battle_shock.py after_shooting).
 AFTER_SHOOTING_BATTLE_SHOCK = {"Dread Snipers": 0}
+
+# While leading a unit: +n OC for the models in it (see
+# app/services/in_game/objectives.py).
+LEADING_OC = {"Seekers of Divine Arcana": 1}
+
+# Aerial Deployment: an ingress move in its first Movement phase - it can
+# arrive from Reserves in the first battle round (see
+# app/services/in_game/reinforcements.py).
+FIRST_ROUND_INGRESS = {"Aerial Deployment"}
+
+# Sentinel Directives: Firing Overwatch, it hits on unmodified 5+ (see
+# app/services/combat.py).
+SNAP_SHOTS_ON = {"Sentinel Directives": 5}
+
+# Network Override: while the unit contains a TECH-PRIEST model, it can start
+# an action in a turn it Advanced, and shoot in a turn it started one (see
+# app/services/in_game/actions.py).
+UNIT_REQUIRES = {"Network Override": "TECH-PRIEST"}
+ACTION_AFTER = {"Network Override": ("advanced",)}
+ACTION_SHOOTS = {"Network Override"}
+
+# Cogitative Instincts: enemy units set up as Reinforcements can't be within
+# 12" (horizontally) of this model (see reinforcements.py).
+REINFORCEMENT_DENIAL = {"Cogitative Instincts": 12.0}
+
+# Bomb Rack: at the end of the opponent's Fight phase, six D6 against a
+# visible enemy unit (not a Lone Operative) within 24" - 1 mortal wound per 4+
+# (see app/services/in_game/phase_end.py).
+END_OF_PHASE_MORTALS = {
+    "Bomb Rack": {"phase": "fight", "turn": "opponent", "range": 24.0, "dice": 6, "on": 4}
+}
+
+# Line-breakers: as it ends a Charge move, a D6 for each of its models engaged
+# with one enemy unit - +2 if it started the move within 6" of a friendly
+# ADEPTUS MECHANICUS BATTLELINE unit; 1 mortal wound per 4+ (see charging.py).
+CHARGE_MODEL_MORTALS = {
+    "Line-breakers": {"on": 4, "bonus": 2, "near": (("ADEPTUS MECHANICUS", "BATTLELINE"), 6.0)}
+}
+
+# Focused Hunters: a quarry selected at the start of the battle - re-roll the
+# Hit roll against it (see app/services/in_game/quarry.py).
+QUARRIES = {
+    "Focused Hunters": {
+        "effects": (REROLL_FAILED_HITS,),
+        "again_with": None,
+        "hint": "attacks against its quarry can re-roll the Hit roll",
+    }
+}

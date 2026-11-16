@@ -24,6 +24,15 @@ from app.services.in_game.deployment import TOLERANCE, gap
 # Absorption); `melee_skill`: the target's melee weapons' Weapon Skill is
 # worse by that much until the end of the phase (Data-spike). At the start
 # of the Fight phase, either player can use theirs. Once a phase each.
+#
+# Some instead make the target take a Battle-shock test (`battle_shock`: its
+# modifier, worse by `keyword_modifier` (keyword, n) against a unit with that
+# keyword) - failing it, it suffers `fail_mortal_wounds` (see
+# app/services/in_game/battle_shock.py take). With no `target_keywords`, any
+# enemy unit; `visible`: one the model can see (e.g. Holy Judgement).
+#
+# Others roll `dice` D6 instead: 1 mortal wound for each of `roll`+ (e.g.
+# Living Lightning: four D6, 4+).
 
 # An ability used this phase (kept as a marked unit - see
 # app/services/in_game/mission_state.py).
@@ -98,6 +107,23 @@ def _targets(game: Game, unit: Unit, model: UnitModel, seat: int, how: dict) -> 
         if how.get("from_unit")
         else [_base(game, model)]
     )
+    if how.get("visible"):
+        from app.seeds.factions.adepta_sororitas import unit_abilities
+
+        seen = unit_abilities.visible_enemies(game, unit, how["range"], [model])
+        if how.get("lone_operative_within") is not None:
+            # (Not a Lone Operative further than this - e.g. Living Lightning.)
+            from app.services.in_game import shooting
+
+            near = set(
+                u.id for u in unit_abilities.visible_enemies(game, unit, how["lone_operative_within"], [model])
+            )
+            seen = [u for u in seen if u.id in near or not shooting.lone_operative(game, u)]
+        return [
+            u for u in seen
+            if not how.get("target_keywords")
+            or {k.name for m in u.unit_models for k in m.model.keywords} & set(how["target_keywords"])
+        ]
     found = []
     for player in game.players:
         if player.seat == seat:
@@ -105,7 +131,7 @@ def _targets(game: Game, unit: Unit, model: UnitModel, seat: int, how: dict) -> 
         for unit in deployment.deployable_units(player):
             models = [m for m in unit.unit_models if m.id in placed]
             keywords = {k.name for m in models for k in m.model.keywords}
-            if not keywords & set(how["target_keywords"]):
+            if how.get("target_keywords") and not keywords & set(how["target_keywords"]):
                 continue
             if any(
                 gap(source, _base(game, m)) <= how["range"] + TOLERANCE
@@ -156,12 +182,34 @@ def use(game: Game, unit: Unit, name: str, target: Unit) -> Result:
         phase = _config().get(name, {}).get("phase", "shooting")
         raise _bad_request(f"{name} is used at the start of the {phase} phase")
     if target.id not in {t.id for t in found.targets}:
-        keywords = " or ".join(found.how["target_keywords"])
+        keywords = " or ".join(found.how.get("target_keywords", ())) + " " if found.how.get(
+            "target_keywords"
+        ) else ""
+        seen = " and visible to" if found.how.get("visible") else ""
         raise _bad_request(
-            f'{name} targets an enemy {keywords} unit within {found.how["range"]:g}" of the '
+            f'{name} targets an enemy {keywords}unit within {found.how["range"]:g}"{seen} of the '
             "model with it"
         )
     mission_state.mark(game, deployment.owner(game, unit).seat, USED, unit.id)
+    if "battle_shock" in found.how:
+        # A Battle-shock test for it to take (see battle_shock.take).
+        from app.services.in_game import battle_shock
+
+        modifier = found.how["battle_shock"]
+        keyword, extra = found.how.get("keyword_modifier", (None, 0))
+        if keyword in {k.name for m in target.unit_models for k in m.model.keywords}:
+            modifier += extra
+        battle_shock.require(game, target, name, modifier)
+        return Result(roll=0)
+    if "dice" in found.how:
+        # Several D6, 1 mortal wound for each of `roll`+ (e.g. Living
+        # Lightning: four D6, 4+). Its roll is how many succeeded.
+        rolls = [dice.randint(1, 6) for _ in range(found.how["dice"])]
+        hits = sum(1 for r in rolls if r >= found.how["roll"])
+        result = Result(roll=hits, wounds=hits)
+        if hits:
+            result.destroyed = casualties.mortal_wounds(game, target, hits, unit)
+        return result
     result = Result(roll=dice.randint(1, 6))
     if result.roll >= found.how["roll"]:
         result.wounds, _ = roll_dice_faces(found.how["mortal_wounds"])

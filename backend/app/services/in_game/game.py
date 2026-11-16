@@ -328,10 +328,19 @@ async def _begin_command_phase(session: AsyncSession, game: Game) -> None:
     selected_objectives_service.clear(game, game.turn_seat)
     for player in game.players:
         player.cp += 1
+    # Abilities that gain the player whose turn it is CP then, while a model
+    # with one is on the battlefield (e.g. Grand Strategist).
+    player_at(game, game.turn_seat).cp += battle_round_service.command_start_cp(
+        game, game.turn_seat
+    )
     drawn = await _draw_tactical(session, game, player_at(game, game.turn_seat))
     mission_state_service.cards_drawn(game, game.turn_seat, drawn)
     command_phase_service.heal(game)
     battle_shock_service.battle_shock_step(game)
+    # Its start step (see app/services/in_game/phase_start.py).
+    from app.services.in_game import phase_start
+
+    phase_start.enter(game)
 
 
 def enter_deployment(game: Game) -> None:
@@ -466,6 +475,21 @@ async def advance(session: AsyncSession, game: Game) -> None:
         # Objectives their rules have them select (e.g. Acquisition At Any Cost).
         if missing := selected_objectives_service.missing(game):
             raise _bad_request("select " + ", ".join(missing) + " first")
+    if game.phase == "movement" and (late := reinforcements_service.still_to_arrive(game)):
+        # (Units that must arrive this phase - e.g. Tunnelling Horrors.)
+        raise _bad_request(
+            "bring in " + ", ".join(u.label for u in late) + " from Strategic Reserves first"
+        )
+    # The phase's end step (see app/services/in_game/phase_end.py): if either
+    # player has something to use or declare at the end of the phase, it
+    # waits for them to.
+    from app.services.in_game import phase_end as phase_end_service
+
+    if phase_end_service.to_open(game):
+        phase_end_service.open(game)
+    if phase_end_service.window_seat(game) is not None:
+        return
+    if game.phase == "command":
         # Its scoring moment (and a pause for any tactical secondary to claim)
         # - objective control determined first, as at the end of every phase.
         objectives_service.determine(game)
@@ -480,6 +504,8 @@ async def advance(session: AsyncSession, game: Game) -> None:
             reanimation_service.reanimate(game)
             if heal_service.placing(game):
                 return
+        # Models that heal then (e.g. Repair Auto-simulacra).
+        command_phase_service.heal(game, end=True)
         # Enhancements that gain CP then (e.g. Magos).
         selected_objectives_service.end_of_command(game)
         # Miracle dice for objectives held with a Simulacrum Imperialis.
@@ -490,11 +516,6 @@ async def advance(session: AsyncSession, game: Game) -> None:
         # The end of the charge phase: the opponent can use Heroic
         # Intervention - it pauses here for them to.
         return
-    if game.phase == "movement" and (late := reinforcements_service.still_to_arrive(game)):
-        # (Units that must arrive this phase - e.g. Tunnelling Horrors.)
-        raise _bad_request(
-            "bring in " + ", ".join(u.label for u in late) + " from Strategic Reserves first"
-        )
     if game.phase == "movement" and not reinforcements_service.movement_ended(game):
         # The end of the movement phase: if the opponent could use Rapid
         # Ingress or Fire Overwatch, it pauses here for them to.
@@ -505,8 +526,18 @@ async def advance(session: AsyncSession, game: Game) -> None:
     # Orb) - and if that returns destroyed models, it waits for them to be
     # set up.
     reanimation_service.resurrect(game)
-    # Divine Intervention: models set up again.
+    # Divine Intervention: models set up again - and Celestine, the first
+    # time she's destroyed (Miraculous Intervention).
     miracle_rules.end_of_phase(game)
+    from app.seeds.factions.adepta_sororitas import unit_abilities as sororitas_abilities
+
+    sororitas_abilities.miraculous_end_of_phase(game)
+    # Mortal wounds rolled for then (e.g. Bomb Rack).
+    phase_end_service.mortals(game)
+    # Auras that grow (e.g. Atomic Energy Manipulator).
+    from app.services.in_game import auras as auras_service
+
+    auras_service.grow_at_end_of_fight(game)
     if heal_service.placing(game):
         return
     # Destroyed models left on the battlefield till then (Duty in Death) go;
@@ -527,6 +558,8 @@ async def advance(session: AsyncSession, game: Game) -> None:
             from app.services.in_game import fighting
 
             fighting.start_fight_step(game)
+        # Its start step (see app/services/in_game/phase_start.py).
+        phase_start.enter(game)
         return
     # The end of the turn: actions that complete then do (or fail), then its
     # scoring moment - and after the last turn, the battle's - with a pause
@@ -750,7 +783,11 @@ def _unavailable(
     stratagem: Stratagem,
     cp_discount: int,
     target: Unit | None,
+    in_attack: bool = False,
 ) -> str | None:
+    # (`in_attack`: used on a roll as an attack's made - see
+    # attack_stratagem_reason - so its game action's targets now don't
+    # matter.)
     cp_discount += ability_discount(game, player, target)[0]
     cp, repeatable = stratagem_cost(stratagem, target)
     if free_rule(game, player, stratagem) is not None:
@@ -784,11 +821,26 @@ def _unavailable(
         game, player, stratagem
     ):
         return "they have no unit it can place in Strategic Reserves now"
-    if stratagem.game_action in _stratagem_actions().ACTIONS and not stratagem_targets(
-        game, player, stratagem
+    if (
+        not in_attack
+        and stratagem.game_action in _stratagem_actions().ACTIONS
+        and not stratagem_targets(game, player, stratagem)
     ):
         return "they have no unit it can be used on now"
     return None
+
+
+def attack_stratagem_reason(
+    game: Game, player: GamePlayer, stratagem: Stratagem, unit: Unit
+) -> str | None:
+    # Why the player can't use the stratagem on a roll for their unit as an
+    # attack's made (e.g. Command Re-roll on a Hit roll - see
+    # attack_decisions.py), or None if they can.
+    if (reason := _unavailable(game, player, stratagem, 0, unit, in_attack=True)) is not None:
+        return reason
+    if deployment_service.owner(game, unit).seat != player.seat:
+        return "it isn't one of their units"
+    return unit_target_reason(game, player, unit)
 
 
 def _stratagem_actions():
@@ -928,48 +980,7 @@ async def use_stratagem(
     elif target_secondary_id is not None:
         raise _bad_request(f"{stratagem.name} doesn't take a target")
 
-    base = max(0, stratagem_cost(stratagem, target_unit or targeted_unit)[0] - cp_discount)
-    # (An ability that takes CP off it - e.g. My Will Be Done - used if it does.)
-    extra, ability = ability_discount(game, player, target_unit or targeted_unit)
-    # (Or a rule that makes it free - e.g. Tyrannical Court - used instead.)
-    free = free_rule(game, player, stratagem) if base > 0 else None
-    if free is not None:
-        extra, ability = 0, None
-        game.ability_uses.append(
-            GameAbilityUse(
-                seat=player.seat,
-                unit_id=(target_unit or targeted_unit).id
-                if (target_unit or targeted_unit) is not None
-                else None,
-                ability=free,
-                battle_round=game.battle_round,
-                turn_seat=game.turn_seat,
-                phase=game.phase,
-            )
-        )
-    cost = 0 if free is not None else max(0, base - extra)
-    if ability is not None and cost < base:
-        game.ability_uses.append(
-            GameAbilityUse(
-                seat=player.seat,
-                unit_id=(target_unit or targeted_unit).id,
-                ability=ability,
-                battle_round=game.battle_round,
-                turn_seat=game.turn_seat,
-            )
-        )
-    player.cp -= cost
-    use = GameStratagemUse(
-        stratagem_id=stratagem.id,
-        stratagem=stratagem,
-        battle_round=game.battle_round,
-        turn_seat=game.turn_seat,
-        phase=game.phase,
-        cp=cost,
-    )
-    if (target_unit or targeted_unit) is not None:
-        use.target_link = GameStratagemTarget(unit_id=(target_unit or targeted_unit).id)
-    player.stratagem_uses.append(use)
+    use = spend_stratagem(game, player, stratagem, target_unit or targeted_unit, cp_discount)
     if stratagem.game_action == "strategic_reserves":
         reinforcements_service.place_in_reserves(game, player.seat, target_unit)
     if stratagem.game_action in _stratagem_actions().ACTIONS:
@@ -984,6 +995,58 @@ async def use_stratagem(
         target.status = "discarded"
         drawn = await _draw_tactical(session, game, player, count=1)
         mission_state_service.cards_drawn(game, player.seat, drawn)
+
+
+def spend_stratagem(
+    game: Game,
+    player: GamePlayer,
+    stratagem: Stratagem,
+    unit: Unit | None,
+    cp_discount: int = 0,
+) -> GameStratagemUse:
+    # The player pays for the stratagem (used on `unit`, if it targets one)
+    # and it's recorded as used this phase - its use.
+    base = max(0, stratagem_cost(stratagem, unit)[0] - cp_discount)
+    # (An ability that takes CP off it - e.g. My Will Be Done - used if it does.)
+    extra, ability = ability_discount(game, player, unit)
+    # (Or a rule that makes it free - e.g. Tyrannical Court - used instead.)
+    free = free_rule(game, player, stratagem) if base > 0 else None
+    if free is not None:
+        extra, ability = 0, None
+        game.ability_uses.append(
+            GameAbilityUse(
+                seat=player.seat,
+                unit_id=unit.id if unit is not None else None,
+                ability=free,
+                battle_round=game.battle_round,
+                turn_seat=game.turn_seat,
+                phase=game.phase,
+            )
+        )
+    cost = 0 if free is not None else max(0, base - extra)
+    if ability is not None and cost < base:
+        game.ability_uses.append(
+            GameAbilityUse(
+                seat=player.seat,
+                unit_id=unit.id,
+                ability=ability,
+                battle_round=game.battle_round,
+                turn_seat=game.turn_seat,
+            )
+        )
+    player.cp -= cost
+    use = GameStratagemUse(
+        stratagem_id=stratagem.id,
+        stratagem=stratagem,
+        battle_round=game.battle_round,
+        turn_seat=game.turn_seat,
+        phase=game.phase,
+        cp=cost,
+    )
+    if unit is not None:
+        use.target_link = GameStratagemTarget(unit_id=unit.id)
+    player.stratagem_uses.append(use)
+    return use
 
 
 def _stratagem_targeted(player: GamePlayer, unit: Unit | None) -> None:

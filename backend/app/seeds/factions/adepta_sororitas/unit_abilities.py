@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from fastapi import HTTPException
 
 from app.models import Unit
@@ -259,6 +261,8 @@ def unit_destroyed(game: Game, unit: Unit, destroyed_by: Unit | None) -> None:
     # dice.
     from app.seeds.factions.adepta_sororitas import acts_of_faith
 
+    # (Recount the Deeds of the Saints: a Miracle dice too.)
+    acts_of_faith.enemy_unit_destroyed(game, unit, destroyed_by)
     if destroyed_by is None or not _army_rule(game, destroyed_by):
         return
     player = deployment.owner(game, destroyed_by)
@@ -399,65 +403,345 @@ def denunciation_tests(game: Game) -> list[tuple[Unit, int]]:
     return found
 
 
-# --- Sacred Healing ---
+# --- Sacred Healing, Salvationist Medikit, Healing Tears: returning models ---
+
+SALVATIONIST_MEDIKIT = "Salvationist Medikit"
+HEALING_TEARS = "Healing Tears"
 
 
-def _healed(game: Game, unit: Unit) -> bool:
+@dataclass(frozen=True)
+class Returns:
+    # An ability that returns destroyed models to its unit in its player's
+    # Command phase (once a phase), with their full wounds, to be set up:
+    # `count` of them (a dice expression) - or, discarding a Miracle dice,
+    # `discard_count` (if it can). The models it can return: not CHARACTERs
+    # (`no_characters`), or only those named `models`. Who has it: a model
+    # with it leading the unit (`leading`), a model on the battlefield with
+    # it, or one with the wargear `wargear` (its bearer).
+    count: str = "1"
+    discard_count: str | None = None
+    no_characters: bool = True
+    models: tuple[str, ...] = ()
+    leading: bool = False
+    wargear: str | None = None
+    # Only while the unit has a model on the battlefield named this (e.g.
+    # Healing Tears: Celestine).
+    needs_model: str | None = None
+
+
+RETURNS = {
+    # (Hospitaller) While leading a unit: 1 - or, discarding a Miracle dice,
+    # up to D3+1.
+    SACRED_HEALING: Returns(count="1", discard_count="D3+1", leading=True),
+    # (Sanctifiers' Salvationist) If the bearer's on the battlefield: up to D3.
+    SALVATIONIST_MEDIKIT: Returns(count="D3", wargear="Salvationist medikit"),
+    # (Saint Celestine) While the unit has Celestine: 1 Geminae Superia.
+    HEALING_TEARS: Returns(
+        count="1", no_characters=False, models=("Geminae Superia",), needs_model="Celestine"
+    ),
+}
+
+
+def _healed(game: Game, unit: Unit, ability: str = SACRED_HEALING) -> bool:
     from app.seeds.factions.adepta_sororitas import miracle_rules
 
     seat = deployment.owner(game, unit).seat
-    return bool(miracle_rules.used(game, seat, SACRED_HEALING, unit.id))
+    return bool(miracle_rules.used(game, seat, ability, unit.id))
 
 
-def returnable(game: Game, unit: Unit) -> list:
-    # The unit's destroyed models Sacred Healing could return (not
-    # CHARACTERs).
+def returnable(game: Game, unit: Unit, ability: str = SACRED_HEALING) -> list:
+    # The unit's destroyed models the ability could return.
+    config = RETURNS[ability]
     lost = casualties.damage(game)
     return [
         m
         for m in deployment.unit_models(unit)
         if m.id in lost
         and lost[m.id].destroyed
-        and "CHARACTER" not in enhancement_rules.model_keywords(unit, m)
+        and not (config.no_characters and "CHARACTER" in enhancement_rules.model_keywords(unit, m))
+        and (not config.models or m.model.name in config.models)
     ]
 
 
-def healing_reason(game: Game, unit: Unit) -> str | None:
-    healers = _models_with(game, unit, SACRED_HEALING)
-    if not healers or not any(enhancement_rules.is_leading(unit, m) for m in healers):
-        return "it has no Hospitaller leading it"
+def _has_return(game: Game, unit: Unit, ability: str) -> bool:
+    config = RETURNS[ability]
+    if config.wargear is not None:
+        return any(
+            g.name == config.wargear
+            for m in deployment.models_on_battlefield(game, unit)
+            for g in m.wargear
+        )
+    holders = _models_with(game, unit, ability)
+    if config.leading:
+        return any(enhancement_rules.is_leading(unit, m) for m in holders)
+    return bool(holders)
+
+
+def return_abilities(game: Game, unit: Unit) -> list[str]:
+    # The returning abilities the unit could use now.
+    return [a for a in RETURNS if healing_reason(game, unit, a) is None]
+
+
+def healing_reason(game: Game, unit: Unit, ability: str = SACRED_HEALING) -> str | None:
+    config = RETURNS[ability]
+    if not _has_return(game, unit, ability):
+        if ability == SACRED_HEALING:
+            return "it has no Hospitaller leading it"
+        return f"it doesn't have {ability}"
+    if config.needs_model is not None and not any(
+        m.model.name == config.needs_model for m in deployment.models_on_battlefield(game, unit)
+    ):
+        return f"it has no {config.needs_model} model on the battlefield"
     if game.phase != "command" or game.turn_seat != deployment.owner(game, unit).seat:
         return "it's used in its player's Command phase"
-    if _healed(game, unit):
+    if _healed(game, unit, ability):
         return "it has already been used this phase"
-    if not returnable(game, unit):
+    if not returnable(game, unit, ability):
         return "it has no destroyed models to return"
     return None
 
 
-def sacred_healing(game: Game, unit: Unit, discard: int | None) -> int:
-    # Returns up to 1 destroyed model - or, discarding the Miracle dice of
-    # `discard`, up to D3+1 - with full wounds, to be set up. How many.
+def _roll(expression: str) -> int:
+    # "1", "D3", "D3+1".
+    count, _, plus = expression.partition("+")
+    total = dice.randint(1, int(count[1:])) if count.startswith("D") else int(count)
+    return total + (int(plus) if plus else 0)
+
+
+def sacred_healing(
+    game: Game, unit: Unit, discard: int | None, ability: str = SACRED_HEALING
+) -> int:
+    # Returns the ability's destroyed models - discarding the Miracle dice of
+    # `discard` for more, if it can - with full wounds, to be set up. How many.
     from app.seeds.factions.adepta_sororitas import miracle_rules
 
-    if (reason := healing_reason(game, unit)) is not None:
-        raise _bad_request(f"{unit.label} can't use {SACRED_HEALING}: {reason}")
+    if ability not in RETURNS:
+        raise _bad_request(f"{ability} doesn't return models")
+    config = RETURNS[ability]
+    if (reason := healing_reason(game, unit, ability)) is not None:
+        raise _bad_request(f"{unit.label} can't use {ability}: {reason}")
     player = deployment.owner(game, unit)
     removed = []
-    count = 1
+    count = config.count
     if discard is not None:
+        if config.discard_count is None:
+            raise _bad_request(f"{ability} doesn't discard a Miracle dice")
         if not _army_rule(game, unit):
             raise _bad_request("only an Adepta Sororitas army has Miracle dice")
         miracle_rules._take(player, [discard])
         removed = [discard]
-        count = dice.randint(1, 3) + 1
+        count = config.discard_count
     lost = casualties.damage(game)
-    back = returnable(game, unit)[:count]
+    back = returnable(game, unit, ability)[: _roll(count)]
     for m in back:
         lost[m.id].destroyed = False
         lost[m.id].wounds_lost = 0
-    miracle_rules._record(game, player.seat, SACRED_HEALING, unit.id, removed, [])
+    miracle_rules._record(game, player.seat, ability, unit.id, removed, [])
     return len(back)
+
+
+# --- Fiery Conviction ---
+
+FIERY_CONVICTION = "Fiery Conviction"
+
+
+def conviction_reason(game: Game, unit: Unit) -> str | None:
+    # Why the unit can't use Fiery Conviction now, if it can't: its model's
+    # on the battlefield, in its player's Command phase, once a phase.
+    if not _models_with(game, unit, FIERY_CONVICTION):
+        return f"it has no model with {FIERY_CONVICTION} on the battlefield"
+    if game.phase != "command" or game.turn_seat != deployment.owner(game, unit).seat:
+        return "it's used in its player's Command phase"
+    if _healed(game, unit, FIERY_CONVICTION):
+        return "it has already been used this phase"
+    return None
+
+
+def fiery_conviction(game: Game, unit: Unit, discard: int | None) -> bool:
+    # Discarding the Miracle dice of `discard`, 1CP - or, without, a
+    # Leadership test for the model: passed, 1CP. Whether it gained the CP.
+    from app.seeds.factions.adepta_sororitas import miracle_rules
+
+    if (reason := conviction_reason(game, unit)) is not None:
+        raise _bad_request(f"{unit.label} can't use {FIERY_CONVICTION}: {reason}")
+    player = deployment.owner(game, unit)
+    removed = []
+    if discard is not None:
+        miracle_rules._take(player, [discard])
+        removed = [discard]
+        gained = True
+    else:
+        model = _models_with(game, unit, FIERY_CONVICTION)[0]
+        gained = dice.randint(1, 6) + dice.randint(1, 6) >= model.model.leadership
+    if gained:
+        player.cp += 1
+    miracle_rules._record(game, player.seat, FIERY_CONVICTION, unit.id, removed, [])
+    return gained
+
+
+# --- Relics of the Matriarchs ---
+
+RELICS = "Relics of the Matriarchs"
+# A relic chosen this battle round: a marked unit, of kind "relic:<option>".
+RELIC = "relic:"
+RELICS_CHOSEN = 2
+RELICS_DAMAGED = 1
+FIERY_HEART = "The Fiery Heart (Aura)"
+FIERY_HEART_MOVE = 2
+FIERY_HEART_ROLLS = 1
+CENSER = "Censer of the Sacred Rose (Aura)"
+EBON_CHALICE = "Simulacrum of the Ebon Chalice (Aura)"
+
+
+def relic_options() -> list[str]:
+    from app.seeds import datasheet_abilities
+
+    return list(datasheet_abilities.OPTIONS.get(RELICS, {}))
+
+
+def relic_models(game: Game, unit: Unit) -> list:
+    return _models_with(game, unit, RELICS)
+
+
+def relics_allowed(game: Game, unit: Unit) -> int:
+    # How many it can select: two - one while it's Damaged.
+    damaged = any(casualties.damaged_profile(game, m) is not None for m in relic_models(game, unit))
+    return RELICS_DAMAGED if damaged else RELICS_CHOSEN
+
+
+def chosen_relics(game: Game, unit: Unit) -> list[str]:
+    # The relics the unit chose this battle round.
+    return [
+        m.kind[len(RELIC):]
+        for m in game.marked_units
+        if m.kind.startswith(RELIC)
+        and m.unit_id == unit.id
+        and m.battle_round == game.battle_round
+        and not m.ended
+    ]
+
+
+def relics_reason(game: Game, unit: Unit) -> str | None:
+    from app.services.in_game import battle_round
+
+    if not relic_models(game, unit):
+        return f"it has no model with {RELICS} on the battlefield"
+    if game.status != "in_progress" or game.phase != battle_round.START_OF_ROUND:
+        return "they're selected at the start of the battle round"
+    return None
+
+
+def choose_relics(game: Game, unit: Unit, options: list[str]) -> None:
+    # The start of the battle round: up to two relics (one while Damaged),
+    # until the start of the next.
+    from app.services.in_game import mission_state
+
+    if (reason := relics_reason(game, unit)) is not None:
+        raise _bad_request(f"{unit.label} can't select relics now: {reason}")
+    options = list(dict.fromkeys(options))
+    if len(options) > relics_allowed(game, unit):
+        raise _bad_request(f"it can select up to {relics_allowed(game, unit)} of them now")
+    unknown = [o for o in options if o not in relic_options()]
+    if unknown:
+        raise _bad_request(f"{RELICS} has no {unknown[0]!r}")
+    for m in game.marked_units:
+        if m.kind.startswith(RELIC) and m.unit_id == unit.id and m.battle_round == game.battle_round:
+            m.ended = True
+    seat = deployment.owner(game, unit).seat
+    for option in options:
+        mission_state.mark(game, seat, f"{RELIC}{option}", unit.id)
+
+
+def relic_on(game: Game, unit: Unit, option: str) -> bool:
+    # Whether a relic aura reaches the unit now (an ADEPTA SORORITAS unit
+    # within 6" of a model whose unit chose it this round).
+    from app.services.in_game import auras
+
+    # (Cheaply, first: no relic chosen this round at all.)
+    if not any(
+        m.kind.startswith(RELIC) and m.battle_round == game.battle_round and not m.ended
+        for m in game.marked_units
+    ):
+        return False
+    if not _sororitas_unit(unit):
+        return False
+    seat = deployment.owner(game, unit).seat
+    return any(
+        a.ability == RELICS and a.option == option and auras.in_range(game, a, unit)
+        for a in auras.auras(game, seat)
+    )
+
+
+def _sororitas_unit(unit: Unit) -> bool:
+    return any(
+        "ADEPTA SORORITAS" in enhancement_rules.model_keywords(unit, m) for m in unit.unit_models
+    )
+
+
+# --- Miraculous Intervention ---
+
+MIRACULOUS_INTERVENTION = "Miraculous Intervention"
+MIRACULOUS_MODEL = "Celestine"
+MIRACULOUS_ROLL = 2
+# Its use, the first time Celestine's destroyed (a marked unit, never ended -
+# see app/services/in_game/mission_state.py).
+MIRACULOUS_USED = "miraculous_intervention"
+
+
+def miraculous_end_of_phase(game: Game) -> list[tuple[int, int, bool]]:
+    # The end of a phase: each Celestine (with Miraculous Intervention)
+    # destroyed this phase for the first time rolls a D6 - on a 2+ she's set
+    # up again, as close as possible to where she was destroyed and
+    # unengaged, with her full wounds. (unit model id, roll, set up) for each.
+    from app.engine.state import GameModelPosition
+    from app.seeds.factions.adepta_sororitas import miracle_rules
+    from app.services.in_game import mission_state
+
+    used = {m.unit_id for m in mission_state.marked(game, MIRACULOUS_USED)}
+    lost = casualties.damage(game)
+    results = []
+    for player in game.players:
+        for unit in deployment.deployable_units(player):
+            if unit.id in used:
+                continue
+            for model in unit.unit_models:
+                if model.model.name != MIRACULOUS_MODEL or not any(
+                    a.name == MIRACULOUS_INTERVENTION for a in model.model.abilities
+                ):
+                    continue
+                if model.id not in lost or not lost[model.id].destroyed:
+                    continue
+                where = next(
+                    (
+                        r
+                        for r in reversed(game.models_destroyed)
+                        if r.unit_model_id == model.id
+                        and miracle_rules._now(game, r)
+                        and r.x is not None
+                    ),
+                    None,
+                )
+                if where is None:
+                    continue
+                mission_state.mark(game, player.seat, MIRACULOUS_USED, unit.id)
+                roll = dice.randint(1, 6)
+                spot = None
+                if roll >= MIRACULOUS_ROLL:
+                    lost[model.id].destroyed = False
+                    lost[model.id].wounds_lost = 0
+                    spot = miracle_rules._set_up_spot(game, unit, model, (where.x, where.y))
+                    if spot is None:
+                        # Nowhere to set her up: she stays destroyed.
+                        lost[model.id].destroyed = True
+                        lost[model.id].wounds_lost = model.wounds
+                    else:
+                        game.model_positions.append(
+                            GameModelPosition(
+                                unit_model_id=model.id, x=spot[0], y=spot[1], rotation=0.0
+                            )
+                        )
+                results.append((model.id, roll, spot is not None))
+    return results
 
 
 # --- Holy Mission, Holy Vanguard: abilities from what a unit's made of ---

@@ -376,10 +376,31 @@ def missing_choices(game: Game) -> list[str]:
         for rule in player_rules(game, player, game.battle_round):
             if rule.required and rule.faction_ability_id not in chosen:
                 missing.append(f"{player.user.name}'s {rule.name}")
-    return missing
+    # Abilities used then that select something (e.g. Triarch Abilities).
+    from app.services.in_game import activations
+
+    return missing + activations.missing_round_start(game)
 
 
 # --- CP at the start of the battle round ---
+
+
+def command_start_cp(game: Game, seat: int) -> int:
+    # What the player gains at the start of their Command phase from their
+    # models on the battlefield with an ability in COMMAND_START_CP (e.g.
+    # Grand Strategist: 1CP) - each ability once.
+    gains = datasheet_ability_seeds.COMMAND_START_CP
+    if not gains:
+        return 0
+    player = next(p for p in game.players if p.seat == seat)
+    names = {
+        a.name
+        for unit in deployment.deployable_units(player)
+        for m in deployment.models_on_battlefield(game, unit)
+        for a in m.model.abilities
+        if a.name in gains
+    }
+    return sum(gains[n] for n in names)
 
 
 def warlord_cp(game: Game) -> dict[int, int]:

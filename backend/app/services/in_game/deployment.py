@@ -546,7 +546,17 @@ def physical_problems(
         if feature := _feature_overlapped(base, features):
             found.append(f"overlaps {feature}")
 
-    # Coherency.
+    # Coherency - but models that are each their own unit once set up need
+    # only be within 12" of one other model of theirs (Starstele Deployment).
+    if len(models) > 1 and all(any(a.name == SEPARATE_MODELS for a in m.model.abilities) for m in models):
+        for model in models:
+            if not any(
+                gap(bases[model.id], bases[o.id]) <= SEPARATE_RANGE + TOLERANCE
+                for o in models
+                if o.id != model.id
+            ):
+                problems[model.id].append('isn\'t within 12" of another model in its unit')
+        return problems
     if len(models) > 1:
         for model in models:
             gaps = [gap(bases[model.id], bases[o.id]) for o in models if o.id != model.id]
@@ -556,6 +566,13 @@ def physical_problems(
             if far:
                 problems[model.id].append(f'is more than 9" from {_models_phrase(far)} in its unit')
     return problems
+
+
+# Starstele Deployment (the Convergence of Dominion): each model's treated as
+# a separate unit - set up within 12" of another of its models, and never
+# out of coherency.
+SEPARATE_MODELS = "Starstele Deployment"
+SEPARATE_RANGE = 12.0
 
 
 def summarise(models: list[UnitModel], problems: dict[int, list[str]]) -> Placement:

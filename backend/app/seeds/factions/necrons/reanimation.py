@@ -66,7 +66,7 @@ def reanimate(game: Game) -> None:
     if reanimations(game):
         return
     for unit in reanimating_units(game, game.turn_seat):
-        roll = dice.randint(1, HEAL_DICE) + beam_bonus(game, unit)
+        roll = _roll(unit, HEAL_DICE) + beam_bonus(game, unit)
         healed, returned = heal.heal(game, unit, roll)
         game.reanimations.append(
             GameReanimation(
@@ -168,8 +168,59 @@ def resurrect(game: Game) -> None:
         if not deployment.is_deployed(unit, deployment.positions(game)) or not has_orb(game, unit):
             game.resurrections.remove(record)
             continue
-        record.roll = dice.randint(1, RESURRECT_DICE) + beam_bonus(game, unit)
+        record.roll = _roll(unit, RESURRECT_DICE) + beam_bonus(game, unit)
         record.healed, record.returned = heal.heal(game, unit, record.roll)
+
+
+THEIR_NUMBER_IS_LEGION = "Their Number is Legion"
+NANOSCARAB_PROJECTOR = "Nanoscarab Projector"
+PROJECTOR_RANGE = 3.0
+# A Nanoscarab Projector used this battle round: a mark of this kind (its
+# unit model's id as the unit).
+PROJECTOR_USED = "nanoscarab_projector"
+
+
+def _roll(unit: Unit, sides: int) -> int:
+    # The dice for how many wounds its Reanimation Protocols heal - re-rolled,
+    # for a unit with Their Number is Legion, if it's in the bottom half (a 1
+    # on a D3, 1-3 on a D6).
+    roll = dice.randint(1, sides)
+    if roll <= sides // 2 and any(
+        a.name == THEIR_NUMBER_IS_LEGION for m in unit.unit_models for a in m.model.abilities
+    ):
+        roll = dice.randint(1, sides)
+    return roll
+
+
+def activate(game: Game, unit: Unit) -> tuple[int, int]:
+    # Its Reanimation Protocols activate outside its Command phase (e.g. Repair
+    # Barge): it heals D3 wounds (with any bonuses). (healed, returned)
+    return heal.heal(game, unit, _roll(unit, HEAL_DICE) + beam_bonus(game, unit))
+
+
+def _projector_bonus(game: Game, unit: Unit, mine: list, base) -> int:
+    # A friendly model with a Nanoscarab Projector within 3" of it, not used
+    # this battle round: 1 more wound (and it's used).
+    from app.services.in_game import mission_state
+    from app.services.in_game.deployment import TOLERANCE, gap
+
+    seat = deployment.owner(game, unit).seat
+    player = next(p for p in game.players if p.seat == seat)
+    used = {
+        m.unit_id
+        for m in mission_state.marked(game, PROJECTOR_USED)
+        if m.battle_round == game.battle_round
+    }
+    for other in deployment.deployable_units(player):
+        for m in deployment.models_on_battlefield(game, other):
+            if m.id in used or not any(
+                a.name == NANOSCARAB_PROJECTOR for g in m.wargear for a in g.abilities
+            ):
+                continue
+            if any(gap(base(m), b) <= PROJECTOR_RANGE + TOLERANCE for b in mine):
+                mission_state.mark(game, seat, PROJECTOR_USED, m.id)
+                return 1
+    return 0
 
 
 def beam_bonus(game: Game, unit: Unit) -> int:
@@ -193,5 +244,5 @@ def beam_bonus(game: Game, unit: Unit) -> int:
                 continue
             source = base(m)
             if any(gap(source, b) <= BEAM_RANGE + TOLERANCE for b in mine):
-                return dice.randint(1, 3)
-    return 0
+                return dice.randint(1, 3) + _projector_bonus(game, unit, mine, base)
+    return _projector_bonus(game, unit, mine, base)

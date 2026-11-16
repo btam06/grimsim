@@ -859,6 +859,7 @@ async def calculate(
         weapon_results=[
             WeaponCombatResultOut(
                 name=wr.name,
+                hits=wr.hits,
                 damage=wr.damage,
                 attack_rolls=wr.attack_rolls,
                 attack_rerolls=wr.attack_rerolls,

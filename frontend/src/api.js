@@ -322,10 +322,20 @@ export const selectHagiomnifexAbility = (id, payload) =>
 export const decideAttack = (id, payload) =>
   request(`/games/${id}/attack-decision`, { method: 'POST', body: JSON.stringify(payload) })
 export const getJudgement = (id) => request(`/games/${id}/judged-for-execution`)
+// Virtue of Intolerance: units' quarries (see app/seeds/factions/adepta_sororitas/unit_abilities.py).
+export const getQuarry = (id) => request(`/games/${id}/quarry`)
+// Relics of the Matriarchs: chosen at the start of each battle round.
+export const getRelics = (id) => request(`/games/${id}/relics`)
+export const chooseRelics = (id, payload) =>
+  request(`/games/${id}/relics`, { method: 'POST', body: JSON.stringify(payload) })
+export const selectQuarry = (id, payload) =>
+  request(`/games/${id}/quarry`, { method: 'POST', body: JSON.stringify(payload) })
 export const judgeForExecution = (id, payload) =>
   request(`/games/${id}/judged-for-execution`, { method: 'POST', body: JSON.stringify(payload) })
 export const sacredHealing = (id, payload) =>
   request(`/games/${id}/sacred-healing`, { method: 'POST', body: JSON.stringify(payload) })
+export const fieryConviction = (id, payload) =>
+  request(`/games/${id}/fiery-conviction`, { method: 'POST', body: JSON.stringify(payload) })
 export const getScentingFear = (id) => request(`/games/${id}/scenting-fear`)
 export const selectScentingFear = (id, payload) =>
   request(`/games/${id}/scenting-fear`, { method: 'POST', body: JSON.stringify(payload) })
@@ -378,6 +388,9 @@ export const applyPhaseStart = (id, payload) =>
   request(`/games/${id}/phase-start`, { method: 'POST', body: JSON.stringify(payload) })
 export const finishPhaseStart = (id, payload) =>
   request(`/games/${id}/phase-start/done`, { method: 'POST', body: JSON.stringify(payload) })
+export const getPhaseEnd = (id) => request(`/games/${id}/phase-end`)
+export const finishPhaseEnd = (id, payload) =>
+  request(`/games/${id}/phase-end/done`, { method: 'POST', body: JSON.stringify(payload) })
 export const getTeleportHomers = (id) => request(`/games/${id}/teleport-homers`)
 export const placeTeleportHomer = (id, payload) =>
   request(`/games/${id}/teleport-homers`, { method: 'POST', body: JSON.stringify(payload) })
@@ -472,3 +485,13 @@ export const getAgentLog = (id) => request(`/games/${id}/agent/log?limit=200`)
 // The ML runs' diagnose files (ml/diagnose.py), newest first, and one summed up.
 export const listDiagnoses = () => request('/ml/diagnoses')
 export const getDiagnosis = (name) => request(`/ml/diagnoses/${encodeURIComponent(name)}`)
+// Activated abilities (e.g. Lord of the Storm, Gravitic Pulse) - see
+// app/services/in_game/activations.py.
+export const getActivations = (id) => request(`/games/${id}/activations`)
+export const activateAbility = (id, payload) =>
+  request(`/games/${id}/activations`, { method: 'POST', body: JSON.stringify(payload) })
+// Shots in the opponent's turn (e.g. Hyperspace Hunters) - see
+// app/services/in_game/reactive_shots.py.
+export const getReactiveShots = (id) => request(`/games/${id}/reactive-shots`)
+export const takeReactiveShot = (id, payload) =>
+  request(`/games/${id}/reactive-shots`, { method: 'POST', body: JSON.stringify(payload) })

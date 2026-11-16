@@ -42,8 +42,9 @@ from app.services.list_building import enhancements as enhancement_rules
 #   that charged this phase) or - for 1CP more - Into the Fray (a charge roll
 #   of at most 6; any enemy units within 6").
 # - Command Re-roll: re-rolls a unit's Advance roll (before it's moved with
-#   it) or its charge roll in full (before it's charged). Rolls in attacks
-#   (Hit, Wound, Save, Damage...) are re-rolled in the combat calculator.
+#   it) or its charge roll in full (before it's charged). In an attack, its
+#   player's offered it once a weapon's Hit, Wound or saving throws are
+#   rolled - one dice (see attack_decisions.py).
 
 EXPLOSIVES = "explosives"
 CRUSHING_IMPACT = "crushing_impact"
@@ -275,8 +276,8 @@ def target_reason(
     if action == COMMAND_REROLL:
         if not choices(game, player, stratagem, unit):
             return (
-                "it has no Advance or charge roll to re-roll now (re-roll attack rolls in "
-                "the combat calculator)"
+                "it has no Advance or charge roll to re-roll now (Hit, Wound and saving "
+                "throws are offered as an attack's made)"
             )
         return None
     return None

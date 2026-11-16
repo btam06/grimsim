@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   discardForManual,
+  fieryConviction,
   getMiracleDice,
   rerollWithChaplet,
   resolvePsalm,
@@ -159,21 +160,65 @@ function PlayerMiracles({ game, state, onDone, onError }) {
         </div>
       ))}
       {state.sacred_healing.map((healing) => (
-        <div key={healing.unit_id}>
+        <div key={`${healing.unit_id}-${healing.ability}`}>
           <span>
-            Sacred Healing{' '}
+            {healing.ability}{' '}
             <span className="hint">
-              ({healing.name}, {healing.destroyed} destroyed): return 1 model - or discard a
-              Miracle dice to return up to D3+1
+              ({healing.name}, {healing.destroyed} destroyed): return{' '}
+              {healing.count === '1' ? '1 model' : `up to ${healing.count}`}
+              {healing.discard_count &&
+                ` - or discard a Miracle dice to return up to ${healing.discard_count}`}
             </span>
           </span>
           <div className="inline-controls">
             <button
               type="button"
               disabled={busy}
-              onClick={() => run(() => sacredHealing(game.id, { unit_id: healing.unit_id }))}
+              onClick={() =>
+                run(() =>
+                  sacredHealing(game.id, { unit_id: healing.unit_id, ability: healing.ability })
+                )
+              }
             >
-              Return 1
+              Return {healing.count === '1' ? '1' : `up to ${healing.count}`}
+            </button>
+            {healing.discard_count &&
+              [...new Set(state.pool)].map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  disabled={busy}
+                  onClick={() =>
+                    run(() =>
+                      sacredHealing(game.id, {
+                        unit_id: healing.unit_id,
+                        discard: value,
+                        ability: healing.ability,
+                      })
+                    )
+                  }
+                >
+                  Discard {value}: return up to {healing.discard_count}
+                </button>
+              ))}
+          </div>
+        </div>
+      ))}
+      {Object.entries(state.fiery_conviction ?? {}).map(([unitId, name]) => (
+        <div key={`conviction-${unitId}`}>
+          <span>
+            Fiery Conviction{' '}
+            <span className="hint">
+              ({name}): discard a Miracle dice for 1CP - or a Leadership test, passed for 1CP
+            </span>
+          </span>
+          <div className="inline-controls">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => run(() => fieryConviction(game.id, { unit_id: Number(unitId) }))}
+            >
+              Take a Leadership test
             </button>
             {[...new Set(state.pool)].map((value) => (
               <button
@@ -181,10 +226,10 @@ function PlayerMiracles({ game, state, onDone, onError }) {
                 type="button"
                 disabled={busy}
                 onClick={() =>
-                  run(() => sacredHealing(game.id, { unit_id: healing.unit_id, discard: value }))
+                  run(() => fieryConviction(game.id, { unit_id: Number(unitId), discard: value }))
                 }
               >
-                Discard {value}: return up to D3+1
+                Discard {value}: 1CP
               </button>
             ))}
           </div>
@@ -221,7 +266,8 @@ function MiracleDicePanel({ game, onChange, onError }) {
       p.chaplet > 0 ||
       p.offers.length > 0 ||
       p.used.length > 0 ||
-      (p.sacred_healing ?? []).length > 0
+      (p.sacred_healing ?? []).length > 0 ||
+      Object.keys(p.fiery_conviction ?? {}).length > 0
   )
   if (shown.length === 0) return null
   return (

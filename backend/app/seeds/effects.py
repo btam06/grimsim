@@ -4,14 +4,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.combat_rules.effects import (
     ADD_D3_EXTRA_HITS,
     ADD_D6_PLUS_3_ATTACKS,
-    ADD_EXTRA_ATTACK,
+    ADD_ATTACKS_1,
     ADD_EXTRA_HIT,
-    ADD_FOUR_ATTACKS,
+    ADD_ATTACKS_4,
     REROLL_ATTACKS,
-    ADD_NINE_ATTACKS,
-    ADD_SIX_ATTACKS,
-    ADD_THREE_ATTACKS,
-    ADD_TWO_ATTACKS,
+    ADD_ATTACKS_9,
+    ADD_ATTACKS_6,
+    ADD_ATTACKS_5,
+    SUCCESSFUL_HITS_CRITICAL,
+    REROLL_ONE_FAILED_HIT,
+    REROLL_ONE_HIT_OR_WOUND,
+    ADD_ATTACKS_3,
+    ADD_ATTACKS_2,
     ADD_TWO_EXTRA_HITS,
     ASSAULT,
     AUTO_PASS_WOUND,
@@ -26,6 +30,11 @@ from app.combat_rules.effects import (
     FEEL_NO_PAIN_5,
     FEEL_NO_PAIN_6,
     FEEL_NO_PAIN_MORTAL_5,
+    FEEL_NO_PAIN_MORTAL_4,
+    FEEL_NO_PAIN_PSYCHIC_4,
+    INVULNERABLE_2,
+    SAVE_2,
+    HALVE_ATTACKS,
     FORCE_CRITICAL_WOUND,
     HAZARDOUS,
     HEAVY,
@@ -81,7 +90,7 @@ ENTRIES = [
         "Adds D6+3 additional attacks to this weapon, each with its own hit roll.",
     ),
     (
-        ADD_EXTRA_ATTACK,
+        ADD_ATTACKS_1,
         "Add Extra Attack",
         "Adds one additional attack to the chain for this weapon, with its own hit roll.",
     ),
@@ -91,17 +100,38 @@ ENTRIES = [
         "Adds one additional hit to the attack chain.",
     ),
     (
-        ADD_SIX_ATTACKS,
+        REROLL_ONE_FAILED_HIT,
+        "Re-roll One Failed Hit",
+        "One failed Hit roll among the unit's attacks can be re-rolled.",
+    ),
+    (
+        REROLL_ONE_HIT_OR_WOUND,
+        "Re-roll One Hit or Wound Roll",
+        "One failed Hit roll or one failed Wound roll among the unit's attacks can be "
+        "re-rolled - in a game, its player chooses which as they fail.",
+    ),
+    (
+        SUCCESSFUL_HITS_CRITICAL,
+        "Successful Hits Are Critical",
+        "Every successful Hit roll for this attack scores a Critical Hit.",
+    ),
+    (
+        ADD_ATTACKS_5,
+        "Add Five Attacks",
+        "Adds five additional attacks to this weapon, each with its own hit roll.",
+    ),
+    (
+        ADD_ATTACKS_6,
         "Add Six Attacks",
         "Adds six additional attacks to this weapon, each with its own hit roll.",
     ),
     (
-        ADD_THREE_ATTACKS,
+        ADD_ATTACKS_3,
         "Add Three Attacks",
         "Adds three additional attacks to this weapon, each with its own hit roll.",
     ),
     (
-        ADD_TWO_ATTACKS,
+        ADD_ATTACKS_2,
         "Add Two Attacks",
         "Adds two additional attacks to this weapon, each with its own hit roll.",
     ),
@@ -176,6 +206,31 @@ ENTRIES = [
         "Feel No Pain 5+ against mortal wounds only (a better one is kept).",
     ),
     (
+        FEEL_NO_PAIN_MORTAL_4,
+        "Feel No Pain 4+ vs Mortal Wounds",
+        "Feel No Pain 4+ against mortal wounds only (a better one is kept).",
+    ),
+    (
+        FEEL_NO_PAIN_PSYCHIC_4,
+        "Feel No Pain 4+ vs Psychic Attacks",
+        "Feel No Pain 4+ against Psychic Attacks only (a better one is kept).",
+    ),
+    (
+        INVULNERABLE_2,
+        "2+ Invulnerable Save",
+        "The model has a 2+ invulnerable save (a better one is kept).",
+    ),
+    (
+        HALVE_ATTACKS,
+        "Halve Attacks",
+        "The weapon's Attacks characteristic is halved (rounding up).",
+    ),
+    (
+        SAVE_2,
+        "Save 2+",
+        "The model has a Save characteristic of 2+ (a better one is kept).",
+    ),
+    (
         FORCE_CRITICAL_WOUND,
         "Force Critical Wound",
         "This attack's wound counts as a critical wound regardless of the actual roll.",
@@ -216,12 +271,12 @@ ENTRIES = [
         "This attack's damage roll is re-rolled if it came up below its average.",
     ),
     (
-        ADD_NINE_ATTACKS,
+        ADD_ATTACKS_9,
         "Add Nine Attacks",
         "Adds nine additional attacks to this weapon, each with its own hit roll.",
     ),
     (
-        ADD_FOUR_ATTACKS,
+        ADD_ATTACKS_4,
         "Add Four Attacks",
         "Adds four additional attacks to this weapon, each with its own hit roll.",
     ),
@@ -384,13 +439,38 @@ ENTRIES = [
 ]
 
 
+# Keywords that have been renamed: {old: new}. Existing rows are renamed in
+# place on startup, so the abilities linked to them keep them.
+RENAMED = {
+    "add_extra_attack": "add_attacks_1",
+    "add_two_attacks": "add_attacks_2",
+    "add_three_attacks": "add_attacks_3",
+    "add_four_attacks": "add_attacks_4",
+    "add_six_attacks": "add_attacks_6",
+    "add_nine_attacks": "add_attacks_9",
+}
+
+
+async def _rename(session: AsyncSession) -> None:
+    rows = (await session.execute(select(Effect).where(Effect.keyword.in_(RENAMED)))).scalars()
+    taken = set(
+        (await session.execute(select(Effect.keyword).where(Effect.keyword.in_(RENAMED.values()))))
+        .scalars()
+        .all()
+    )
+    for row in rows.all():
+        if RENAMED[row.keyword] not in taken:
+            row.keyword = RENAMED[row.keyword]
+    await session.flush()
+
+
 async def seed(session: AsyncSession) -> None:
+    await _rename(session)
     existing = set((await session.execute(select(Effect.keyword))).scalars().all())
     missing = [
         Effect(keyword=keyword, name=name, description=description)
         for keyword, name, description in ENTRIES
         if keyword not in existing
     ]
-    if missing:
-        session.add_all(missing)
-        await session.commit()
+    session.add_all(missing)
+    await session.commit()

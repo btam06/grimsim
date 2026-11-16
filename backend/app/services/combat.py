@@ -48,6 +48,12 @@ def roll_dice_faces(notation: str, first: int | None = None) -> tuple[int, list[
     return sum(faces) + plus, faces
 
 
+def _sides(notation: str) -> int:
+    # The dice rolled for it: 3 (D3s) or 6.
+    match = _DICE_PATTERN.match(notation)
+    return int(match["die"]) if match["die"] else 6
+
+
 def random_notation(notation: str) -> bool:
     # Whether dice are rolled for it (D3, 2D6+1...), rather than a flat number.
     return _DICE_PATTERN.match(notation)["flat"] is None
@@ -87,6 +93,8 @@ def _effective_save(model: Model) -> int:
 
 # The weapon ability that lets a weapon shoot targets it can't see (24.19).
 INDIRECT_FIRE = "Indirect Fire"
+# A Psychic Attack is one made with a [PSYCHIC] weapon.
+PSYCHIC = "Psychic"
 # Devastating Refrain (Exorcist): its [INDIRECT FIRE] attacks set off a
 # destroyed model's Deadly Demise on this (instead of a 6).
 DEVASTATING_REFRAIN = "Devastating Refrain"
@@ -119,6 +127,89 @@ class WeaponBonus:
         if self.melee_only and is_ranged:
             return False
         return not self.names or any(weapon.name.startswith(n) for n in self.names)
+
+
+# What each kind of roll's called (see resolve_combat's offer).
+ROLL_NAMES = {
+    "hit": "Hit roll", "wound": "Wound roll", "save": "saving throw", "damage": "Damage roll",
+    "hazard": "hazard roll", "attacks": "Attacks roll",
+}
+
+
+def _hit_check(indirect_needs: int, critical_hit_on: int, effective_skill: int):
+    # Whether a Hit roll hits: a Critical Hit always does and a 1 always
+    # fails, whatever the modifiers (an indirect fire one needs at least
+    # `indirect_needs`).
+    def hits(roll: int) -> bool:
+        if roll < indirect_needs:
+            return False
+        return roll != 1 and (roll >= critical_hit_on or roll >= effective_skill)
+
+    return hits
+
+
+def _wounds(attack: dict, roll: int, abilities, wound_context: dict, threshold: int) -> bool:
+    # Whether a Wound roll wounds - the attack marked by the wound-step
+    # triggers it sets off.
+    _apply_triggered_effects(
+        abilities, {"step": "wound", "roll": roll, **wound_context}, attack, deque()
+    )
+    if attack.get("critical_wound"):
+        # An Anti-X-style ability (e.g. Anti-Infantry 4+) matched this roll
+        # against the defending unit's keywords - it counts as a critical
+        # wound regardless of the actual roll, so re-run the wound-step
+        # trigger check with a synthetic natural-6 context to also fire any
+        # other critical-wound-dependent effects (e.g. Devastating Wounds),
+        # same as an actual natural 6 would.
+        _apply_triggered_effects(
+            abilities, {"step": "wound", "roll": 6, **wound_context}, attack, deque()
+        )
+        return True
+    # An unmodified 6 always wounds and a 1 always fails, whatever the
+    # modifiers. A +1 and a -1 to wound cancel out.
+    # (An attack that ignores penalties to its Wound roll, e.g. Molecular
+    # Targeting, ignores a -1.)
+    needed = (
+        threshold
+        + (
+            1
+            if attack.get("minus_one_to_wound") and not attack.get("ignore_wound_penalties")
+            else 0
+        )
+        - (1 if attack.get("plus_one_to_wound") else 0)
+    )
+    return roll != 1 and (roll == 6 or roll >= needed)
+
+
+def _wound_die(
+    attack: dict, before: dict, fired: dict, roll: int, passed: bool, wound_context: dict,
+    threshold: int, rerolled: bool, rerollable: bool, result,
+) -> RolledDie:
+    # The attack's Wound roll, which its player can re-roll or change (see
+    # resolve_combat's offer): the attack's as it was `before` it, its
+    # wound-step triggers checked against the new roll.
+    abilities = fired["abilities"]
+
+    def check(value: int) -> bool:
+        return _wounds(dict(before), value, abilities, wound_context, threshold)
+
+    def give(value: int, rerolled: bool) -> None:
+        attack.clear()
+        attack.update(before)
+        die.passed = _wounds(attack, value, abilities, wound_context, threshold)
+        if rerolled:
+            result.wound_rerolls.append(value)
+            fired["result"].wound_rerolls.append(value)
+        else:
+            _replace(result.wound_rolls, die.value, value)
+            _replace(fired["result"].wound_rolls, die.value, value)
+        die.value, die.rerolled = value, die.rerolled or rerolled
+
+    die = RolledDie(
+        "wound", roll, fired["weapon"].name, passed, rerollable=rerollable, rerolled=rerolled,
+        check=check, give=give,
+    )
+    return die
 
 
 def hazard_failed(roll: int) -> bool:
@@ -185,6 +276,9 @@ class _Target:
     remaining_wounds : int
     # Feel No Pain against mortal wounds only (see feel_no_pain_mortal).
     feel_no_pain_mortal: int | None = None
+    # Feel No Pain against Psychic Attacks only (attacks made with [PSYCHIC]
+    # weapons) - e.g. a Null Rod.
+    feel_no_pain_psychic: int | None = None
     # Its invulnerable save is against ranged attacks only.
     invulnerable_ranged_only: bool = False
     # An invulnerable save it has against ranged attacks only, from a rule
@@ -334,6 +428,35 @@ def _mortal_wound_target(targets: deque[_Target]) -> _Target:
 
 
 @dataclass
+class RolledDie:
+    # A dice rolled as an attack's made - one of a weapon's Hit, Wound or
+    # saving throws, rolled together - that a player could re-roll or change
+    # once they're all rolled (in a game - see
+    # app/services/in_game/attack_decisions.py Decisions.dice). A dice is
+    # never re-rolled twice: one re-rolled already (by any rule - e.g.
+    # Twin-linked, re-rolling 1s) isn't offered again.
+    kind: str
+    value: int
+    weapon_name: str
+    # Whether it succeeds with its value now.
+    passed: bool
+    # (False: a Miracle dice, or a roll nothing can re-roll - e.g. an
+    # indirect fire Hit roll.)
+    rerollable: bool = True
+    rerolled: bool = False
+    # Whether it'd succeed with a value (e.g. Artisan's 6), and gives it one
+    # (re-rolled, or changed) - the rules its roll triggers checked again.
+    check: object = None
+    give: object = None
+    # (A D3's re-rolled as a D3.)
+    sides: int = 6
+
+    def offerable(self) -> bool:
+        # A failed roll that can still be re-rolled.
+        return self.rerollable and not self.rerolled and not self.passed
+
+
+@dataclass
 class WeaponCombatResult:
     # The same breakdown as CombatResult below, scoped to a single weapon
     # profile (every weapon instance sharing one name, across every model in
@@ -341,6 +464,8 @@ class WeaponCombatResult:
     name             : str
     # The weapon's Damage characteristic, e.g. "D6+2".
     damage           : str       = field(default="")
+    # How many hits it scored (as CombatResult.hits).
+    hits             : int       = field(default=0)
     attack_rolls     : list[int] = field(default_factory=list)
     attack_rerolls   : list[int] = field(default_factory=list)
     wound_rolls      : list[int] = field(default_factory=list)
@@ -406,6 +531,26 @@ class CombatResult:
     attacker_damage: dict[int, int] = field(default_factory=dict)
 
 
+
+
+def _damaged_bracket(unit_model, attacker_wounds, attacker_damaged: bool) -> int | None:
+    # The top of the model's Damaged profile's wounds range if it's on it now:
+    # in a game, by its wounds left; in the calculator (no wounds known), when
+    # "Attacking model is Damaged" is ticked. None: it has no such profile, or
+    # isn't on it.
+    from app.seeds.datasheet_abilities import DAMAGED_PROFILES
+
+    top = next(
+        (DAMAGED_PROFILES[a.name][0] for a in unit_model.model.abilities if a.name in DAMAGED_PROFILES),
+        None,
+    )
+    if top is None:
+        return None
+    if not attacker_wounds or unit_model.id not in attacker_wounds:
+        return top if attacker_damaged else None
+    return top if 0 < attacker_wounds[unit_model.id] <= top else None
+
+
 def resolve_combat(
     attacker: Unit,
     defender: Unit,
@@ -450,10 +595,11 @@ def resolve_combat(
     weapon_bonuses: dict[int, list[WeaponBonus]] | None = None,
     decisions=None,
 ) -> CombatResult:
-    # `decisions`: the defending player's choices as its saves are made, in a
-    # game (see app/services/in_game/attack_decisions.py's Decisions) - asked
-    # before a weapon's saving throws are rolled (an Act of Faith), and as one
-    # fails (e.g. Artisan, Necromechanic).
+    # `decisions`: the players' choices as the attack's made, in a game (see
+    # app/services/in_game/attack_decisions.py's Decisions) - asked once a
+    # weapon's Hit, Wound or saving throws are rolled, to re-roll or change
+    # one (e.g. Command Re-roll, Seething Hatred, Artisan); before its saving
+    # throws are rolled (an Act of Faith); and as one fails (Necromechanic).
     # `weapon_bonuses`: what rules add to particular attacking models'
     # weapons, by unit model id (see WeaponBonus - e.g. Righteous Rage's
     # Miracle dice discarded).
@@ -540,6 +686,25 @@ def resolve_combat(
         frozenset(enhancement_rules.model_keywords(attacker, unit_model))
         for unit_model in attacker.unit_models
     ]
+    # The models' names, either side - e.g. "while this unit contains a
+    # Repentia Superior model".
+    attacker_unit_model_names = [unit_model.model.name for unit_model in attacker.unit_models]
+    # Snap shots hit on an unmodified 6 - or less, with an ability that says
+    # so (datasheet_abilities SNAP_SHOTS_ON - e.g. Sentinel Directives: 5+).
+    snap_shots_on = 6
+    if snap_shots:
+        from app.seeds import datasheet_abilities
+
+        snap_shots_on = min(
+            (
+                datasheet_abilities.SNAP_SHOTS_ON[a.name]
+                for unit_model in attacker.unit_models
+                for a in unit_model.model.abilities
+                if a.name in datasheet_abilities.SNAP_SHOTS_ON
+            ),
+            default=6,
+        )
+    defender_unit_model_names = [unit_model.model.name for unit_model in defender.unit_models]
 
     # Code-defined rules (e.g. an active Doctrina Imperative) from faction
     # abilities: the attacking unit's own "attacker" rules are in play like
@@ -640,6 +805,7 @@ def resolve_combat(
             "defender_keywords": defender_keywords,
             "attacker_keywords": attacker_keywords,
             "attacker_unit_model_keywords": attacker_unit_model_keywords,
+            "attacker_unit_model_names": attacker_unit_model_names,
             "attacker_options": attacker_options,
             "defender_model_keywords": defender_model_keywords,
             "attacker_positions": attacker_positions,
@@ -652,6 +818,70 @@ def resolve_combat(
         deque(),
     )
     unit_rerolls_failed_hits = unit_wide_state.get("reroll_failed_hits", False)
+    # One failed Hit roll it can re-roll, this time it attacks - or one failed
+    # Hit or Wound roll (e.g. Seething Hatred). In a game, its player's
+    # offered it once a weapon's Hit or Wound rolls are rolled (see offer);
+    # otherwise the first to fail is re-rolled.
+    one_reroll = {
+        "left": 1,
+        "kinds": (
+            {"hit", "wound"}
+            if unit_wide_state.get("reroll_one_hit_or_wound")
+            else {"hit"} if unit_wide_state.get("reroll_one_failed_hit") else set()
+        ),
+    }
+
+    def spend_one_reroll(kind: str, weapon, roll: int) -> bool:
+        if decisions is not None or one_reroll["left"] <= 0 or kind not in one_reroll["kinds"]:
+            return False
+        one_reroll["left"] -= 1
+        return True
+
+    def offer(kind: str, rolled_dice: list[RolledDie], unit: Unit) -> None:
+        # In a game: once rolls are made - a weapon's Hit, Wound or saving
+        # throws together, or its Attacks, a Damage or a hazard roll - their
+        # player's offered what can re-roll or change one of them (e.g.
+        # Command Re-roll, Seething Hatred, Artisan) - one at a time, until
+        # they carry on.
+        if decisions is None:
+            return
+        while any(d.rerollable and not d.rerolled for d in rolled_dice):
+            one = one_reroll["left"] > 0 and kind in one_reroll["kinds"]
+            chosen = decisions.dice(kind, unit, rolled_dice, one)
+            if chosen is None:
+                return
+            source, die, note = chosen
+            if source == "one":
+                one_reroll["left"] -= 1
+            before = die.value
+            name = ROLL_NAMES[kind]
+            if source == "six":
+                die.give(6, rerolled=False)
+                result.choices.append(f"{note}: a {name} of {before} ({die.weapon_name}) became a 6")
+            else:
+                die.give(dice.randint(1, die.sides), rerolled=True)
+                result.choices.append(
+                    f"{note}: a {name} of {before} ({die.weapon_name}) re-rolled: {die.value}"
+                )
+
+    def plain_dice(kind: str, faces: list[int], weapon, sides: int, check=None) -> list[RolledDie]:
+        # Dice whose values are all that matters (an Attacks or Damage roll's,
+        # a hazard roll) - `faces` kept up to date with them.
+        found = []
+        for index, value in enumerate(faces):
+            def give(value: int, rerolled: bool, index=index) -> None:
+                die = found[index]
+                faces[index] = value
+                die.value, die.rerolled = value, die.rerolled or rerolled
+                die.passed = die.check(value)
+
+            found.append(
+                RolledDie(
+                    kind, value, weapon.name, (check or (lambda v: True))(value),
+                    check=check or (lambda v: True), give=give, sides=sides,
+                )
+            )
+        return found
 
     def own_rules(unit_model) -> tuple:
         # Rules only this model has: per-model detachment rules (e.g.
@@ -692,6 +922,8 @@ def resolve_combat(
             # (Its datasheet abilities' names - e.g. for "other CHARACTER
             # models", the one with the ability aside: Veteran Bodyguard.)
             "target_model_abilities": {a.name for a in unit_model.model.abilities},
+            "target_model_name": unit_model.model.name,
+            "defender_unit_model_names": defender_unit_model_names,
             "defender_keywords": defender_keywords,
             "defender_model_keywords": defender_model_keywords,
         }
@@ -704,7 +936,9 @@ def resolve_combat(
         _Target(
             toughness=unit_model.model.toughness
             + (1 if model_states[id(unit_model)].get("plus_one_toughness") else 0),
-            save=unit_model.save,
+            # (Or a better Save characteristic a rule gives it - e.g. Stanchion
+            # of Holy Martyrs' 2+.)
+            save=min(unit_model.save, model_states[id(unit_model)].get("save_characteristic", 7)),
             # (With any its rules give it - e.g. Defend the Divine Work's 4+ -
             # so its allocation group knows it.)
             invulnerable=min(
@@ -729,7 +963,19 @@ def resolve_combat(
                 ),
                 default=None,
             ),
-            feel_no_pain_mortal=unit_model.model.feel_no_pain_mortal,
+            # (Its own, or one a rule gives it - e.g. a Null Rod.)
+            feel_no_pain_mortal=min(
+                (
+                    fnp
+                    for fnp in (
+                        unit_model.model.feel_no_pain_mortal,
+                        model_states[id(unit_model)].get("feel_no_pain_mortal"),
+                    )
+                    if fnp is not None
+                ),
+                default=None,
+            ),
+            feel_no_pain_psychic=model_states[id(unit_model)].get("feel_no_pain_psychic"),
             invulnerable_ranged_only=unit_model.model.invulnerable_ranged_only,
             ranged_invulnerable=model_states[id(unit_model)].get("ranged_invulnerable"),
             minus_one_damage=bool(model_states[id(unit_model)].get("minus_one_damage")),
@@ -918,6 +1164,7 @@ def resolve_combat(
                     "defender_keywords": defender_keywords,
                     "attacker_keywords": attacker_keywords,
                     "attacker_unit_model_keywords": attacker_unit_model_keywords,
+                    "attacker_unit_model_names": attacker_unit_model_names,
                     "attacker_options": attacker_options,
                     "defender_model_keywords": defender_model_keywords,
                     "attacker_positions": attacker_positions,
@@ -925,6 +1172,12 @@ def resolve_combat(
                     "charged": charged,
                     "defender_battle_shocked": defender_battle_shocked,
                     "attacker_damaged": attacker_damaged,
+                    # The firing model's Damaged profile, if it's on it: the
+                    # most wounds remaining it applies at (e.g. 6, for
+                    # "Damaged: 1-6 Wounds Remaining") - for DAMAGED_6.
+                    "attacker_damaged_bracket": _damaged_bracket(
+                        unit_model, attacker_wounds, attacker_damaged
+                    ),
                     # The firing model's own keywords - e.g. for "weapons
                     # equipped by KASTELAN ROBOT models".
                     "attacker_model_keywords": enhancement_rules.model_keywords(
@@ -933,6 +1186,7 @@ def resolve_combat(
                     # ...and its datasheet abilities' names - e.g. for "this
                     # model's attacks" (Calgar's Champion).
                     "attacker_model_abilities": {a.name for a in unit_model.model.abilities},
+                    "attacker_model_name": unit_model.model.name,
                 }
 
                 # Weapon eligibility: a static, no-dice-rolled check of this
@@ -1009,7 +1263,19 @@ def resolve_combat(
 
                 # Attacks characteristic: how many attacks this weapon makes,
                 # rolled once per weapon (flat or dice notation, e.g. "2", "D3", "2D6").
-                rolled_attacks = roll_dice(weapon.attacks)
+                rolled_attacks, attack_faces = roll_dice_faces(weapon.attacks)
+                if attack_faces and decisions is not None and not (
+                    attack_limits is not None and weapon.id in attack_limits
+                ):
+                    # (Its player's offered re-rolling one of its dice - e.g.
+                    # Command Re-roll.)
+                    plus = rolled_attacks - sum(attack_faces)
+                    offer(
+                        "attacks",
+                        plain_dice("attacks", attack_faces, weapon, _sides(weapon.attacks)),
+                        attacker,
+                    )
+                    rolled_attacks = sum(attack_faces) + plus
                 attack_count = rolled_attacks
                 bonuses = [
                     b
@@ -1059,6 +1325,11 @@ def resolve_combat(
                     for _ in range(rolled_attacks - again):
                         if pending_attacks:
                             pending_attacks.pop()
+                if pre_weapon_state.get("halve_attacks"):
+                    # Its Attacks halved, rounding up (e.g. a Damaged
+                    # profile).
+                    for _ in range(len(pending_attacks) // 2):
+                        pending_attacks.pop()
                 # Melta: extra damage on every attack this weapon makes.
                 fired["damage_bonus"] = pre_weapon_state.get("melta", 0) + bonus_d
                 if pre_weapon_state.get("blast"):
@@ -1083,6 +1354,16 @@ def resolve_combat(
                     # 1-2 fails, and the unit suffers mortal wounds once its
                     # attacks are resolved (see below).
                     hazard_roll = dice.randint(1, 6)
+                    if decisions is not None:
+                        faces = [hazard_roll]
+                        offer(
+                            "hazard",
+                            plain_dice(
+                                "hazard", faces, weapon, 6, check=lambda v: not hazard_failed(v)
+                            ),
+                            attacker,
+                        )
+                        hazard_roll = faces[0]
                     result.hazardous_rolls.append(hazard_roll)
                     weapon_result.hazardous_rolls.append(hazard_roll)
                     if hazard_failed(hazard_roll):
@@ -1138,6 +1419,15 @@ def resolve_combat(
         ):
             weapon_result.damage_rolls.extend(damage_faces)
             rolled_damage, damage_faces = roll_dice_faces(weapon.damage)
+        elif damage_faces and decisions is not None:
+            # (Its player's offered re-rolling one of its dice - e.g. Command
+            # Re-roll. Not a Miracle dice.)
+            plus = rolled_damage - sum(damage_faces)
+            rolled = plain_dice("damage", damage_faces, weapon, _sides(weapon.damage))
+            if miracle is not None:
+                rolled[0].rerollable = False
+            offer("damage", rolled, attacker)
+            rolled_damage = sum(damage_faces) + plus
         weapon_result.damage_rolls.extend(damage_faces)
         damage = (
             rolled_damage + fired["damage_bonus"] + (1 if attack.get("plus_one_damage") else 0)
@@ -1155,6 +1445,9 @@ def resolve_combat(
         fnps = [target.feel_no_pain, attack.get("feel_no_pain")]
         if mortal:
             fnps += [target.feel_no_pain_mortal, attack.get("feel_no_pain_mortal")]
+        weapon = fired.get("weapon")
+        if weapon is not None and any(a.name == PSYCHIC for a in weapon.abilities):
+            fnps.append(target.feel_no_pain_psychic)
         feel_no_pain = min((fnp for fnp in fnps if fnp is not None), default=None)
         for _ in range(damage):
             if feel_no_pain is not None:
@@ -1184,147 +1477,196 @@ def resolve_combat(
                 weapon_result.models_destroyed += 1
                 break
 
+    def hit_die(
+        attack: dict, fired: dict, spawned: deque, roll: int, hit_context: dict, hits, rerolled: bool,
+        rerollable: bool,
+    ) -> RolledDie:
+        # Its Hit roll, which the player can re-roll (see offer): the attack's
+        # as it was before it, its hit-step triggers checked against the new
+        # roll.
+        abilities = fired["abilities"]
+        base_before_triggers = attack.pop("_before_hit")
+
+        def give(value: int, rerolled: bool) -> None:
+            attack.clear()
+            attack.update(base_before_triggers)
+            spawned.clear()
+            _apply_triggered_effects(
+                abilities, {"step": "hit", "roll": value, **hit_context}, attack, spawned
+            )
+            if rerolled:
+                result.attack_rerolls.append(value)
+                fired["result"].attack_rerolls.append(value)
+            else:
+                _replace(result.attack_rolls, die.value, value)
+                _replace(fired["result"].attack_rolls, die.value, value)
+            die.value, die.passed, die.rerolled = value, hits(value), die.rerolled or rerolled
+
+        die = RolledDie(
+            "hit", roll, fired["weapon"].name, hits(roll), rerollable=rerollable,
+            rerolled=rerolled, check=hits, give=give,
+        )
+        return die
+
     for profile_attacks in profiles.values():
         # Hit phase: every attack of this profile rolls to hit. Extra attacks
         # and hits an effect adds (e.g. Sustained Hits) join the same phase -
-        # an extra hit is already a hit, so it skips the roll.
+        # an extra hit is already a hit, so it skips the roll. The Hit rolls
+        # made together are offered to the player (see offer) before what
+        # they spawn is resolved - then those, in turn.
         successful_hits: list[tuple[dict, dict]] = []
         queue = deque(profile_attacks)
         while queue:
-            attack, fired = queue.popleft()
-            # (A weapon with no skill - [TORRENT]'s "N/A" - never rolls.)
-            if attack["auto_hit"] or not fired["weapon"].skill:
-                successful_hits.append((attack, fired))
-                continue
-            weapon = fired["weapon"]
-            abilities = fired["abilities"]
-            weapon_context = fired["context"]
-            is_ranged = fired["is_ranged"]
-            weapon_result = fired["result"]
-            spawned: deque[dict] = deque()
+            # (In order: an attack that hits automatically has no dice.)
+            rolled_hits: list[tuple[RolledDie | None, dict, dict, deque]] = []
+            batch, queue = queue, deque()
+            for attack, fired in batch:
+                # (A weapon with no skill - [TORRENT]'s "N/A" - never rolls.)
+                if attack["auto_hit"] or not fired["weapon"].skill:
+                    rolled_hits.append((None, attack, fired, deque()))
+                    continue
+                weapon = fired["weapon"]
+                abilities = fired["abilities"]
+                weapon_context = fired["context"]
+                is_ranged = fired["is_ranged"]
+                weapon_result = fired["result"]
+                spawned: deque[dict] = deque()
 
-            # Pre-hit: lets a static trait (e.g. "always ignore cover", or Heavy
-            # when the unit moved less than 3") mark this attack before the hit
-            # roll's threshold is set.
-            _apply_triggered_effects(
-                abilities,
-                {
-                    "step": "pre_hit",
-                    "moved_less_than_3": moved_less_than_3,
-                    "in_engagement_range": in_engagement_range,
-                    "half_range": fired["half_range"],
-                    **weapon_context,
-                },
-                attack,
-                spawned,
-            )
-            # Hit roll modifiers: every +1 and -1 to hit adds up, then the total
-            # is capped at +1/-1 - so +2 and -1 is still +1. A ranged attack
-            # against a target in cover counts as a -1, unless this attack (or
-            # the whole unit) ignores cover.
-            # An attack that ignores penalties to its Hit roll (e.g. Molecular
-            # Targeting) keeps only the bonuses.
-            ignore_penalties = attack.get("ignore_hit_penalties", False)
-            hit_modifier = attack.get("plus_one_to_hit", 0) - (
-                0
-                if ignore_penalties
-                else attack.get("minus_one_to_hit", 0) + (1 if fired["engaged_penalty"] else 0)
-            )
-            # [HEAVY] is one +1, however many sources grant it.
-            if attack.get("heavy"):
-                hit_modifier += 1
-            hit_modifier = max(-1, min(1, hit_modifier))
-            # Setting the characteristic (e.g. "a Ballistic Skill of 3+") comes
-            # before any modifiers or improvements.
-            skill = 3 if is_ranged and attack.get("ranged_skill_3") else weapon.skill
-            effective_skill = skill - hit_modifier
-            # Improving the BS/WS characteristic itself (e.g. a Doctrina
-            # Imperative) isn't a hit roll modifier, so it's outside the cap.
-            if is_ranged and attack.get("plus_one_skill_ranged"):
-                effective_skill -= 1
-            # Plunging Fire (22.05): a TOWERING model's ranged attack at a
-            # target within 12" has +1 BS (not by or at AIRCRAFT).
-            if (
-                is_ranged
-                and "TOWERING" in weapon_context["attacker_model_keywords"]
-                and WITHIN_12_OF_TARGET in attacker_positions
-                and "AIRCRAFT" not in weapon_context["attacker_model_keywords"]
-                and "AIRCRAFT" not in defender_keywords
-            ):
-                effective_skill -= 1
-            # The benefit of cover worsens a ranged attack's BS by 1 (13.08) -
-            # an indirect fire attack's target always has it.
-            if (
-                (in_cover or attack.get("benefit_of_cover") or fired["indirect"])
-                and is_ranged
-                and not attack.get("ignore_cover")
-                and not ignore_penalties
-            ):
-                effective_skill += 1
-            if not is_ranged and attack.get("plus_one_skill_melee"):
-                effective_skill -= 1
-            # (Worsened, e.g. by Data-spike: the characteristic, outside the cap.)
-            if not is_ranged and attack.get("worse_melee_skill"):
-                effective_skill += 1
+                # Pre-hit: lets a static trait (e.g. "always ignore cover", or Heavy
+                # when the unit moved less than 3") mark this attack before the hit
+                # roll's threshold is set.
+                _apply_triggered_effects(
+                    abilities,
+                    {
+                        "step": "pre_hit",
+                        "moved_less_than_3": moved_less_than_3,
+                        "in_engagement_range": in_engagement_range,
+                        "half_range": fired["half_range"],
+                        **weapon_context,
+                    },
+                    attack,
+                    spawned,
+                )
+                # Hit roll modifiers: every +1 and -1 to hit adds up, then the total
+                # is capped at +1/-1 - so +2 and -1 is still +1. A ranged attack
+                # against a target in cover counts as a -1, unless this attack (or
+                # the whole unit) ignores cover.
+                # An attack that ignores penalties to its Hit roll (e.g. Molecular
+                # Targeting) keeps only the bonuses.
+                ignore_penalties = attack.get("ignore_hit_penalties", False)
+                hit_modifier = attack.get("plus_one_to_hit", 0) - (
+                    0
+                    if ignore_penalties
+                    else attack.get("minus_one_to_hit", 0) + (1 if fired["engaged_penalty"] else 0)
+                )
+                # [HEAVY] is one +1, however many sources grant it.
+                if attack.get("heavy"):
+                    hit_modifier += 1
+                hit_modifier = max(-1, min(1, hit_modifier))
+                # Setting the characteristic (e.g. "a Ballistic Skill of 3+") comes
+                # before any modifiers or improvements.
+                skill = 3 if is_ranged and attack.get("ranged_skill_3") else weapon.skill
+                effective_skill = skill - hit_modifier
+                # Improving the BS/WS characteristic itself (e.g. a Doctrina
+                # Imperative) isn't a hit roll modifier, so it's outside the cap.
+                if is_ranged and attack.get("plus_one_skill_ranged"):
+                    effective_skill -= 1
+                # Plunging Fire (22.05): a TOWERING model's ranged attack at a
+                # target within 12" has +1 BS (not by or at AIRCRAFT).
+                if (
+                    is_ranged
+                    and "TOWERING" in weapon_context["attacker_model_keywords"]
+                    and WITHIN_12_OF_TARGET in attacker_positions
+                    and "AIRCRAFT" not in weapon_context["attacker_model_keywords"]
+                    and "AIRCRAFT" not in defender_keywords
+                ):
+                    effective_skill -= 1
+                # The benefit of cover worsens a ranged attack's BS by 1 (13.08) -
+                # an indirect fire attack's target always has it.
+                if (
+                    (in_cover or attack.get("benefit_of_cover") or fired["indirect"])
+                    and is_ranged
+                    and not attack.get("ignore_cover")
+                    and not ignore_penalties
+                ):
+                    effective_skill += 1
+                if not is_ranged and attack.get("plus_one_skill_melee"):
+                    effective_skill -= 1
+                # (Worsened, e.g. by Data-spike: the characteristic, outside the cap.)
+                if not is_ranged and attack.get("worse_melee_skill"):
+                    effective_skill += 1
 
-            # The unmodified roll that scores a Critical Hit: a 6, or lower for
-            # some attacks (e.g. Enslaved Artifice's 5+).
-            critical_hit_on = attack.get("critical_hit_on", 6)
-            hit_context = {"critical_hit_on": critical_hit_on, **weapon_context}
+                # The unmodified roll that scores a Critical Hit: a 6, or lower for
+                # some attacks (e.g. Enslaved Artifice's 5+).
+                critical_hit_on = attack.get("critical_hit_on", 6)
+                # (Or every successful Hit roll does - e.g. Flesh Hunger.)
+                if attack.get("successful_hits_critical"):
+                    critical_hit_on = min(critical_hit_on, max(2, effective_skill))
+                hit_context = {"critical_hit_on": critical_hit_on, **weapon_context}
 
-            # Indirect fire: an unmodified 1-5 fails (1-3 if spotted).
-            indirect_needs = (4 if indirect_spotted else 6) if fired["indirect"] else 0
+                # Indirect fire: an unmodified 1-5 fails (1-3 if spotted).
+                indirect_needs = (4 if indirect_spotted else 6) if fired["indirect"] else 0
+                hits = _hit_check(indirect_needs, critical_hit_on, effective_skill)
 
-            def hits(roll: int) -> bool:
-                # A Critical Hit always hits and a 1 always fails, whatever the
-                # modifiers.
-                if roll < indirect_needs:
-                    return False
-                return roll != 1 and (roll >= critical_hit_on or roll >= effective_skill)
-
-            # Hit roll: succeeds (hits) on a roll equal to or greater than skill.
-            hit_roll = miracle_roll("hit", weapon, attacker_miracle)
-            miracle_hit = hit_roll is not None
-            if hit_roll is None:
-                hit_roll = dice.randint(1, 6)
-            result.attack_rolls.append(hit_roll)
-            weapon_result.attack_rolls.append(hit_roll)
-            if snap_shots:
-                # Only an unmodified 6 hits; nothing else happens.
-                if hit_roll == 6:
-                    successful_hits.append((attack, fired))
-                continue
-            _apply_triggered_effects(
-                abilities, {"step": "hit", "roll": hit_roll, **hit_context}, attack, spawned
-            )
-            # (A Miracle dice can't be re-rolled.)
-            if not hits(hit_roll) and not fired["indirect"] and not miracle_hit and (
-                attack.get("reroll_failed_hits")
-                or unit_rerolls_failed_hits
-                or (hit_roll == 1 and attack.get("reroll_hit_ones"))
-            ):
-                # Re-roll a failed hit (or just a 1) once, replacing the
-                # original result - hit-step triggers (e.g. Sustained Hits)
-                # are re-checked against the new roll too.
-                hit_roll = dice.randint(1, 6)
-                result.attack_rerolls.append(hit_roll)
-                weapon_result.attack_rerolls.append(hit_roll)
+                # Hit roll: succeeds (hits) on a roll equal to or greater than skill.
+                hit_roll = miracle_roll("hit", weapon, attacker_miracle)
+                miracle_hit = hit_roll is not None
+                if hit_roll is None:
+                    hit_roll = dice.randint(1, 6)
+                result.attack_rolls.append(hit_roll)
+                weapon_result.attack_rolls.append(hit_roll)
+                if snap_shots:
+                    # Only an unmodified 6 (or what an ability says) hits;
+                    # nothing else happens.
+                    if hit_roll >= snap_shots_on:
+                        rolled_hits.append((None, attack, fired, deque()))
+                    continue
+                attack["_before_hit"] = dict(attack)
                 _apply_triggered_effects(
                     abilities, {"step": "hit", "roll": hit_roll, **hit_context}, attack, spawned
                 )
-            queue.extend((extra, fired) for extra in spawned)
-            if hits(hit_roll):
-                successful_hits.append((attack, fired))
+                # (A Miracle dice can't be re-rolled.)
+                rerolled = False
+                if not hits(hit_roll) and not fired["indirect"] and not miracle_hit and (
+                    attack.get("reroll_failed_hits")
+                    or unit_rerolls_failed_hits
+                    or (hit_roll == 1 and attack.get("reroll_hit_ones"))
+                    or spend_one_reroll("hit", weapon, hit_roll)
+                ):
+                    # Re-roll a failed hit (or just a 1) once, replacing the
+                    # original result - hit-step triggers (e.g. Sustained Hits)
+                    # are re-checked against the new roll too.
+                    hit_roll = dice.randint(1, 6)
+                    rerolled = True
+                    result.attack_rerolls.append(hit_roll)
+                    weapon_result.attack_rerolls.append(hit_roll)
+                    _apply_triggered_effects(
+                        abilities, {"step": "hit", "roll": hit_roll, **hit_context}, attack, spawned
+                    )
+                die = hit_die(
+                    attack, fired, spawned, hit_roll, hit_context, hits, rerolled,
+                    rerollable=not fired["indirect"] and not miracle_hit,
+                )
+                rolled_hits.append((die, attack, fired, spawned))
+            offer("hit", [r[0] for r in rolled_hits if r[0] is not None], attacker)
+            for die, attack, fired, spawned in rolled_hits:
+                queue.extend((extra, fired) for extra in spawned)
+                if die is None or die.passed:
+                    successful_hits.append((attack, fired))
 
         # Wound phase: every hit rolls to wound. Nothing has been destroyed yet
         # this phase, so each wound roll is against the Toughness of the model
         # its attack will be allocated to first.
         result.hits += len(successful_hits)
+        for _, f in successful_hits:
+            f["result"].hits += 1
         result.indirect_hits += sum(1 for _, f in successful_hits if f["indirect_weapon"])
         if not targets:
             continue  # the defending unit was wiped out by an earlier profile
         wounds: list[tuple[dict, dict]] = []
         extra_mortals: list[tuple[dict, dict]] = []
+        # (In order: an attack that wounds automatically has no dice.)
+        rolled_wounds: list[tuple[RolledDie | None, dict, dict]] = []
         for attack, fired in successful_hits:
             weapon = fired["weapon"]
             abilities = fired["abilities"]
@@ -1343,89 +1685,67 @@ def resolve_combat(
             wound_context = {"strength": strength, "toughness": toughness, **weapon_context}
 
             if attack.get("auto_pass_wound"):
-                wound_passed = True
-            else:
-                wound_passed = False
-                # A failed wound roll may be re-rolled once (e.g. Twin-linked,
-                # or just a 1), with the wound-step triggers re-checked against
-                # the new roll.
-                # (A Miracle dice can't be re-rolled.)
-                wound_roll = None
-                miracle_wound = False
-                for is_reroll in (False, True):
-                    if is_reroll and (
-                        miracle_wound
-                        or not (
-                            attack.get("reroll_failed_wounds")
-                            or (wound_roll == 1 and attack.get("reroll_wound_ones"))
-                        )
-                    ):
-                        break
-                    wound_roll = (
-                        None if is_reroll else miracle_roll("wound", weapon, attacker_miracle)
+                rolled_wounds.append((None, attack, fired))
+                continue
+            before = dict(attack)
+            wound_passed = False
+            rerolled = False
+            # A failed wound roll may be re-rolled once (e.g. Twin-linked,
+            # or just a 1), with the wound-step triggers re-checked against
+            # the new roll.
+            # (A Miracle dice can't be re-rolled.)
+            wound_roll = None
+            miracle_wound = False
+            for is_reroll in (False, True):
+                if is_reroll and (
+                    miracle_wound
+                    or not (
+                        attack.get("reroll_failed_wounds")
+                        or (wound_roll == 1 and attack.get("reroll_wound_ones"))
+                        or spend_one_reroll("wound", weapon, wound_roll)
                     )
-                    miracle_wound = wound_roll is not None
-                    if wound_roll is None:
-                        wound_roll = dice.randint(1, 6)
-                    if is_reroll:
-                        result.wound_rerolls.append(wound_roll)
-                        weapon_result.wound_rerolls.append(wound_roll)
-                    else:
-                        result.wound_rolls.append(wound_roll)
-                        weapon_result.wound_rolls.append(wound_roll)
-                    _apply_triggered_effects(
-                        abilities,
-                        {"step": "wound", "roll": wound_roll, **wound_context},
-                        attack,
-                        deque(),
-                    )
-                    if attack.get("critical_wound"):
-                        # An Anti-X-style ability (e.g. Anti-Infantry 4+) matched
-                        # this roll against the defending unit's keywords - it
-                        # counts as a critical wound regardless of the actual
-                        # roll, so re-run the wound-step trigger check with a
-                        # synthetic natural-6 context to also fire any other
-                        # critical-wound-dependent effects (e.g. Devastating
-                        # Wounds), same as an actual natural 6 would.
-                        _apply_triggered_effects(
-                            abilities,
-                            {"step": "wound", "roll": 6, **wound_context},
-                            attack,
-                            deque(),
-                        )
-                        wound_passed = True
-                    else:
-                        # An unmodified 6 always wounds and a 1 always fails,
-                        # whatever the modifiers. A +1 and a -1 to wound
-                        # cancel out.
-                        # (An attack that ignores penalties to its Wound roll,
-                        # e.g. Molecular Targeting, ignores a -1.)
-                        needed = (
-                            threshold
-                            + (
-                                1
-                                if attack.get("minus_one_to_wound")
-                                and not attack.get("ignore_wound_penalties")
-                                else 0
-                            )
-                            - (1 if attack.get("plus_one_to_wound") else 0)
-                        )
-                        wound_passed = wound_roll != 1 and (
-                            wound_roll == 6 or wound_roll >= needed
-                        )
-                    if wound_passed:
-                        break
-            if wound_passed:
-                # [DEVASTATING WOUNDS] a rule gives this model's weapon (e.g.
-                # Divine Deliverance): a Critical Wound allows no save.
-                if fired.get("devastating") and not attack.get("auto_pass_wound") and (
-                    wound_roll == 6 or attack.get("critical_wound")
                 ):
-                    attack["no_save"] = True
-                wounds.append((attack, fired))
-                if fired.get("mortal_on_wound"):
-                    # (e.g. Rapturous Blows: 1 mortal wound as well.)
-                    extra_mortals.append(({"no_save": True, "fixed_damage": 1}, fired))
+                    break
+                wound_roll = (
+                    None if is_reroll else miracle_roll("wound", weapon, attacker_miracle)
+                )
+                miracle_wound = wound_roll is not None
+                if wound_roll is None:
+                    wound_roll = dice.randint(1, 6)
+                if is_reroll:
+                    rerolled = True
+                    result.wound_rerolls.append(wound_roll)
+                    weapon_result.wound_rerolls.append(wound_roll)
+                else:
+                    result.wound_rolls.append(wound_roll)
+                    weapon_result.wound_rolls.append(wound_roll)
+                wound_passed = _wounds(attack, wound_roll, abilities, wound_context, threshold)
+                if wound_passed:
+                    break
+            rolled_wounds.append(
+                (
+                    _wound_die(
+                        attack, before, fired, wound_roll, wound_passed, wound_context,
+                        threshold, rerolled, rerollable=not miracle_wound, result=result,
+                    ),
+                    attack,
+                    fired,
+                )
+            )
+        offer("wound", [r[0] for r in rolled_wounds if r[0] is not None], attacker)
+        for die, attack, fired in rolled_wounds:
+            if die is not None and not die.passed:
+                continue
+            # [DEVASTATING WOUNDS] a rule gives this model's weapon (e.g.
+            # Divine Deliverance): a Critical Wound allows no save.
+            if fired.get("devastating") and die is not None and (
+                die.value == 6 or attack.get("critical_wound")
+            ):
+                attack["no_save"] = True
+            wounds.append((attack, fired))
+            if fired.get("mortal_on_wound"):
+                # (e.g. Rapturous Blows: 1 mortal wound as well.)
+                extra_mortals.append(({"no_save": True, "fixed_damage": 1}, fired))
         result.wounds += len(wounds)
 
         # Save rolls (05.03): one for each wound, made together; then resolved
@@ -1442,26 +1762,6 @@ def resolve_combat(
             chosen = decisions.save_miracle(saving[0][1]["weapon"], len(saving))
             if chosen is not None:
                 defender_miracle = chosen
-        rolled = []
-        for attack, fired in saving:
-            save_roll = miracle_roll("save", fired["weapon"], defender_miracle)
-            if save_roll is None:
-                save_roll = dice.randint(1, 6)
-            elif defender_miracle.auto_success:
-                # (Triptych of the Macharian Crusade: it succeeds, whatever
-                # its value.)
-                attack = {**attack, "miracle_save": True}
-            result.save_rolls.append(save_roll)
-            fired["result"].save_rolls.append(save_roll)
-            _apply_triggered_effects(
-                fired["abilities"],
-                {"step": "save", "roll": save_roll, **fired["context"]},
-                attack,
-                deque(),
-            )
-            rolled.append((save_roll, attack, fired))
-        rolled.sort(key=lambda r: r[0])
-
         def allocated(attack: dict, target: _Target, fired: dict) -> dict:
             # Rules only the model it's allocated to has (e.g. a TECH-PRIEST's
             # 4+ invulnerable save) apply to this attack from here on.
@@ -1473,12 +1773,10 @@ def resolve_combat(
             )
             return attack
 
-        for save_roll, attack, fired in rolled:
-            if not targets:
-                break  # defending unit has no models left
+        def saves(attack: dict, target: _Target, fired: dict, save_roll: int) -> bool:
+            # Whether the saving throw succeeds for the model it's allocated
+            # to (`attack` already allocated).
             weapon = fired["weapon"]
-            target = target_for(fired)
-            attack = allocated(attack, target, fired)
             # The invulnerable save if the roll beats it (unaffected by AP),
             # otherwise the armour save, worsened by the weapon's AP.
             ap = weapon.ap - 1 if attack.get("improve_ap") else weapon.ap
@@ -1496,22 +1794,86 @@ def resolve_combat(
                 save_needed = min(save_needed, attack["invulnerable_save"])
             # +1 to the save roll (an unmodified 1 still fails).
             bonus = 1 if attack.get("plus_one_to_save") else 0
-            if attack.get("miracle_save") or (
+            return bool(attack.get("miracle_save")) or (
                 save_roll != 1 and save_roll + bonus >= save_needed
-            ):
+            )
+
+        def save_die(attack: dict, before: dict, fired: dict, roll: int, miracle: bool) -> RolledDie:
+            # A saving throw, which the defending player can re-roll or change
+            # once they're all rolled (see offer) - whether it succeeds judged
+            # against the model they'd go to first now.
+            def triggered(value: int, state: dict) -> dict:
+                _apply_triggered_effects(
+                    fired["abilities"],
+                    {"step": "save", "roll": value, **fired["context"]},
+                    state,
+                    deque(),
+                )
+                return state
+
+            def check(value: int) -> bool:
+                if not targets:
+                    return True
+                target = target_for(fired)
+                return saves(allocated(triggered(value, dict(before)), target, fired), target, fired, value)
+
+            def give(value: int, rerolled: bool) -> None:
+                attack.clear()
+                attack.update(triggered(value, dict(before)))
+                _replace(result.save_rolls, die.value, value)
+                _replace(fired["result"].save_rolls, die.value, value)
+                die.value, die.rerolled = value, die.rerolled or rerolled
+                die.passed = check(value)
+
+            die = RolledDie(
+                "save", roll, fired["weapon"].name, False, rerollable=not miracle,
+                check=check, give=give,
+            )
+            die.passed = check(roll)
+            return die
+
+        rolled_saves: list[tuple[RolledDie | None, dict, dict, int]] = []
+        for attack, fired in saving:
+            save_roll = miracle_roll("save", fired["weapon"], defender_miracle)
+            miracle = save_roll is not None
+            if save_roll is None:
+                save_roll = dice.randint(1, 6)
+            elif defender_miracle.auto_success:
+                # (Triptych of the Macharian Crusade: it succeeds, whatever
+                # its value.)
+                attack = {**attack, "miracle_save": True}
+            result.save_rolls.append(save_roll)
+            fired["result"].save_rolls.append(save_roll)
+            before = dict(attack)
+            _apply_triggered_effects(
+                fired["abilities"],
+                {"step": "save", "roll": save_roll, **fired["context"]},
+                attack,
+                deque(),
+            )
+            die = save_die(attack, before, fired, save_roll, miracle) if decisions is not None else None
+            rolled_saves.append((die, attack, fired, save_roll))
+        if decisions is not None:
+            offer("save", [r[0] for r in rolled_saves], defender)
+        rolled = sorted(
+            ((d.value if d is not None else roll, attack, fired) for d, attack, fired, roll in rolled_saves),
+            key=lambda r: r[0],
+        )
+
+        for save_roll, attack, fired in rolled:
+            if not targets:
+                break  # defending unit has no models left
+            weapon = fired["weapon"]
+            target = target_for(fired)
+            attack = allocated(attack, target, fired)
+            if saves(attack, target, fired, save_roll):
                 continue  # save succeeded - no damage from this attack
             if decisions is not None:
-                # The defender's choice as it fails: change the roll to an
-                # unmodified 6 (Artisan), or the attack's Damage to 0
+                # The defender's choice as it fails: the attack's Damage to 0
                 # (Necromechanic).
-                choice = decisions.failed_save(
-                    target.unit_model_id, weapon, save_roll, passes_on_six=6 + bonus >= save_needed
-                )
+                choice = decisions.failed_save(target.unit_model_id, weapon, save_roll)
                 if choice is not None:
                     result.choices.append(choice.note)
-                    if choice.save_roll is not None:
-                        _replace(result.save_rolls, save_roll, choice.save_roll)
-                        _replace(fired["result"].save_rolls, save_roll, choice.save_roll)
                     continue
             _inflict(target, attack, fired, mortal=False)
 

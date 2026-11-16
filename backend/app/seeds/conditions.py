@@ -10,7 +10,23 @@ from app.combat_rules.conditions import (
     ANTI_INFANTRY_3,
     ANTI_INFANTRY_4,
     ANTI_INFANTRY_5,
+    ANTI_PSYKER_4,
+    TARGET_CANT_FLY,
+    MELEE_WEAPON,
+    RANGED_WEAPON,
+    ATTACKER_STATIONARY,
+    TARGET_WITHIN_12,
+    TARGET_IS_CLOSEST,
+    TARGET_TITANIC_OR_TOWERING,
+    TARGET_FORTIFICATION,
+    TARGET_VEHICLE,
+    NOT_PISTOL,
+    DAMAGED_BRACKETS,
+    ANTI_CHAOS_2,
     ANTI_MONSTER_4,
+    ANTI_CHARACTER_4,
+    ANTI_MONSTER_2,
+    ANTI_TITANIC_4,
     ANTI_NON_VEHICLE_4,
     ANTI_VEHICLE_2,
     ANTI_VEHICLE_3,
@@ -70,6 +86,67 @@ CORE_ENTRIES = [
         "The wound roll was a 2+ against a defending unit that contains a PSYKER model.",
     ),
     (
+        ANTI_PSYKER_4,
+        "Anti-Psyker 4+",
+        "The wound roll was a 4+ against a defending unit that contains a PSYKER model.",
+    ),
+    (
+        TARGET_CANT_FLY,
+        "Target Can't FLY",
+        "The defending unit has no FLY model. Applies at every step.",
+    ),
+    (
+        MELEE_WEAPON,
+        "Melee Weapon",
+        "The attack is made with a melee weapon. Applies at every step.",
+    ),
+    (RANGED_WEAPON, "Ranged Weapon", "The attack is made with a ranged weapon. Applies at every step."),
+    (
+        ATTACKER_STATIONARY,
+        "Attacker Remained Stationary",
+        "The attacking unit Remained Stationary this turn. Applies at every step.",
+    ),
+    (
+        TARGET_WITHIN_12,
+        "Target Within 12\"",
+        "The target is within 12\" of the attacking unit. Applies at every step.",
+    ),
+    (
+        TARGET_IS_CLOSEST,
+        "Target Is Closest Eligible",
+        "The target is the closest eligible target. Applies at every step.",
+    ),
+    (
+        TARGET_TITANIC_OR_TOWERING,
+        "Target TITANIC or TOWERING",
+        "The defending unit has a TITANIC or TOWERING model. Applies at every step.",
+    ),
+    (NOT_PISTOL, "Not a Pistol", "The attack isn't made with a [PISTOL] weapon. Applies at every step."),
+    (
+        TARGET_VEHICLE,
+        "Target VEHICLE",
+        "The defending unit has a VEHICLE model. Applies at every step.",
+    ),
+    (
+        TARGET_FORTIFICATION,
+        "Target FORTIFICATION",
+        "The defending unit has a FORTIFICATION model. Applies at every step.",
+    ),
+    *(
+        (
+            f"damaged_{n}",
+            f"Damaged (1-{n} Wounds)",
+            f"The attacking model is on its Damaged: 1-{n} Wounds Remaining profile (in the "
+            "calculator: \"Attacking model is Damaged\" is ticked). Applies at every step.",
+        )
+        for n in DAMAGED_BRACKETS
+    ),
+    (
+        ANTI_CHAOS_2,
+        "Anti-Chaos 2+",
+        "The wound roll was a 2+ against a defending unit that contains a CHAOS model.",
+    ),
+    (
         ANTI_INFANTRY_2,
         "Anti-Infantry 2+",
         "The wound roll was a 2+ against a defending unit that contains an INFANTRY model.",
@@ -103,6 +180,21 @@ CORE_ENTRIES = [
         ANTI_MONSTER_4,
         "Anti-Monster 4+",
         "The wound roll was a 4+ against a defending unit that contains a MONSTER model.",
+    ),
+    (
+        ANTI_CHARACTER_4,
+        "Anti-Character 4+",
+        "The wound roll was a 4+ against a defending unit that contains a CHARACTER model.",
+    ),
+    (
+        ANTI_MONSTER_2,
+        "Anti-Monster 2+",
+        "The wound roll was a 2+ against a defending unit that contains a MONSTER model.",
+    ),
+    (
+        ANTI_TITANIC_4,
+        "Anti-Titanic 4+",
+        "The wound roll was a 4+ against a defending unit that contains a TITANIC model.",
     ),
     (
         WITHIN_HALF_RANGE,

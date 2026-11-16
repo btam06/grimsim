@@ -20,7 +20,7 @@ from app.combat_rules.conditions import (
     TARGET_WITHIN_9,
 )
 from app.combat_rules.effects import (
-    ADD_EXTRA_ATTACK,
+    ADD_ATTACKS_1,
     ADD_EXTRA_HIT,
     AUTO_PASS_WOUND,
     FEEL_NO_PAIN_4,
@@ -426,7 +426,7 @@ RULES = {
 # RuleOption}} - here, an aura that's always on.
 # Banner of Macragge's once-a-battle boost: +1 A and S to melee attacks.
 _BANNER_RULES = (
-    Rule(conditions=(MELEE_PRE_WEAPON,), effects=(ADD_EXTRA_ATTACK,)),
+    Rule(conditions=(MELEE_PRE_WEAPON,), effects=(ADD_ATTACKS_1,)),
     Rule(conditions=(MELEE_ATTACK,), effects=(PLUS_ONE_STRENGTH,)),
 )
 

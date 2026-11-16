@@ -20,6 +20,8 @@ TARGET_MODEL_KASTELAN = "target_model_kastelan"
 TARGET_MODEL_DATASMITH_LEADING_KASTELANS = "target_model_datasmith_leading_kastelans"
 NEUTRON_FUSIL_WEAPON = "neutron_fusil_weapon"
 OMNISSIAN_AXE_WEAPON = "omnissian_axe_weapon"
+ERADICATION_CASTER_WEAPON = "eradication_caster_weapon"
+PHOSPHOR_TORCH_WEAPON = "phosphor_torch_weapon"
 # The calculator's Positioning (see app/combat_rules/positions.py): a
 # friendly ADEPTUS MECHANICUS VEHICLE model was destroyed within 12" of the
 # attacking model this battle (Vengeance for the Omnissiah - in a game,
@@ -154,6 +156,17 @@ def target_model_datasmith_leading_kastelans(context: dict) -> bool:
     ) and "KASTELAN ROBOTS" in context.get("defender_keywords", set())
 
 
+def eradication_caster_weapon(context: dict) -> bool:
+    # The attack is made with an eradication caster (either profile) - e.g.
+    # Broad-spectrum Targeting Augurs.
+    return context.get("weapon_name", "").lower().startswith("eradication caster")
+
+
+def phosphor_torch_weapon(context: dict) -> bool:
+    # The attack is made with a phosphor torch - e.g. Searing Conflagration.
+    return context.get("weapon_name", "").lower() == "phosphor torch"
+
+
 def neutron_fusil_weapon(context: dict) -> bool:
     # The attack is made with a neutron fusil - e.g. Monocular Targeting Helms.
     return "neutron fusil" in context.get("weapon_name", "").lower()
@@ -208,6 +221,8 @@ CONDITIONS = {
     TARGET_MODEL_KASTELAN: target_model_kastelan,
     TARGET_MODEL_DATASMITH_LEADING_KASTELANS: target_model_datasmith_leading_kastelans,
     NEUTRON_FUSIL_WEAPON: neutron_fusil_weapon,
+    ERADICATION_CASTER_WEAPON: eradication_caster_weapon,
+    PHOSPHOR_TORCH_WEAPON: phosphor_torch_weapon,
     OMNISSIAN_AXE_WEAPON: omnissian_axe_weapon,
     VENGEANCE_ACTIVE: vengeance_active,
     TARGET_WITHIN_ACQUISITION: target_within_acquisition,
@@ -322,5 +337,15 @@ ENTRIES = [
         "Defender Within Acquisition Objective",
         "The defending unit is within range of its own army's Acquisition objective marker. "
         "Applies at every step.",
+    ),
+    (
+        ERADICATION_CASTER_WEAPON,
+        "Eradication Caster Weapon",
+        "The attack is made with an eradication caster (checked by its name).",
+    ),
+    (
+        PHOSPHOR_TORCH_WEAPON,
+        "Phosphor Torch Weapon",
+        "The attack is made with a phosphor torch (checked by its name).",
     ),
 ]

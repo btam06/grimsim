@@ -1524,11 +1524,11 @@ def test_within_half_range_condition_checks_pre_weapon_step_and_flag():
 
 
 def test_resolve_combat_rapid_fire_1_adds_an_extra_attack_within_half_range(monkeypatch):
-    # Rapid Fire 1: within_half_range -> add_extra_attack. The extra attack is
+    # Rapid Fire 1: within_half_range -> add_attacks_1. The extra attack is
     # a fresh attack, not an auto-hit, so it still needs its own hit roll.
     monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
-    rapid_fire = _ability([_condition("within_half_range")], [_effect("add_extra_attack")])
+    rapid_fire = _ability([_condition("within_half_range")], [_effect("add_attacks_1")])
     weapon = _weapon(attacks="1", skill=2, strength=10, ap=-10, damage="1")
     weapon.id = 1
     weapon.abilities = [rapid_fire]
@@ -1554,7 +1554,7 @@ def test_resolve_combat_rapid_fire_1_adds_an_extra_attack_within_half_range(monk
 def test_resolve_combat_rapid_fire_1_does_nothing_outside_half_range(monkeypatch):
     monkeypatch.setattr("app.services.dice.randint", lambda a, b: 6)
 
-    rapid_fire = _ability([_condition("within_half_range")], [_effect("add_extra_attack")])
+    rapid_fire = _ability([_condition("within_half_range")], [_effect("add_attacks_1")])
     weapon = _weapon(attacks="1", skill=2, strength=10, ap=-10, damage="1")
     weapon.id = 1
     weapon.abilities = [rapid_fire]
@@ -1582,7 +1582,7 @@ def test_resolve_combat_rapid_fire_1_grants_exactly_one_extra_attack_regardless_
     # Rapid Fire 1 (3 total), not 1 extra per base attack.
     monkeypatch.setattr("app.services.dice.randint", lambda a, b: 1)  # misses everything
 
-    rapid_fire = _ability([_condition("within_half_range")], [_effect("add_extra_attack")])
+    rapid_fire = _ability([_condition("within_half_range")], [_effect("add_attacks_1")])
     weapon = _weapon(attacks="2", skill=2)
     weapon.id = 1
     weapon.abilities = [rapid_fire]
@@ -3228,7 +3228,7 @@ def test_blitz_dem_gitz_adds_six_attacks_against_non_monster_vehicle(
 ):
     monkeypatch.setattr("app.services.dice.randint", lambda a, b: 1)  # every hit misses
     blitz = _ability(
-        [_condition("pre_weapon_not_monster_or_vehicle")], [_effect("add_six_attacks")]
+        [_condition("pre_weapon_not_monster_or_vehicle")], [_effect("add_attacks_6")]
     )
     weapon = _weapon(attacks="8", skill=4, strength=7, ap=-2, damage="2", weapon_type="ranged")
     weapon.abilities = [blitz]
@@ -3555,7 +3555,7 @@ def test_rapid_fire_3_adds_three_attacks_within_half_range(
 ):
     monkeypatch.setattr("app.services.dice.randint", lambda a, b: 1)
     weapon = _weapon(attacks="3", skill=4, weapon_type="ranged")
-    weapon.abilities = [_ability([_condition("within_half_range")], [_effect("add_three_attacks")])]
+    weapon.abilities = [_ability([_condition("within_half_range")], [_effect("add_attacks_3")])]
 
     result = _fire(weapon, _many_targets(1), half_range=half_range)
     assert len(result.attack_rolls) == expected_attacks
@@ -6671,7 +6671,7 @@ def test_snap_shots_keep_torrent_and_rapid_fire(monkeypatch):
     weapon = _weapon(attacks="1", skill=2, strength=10, ap=-10, weapon_type="ranged")
     weapon.abilities = [
         _ability([_condition(c) for c in torrent[2]], [_effect(e) for e in torrent[3]]),
-        _ability([_condition("within_half_range")], [_effect("add_extra_attack")]),
+        _ability([_condition("within_half_range")], [_effect("add_attacks_1")]),
     ]
     result = _fire(
         weapon, [_model(toughness=1, wounds=10, save=7)], snap_shots=True, half_range=True
@@ -7133,3 +7133,88 @@ def test_dispersion_shield_is_a_4_up_invulnerable_save(monkeypatch):
     shield.abilities = [_wargear_ability([_condition(c) for c in entry[2]], [_effect(e) for e in entry[3]])]
     defender = _unit([_unit_model(_model(wounds=10, save=7), [], [shield])])
     assert _resolve(attacker, defender, weapon).total_damage == 0
+
+
+# --- in a game: a weapon's rolls offered once they're made ---
+
+
+class _Offers:
+    # Stands in for attack_decisions.Decisions: records each set of dice
+    # offered and picks (source, dice index) in turn - None carries on.
+    def __init__(self, picks=()):
+        self.picks = list(picks)
+        self.offered = []
+
+    def dice(self, kind, unit, rolled, one):
+        self.offered.append((kind, [(d.value, d.offerable()) for d in rolled]))
+        pick = self.picks.pop(0) if self.picks else None
+        if pick is None:
+            return None
+        source, index = pick
+        return source, rolled[index], "Command Re-roll"
+
+    def save_miracle(self, weapon, saves):
+        return None
+
+    def failed_save(self, unit_model_id, weapon, roll):
+        return None
+
+
+def _three_shots(monkeypatch, rolls, attacks_override="3", damage_override="1"):
+    rolls = iter(rolls)
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls))
+    gun = _weapon(attacks=attacks_override, skill=4, strength=4, ap=-10, damage=damage_override)
+    gun.id = 1
+    attacker = _unit([_unit_model(_model(), [gun])])
+    defender = _unit([_unit_model(_model(toughness=1, wounds=5, save=2, feel_no_pain=None), [])])
+    return attacker, defender, gun
+
+
+def _resolve_offered(attacker, defender, gun, decisions):
+    return combat.resolve_combat(
+        attacker, defender, {gun.id}, in_engagement_range=False, visible=True, in_range=True,
+        in_cover=False, half_range=False, moved_less_than_3=False, advanced=False,
+        decisions=decisions,
+    )
+
+
+def test_a_weapons_hit_rolls_are_offered_once_theyre_all_made(monkeypatch):
+    # Hits 1 (re-rolled for being a 1: a 2), 3 and 5 - then the 3's re-rolled
+    # (a 6). Wounds 6, 6; saves 1, 1.
+    attacker, defender, gun = _three_shots(monkeypatch, [1, 2, 3, 5, 6, 6, 6, 1, 1])
+    gun.abilities = [_ability([_condition("always")], [_effect("reroll_hit_ones")])]
+    offers = _Offers([("command_reroll", 1)])
+    result = _resolve_offered(attacker, defender, gun, offers)
+    # (The 2's been re-rolled already: never again. The 5 hit.)
+    assert offers.offered[0] == ("hit", [(2, False), (3, True), (5, False)])
+    assert result.attack_rolls == [1, 3, 5] and result.attack_rerolls == [2, 6]
+    assert result.hits == 2 and result.total_damage == 2
+    assert any("re-rolled: 6" in c for c in result.choices)
+    # (Offered again - the 5's left - then the Wound rolls and saving throws.)
+    assert [kind for kind, _ in offers.offered] == ["hit", "hit", "wound", "save"]
+
+
+def test_once_every_dice_has_been_re_rolled_nothings_offered(monkeypatch):
+    attacker, defender, gun = _three_shots(monkeypatch, [2, 6, 2, 6, 2, 6, 6, 6, 6, 1, 1, 1])
+    gun.abilities = [_ability([_condition("always")], [_effect("reroll_failed_hits")])]
+    offers = _Offers()
+    _resolve_offered(attacker, defender, gun, offers)
+    assert [kind for kind, _ in offers.offered] == ["wound", "save"]
+
+
+def test_attacks_damage_and_hazard_rolls_are_offered(monkeypatch):
+    # D3 attacks (a 1 - re-rolled: a 2); hazard 3; two hits, wounds, failed
+    # saves; D6 Damage 1 and 4.
+    attacker, defender, gun = _three_shots(
+        monkeypatch, [1, 2, 3, 6, 6, 6, 6, 1, 1, 1, 4], attacks_override="D3", damage_override="D6"
+    )
+    gun.abilities = [_ability([_condition("always")], [_effect("hazardous")])]
+    offers = _Offers([("command_reroll", 0)])
+    result = _resolve_offered(attacker, defender, gun, offers)
+    # (The Attacks roll's one dice, re-rolled: nothing left to offer there.)
+    assert [kind for kind, _ in offers.offered] == [
+        "attacks", "hazard", "hit", "wound", "save", "damage", "damage"
+    ]
+    assert result.attack_rolls == [6, 6] and result.hazardous_rolls == [3]
+    assert any("Attacks roll of 1" in c and "re-rolled: 2" in c for c in result.choices)
+    assert result.total_damage == 5

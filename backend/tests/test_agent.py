@@ -269,6 +269,11 @@ async def test_start_of_phase_abilities_one_player_then_the_other(
     t, u = _unit_named(deployment, "T"), _unit_named(deployment, "U")
     for unit in (t, u):
         await _give(session, unit, "Data-spike")
+    # (Given once the phase had begun: its start step again, as if they'd
+    # had it then.)
+    from tests import live_games
+
+    live_games.game(game_id).phase_start_uses.clear()
 
     async def apply(action):
         response = await client.post(f"/games/{game_id}/agent/apply", json={"action": {

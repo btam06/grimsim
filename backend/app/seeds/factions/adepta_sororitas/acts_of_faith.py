@@ -8,6 +8,7 @@ from app.models import Unit
 from app.engine.state import Game, GameActOfFaith, GameMiracleGain, GamePlayer
 from app.services import dice
 from app.services.in_game import deployment
+from app.services.in_game.deployment import TOLERANCE, gap
 from app.services.list_building import enhancements as enhancement_rules
 
 # The Adepta Sororitas' Acts of Faith, in a game.
@@ -113,11 +114,17 @@ def _bearer(unit: Unit, enhancement: str):
     )
 
 
-def acts_per_phase(player: GamePlayer) -> int:
-    # Sacred Rites (the Army of Faith detachment): two a phase.
+def acts_per_phase(player: GamePlayer, game: Game | None = None, unit: Unit | None = None) -> int:
+    # Sacred Rites (the Army of Faith detachment): two a phase - or for the
+    # unit, while the Simulacrum of the Ebon Chalice reaches it.
     army_list = player.army_list
     if any(d.name == SACRED_RITES for d in getattr(army_list, "detachments", None) or []):
         return 2
+    if game is not None and unit is not None:
+        from app.seeds.factions.adepta_sororitas import unit_abilities
+
+        if unit_abilities.relic_on(game, unit, unit_abilities.EBON_CHALICE):
+            return 2
     return 1
 
 
@@ -152,11 +159,35 @@ def _record_gain(
     )
 
 
+SOLEMN_PROCESSION = "Solemn Procession"
+STIRRING_RHETORIC = "Stirring Rhetoric"
+LITANY_OF_DEEDS = "Litany of Deeds"
+LITANY_RANGE = 12.0
+RECOUNT_THE_DEEDS = "Recount the Deeds of the Saints"
+AGATHAE_DOLAN = "Agathae Dolan"
+
+
+def _on_battlefield_with(game: Game, player: GamePlayer, ability: str) -> list:
+    # The player's models on the battlefield with the ability.
+    return [
+        m
+        for u in deployment.deployable_units(player)
+        for m in deployment.models_on_battlefield(game, u)
+        if any(a.name == ability for a in m.model.abilities)
+    ]
+
+
 def start_of_turn(game: Game) -> None:
-    # The start of a turn: a Miracle dice each; then the start of its
-    # player's Command phase - Litanies of Faith.
+    # The start of a turn: a Miracle dice each (a 6, not rolled, while a
+    # model with Solemn Procession is on the battlefield); then the start of
+    # its player's Command phase - Litanies of Faith.
     for player in game.players:
-        if army_rule(player):
+        if not army_rule(player):
+            continue
+        if _on_battlefield_with(game, player, SOLEMN_PROCESSION):
+            player.miracle_dice.append(6)
+            _record_gain(game, player, START_OF_TURN, None, 6)
+        else:
             _gain(game, player, START_OF_TURN)
     player = _player(game, game.turn_seat)
     if not army_rule(player):
@@ -197,12 +228,68 @@ def model_destroyed(game: Game, unit: Unit, unit_model=None) -> None:
         )
     ):
         for _ in range(dice.randint(1, 3)):
-            _gain(game, player, SAINTLY_EXAMPLE, unit.id)
+            _death_gain(game, player, SAINTLY_EXAMPLE, unit, unit_model)
+    if (
+        unit_model is not None
+        and unit_model.model.name == AGATHAE_DOLAN
+        and any(a.name == RECOUNT_THE_DEEDS for a in unit_model.model.abilities)
+        and enhancement_rules.is_leading(unit, unit_model)
+    ):
+        # Recount the Deeds of the Saints: D3, when Agathae Dolan's destroyed.
+        for _ in range(dice.randint(1, 3)):
+            _death_gain(game, player, RECOUNT_THE_DEEDS, unit, unit_model)
     if not _sororitas(unit) or not _destroyed(game, unit):
         return
     if any(g.reason == UNIT_DESTROYED and g.unit_id == unit.id for g in game.miracle_gains):
         return
-    _gain(game, player, UNIT_DESTROYED, unit.id)
+    _death_gain(game, player, UNIT_DESTROYED, unit, unit_model)
+
+
+def _death_gain(game: Game, player: GamePlayer, reason: str, unit: Unit, unit_model) -> None:
+    # A Miracle dice for one of the player's ADEPTA SORORITAS units or models
+    # being destroyed - re-rolled (if it's below average) when that was within
+    # 12" of one of their models with Litany of Deeds.
+    value = dice.randint(1, 6)
+    if value < 4 and _litany(game, player, unit, unit_model):
+        value = dice.randint(1, 6)
+    player.miracle_dice.append(value)
+    _record_gain(game, player, reason, unit.id, value)
+
+
+def _litany(game: Game, player: GamePlayer, unit: Unit, unit_model) -> bool:
+    imagifiers = _on_battlefield_with(game, player, LITANY_OF_DEEDS)
+    if not imagifiers or not _sororitas(unit):
+        return False
+    ids = {unit_model.id} if unit_model is not None else {m.id for m in unit.unit_models}
+    where = [r for r in game.models_destroyed if r.unit_model_id in ids and r.x is not None]
+    if not where:
+        return False
+    record = where[-1]
+    model = next(m for m in unit.unit_models if m.id == record.unit_model_id)
+    dead = deployment.base_at(model, record.x, record.y, record.rotation)
+    placed = deployment.positions(game)
+    return any(
+        gap(dead, deployment.base_at(m, placed[m.id].x, placed[m.id].y, placed[m.id].rotation))
+        <= LITANY_RANGE + TOLERANCE
+        for m in imagifiers
+    )
+
+
+def enemy_unit_destroyed(game: Game, unit: Unit, destroyed_by: Unit | None) -> None:
+    # An enemy unit destroyed by `destroyed_by`: Recount the Deeds of the
+    # Saints - a Miracle dice, while Agathae Dolan's leading it.
+    if destroyed_by is None:
+        return
+    player = deployment.owner(game, destroyed_by)
+    if not army_rule(player) or player.seat == deployment.owner(game, unit).seat:
+        return
+    if any(
+        m.model.name == AGATHAE_DOLAN
+        and any(a.name == RECOUNT_THE_DEEDS for a in m.model.abilities)
+        and enhancement_rules.is_leading(destroyed_by, m)
+        for m in deployment.models_on_battlefield(game, destroyed_by)
+    ):
+        _gain(game, player, RECOUNT_THE_DEEDS, destroyed_by.id)
 
 
 def after_attacks(game: Game, unit: Unit, models_destroyed: int, fought: bool) -> None:
@@ -264,10 +351,11 @@ def cant_reason(game: Game, unit: Unit) -> str | None:
 
     if miracle_rules.chaplet_used(game, player.seat):
         return "the Chaplet of Sacrifice has been used: it's the end of the Command phase"
-    if len(performed(game, unit)) >= acts_per_phase(player):
+    allowed = acts_per_phase(player, game, unit)
+    if len(performed(game, unit)) >= allowed:
         return (
             "it has already performed an Act of Faith this phase"
-            if acts_per_phase(player) == 1
+            if allowed == 1
             else "it has already performed its Acts of Faith this phase"
         )
     return None
@@ -297,6 +385,8 @@ def perform(game: Game, unit: Unit, roll: str, value: int) -> int:
     check(game, unit, roll, value)
     player = deployment.owner(game, unit)
     player.miracle_dice.remove(value)
+    # Stirring Rhetoric: changed to a 6 first.
+    value = rhetoric_value(game, unit, value)
     game.acts_of_faith.append(
         GameActOfFaith(
             seat=player.seat,
@@ -315,6 +405,18 @@ def perform(game: Game, unit: Unit, roll: str, value: int) -> int:
     return value
 
 
+def rhetoric_value(game: Game, unit: Unit, value: int) -> int:
+    # The value a Miracle dice used in the unit's Act of Faith has: a 6, while
+    # a model with Stirring Rhetoric is leading it.
+    if any(
+        any(a.name == STIRRING_RHETORIC for a in m.model.abilities)
+        and enhancement_rules.is_leading(unit, m)
+        for m in deployment.models_on_battlefield(game, unit)
+    ):
+        return 6
+    return value
+
+
 @dataclass
 class AttackMiracle:
     # An Act of Faith for an attack (see app/services/combat.py): the unit
@@ -329,6 +431,9 @@ class AttackMiracle:
     # A Saving throw that succeeds whatever its value (Triptych of the
     # Macharian Crusade).
     auto_success: bool = False
+    # The Miracle dice taken from the pool for it, if its value's been
+    # changed (Stirring Rhetoric: a 6).
+    pool_value: int | None = None
 
     def applies(self, roll: str, weapon) -> bool:
         return (
@@ -358,8 +463,9 @@ def attack_miracle(
     return AttackMiracle(
         unit,
         choice.roll,
-        choice.value,
+        rhetoric_value(game, unit, choice.value),
         choice.weapon_id,
+        pool_value=choice.value,
         auto_success=choice.roll == SAVE and _bearer(unit, MACHARIAN_TRIPTYCH) is not None,
     )
 
@@ -367,4 +473,7 @@ def attack_miracle(
 def spend(game: Game, miracle: AttackMiracle | None) -> None:
     # After the attack: the Miracle dice is spent if it was used.
     if miracle is not None and miracle.used:
-        perform(game, miracle.unit, miracle.roll, miracle.value)
+        perform(
+            game, miracle.unit, miracle.roll,
+            miracle.pool_value if miracle.pool_value is not None else miracle.value,
+        )

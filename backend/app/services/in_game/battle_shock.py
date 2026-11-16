@@ -104,7 +104,38 @@ def needed(game: Game, unit: Unit) -> int:
     # any rules (Deathly Terror, Despair).
     from app.seeds.factions.chaos_knights import dread
 
-    return leadership(unit) + dread.leadership_worsened(game, unit)
+    return leadership(unit) + dread.leadership_worsened(game, unit) - leadership_improved(game, unit)
+
+
+def leadership_improved(game: Game, unit: Unit) -> int:
+    # What friendly auras improve its Leadership by (datasheet_abilities
+    # LEADERSHIP_AURAS - e.g. The Silent King: 1 for NECRONS units within 6"
+    # of Szarekh), each ability once.
+    from app.seeds import datasheet_abilities
+    from app.services.in_game.deployment import TOLERANCE, gap
+
+    config = datasheet_abilities.LEADERSHIP_AURAS
+    if not config or game.status != "in_progress":
+        return 0
+    seat = deployment.owner(game, unit).seat
+    player = next(p for p in game.players if p.seat == seat)
+    keywords = {k.name for m in unit.unit_models for k in m.model.keywords}
+    mine = _unit_bases(game, unit)
+    placed = deployment.positions(game)
+    total = 0
+    for name, how in config.items():
+        if not set(how["keywords"]) <= keywords:
+            continue
+        for other in deployment.deployable_units(player):
+            near = [
+                deployment.base_at(m, placed[m.id].x, placed[m.id].y, placed[m.id].rotation)
+                for m in deployment.models_on_battlefield(game, other)
+                if m.id in placed and any(a.name == name for a in m.model.abilities)
+            ]
+            if any(gap(a, b) <= how["range"] + TOLERANCE for a in near for b in mine):
+                total += how["bonus"]
+                break
+    return total
 
 
 # --- tests ---
@@ -190,6 +221,44 @@ def battle_shock_step(game: Game) -> None:
             or dread.dismay(game, unit)
         ):
             require(game, unit, BATTLE_SHOCK_STEP)
+        elif (modifier := _forced_by_aura(game, unit)) is not None:
+            # (An enemy aura makes it - e.g. Nightmare Shroud: below its
+            # Starting Strength within 6", at -1.)
+            require(game, unit, BATTLE_SHOCK_STEP, modifier)
+
+
+# Enemy auras that make a unit below its Starting Strength take a test in its
+# Battle-shock step: {ability: (range, modifier)} - Nightmare Shroud.
+FORCED_TEST_AURAS = {"Nightmare Shroud (Aura)": (6.0, -1)}
+
+
+def _forced_by_aura(game: Game, unit: Unit) -> int | None:
+    from app.services.in_game.deployment import gap
+
+    if not below_starting_strength(game, unit):
+        return None
+    seat = deployment.owner(game, unit).seat
+    mine = _unit_bases(game, unit)
+    for player in game.players:
+        if player.seat == seat:
+            continue
+        for other in deployment.deployable_units(player):
+            for name, (reach, modifier) in FORCED_TEST_AURAS.items():
+                near = [
+                    b
+                    for m in deployment.models_on_battlefield(game, other)
+                    if any(a.name == name for a in m.model.abilities)
+                    for b in [_unit_bases_of_model(game, m)]
+                ]
+                if any(gap(a, b) <= reach + 1e-6 for a in near for b in mine):
+                    return modifier
+    return None
+
+
+def _unit_bases_of_model(game: Game, unit_model):
+    placed = deployment.positions(game)
+    p = placed[unit_model.id]
+    return deployment.base_at(unit_model, p.x, p.y, p.rotation)
 
 
 def _unit_bases(game: Game, unit: Unit) -> list:
@@ -224,15 +293,40 @@ def start_of_fight(game: Game) -> None:
         for u in deployment.deployable_units(p)
         if deployment.is_deployed(u, placed)
     ]
+    # (And the abilities in FIGHT_START_BATTLE_SHOCK - e.g. Terrifying
+    # Monstrosity.)
+    from app.seeds import datasheet_abilities
+
+    names = {VOICES_IN_THE_CODE} | datasheet_abilities.FIGHT_START_BATTLE_SHOCK
+    auras = datasheet_abilities.FIGHT_START_BATTLE_SHOCK_AURAS
+
+    def aura_on(seat: int, unit: Unit) -> str | None:
+        # A friendly aura with it reaching the unit (e.g. Unrestrained Terror:
+        # WAR DOG units within 6").
+        keywords = {k.name for m in unit.unit_models for k in m.model.keywords}
+        mine = _unit_bases(game, unit)
+        for name, how in sorted(auras.items()):
+            if not set(how["keywords"]) <= keywords:
+                continue
+            for other_seat, other in units:
+                if other_seat == seat and _has_ability(other, name) and any(
+                    gap(a, b) <= how["range"] + 1e-6 for a in _unit_bases(game, other) for b in mine
+                ):
+                    return name
+        return None
+
     for seat, voices in units:
-        if not _has_ability(voices, VOICES_IN_THE_CODE):
+        name = next((n for n in sorted(names) if _has_ability(voices, n)), None) or (
+            aura_on(seat, voices) if auras else None
+        )
+        if name is None:
             continue
         near = _unit_bases(game, voices)
         for other_seat, enemy in units:
             if other_seat != seat and any(
                 gap(a, b) <= ENGAGEMENT_RANGE + 1e-6 for a in near for b in _unit_bases(game, enemy)
             ):
-                _test_if_able(game, enemy, VOICES_IN_THE_CODE)
+                _test_if_able(game, enemy, name)
     # Righteous Denunciation: enemy units within 6" of a model with it, at -1.
     from app.seeds.factions.adepta_sororitas import unit_abilities
 
@@ -301,6 +395,21 @@ def rerolls_failed(game: Game, unit) -> bool:
     from app.seeds import factions as faction_seeds
     from app.services.list_building import enhancements as enhancement_rules
 
+    # (The Censer of the Sacred Rose reaching it, too.)
+    from app.seeds.factions.adepta_sororitas import unit_abilities as sororitas
+
+    if sororitas.relic_on(game, unit, sororitas.CENSER):
+        return True
+    # (Or a model leading it has an ability that lets it - e.g. Fiery Faith.)
+    from app.seeds import datasheet_abilities
+
+    leading = datasheet_abilities.LEADING_BATTLE_SHOCK_REROLLS
+    if leading and any(
+        a.name in leading and enhancement_rules.is_leading(unit, m)
+        for m in deployment.models_on_battlefield(game, unit)
+        for a in m.model.abilities
+    ):
+        return True
     configs = faction_seeds.BATTLE_SHOCK_REROLLS
     player = deployment.owner(game, unit)
     models = deployment.models_on_battlefield(game, unit) or list(unit.unit_models)
@@ -374,7 +483,17 @@ def take(
         test.rerolled = [test.first_die, test.second_die]
         test.first_die, test.second_die = (dice.randint(1, 6) for _ in range(DICE))
         test.passed = test.first_die + test.second_die + test.modifier >= needed(game, unit)
-    if not test.passed and dread.delirium(game, unit):
+    if not test.passed and test.wounds is None:
+        # A test an ability made it take, failing which it suffers mortal
+        # wounds (e.g. Holy Judgement - see shooting_start).
+        from app.seeds import datasheet_abilities
+
+        how = datasheet_abilities.START_OF_SHOOTING.get(test.reason, {})
+        if how.get("fail_mortal_wounds"):
+            wounds = how["fail_mortal_wounds"]
+            test.wounds = GameBattleShockWounds(source=test.reason, roll=wounds)
+            casualties.mortal_wounds(game, unit, wounds)
+    if not test.passed and test.wounds is None and dread.delirium(game, unit):
         roll = dice.randint(1, DELIRIUM_DICE)
         test.wounds = GameBattleShockWounds(source="Delirium", roll=roll)
         casualties.mortal_wounds(game, unit, roll)
@@ -446,8 +565,13 @@ def after_shooting(
     if is_battle_shocked(game, target) or any(t.unit_id == target.id for t in pending(game)):
         return
     names = {a.name for m in deployment.models_on_battlefield(game, unit) for a in m.model.abilities}
+    keywords = {k.name for m in target.unit_models for k in m.model.keywords}
+    required = datasheet_abilities.AFTER_SHOOTING_TARGET_KEYWORDS
     for name in sorted(names & set(config)):
         if name in indirect_only and indirect_hits <= 0:
+            continue
+        # (Only a unit with these keywords - e.g. Cursed Flames: INFANTRY.)
+        if name in required and not set(required[name]) <= keywords:
             continue
         require(game, target, name, config[name])
         return

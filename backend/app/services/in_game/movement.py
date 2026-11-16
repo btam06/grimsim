@@ -196,9 +196,27 @@ def allowance(
     return float(max(0, model.movement + change) + extra - skies)
 
 
+def _move_change(game: Game, unit: Unit) -> int:
+    # What's done to its Move characteristic now (e.g. -2 shocked), and what
+    # an aura adds (The Fiery Heart: +2").
+    from app.seeds.factions.adepta_sororitas import unit_abilities as sororitas
+
+    from app.services.in_game import activations, auras
+
+    change = unit_effects.move_change(game, unit)
+    if sororitas.relic_on(game, unit, sororitas.FIERY_HEART):
+        change += sororitas.FIERY_HEART_MOVE
+    # (Auras that add to it - e.g. Relentless March: +2".)
+    change += auras.move_bonus(game, unit)
+    # Halved (Gravitic Pulse): rounding up.
+    if activations.halved(game, unit) and unit.unit_models:
+        change -= unit.unit_models[0].model.movement // 2
+    return change
+
+
 def move_characteristic(game: Game, unit: Unit, model: UnitModel) -> int:
     # The model's Move characteristic now - its effects' changes included.
-    return max(0, model.movement + unit_effects.move_change(game, unit))
+    return max(0, model.movement + _move_change(game, unit))
 
 
 FLY = "FLY"
@@ -225,12 +243,37 @@ def desperate(game: Game, unit: Unit, kind: str) -> bool:
     # Whether its Fall Back move is a Desperate Escape: it's Battle-shocked.
     from app.services.in_game import battle_shock
 
-    return kind == "fall_back" and battle_shock.is_battle_shocked(game, unit)
+    if kind != "fall_back" or not battle_shock.is_battle_shocked(game, unit):
+        return False
+    # (Not when it's within Engagement Range only of enemy FORTIFICATIONS -
+    # Fortification.)
+    from app.services.in_game import shooting
+
+    engaged = [u for u in shooting.enemy_units(game, unit) if shooting.engaged_with(game, unit, u)]
+    return not engaged or not all(
+        any(k.name == "FORTIFICATION" for m in u.unit_models for k in m.model.keywords) for u in engaged
+    )
+
+
+# Translocation Shroud: Advancing, 6" more Move instead of an Advance roll;
+# and its Normal, Advance and Fall Back moves go through models and terrain.
+TRANSLOCATION_SHROUD = "Translocation Shroud"
+SHROUD_ADVANCE = 6
+# Transdimensional Displacement: an Advance move with no maximum distance,
+# through every model - ending more than 8" from every enemy unit.
+TRANSDIMENSIONAL_DISPLACEMENT = "Transdimensional Displacement"
+DISPLACEMENT_CLEARANCE = 8.0
+
+
+def has_ability(unit: Unit, name: str) -> bool:
+    return any(a.name == name for m in unit.unit_models for a in m.model.abilities)
 
 
 def through(game: Game, unit: Unit, kind: str, take_to_skies: bool = False) -> str:
     # What the unit's models can go through on this move (see pathing).
     if take_to_skies and can_fly(unit):
+        return "all"
+    if kind in ("normal", "advance", "fall_back") and has_ability(unit, TRANSLOCATION_SHROUD):
         return "all"
     if desperate(game, unit, kind):
         return "enemies"
@@ -253,6 +296,10 @@ def _check_unit(game: Game, unit: Unit) -> None:
         raise _bad_request("that unit isn't on the battlefield")
     if reinforcements.movement_ended(game):
         raise _bad_request("the movement phase is over")
+    from app.services.in_game import phase_end, phase_start
+
+    if (reason := phase_start.blocks(game) or phase_end.blocks(game)) is not None:
+        raise _bad_request(reason)
     move = unit_move(game, unit)
     if move is not None and move.kind == reinforcements.ARRIVED:
         raise _bad_request("it arrived from Reserves this phase: it can't move again")
@@ -283,6 +330,11 @@ def roll_bonus(game: Game, unit: Unit, roll: str) -> int:
             if regions.near_friendly(game, unit, keywords, reach):
                 value = instead
         best = max(best, value)
+    # (The Fiery Heart: +1 to Advance and Charge rolls.)
+    from app.seeds.factions.adepta_sororitas import unit_abilities as sororitas
+
+    if sororitas.relic_on(game, unit, sororitas.FIERY_HEART):
+        best += sororitas.FIERY_HEART_ROLLS
     return best + unit_effects.roll_change(game, unit, roll)
 
 
@@ -304,11 +356,18 @@ def roll_advance(game: Game, unit: Unit, miracle_die: int | None = None) -> Game
         return move
 
     def roll() -> int:
+        # (Translocation Shroud: no roll - 6" more Move instead.)
+        if has_ability(unit, TRANSLOCATION_SHROUD):
+            return SHROUD_ADVANCE
         if miracle_die is not None:
             die = acts_of_faith.perform(game, unit, acts_of_faith.ADVANCE, miracle_die)
         else:
             die = dice.randint(1, 6)
-        return max(0, die + roll_bonus(game, unit, "advance"))
+        total = max(0, die + roll_bonus(game, unit, "advance"))
+        # (Halved - Gravitic Pulse - rounding up.)
+        from app.services.in_game import activations
+
+        return (total + 1) // 2 if activations.halved(game, unit) else total
 
     if move is not None:
         # Already moved (normally) this phase: roll now.
@@ -333,7 +392,10 @@ def can_reroll_advance(game: Game, unit: Unit) -> bool:
     from app.seeds import datasheet_abilities
 
     move = unit_move(game, unit)
-    names = {a.name for m in unit.unit_models for a in m.model.abilities}
+    # (Its models' abilities, and their wargear's - e.g. a sacred banner.)
+    names = {a.name for m in unit.unit_models for a in m.model.abilities} | {
+        a.name for m in unit.unit_models for g in m.wargear for a in g.abilities
+    }
     return (
         move is not None
         and move.advance_roll is not None
@@ -404,17 +466,23 @@ def check_move(
     enemies = _enemy_bases(game, unit)
     # How far each model moves: round dense terrain and enemy models, unless
     # it can go through them (see app/services/in_game/pathing.py).
-    change = unit_effects.move_change(game, unit)
+    change = _move_change(game, unit)
     pather = pathing.for_unit(
         game, unit, start,
         max((allowance(m, kind, move, take_to_skies, change) for m in models), default=0),
         through(game, unit, kind, take_to_skies),
-        mobile and pathing.is_super_heavy_walker(unit),
+        (mobile and pathing.is_super_heavy_walker(unit))
+        or (kind in ("normal", "advance", "fall_back") and has_ability(unit, TRANSLOCATION_SHROUD)),
+    )
+    # Transdimensional Displacement: an Advance move anywhere, as long as it
+    # ends more than 8" from every enemy model.
+    displaced = kind == "advance" and has_ability(unit, TRANSDIMENSIONAL_DISPLACEMENT) and all(
+        deployment.gap(b, e) > DISPLACEMENT_CLEARANCE + TOLERANCE for b in bases.values() for e in enemies
     )
     for model in models:
         found = []
         limit = allowance(model, kind, move, take_to_skies, change)
-        if problem := pathing.too_far(pather, start[model.id], bases[model.id], limit):
+        if not displaced and (problem := pathing.too_far(pather, start[model.id], bases[model.id], limit)):
             found.append(problem)
         if any(
             deployment.gap(bases[model.id], enemy) <= ENGAGEMENT_RANGE + TOLERANCE

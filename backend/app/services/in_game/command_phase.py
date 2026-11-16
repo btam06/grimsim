@@ -201,6 +201,11 @@ def eligible_after(game: Game, unit: Unit, action: str, to: str) -> bool:
     for name in names & set(datasheet_abilities.ELIGIBLE_AFTER):
         if to in datasheet_abilities.ELIGIBLE_AFTER[name].get(action, ()):
             return True
+    # (Or what it used this turn - e.g. Dark Ritual.)
+    from app.services.in_game import activations
+
+    if activations.eligible_after(game, unit, action, to):
+        return True
     seat = deployment.owner(game, unit).seat
     held = _held_army_rules(unit)
     army_options = [o for a, o in _active_army_choices(game, seat) if a in held]
@@ -517,22 +522,29 @@ def choose_army_rule(
 # --- healing at the start of the Command phase ---
 
 
-def heals(game: Game) -> list[GameCommandHeal]:
-    # The models healed at the start of this Command phase.
+def heals(game: Game, end: bool | None = None) -> list[GameCommandHeal]:
+    # The models healed in this Command phase (`end`: only at its end - or
+    # only at its start).
+    at_end = datasheet_ability_seeds.COMMAND_END_HEALS
     return [
         h
         for h in game.command_heals
         if h.battle_round == game.battle_round and h.seat == game.turn_seat
+        and (end is None or (h.ability in at_end) == end)
     ]
 
 
-def heal(game: Game) -> None:
-    # The start of the Command phase: each of the player whose turn it is's
+def heal(game: Game, end: bool = False) -> None:
+    # The start of the Command phase (or its end, for those healed then -
+    # e.g. Repair Auto-simulacra): each of the player whose turn it is's
     # models on the battlefield with a healing ability rolls its die and
     # regains up to that many lost wounds (once a phase).
-    if heals(game):
+    if heals(game, end):
         return
-    heal_dice = datasheet_ability_seeds.COMMAND_HEALS
+    at_end = datasheet_ability_seeds.COMMAND_END_HEALS
+    heal_dice = {
+        k: v for k, v in datasheet_ability_seeds.COMMAND_HEALS.items() if (k in at_end) == end
+    }
     player = next(p for p in game.players if p.seat == game.turn_seat)
     records = casualties.damage(game)
     for unit in deployment.deployable_units(player):

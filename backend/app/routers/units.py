@@ -296,6 +296,58 @@ def _kind(models: list[Model]) -> str | None:
     return "leader" if any(m.is_leader for m in models) else "support"
 
 
+# Retinues (Cryptek Retinue: Cryptothralls; Canoptek Retinue: Tomb Crawlers):
+# a unit with one can join one other unit in its list that's led by a
+# CRYPTEK model - one retinue to a unit. In a game it's part of that unit
+# (see app/engine/loader.py merge).
+RETINUES = {"Cryptek Retinue": "CRYPTEK", "Canoptek Retinue": "CRYPTEK"}
+
+
+async def _retinue(session: AsyncSession, models: list[Model]) -> bool:
+    ids = [m.id for m in models if m.id is not None]
+    if not ids:
+        return False
+    found = (
+        await session.execute(
+            select(Model).options(selectinload(Model.abilities)).where(Model.id.in_(ids))
+        )
+    ).scalars().all()
+    return bool(found) and all(any(a.name in RETINUES for a in m.abilities) for m in found)
+
+
+async def _check_retinue(session: AsyncSession, payload: UnitIn, unit_id: int | None) -> int:
+    target = (
+        await session.execute(
+            select(Unit)
+            .options(selectinload(Unit.unit_models).selectinload(UnitModel.model))
+            .where(Unit.id == payload.attached_to_id)
+        )
+    ).scalar_one_or_none()
+    if target is None or target.list_id != payload.list_id or target.id == unit_id:
+        raise HTTPException(status_code=400, detail="attached_to_id must be another unit in its list")
+    if target.attached_to_id is not None or _kind([um.model for um in target.unit_models]):
+        raise HTTPException(status_code=400, detail="a retinue joins a Bodyguard unit")
+    attached = (
+        await session.execute(
+            select(Unit)
+            .options(
+                selectinload(Unit.unit_models).selectinload(UnitModel.model).selectinload(Model.keywords),
+                selectinload(Unit.unit_models).selectinload(UnitModel.model).selectinload(Model.abilities),
+            )
+            .where(Unit.attached_to_id == target.id, Unit.id != (unit_id or 0))
+        )
+    ).scalars().all()
+    if not any(
+        any(k.name == "CRYPTEK" for k in um.model.keywords) for other in attached for um in other.unit_models
+    ):
+        raise HTTPException(status_code=400, detail="a retinue joins a unit led by a CRYPTEK model")
+    if any(
+        any(a.name in RETINUES for a in um.model.abilities) for other in attached for um in other.unit_models
+    ):
+        raise HTTPException(status_code=400, detail="that unit already has a retinue")
+    return target.id
+
+
 async def _check_attachment(
     session: AsyncSession, payload: UnitIn, models: list[Model], unit_id: int | None
 ) -> int | None:
@@ -308,6 +360,8 @@ async def _check_attachment(
     if payload.list_id is None:
         raise HTTPException(status_code=400, detail="only a unit in a list can be attached")
     kind = _kind(models)
+    if kind is None and await _retinue(session, models):
+        return await _check_retinue(session, payload, unit_id)
     if kind is None:
         raise HTTPException(
             status_code=400, detail="only a leader or support unit can be attached to a unit"

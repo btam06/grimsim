@@ -104,14 +104,23 @@ def actions(game: Game, units: dict) -> list[Choice]:
                            {"offer_id": offer.id, "value": pool[0]}))
             add(Choice("miracle_psalm", seat, f"{offer.rule}: decline",
                        {"offer_id": offer.id, "value": None}))
-        for healing in state.sacred_healing:
-            add(Choice("sacred_healing", seat, f"Sacred Healing: return 1 to {healing.name}",
-                       {"unit_id": healing.unit_id}))
+        for unit_id, name in state.fiery_conviction.items():
+            add(Choice("fiery_conviction", seat, f"Fiery Conviction: Leadership test ({name})",
+                       {"unit_id": unit_id}))
             if pool:
+                add(Choice("fiery_conviction", seat,
+                           f"Fiery Conviction: discard {pool[0]} for 1CP ({name})",
+                           {"unit_id": unit_id, "discard": pool[0]}))
+        for healing in state.sacred_healing:
+            add(Choice("sacred_healing", seat,
+                       f"{healing.ability}: return {healing.count} to {healing.name}",
+                       {"unit_id": healing.unit_id, "ability": healing.ability}))
+            if pool and healing.discard_count:
                 add(Choice("sacred_healing", seat,
-                           f"Sacred Healing: discard {pool[0]}, return up to D3+1 to "
-                           f"{healing.name}",
-                           {"unit_id": healing.unit_id, "discard": pool[0]}))
+                           f"{healing.ability}: discard {pool[0]}, return up to "
+                           f"{healing.discard_count} to {healing.name}",
+                           {"unit_id": healing.unit_id, "discard": pool[0],
+                            "ability": healing.ability}))
     for unit in g._condemnation_out(game).units:
         for target in unit.targets:
             add(Choice("condemn", seat_of(unit.unit_id),

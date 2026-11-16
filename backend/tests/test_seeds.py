@@ -602,7 +602,12 @@ async def test_seed_weapon_abilities_resyncs_heavy_to_the_heavy_effect(session: 
 async def test_datasheet_ability_options_are_well_formed():
     from app.combat_rules import CONDITIONS, EFFECTS
 
-    seeded = {name for name, _, _, _ in datasheet_abilities.ENTRIES}
+    from app.seeds import wargear_abilities
+
+    # (An aura can be a wargear ability's - e.g. a gloom prism's.)
+    seeded = {name for name, _, _, _ in datasheet_abilities.ENTRIES} | {
+        name for name, _, _, _ in wargear_abilities.ENTRIES
+    }
     assert set(datasheet_abilities.OPTIONS) <= seeded
     for options in datasheet_abilities.OPTIONS.values():
         for option in options.values():
@@ -1474,3 +1479,19 @@ async def test_seed_links_leaders_to_the_datasheets_they_lead(session, monkeypat
         select(LeaderBodyguard.leader_id, LeaderBodyguard.bodyguard_id)
     )).all())
     assert (ids["Test Walker"], ids["Test Squad"]) in links
+
+
+async def test_seed_effects_renames_old_keywords_in_place(session: AsyncSession):
+    from app.seeds import effects as effect_seeds
+
+    old = Effect(keyword="add_two_attacks", name="Add Two Attacks", description=None)
+    session.add(old)
+    await session.commit()
+    await effect_seeds.seed(session)
+    rows = (
+        await session.execute(select(Effect).where(Effect.keyword.like("add_%attack%")))
+    ).scalars().all()
+    keywords = [r.keyword for r in rows]
+    assert "add_two_attacks" not in keywords and keywords.count("add_attacks_2") == 1
+    # (The same row: whatever's linked to it keeps it.)
+    assert any(r.id == old.id and r.keyword == "add_attacks_2" for r in rows)

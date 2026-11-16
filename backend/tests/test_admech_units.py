@@ -45,7 +45,7 @@ def test_monocular_targeting_helms():
 
 def test_rapid_fire_9():
     weapons = {entry[0]: entry for entry in weapon_ability_seeds.ENTRIES}
-    assert weapons["Rapid Fire 9"][3] == ["add_nine_attacks"]
+    assert weapons["Rapid Fire 9"][3] == ["add_attacks_9"]
 
 
 async def test_optimised_gait(client: AsyncClient, session, tmp_path):

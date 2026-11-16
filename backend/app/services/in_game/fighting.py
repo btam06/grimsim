@@ -170,9 +170,10 @@ def locked_models(game: Game, unit: Unit) -> set[int]:
 def _phase_start_block(game: Game) -> str | None:
     # (The opponent's abilities for the start of the phase come first - e.g.
     # Defend the Divine Work.)
-    from app.services.in_game import phase_start
+    # (Nor can anything happen once it's ending.)
+    from app.services.in_game import phase_end, phase_start
 
-    return phase_start.blocks(game)
+    return phase_start.blocks(game) or phase_end.blocks(game)
 
 
 def cant_pile_in_reason(game: Game, unit: Unit) -> str | None:

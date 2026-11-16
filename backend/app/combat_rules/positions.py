@@ -1,4 +1,7 @@
 from app.combat_rules.conditions import (
+    ATTACKER_STATIONARY,
+    TARGET_IS_CLOSEST,
+    TARGET_WITHIN_12,
     TARGET_ENGAGED,
     WITHIN_12_OF_TARGET,
     BELOW_HALF_STRENGTH,
@@ -104,7 +107,7 @@ POSITIONS = {
 # (e.g. Doctrina Imperatives, Breaching Command).
 POSITION_CONDITIONS = {
     TARGET_ENGAGED: {"attacker": set(), "defender": set()},
-    WITHIN_12_OF_TARGET: {"attacker": set(), "defender": set()},
+    WITHIN_12_OF_TARGET: {"attacker": {TARGET_WITHIN_12}, "defender": set()},
     NEAR_ADMECH_BATTLELINE: {
         "attacker": {
             ATTACKER_NEAR_ADMECH_BATTLELINE,
@@ -113,7 +116,10 @@ POSITION_CONDITIONS = {
         "defender": {MELEE_VS_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE},
     },
     IN_RANGE_OF_OBJECTIVE: {"attacker": set(), "defender": {DEFENDER_IN_RANGE_OF_OBJECTIVE}},
-    REMAINED_STATIONARY: {"attacker": {STATIONARY_RANGED_CRITICAL_HIT}, "defender": set()},
+    REMAINED_STATIONARY: {
+        "attacker": {STATIONARY_RANGED_CRITICAL_HIT, ATTACKER_STATIONARY},
+        "defender": set(),
+    },
     ISOLATED_TARGET: {"attacker": {TARGET_ISOLATED}, "defender": set()},
     BELOW_STARTING_STRENGTH: {
         "attacker": {ATTACKER_BELOW_STARTING_STRENGTH},
@@ -130,6 +136,7 @@ POSITION_CONDITIONS = {
     WITHIN_POWER_MATRIX: {"attacker": {ATTACKER_IN_POWER_MATRIX}, "defender": set()},
     TARGETING_CLOSEST_ELIGIBLE: {
         "attacker": {
+            TARGET_IS_CLOSEST,
             DESTROYER_CULT_RANGED_VS_CLOSEST,
             RANGED_VS_CLOSEST,
             RANGED_VS_CLOSEST_ON_OBJECTIVE,

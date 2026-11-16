@@ -128,6 +128,11 @@ def blocks(game: Game, unit: Unit, what: str) -> str | None:
         return None
     if what == "shoot" and "TITANIC" in _keywords(unit):
         return None
+    # (Or an ability lets it shoot anyway - e.g. Network Override.)
+    from app.seeds import datasheet_abilities
+
+    if what == "shoot" and _abilities(unit, game) & datasheet_abilities.ACTION_SHOOTS:
+        return None
     return f"it started an action this turn ({action.action})"
 
 
@@ -138,15 +143,34 @@ def moved(game: Game, unit: Unit) -> None:
             record.status = "failed"
 
 
-def _act_after(unit: Unit) -> set[str]:
+def _abilities(unit: Unit, game: Game | None = None) -> set[str]:
+    # The unit's abilities that work now - those needing a model with a
+    # keyword in the unit (datasheet_abilities UNIT_REQUIRES - e.g. Network
+    # Override, a TECH-PRIEST) only while it has one (in `game`, alive).
+    from app.seeds import datasheet_abilities
+    from app.services.in_game import casualties
+
+    requires = datasheet_abilities.UNIT_REQUIRES
+    names = {a.name for m in unit.unit_models for a in m.model.abilities}
+    if not names & set(requires):
+        return names
+    lost = casualties.damage(game) if game is not None else {}
+    keywords = {
+        k.name
+        for m in unit.unit_models
+        if not (m.id in lost and lost[m.id].destroyed)
+        for k in m.model.keywords
+    }
+    return {n for n in names if n not in requires or requires[n] in keywords}
+
+
+def _act_after(unit: Unit, game: Game | None = None) -> set[str]:
     # The moves the unit's abilities let it start an action after
     # (datasheet_abilities ACTION_AFTER).
     from app.seeds import datasheet_abilities
 
     config = datasheet_abilities.ACTION_AFTER
-    return {
-        move for m in unit.unit_models for a in m.model.abilities for move in config.get(a.name, ())
-    }
+    return {move for name in _abilities(unit, game) for move in config.get(name, ())}
 
 
 def can_act(game: Game, unit: Unit) -> str | None:
@@ -173,9 +197,9 @@ def can_act(game: Game, unit: Unit) -> str | None:
         return "its OC is 0"
     status = shooting.move_status(game, unit)
     # (An ability can let it anyway - e.g. Flexible Asset.)
-    if status.advanced and "advanced" not in _act_after(unit):
+    if status.advanced and "advanced" not in _act_after(unit, game):
         return "it Advanced this turn"
-    if status.fell_back and "fell_back" not in _act_after(unit):
+    if status.fell_back and "fell_back" not in _act_after(unit, game):
         return "it Fell Back this turn"
     if movement.in_engagement_range(game, unit) and "TITANIC" not in keywords:
         return "it's engaged"

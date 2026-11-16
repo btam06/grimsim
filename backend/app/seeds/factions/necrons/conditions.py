@@ -32,6 +32,8 @@ MURDER_MADNESS_CRITICAL_HIT = "murder_madness_critical_hit"
 PROPHET_OF_DESTRUCTION_TARGET = "prophet_of_destruction_target"
 ENMITIC_EXTERMINATOR_VS_NON_MONSTER = "enmitic_exterminator_vs_non_monster"
 GAUSS_DESTRUCTOR_VS_MONSTER = "gauss_destructor_vs_monster"
+DOOMSDAY_CANNON_WEAPON = "doomsday_cannon_weapon"
+TARGET_MODEL_CRYPTEK = "target_model_cryptek"
 TARGET_LED_BY_NOBLE = "target_led_by_noble"
 IMPLACABLE_TARGET_MODEL = "implacable_target_model"
 MELEE_CRITICAL_HIT = "melee_critical_hit"
@@ -236,7 +238,21 @@ def melee_critical_hit(context: dict) -> bool:
     return critical_hit(context) and not context.get("is_ranged", True)
 
 
+
+def doomsday_cannon_weapon(context: dict) -> bool:
+    # The attack is made with a doomsday cannon - e.g. Overwhelming
+    # Obliteration.
+    return context.get("weapon_name", "").lower().startswith("doomsday cannon")
+
+
+def target_model_cryptek(context: dict) -> bool:
+    # A defending CRYPTEK model (checked per model) - e.g. Bound Creation's
+    # Feel No Pain 4+.
+    return "CRYPTEK" in context.get("target_model_keywords", set())
+
 CONDITIONS = {
+    TARGET_MODEL_CRYPTEK: target_model_cryptek,
+    DOOMSDAY_CANNON_WEAPON: doomsday_cannon_weapon,
     ENMITIC_EXTERMINATOR_VS_NON_MONSTER: enmitic_exterminator_vs_non_monster,
     GAUSS_DESTRUCTOR_VS_MONSTER: gauss_destructor_vs_monster,
     TARGET_LED_BY_NOBLE: target_led_by_noble,
@@ -265,6 +281,16 @@ CONDITIONS = {
 
 # Seeded Condition rows: (keyword, name, description).
 ENTRIES = [
+    (
+        TARGET_MODEL_CRYPTEK,
+        "Target Model CRYPTEK",
+        "A defending CRYPTEK model (checked per model).",
+    ),
+    (
+        DOOMSDAY_CANNON_WEAPON,
+        "Doomsday Cannon Weapon",
+        "The attack is made with a doomsday cannon (checked by its name).",
+    ),
     (
         ENMITIC_EXTERMINATOR_VS_NON_MONSTER,
         "Enmitic Exterminator vs non-Monster/Vehicle",

@@ -1,6 +1,6 @@
 from app.combat_rules import Rule
 from app.combat_rules.conditions import MELEE_ATTACK
-from app.combat_rules.effects import ADD_EXTRA_ATTACK, REROLL_FAILED_WOUNDS
+from app.combat_rules.effects import ADD_ATTACKS_1, REROLL_FAILED_WOUNDS
 from app.seeds.factions.adepta_sororitas.conditions import ATTACKER_BELOW_HALF_STRENGTH
 from app.seeds.factions.space_marines.conditions import MELEE_PRE_WEAPON
 
@@ -20,7 +20,7 @@ RULES = {
     "Sanctified Blows": [
         Rule(
             conditions=(MELEE_PRE_WEAPON,),
-            effects=(ADD_EXTRA_ATTACK,),
+            effects=(ADD_ATTACKS_1,),
             description="+1 Attacks for melee weapons.",
         ),
     ],

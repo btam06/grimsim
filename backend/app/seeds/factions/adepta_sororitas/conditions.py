@@ -14,6 +14,11 @@ RANGED_TARGET_WITHIN_6 = "ranged_target_within_6"
 RANGED_CRITICAL_WOUND = "ranged_critical_wound"
 TORRENT_CRITICAL_WOUND = "torrent_critical_wound"
 RANGED_VS_SORORITAS_KILLER = "ranged_vs_sororitas_killer"
+ATTACKER_HAS_AESTRED_THURGA = "attacker_has_aestred_thurga"
+ATTACKER_HAS_MINISTORUM_PRIEST = "attacker_has_ministorum_priest"
+REPENTIA_OVERSEEN_MELEE = "repentia_overseen_melee"
+CELESTINE_WITH_GEMINAE = "celestine_with_geminae"
+ARCO_FLAILS_WEAPON = "arco_flails_weapon"
 
 # The calculator's Positioning (see app/combat_rules/positions.py): the target
 # is within 6" of the attacking unit (measured in a game).
@@ -84,6 +89,44 @@ def ranged_vs_sororitas_killer(context: dict) -> bool:
     )
 
 
+def attacker_has_aestred_thurga(context: dict) -> bool:
+    # The attacking unit contains an Aestred Thurga model - e.g. Auto-Tapestry
+    # of the Emperor's Judgement.
+    return "Aestred Thurga" in context.get("attacker_unit_model_names", ())
+
+
+def attacker_has_ministorum_priest(context: dict) -> bool:
+    # The attacking unit contains a MINISTORUM PRIEST model (e.g. one leading
+    # it) - e.g. Ministorum Sermon.
+    return any(
+        "MINISTORUM PRIEST" in keywords
+        for keywords in context.get("attacker_unit_model_keywords", ())
+    )
+
+
+def repentia_overseen_melee(context: dict) -> bool:
+    # A Sister Repentia model's melee attack while its unit contains a
+    # Repentia Superior model - Overseer of Redemption.
+    return (
+        not context.get("is_ranged", False)
+        and context.get("attacker_model_name") == "Sister Repentia"
+        and "Repentia Superior" in context.get("attacker_unit_model_names", ())
+    )
+
+
+def celestine_with_geminae(context: dict) -> bool:
+    # The Celestine model, checked per model, while her unit contains one or
+    # more Geminae Superia models - Lifewards.
+    return context.get("target_model_name") == "Celestine" and "Geminae Superia" in context.get(
+        "defender_unit_model_names", ()
+    )
+
+
+def arco_flails_weapon(context: dict) -> bool:
+    # An attack made with arco-flails - e.g. Extremis Trigger Word.
+    return context.get("weapon_name") == "Arco-flails"
+
+
 CONDITIONS = {
     ATTACKER_BELOW_STARTING_STRENGTH: attacker_below_starting_strength,
     ATTACKER_BELOW_HALF_STRENGTH: attacker_below_half_strength,
@@ -91,6 +134,11 @@ CONDITIONS = {
     RANGED_CRITICAL_WOUND: ranged_critical_wound,
     TORRENT_CRITICAL_WOUND: torrent_critical_wound,
     RANGED_VS_SORORITAS_KILLER: ranged_vs_sororitas_killer,
+    ATTACKER_HAS_AESTRED_THURGA: attacker_has_aestred_thurga,
+    ATTACKER_HAS_MINISTORUM_PRIEST: attacker_has_ministorum_priest,
+    REPENTIA_OVERSEEN_MELEE: repentia_overseen_melee,
+    CELESTINE_WITH_GEMINAE: celestine_with_geminae,
+    ARCO_FLAILS_WEAPON: arco_flails_weapon,
 }
 
 # (keyword, name, description), seeded as Condition rows.
@@ -125,5 +173,30 @@ ENTRIES = [
         "Ranged Attack vs Sororitas Killer",
         "A ranged attack against a unit that has destroyed one or more ADEPTA SORORITAS units "
         "of the attacking army this battle.",
+    ),
+    (
+        ATTACKER_HAS_AESTRED_THURGA,
+        "Attacker Has Aestred Thurga",
+        "The attacking unit contains an Aestred Thurga model.",
+    ),
+    (
+        ATTACKER_HAS_MINISTORUM_PRIEST,
+        "Attacker Has a Ministorum Priest",
+        "The attacking unit contains a MINISTORUM PRIEST model.",
+    ),
+    (
+        REPENTIA_OVERSEEN_MELEE,
+        "Overseen Sister Repentia Melee Attack",
+        "A Sister Repentia model's melee attack while its unit contains a Repentia Superior.",
+    ),
+    (
+        CELESTINE_WITH_GEMINAE,
+        "Celestine With Geminae Superia",
+        "The Celestine model, while her unit contains one or more Geminae Superia models.",
+    ),
+    (
+        ARCO_FLAILS_WEAPON,
+        "Arco-flails",
+        "An attack made with arco-flails.",
     ),
 ]
