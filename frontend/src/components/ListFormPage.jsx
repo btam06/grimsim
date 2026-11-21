@@ -145,12 +145,20 @@ function ListFormPage({
   // Only categories with units in them, in UNIT_CATEGORIES order, then Other.
   // Leader and support units attached to another of the list's units are
   // shown under it, not in their own category.
-  const attachedTo = (unit) => unitsInThisList.filter((u) => u.attached_to_id === unit.id)
+  // Units in each category (and those attached to one) by datasheet name.
+  const datasheetName = (u) => factionUnits.find((fu) => fu.id === u.faction_unit_id)?.name ?? ''
+  const alphabetical = (list) =>
+    [...list].sort((a, b) => datasheetName(a).localeCompare(datasheetName(b)) || a.id - b.id)
+  const attachedTo = (unit) =>
+    alphabetical(unitsInThisList.filter((u) => u.attached_to_id === unit.id))
   const shownOnTheirOwn = unitsInThisList.filter(
     (u) => u.attached_to_id === null || !unitsInThisList.some((t) => t.id === u.attached_to_id)
   )
   const unitGroups = [...UNIT_CATEGORIES.map((c) => c.label), 'Other']
-    .map((label) => ({ label, units: shownOnTheirOwn.filter((u) => categoryOf(u) === label) }))
+    .map((label) => ({
+      label,
+      units: alphabetical(shownOnTheirOwn.filter((u) => categoryOf(u) === label)),
+    }))
     .filter((group) => group.units.length > 0)
   const modelName = (id) => models.find((m) => m.id === id)?.name ?? `#${id}`
   const weaponName = (id) => weapons.find((w) => w.id === id)?.name ?? `#${id}`

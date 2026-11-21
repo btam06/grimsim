@@ -7,7 +7,7 @@ from app.db import get_session
 from app.models import Faction, FactionUnit, LeaderBodyguard
 from app.schemas import (
     FactionUnitIn, FactionUnitOut, LoadoutChoiceOut, LoadoutItemsOut, LoadoutOptionOut,
-    LoadoutOut, LoadoutPartOut, LoadoutVariantOut,
+    LoadoutGroupOut, LoadoutOut, LoadoutPartOut, LoadoutVariantOut,
 )
 from app.services.list_building import loadouts
 
@@ -87,17 +87,30 @@ async def get_loadout(faction_unit_id: int, session: AsyncSession = Depends(get_
         ],
         variants=[
             LoadoutVariantOut(
-                model_id=v.model.id, name=v.name, options=sorted(v.used), **items(v.model, v.items)
+                model_id=v.model.id, name=v.name, options=sorted(v.used), picks=v.picks,
+                **items(v.model, v.items),
             )
             for part in loadout.sergeant_first()
             for v in loadout_variants(loadout, part)
+        ],
+        groups=[
+            LoadoutGroupOut(
+                model_id=g.model.id, name=g.name, options=g.options,
+                choices=[c.name for c in g.choices],
+            )
+            for part in loadout.sergeant_first()
+            for g in loadouts.groups(part, model_options(loadout, part))
         ],
         auto=loadout.auto,
     )
 
 
+def model_options(loadout, part):
+    return [o for o in loadout.options if o.model.id == part.model.id]
+
+
 def loadout_variants(loadout, part):
-    return loadouts.variants(part, [o for o in loadout.options if o.model.id == part.model.id])
+    return loadouts.variants(part, model_options(loadout, part))
 
 
 @router.put("/{faction_unit_id}/bodyguards", response_model=FactionUnitOut)

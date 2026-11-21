@@ -228,3 +228,60 @@ def test_a_weapons_ranged_and_melee_profiles_are_one_weapon():
     assert loadouts.items_of(stubbers, []) == {"heavystubber": 2}
     assert loadouts.ids_for(model, {"electrostaticgauntlets": 1}) == ([1, 2], [])
     assert loadouts.ids_for(model, {"heavystubber": 1}) == ([3], [])
+
+
+async def test_options_that_dont_depend_on_each_other_are_picked_separately(
+    client: AsyncClient, session: AsyncSession, faction_id: int
+):
+    # An Onager Dunecrawler: its beamer swap, an extra stubber and a
+    # data-tether are three pickers, not 4 x 2 x 2 loadouts in one.
+    crawler, weapons = await _model(client, faction_id, "Onager Dunecrawler", [
+        ("Eradication beamer", False, False), ("Daedalus missile launcher", False, False),
+        ("Icarus array", False, False), ("Neutron laser", False, False),
+        ("Cognis heavy stubber", False, False), ("Twin Onager heavy phosphor blaster", False, False),
+    ])
+    tether = (
+        await client.post("/wargear", json={"name": "Broad spectrum data-tether", "model_id": crawler})
+    ).json()["id"]
+    unit_id = (
+        await client.post("/faction-units", json={"name": "Onager Dunecrawler", "faction_id": faction_id})
+    ).json()["id"]
+    session.add(DatasheetLoadout(
+        faction_unit_id=unit_id, models=["Onager Dunecrawler"],
+        composition=[{"model": "Onager Dunecrawler", "min": 1, "max": 1, "equipped": ["Eradication beamer"]}],
+        options=[
+            {"model": "Onager Dunecrawler", "replace": ["Eradication beamer"], "with": [
+                ["Daedalus missile launcher", "Icarus array"], ["Neutron laser", "Cognis heavy stubber"],
+                ["Twin Onager heavy phosphor blaster"],
+            ]},
+            {"model": "Onager Dunecrawler", "with": [["Cognis heavy stubber"]]},
+            {"model": "Onager Dunecrawler", "with": [["Broad spectrum data-tether"]]},
+        ],
+    ))
+    await session.commit()
+
+    loadout = (await client.get(f"/faction-units/{unit_id}/loadout")).json()
+    groups = {g["name"]: g for g in loadout["groups"]}
+    assert set(groups) == {"Eradication beamer", "Cognis heavy stubber", "Broad spectrum data-tether"}
+    assert groups["Eradication beamer"]["choices"][0] == "Eradication beamer"
+    assert len(groups["Eradication beamer"]["choices"]) == 4
+    assert groups["Broad spectrum data-tether"]["choices"] == ["None", "Broad spectrum data-tether"]
+    assert len(loadout["variants"]) == 16
+
+    # Neutron laser (with its stubber), plus the extra stubber, plus the tether.
+    order = [g["name"] for g in loadout["groups"]]
+    picks = [0] * 3
+    picks[order.index("Eradication beamer")] = groups["Eradication beamer"]["choices"].index(
+        "Cognis heavy stubber, Neutron laser"
+    )
+    picks[order.index("Cognis heavy stubber")] = 1
+    picks[order.index("Broad spectrum data-tether")] = 1
+    [variant] = [v for v in loadout["variants"] if v["picks"] == picks]
+    assert variant["wargear_ids"] == [tether]
+    assert weapons["Neutron laser"] in variant["weapon_ids"]
+    assert weapons["Cognis heavy stubber"] in variant["weapon_ids"]
+    assert weapons["Eradication beamer"] not in variant["weapon_ids"]
+    made = await client.post("/units", json={"faction_unit_id": unit_id, "unit_models": [
+        _member(crawler, *variant["weapon_ids"], wargear=variant["wargear_ids"]),
+    ]})
+    assert made.status_code == 201, made.text

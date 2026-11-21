@@ -211,11 +211,31 @@ def ways(start: Counter, options: list[Option], target: Counter) -> list[frozens
 
 @dataclass
 class Variant:
-    # One way a model can be equipped: the options it took, and its items.
+    # One way a model can be equipped: the options it took, its items, and
+    # which choice of each of the model's option groups it is (`picks`).
     model: Model
     used: frozenset[int]
     items: Counter
     name: str
+    picks: list[int] = field(default_factory=list)
+
+
+@dataclass
+class GroupChoice:
+    used: frozenset[int]
+    items: Counter
+    name: str
+
+
+@dataclass
+class Group:
+    # Options of a model that depend on each other (one replaces or requires
+    # what another replaces or adds), picked between together; a model's
+    # groups are picked independently.
+    model: Model
+    options: list[int]
+    name: str
+    choices: list[GroupChoice]
 
 
 # (More than this many ways to equip one model aren't listed.)
@@ -228,11 +248,32 @@ def _display_names(model: Model) -> dict[str, str]:
     return names
 
 
-def variants(part: Part, options: list[Option]) -> list[Variant]:
-    # Every loadout the model can have - as equipped first, then by how many
-    # options it takes - each named by what it has that it doesn't start
-    # with (or just the model's name, if it has no options).
-    start = _strip(part.equipped)
+def _keys(counter: Counter) -> set[str]:
+    return set(_strip(counter))
+
+
+def _depends(a: Option, b: Option) -> bool:
+    # Whether `a` needs what `b` replaces or adds.
+    needs = _keys(a.replace) | _keys(a.requires)
+    touched = _keys(b.replace).union(*(_keys(c) for c in b.choices))
+    return bool(needs & touched)
+
+
+def option_groups(options: list[Option]) -> list[list[Option]]:
+    # The options split into groups that don't depend on each other, in
+    # the order the data lists them.
+    groups: list[list[Option]] = []
+    for option in options:
+        joined = [g for g in groups if any(_depends(option, o) or _depends(o, option) for o in g)]
+        merged = [o for g in joined for o in g] + [option]
+        groups = [g for g in groups if g not in joined]
+        groups.append(sorted(merged, key=lambda o: o.index))
+    return sorted(groups, key=lambda g: g[0].index)
+
+
+def _walk(start: Counter, options: list[Option]) -> dict[frozenset, frozenset[int]]:
+    # Every item set reachable from `start`, with the fewest options that
+    # reach it.
     found: dict[frozenset, frozenset[int]] = {}
     seen: set = set()
 
@@ -252,21 +293,73 @@ def variants(part: Part, options: list[Option]) -> list[Variant]:
                 walk(_strip(current - option.replace + choice), used | {option.index})
 
     walk(start, frozenset())
+    return found
+
+
+def _label(start: Counter, items: Counter, names: dict[str, str]) -> str:
+    # What a loadout has that it doesn't start with ("" for as equipped).
+    extra = items - start
+    label = ", ".join(
+        (f"{n} {names.get(k, k)}" if n > 1 else names.get(k, k))
+        for k, n in sorted(extra.items(), key=lambda kv: names.get(kv[0], kv[0]))
+    )
+    if not label and start - items:
+        label = "without " + ", ".join(names.get(k, k) for k in start - items)
+    return label
+
+
+def groups(part: Part, options: list[Option]) -> list[Group]:
+    # The model's option groups, each with its choices: as equipped first
+    # (named by what its options replace, or "None" when they only add),
+    # then by how many options they take.
+    start = _strip(part.equipped)
     names = _display_names(part.model)
     out = []
-    for items, used in found.items():
-        items = Counter(dict(items))
-        extra = items - start
-        label = ", ".join(
-            (f"{n} {names.get(k, k)}" if n > 1 else names.get(k, k))
-            for k, n in sorted(extra.items(), key=lambda kv: names.get(kv[0], kv[0]))
+    for group in option_groups(options):
+        replaced = sorted(set().union(*(_keys(o.replace) for o in group)) & set(start))
+        added = sorted(set().union(*(_keys(c) for o in group for c in o.choices)) - set(start))
+        title = ", ".join(names.get(k, k) for k in (replaced or added))
+        choices = [
+            GroupChoice(
+                used=used, items=Counter(dict(items)),
+                name=_label(start, Counter(dict(items)), names)
+                or (title if replaced else "None"),
+            )
+            for items, used in _walk(start, group).items()
+        ]
+        choices.sort(key=lambda c: (len(c.used), c.name))
+        out.append(Group(model=part.model, options=[o.index for o in group], name=title, choices=choices))
+    return out
+
+
+def variants(part: Part, options: list[Option]) -> list[Variant]:
+    # Every loadout the model can have - a choice from each of its option
+    # groups; as equipped first, then by how many options it takes - each
+    # named by what it has that it doesn't start with (or just the model's
+    # name, if it has no options).
+    start = _strip(part.equipped)
+    names = _display_names(part.model)
+    found: dict[frozenset, Variant] = {}
+    combos: list[tuple[list[int], frozenset[int], dict]] = [([], frozenset(), dict(start))]
+    for group in groups(part, options):
+        combos = [
+            (picks + [i], used | choice.used, {
+                k: items.get(k, 0) + choice.items.get(k, 0) - start.get(k, 0)
+                for k in set(items) | set(choice.items)
+            })
+            for picks, used, items in combos
+            for i, choice in enumerate(group.choices)
+        ][:MAX_VARIANTS]
+    for picks, used, items in combos:
+        items = _strip(Counter(items))
+        frozen = frozenset(items.items())
+        if frozen in found and len(found[frozen].used) <= len(used):
+            continue
+        found[frozen] = Variant(
+            model=part.model, used=used, items=items, picks=picks,
+            name=f"{part.model.name} — {_label(start, items, names) or 'as equipped'}",
         )
-        if not label and start - items:
-            label = "without " + ", ".join(names.get(k, k) for k in start - items)
-        out.append(Variant(
-            model=part.model, used=used, items=items,
-            name=f"{part.model.name} — {label or 'as equipped'}",
-        ))
+    out = list(found.values())
     if len(out) == 1:
         # (No other way to equip it: just its name.)
         out[0].name = part.model.name

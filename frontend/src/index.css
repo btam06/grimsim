@@ -190,6 +190,17 @@ section form input[type='radio'] {
   min-width: 0;
 }
 
+.unit-slot__group + .unit-slot__group {
+  margin-top: 0.6rem;
+}
+
+.unit-slot__group-name {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.85em;
+  opacity: 0.75;
+}
+
 .unit-slot > .card-accordion.MuiAccordion-root {
   margin: 0;
 }

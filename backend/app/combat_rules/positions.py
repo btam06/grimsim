@@ -24,6 +24,7 @@ from app.seeds.factions.adeptus_mechanicus.conditions import (
     ATTACKER_NEAR_ADMECH_BATTLELINE,
     ATTACKER_OR_TARGET_ON_ACQUISITION,
     DEFENDER_ON_ACQUISITION,
+    FIRE_SUPPORT_TARGET,
     MELEE_VS_BATTLELINE_OR_NEAR_ADMECH_BATTLELINE,
     NEAR_ADMECH_BATTLELINE,
     ON_ACQUISITION,
@@ -96,6 +97,9 @@ POSITIONS = {
         'A friendly ADEPTUS MECHANICUS VEHICLE model was destroyed within 12" '
         "(Vengeance for the Omnissiah)"
     ),
+    FIRE_SUPPORT_TARGET: (
+        "Disembarked this turn from a transport whose Fire Support picked out the target"
+    ),
     ON_ACQUISITION: "Within range of its army's Acquisition objective marker",
     TARGET_ON_ACQUISITION: (
         "Target is within range of the attacking army's Acquisition objective marker"
@@ -157,6 +161,9 @@ POSITION_CONDITIONS = {
     TARGET_KILLED_SORORITAS: {"attacker": {RANGED_VS_SORORITAS_KILLER}, "defender": set()},
     CONTROLLING_OBJECTIVE: {"attacker": set(), "defender": {DEFENDER_CONTROLLING_OBJECTIVE}},
     VENGEANCE: {"attacker": {VENGEANCE_ACTIVE}, "defender": set()},
+    # (Asked about by the transport's ability, not the unit's: see
+    # app/routers/combat.py relevant_positions.)
+    FIRE_SUPPORT_TARGET: {"attacker": set(), "defender": set()},
     ON_ACQUISITION: {
         "attacker": {ATTACKER_OR_TARGET_ON_ACQUISITION},
         "defender": {DEFENDER_ON_ACQUISITION},

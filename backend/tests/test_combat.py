@@ -7218,3 +7218,72 @@ def test_attacks_damage_and_hazard_rolls_are_offered(monkeypatch):
     assert result.attack_rolls == [6, 6] and result.hazardous_rolls == [3]
     assert any("Attacks roll of 1" in c and "re-rolled: 2" in c for c in result.choices)
     assert result.total_damage == 5
+
+
+async def test_fire_support_is_offered_to_units_its_transport_could_carry(
+    client: AsyncClient, session, faction_id: int, monkeypatch
+):
+    # A Skorpius Dunerider's Fire Support is the transport's ability: the
+    # attacker is asked about it when its list has one that could carry it,
+    # and ticking it re-rolls the attacker's failed Wound rolls.
+    from app.models import Model
+    from app.models.model import TransportCapacity
+    from app.seeds import conditions as conditions_seed
+    from app.seeds import datasheet_abilities as datasheet_abilities_seed
+    from app.seeds import effects as effects_seed
+
+    await conditions_seed.seed(session)
+    await effects_seed.seed(session)
+    await datasheet_abilities_seed.seed(session)
+    fire_support = next(
+        a["id"]
+        for a in (await client.get("/datasheet-abilities")).json()
+        if a["name"] == "Fire Support"
+    )
+    attacker_id, defender_id, weapon_id = await _combat_units_in_list(client, faction_id, [])
+    from app.models import Unit
+
+    list_id = (await session.get(Unit, attacker_id)).list_id
+
+    async def offered() -> bool:
+        response = await client.get(
+            "/combat/positions", params={"unit_id": attacker_id, "side": "attacker"}
+        )
+        return "fire_support_target" in [p["id"] for p in response.json()]
+
+    assert not await offered()
+
+    async def transport(name, required=()):
+        model_id = await _create_model(client, faction_id, name=name, ability_ids=[fire_support])
+        model = await session.get(Model, model_id)
+        model.transport = TransportCapacity(capacity=12, keywords=tuple(required))
+        await session.commit()
+        response = await client.post("/units", json={
+            "faction_unit_id": await _create_faction_unit(client, faction_id, name),
+            "points": 100, "list_id": list_id,
+            "unit_models": [{"model_id": model_id, "weapon_ids": []}],
+        })
+        assert response.status_code == 201
+
+    # (One that only carries INFANTRY can't carry it.)
+    await transport("Infantry Carrier", required=["INFANTRY"])
+    assert not await offered()
+    await transport("Dunerider")
+    assert await offered()
+
+    # Wound rolls of 1 then 6: re-rolled, the attack wounds.
+    rolls = iter([6, 1, 6, 1])
+    monkeypatch.setattr("app.services.dice.randint", lambda a, b: next(rolls))
+
+    async def damage(positions):
+        nonlocal rolls
+        rolls = iter([6, 1, 6, 1])
+        response = await client.post("/combat", json={
+            "attacking_unit_id": attacker_id, "defending_unit_id": defender_id,
+            "selected_weapon_ids": [weapon_id], "attacker_positions": positions,
+        })
+        assert response.status_code == 200, response.text
+        return response.json()["total_damage"]
+
+    assert await damage([]) == 0
+    assert await damage(["fire_support_target"]) == 1

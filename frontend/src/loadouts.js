@@ -8,6 +8,7 @@ export const EMPTY_LOADOUT = {
   composition: [],
   options: [],
   variants: [],
+  groups: [],
   auto: false,
 }
 
@@ -94,6 +95,19 @@ export function withSlotAs(loadout, slots, at, variant) {
     i === at ? { ...variantSlot(variant), enhancement_id: s.enhancement_id } : s
   )
   return withinLimits(loadout, next, variant.options) ? next : null
+}
+
+// A model's option groups: options picked between together (each group is
+// picked on its own - a vehicle's weapon swap apart from its extra wargear).
+export const groupsOf = (loadout, modelId) =>
+  (loadout.groups ?? []).filter((g) => String(g.model_id) === String(modelId))
+
+// The variant with one group's pick changed (undefined: no such loadout).
+export function variantWithPick(loadout, variant, group, pick) {
+  const picks = variant.picks.map((p, i) => (i === group ? pick : p))
+  return loadout.variants.find(
+    (v) => v.model_id === variant.model_id && v.picks.join() === picks.join()
+  )
 }
 
 // What a model starts with that its options can replace - or, when they

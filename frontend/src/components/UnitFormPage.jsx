@@ -23,8 +23,10 @@ import {
   ordered,
   partFor,
   startingSlots,
+  groupsOf,
   variantLabel,
   variantOf,
+  variantWithPick,
   withModel,
   withSlotAs,
 } from '../loadouts'
@@ -560,15 +562,40 @@ function UnitFormPage({
                       expanded={openSlot === i}
                       onChange={(open) => setOpenSlot(open ? i : null)}
                     >
-                      <ChoiceBoxes
-                        label={`${name} loadout`}
-                        options={choices.map((v) => ({
-                          id: v.name,
-                          label: variantLabel(loadout, v, name, itemNameOf),
-                        }))}
-                        value={current?.name}
-                        onChange={(id) => changeLoadout(i, choices.find((v) => v.name === id))}
-                      />
+                      {current && groupsOf(loadout, s.model_id).length > 1 ? (
+                        // Each group of its options picked on its own.
+                        groupsOf(loadout, s.model_id).map((group, g) => {
+                          const picks = group.choices
+                            .map((label, pick) => ({
+                              label,
+                              variant: variantWithPick(loadout, current, g, pick),
+                            }))
+                            .filter((c) => c.variant && choices.includes(c.variant))
+                          return (
+                            <div key={g} className="unit-slot__group">
+                              <span className="unit-slot__group-name">{group.name}</span>
+                              <ChoiceBoxes
+                                label={`${name}: ${group.name}`}
+                                options={picks.map((c) => ({ id: c.variant.name, label: c.label }))}
+                                value={current.name}
+                                onChange={(id) =>
+                                  changeLoadout(i, choices.find((v) => v.name === id))
+                                }
+                              />
+                            </div>
+                          )
+                        })
+                      ) : (
+                        <ChoiceBoxes
+                          label={`${name} loadout`}
+                          options={choices.map((v) => ({
+                            id: v.name,
+                            label: variantLabel(loadout, v, name, itemNameOf),
+                          }))}
+                          value={current?.name}
+                          onChange={(id) => changeLoadout(i, choices.find((v) => v.name === id))}
+                        />
+                      )}
                     </CardTextAccordion>
                   ) : (
                     <span className="unit-slot__loadout">{description}</span>

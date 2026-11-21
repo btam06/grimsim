@@ -29,6 +29,12 @@ PHOSPHOR_TORCH_WEAPON = "phosphor_torch_weapon"
 VENGEANCE = "vengeance_for_the_omnissiah"
 VENGEANCE_ACTIVE = "vengeance_active"
 
+# The calculator's Positioning: the attacking unit disembarked this turn from
+# a transport whose Fire Support picked out the target (in a game, see
+# app/seeds/factions/adeptus_mechanicus/fire_support.py).
+FIRE_SUPPORT_TARGET = "fire_support_target"
+FIRE_SUPPORTED_RANGED_ATTACK = "fire_supported_ranged_attack"
+
 # The calculator's Positioning: "within 6\" of a friendly ADEPTUS MECHANICUS
 # BATTLELINE unit" (see app/combat_rules/positions.py).
 NEAR_ADMECH_BATTLELINE = "near_admech_battleline"
@@ -178,6 +184,15 @@ def omnissian_axe_weapon(context: dict) -> bool:
     return "omnissian axe" in context.get("weapon_name", "").lower()
 
 
+def fire_supported_ranged_attack(context: dict) -> bool:
+    # A ranged attack against the unit a transport the attacking unit
+    # disembarked from this turn picked out with Fire Support (ticked under
+    # Positioning).
+    return context.get("is_ranged", False) and FIRE_SUPPORT_TARGET in context.get(
+        "attacker_positions", set()
+    )
+
+
 def vengeance_active(context: dict) -> bool:
     # True at every step while the attacking unit has Vengeance for the
     # Omnissiah's vengeance (ticked under Positioning, or set in a game).
@@ -225,6 +240,7 @@ CONDITIONS = {
     PHOSPHOR_TORCH_WEAPON: phosphor_torch_weapon,
     OMNISSIAN_AXE_WEAPON: omnissian_axe_weapon,
     VENGEANCE_ACTIVE: vengeance_active,
+    FIRE_SUPPORTED_RANGED_ATTACK: fire_supported_ranged_attack,
     TARGET_WITHIN_ACQUISITION: target_within_acquisition,
     ATTACKER_OR_TARGET_ON_ACQUISITION: attacker_or_target_on_acquisition,
     DEFENDER_ON_ACQUISITION: defender_on_acquisition,
@@ -232,6 +248,12 @@ CONDITIONS = {
 
 # Seeded Condition rows: (keyword, name, description).
 ENTRIES = [
+    (
+        FIRE_SUPPORTED_RANGED_ATTACK,
+        "Fire Supported Ranged Attack",
+        "A ranged attack against the unit picked out by Fire Support from a transport the "
+        "attacking unit disembarked from this turn.",
+    ),
     (
         MELEE_ATTACK_AGAINST_BATTLELINE,
         "Melee Attack Against Battleline",

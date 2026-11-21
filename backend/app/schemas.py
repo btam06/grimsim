@@ -69,6 +69,17 @@ class LoadoutVariantOut(LoadoutItemsOut):
     model_id: int
     name: str
     options: list[int]
+    # Which choice of each of its model's groups (in order) it is.
+    picks: list[int] = []
+
+
+class LoadoutGroupOut(BaseModel):
+    # A model's options that are picked between together (each choice
+    # named); its groups are picked independently.
+    model_id: int
+    name: str
+    options: list[int]
+    choices: list[str]
 
 
 class LoadoutOut(BaseModel):
@@ -82,6 +93,7 @@ class LoadoutOut(BaseModel):
     # Every way each composed model can be equipped, its sergeant's first
     # (the composition's models with at most 1 a unit, then in order).
     variants: list[LoadoutVariantOut] = []
+    groups: list[LoadoutGroupOut] = []
     auto: bool
 
 

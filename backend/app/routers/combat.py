@@ -13,6 +13,8 @@ from app.engine.catalog import Catalog
 from app.combat_rules import Rule, RuleOption
 from app.combat_rules.conditions import WITHIN_12_OF_TARGET
 from app.combat_rules.positions import ALWAYS_ASKED, POSITION_CONDITIONS, POSITIONS
+from app.seeds.factions.adeptus_mechanicus import fire_support
+from app.seeds.factions.adeptus_mechanicus.conditions import FIRE_SUPPORT_TARGET
 from app.models import (
     ArmyList,
     DatasheetAbility,
@@ -519,13 +521,35 @@ async def relevant_positions(
     towering = side == "attacker" and any(
         k.name == "TOWERING" for m in unit.unit_models for k in m.model.keywords
     )
+    # (Fire Support: another of its list's units' ability - a transport with
+    # it that could carry this unit.)
+    supported = side == "attacker" and await _fire_support_transport(session, unit)
     return [
         PositionOut(id=position, label=label)
         for position, label in POSITIONS.items()
         if side in ALWAYS_ASKED.get(position, set())
         or POSITION_CONDITIONS[position][side] & conditions
         or (towering and position == WITHIN_12_OF_TARGET)
+        or (supported and position == FIRE_SUPPORT_TARGET)
     ]
+
+
+async def _fire_support_transport(session: AsyncSession, unit: Unit) -> bool:
+    # Whether the unit's army list has a transport with Fire Support that
+    # could carry it.
+    if unit.list_id is None:
+        return False
+    model = selectinload(Unit.unit_models).selectinload(UnitModel.model)
+    others = (
+        await session.execute(
+            select(Unit)
+            .options(model.selectinload(Model.abilities), model.selectinload(Model.keywords))
+            .where(Unit.list_id == unit.list_id, Unit.id != unit.id)
+        )
+    ).scalars()
+    return any(
+        fire_support.has_it(other) and fire_support.could_carry(other, unit) for other in others
+    )
 
 
 async def _deck_weapon_rows(
@@ -755,8 +779,10 @@ async def _prepared(
         attacker_rules=attacker_option_rules
         + _datasheet_rules(attacker, attacker_detachment_rules)
         + _stratagem_rules(stratagems, "attacker")
-        # (Rules only a game knows apply - e.g. Fire Support's re-roll.)
-        + list(attacker_extra_rules or []),
+        # (Rules only a game knows apply - e.g. Fire Support's re-roll; in the
+        # calculator, it's ticked under Positioning.)
+        + list(attacker_extra_rules or [])
+        + ([fire_support.CALCULATOR_RULE] if payload.game_id is None else []),
         defender_rules=defender_option_rules
         + _datasheet_rules(defender, defender_detachment_rules)
         + _stratagem_rules(defender_stratagems, "defender")
